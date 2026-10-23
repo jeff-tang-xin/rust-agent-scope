@@ -1,0 +1,11 @@
+初始提交：AgentScope Rust（对齐 Java 2.0.4 的 Rust 复刻）
+
+- Cargo workspace：agentscope-core / agentscope-model-openai / agentscope-harness
+  + examples/quickstart + apps/agent-studio（Tauri 桌面应用，独立 workspace）
+- 测试基线 510 全绿（core 242 + harness 251 + model-openai 17），clippy / cargo doc 0 警告
+- 已交付：message/event/tool/formatter/middleware/state/session/interruption/
+  shutdown/credential/observation 对齐；harness 层 workspace/subagent/task/plan/
+  agent/subagents-middleware/filesystem/memory/tools/skill/team/TeamTool/AgentSpawnTool
+- 批次 D1 进行中：bus（消息总线 + 异步工具登记）、observation（动作观察持久化）
+  已落盘并通过 cargo check；artifact/verification/session/context/sandbox/gateway 待做
+- docs/ARCHITECTURE.md 记录架构与批次进度；reference/ 为 Java 2.0.4 参考源码

@@ -1,0 +1,8 @@
+/target
+Cargo.lock.bak
+*.log
+.idea/
+.easyClaw/
+.quickstart-state/
+.idea
+.easyClaw

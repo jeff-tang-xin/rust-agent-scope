@@ -1,0 +1,44 @@
+[package]
+name = "agent-studio"
+version = "0.1.0"
+description = "AgentScope Studio - desktop workbench for the agentscope-rust harness"
+authors = ["agentscope-rust"]
+edition = "2024"
+
+# 独立 workspace：apps/agent-studio 位于主仓库目录树内，但不应被主 Cargo workspace
+# 吸收（tauri 依赖树很重，避免拖慢主 workspace 的构建）。空 [workspace] 表即断开。
+[workspace]
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "agent_studio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+async-trait = "0.1"
+
+# AgentScope Rust harness（path 依赖指向主仓库 crates；跨 workspace path 依赖合法）
+agentscope-core = { path = "../../../crates/agentscope-core" }
+agentscope-model-openai = { path = "../../../crates/agentscope-model-openai" }
+agentscope-harness = { path = "../../../crates/agentscope-harness" }
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
