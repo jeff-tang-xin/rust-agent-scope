@@ -44,6 +44,13 @@ export interface TurnInfo {
   status: string;
 }
 
+/** 上传附件（base64 内联；图片走 Image 块，其他文件走 Data 块）。 */
+export interface AttachmentInput {
+  name: string;
+  media_type: string;
+  data_base64: string;
+}
+
 export interface HistoryItem {
   role: string;
   text: string;
@@ -95,8 +102,14 @@ export const api = {
   updateAgent: (agent: AgentConfig) => invoke<void>("update_agent", { agent }),
   deleteAgent: (agentId: string) => invoke<void>("delete_agent", { agentId }),
 
-  sendMessage: (agentId: string, mode: string, sessionId: string, message: string) =>
-    invoke<TurnInfo>("send_message", { agentId, mode, sessionId, message }),
+  sendMessage: (
+    agentId: string,
+    mode: string,
+    sessionId: string,
+    message: string,
+    attachments?: AttachmentInput[],
+  ) =>
+    invoke<TurnInfo>("send_message", { agentId, mode, sessionId, message, attachments }),
   steerTurn: (agentId: string, mode: string, sessionId: string, message: string) =>
     invoke<boolean>("steer_turn", { agentId, mode, sessionId, message }),
   interruptTurn: (agentId: string, mode: string, sessionId: string) =>

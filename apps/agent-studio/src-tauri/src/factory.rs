@@ -225,6 +225,11 @@ pub fn build_agent(
     if cfg.max_iters > 0 {
         builder = builder.max_iters(cfg.max_iters as usize);
     }
+    if mode == StudioMode::Solo {
+        // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
+        // 能力，否则 enter_plan_mode 报 "plan mode is not enabled on this agent"。
+        builder = builder.enable_plan_mode();
+    }
     if mode == StudioMode::Team {
         // 成员声明注册：SubagentsMiddleware 会把成员指引并入 leader 系统提示
         // （对齐 TeamContext 注入成员快照的语义）。

@@ -12,8 +12,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use agentscope_core::message::{ContentBlock, Role, Source};
 use agentscope_core::{Msg, RuntimeContext};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::config::{AgentConfig, ConfigStore, ModelProviderConfig, StudioConfig};
@@ -235,6 +236,8 @@ pub async fn send_message(
     mode: String,
     session_id: String,
     message: String,
+    // 附件（图片 → Image 块，其他文件 → Data 块；base64 内联）。
+    attachments: Option<Vec<AttachmentInput>>,
 ) -> Result<TurnInfo, String> {
     let handle = state.handle(&agent_id, &mode)?;
     let session = handle.session(&session_id).await;
@@ -244,6 +247,35 @@ pub async fn send_message(
         .map_err(|_| "a turn is already running in this session".to_string())?;
 
     let text = merge_with_pending(&session, &message);
+    // 消息构造：文本块 + 附件块（图片走 Image，其余走 Data；对齐 Java 多模态块）。
+    let mut blocks: Vec<ContentBlock> = Vec::new();
+    if !text.is_empty() {
+        blocks.push(ContentBlock::Text { text });
+    }
+    for att in attachments.unwrap_or_default() {
+        let is_image = att.media_type.starts_with("image/");
+        let source = Source::Base64 {
+            media_type: att.media_type,
+            data: att.data_base64,
+        };
+        if is_image {
+            blocks.push(ContentBlock::Image {
+                source,
+                min_pixels: None,
+                max_pixels: None,
+            });
+        } else {
+            blocks.push(ContentBlock::Data {
+                source,
+                name: Some(att.name),
+            });
+        }
+    }
+    if blocks.is_empty() {
+        return Err("message is empty".to_string());
+    }
+    let user_msg = Msg::new(Role::User, "user", blocks);
+
     let turn_id = uuid::Uuid::new_v4().to_string();
     let agent = Arc::clone(handle.agent.delegate());
     // plan 状态在 turn 链开始前查询一次：busy 期间 UI 锁定 plan 切换，
@@ -261,7 +293,7 @@ pub async fn send_message(
             plan_active,
         },
         turn_id.clone(),
-        text,
+        user_msg,
     ));
     session.track(join.abort_handle()).await;
 
@@ -270,6 +302,14 @@ pub async fn send_message(
         session_id,
         status: "running",
     })
+}
+
+/// 前端上传的附件（base64 内联；大小限制由前端把守）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct AttachmentInput {
+    pub name: String,
+    pub media_type: String,
+    pub data_base64: String,
 }
 
 /// turn 链的静态上下文（收拢参数，避免过长签名）。
@@ -292,7 +332,7 @@ async fn turn_chain(
     mut turn_guard: tokio::sync::OwnedMutexGuard<()>,
     ctx: TurnChainCtx,
     mut turn_id: String,
-    mut text: String,
+    mut msg: Msg,
 ) {
     let TurnChainCtx {
         agent_id,
@@ -302,22 +342,25 @@ async fn turn_chain(
     loop {
         // plan 模式注入（对齐 Java system-reminder 投递思路：运行时约束以
         // system-reminder 消息形态进入上下文，而非改系统提示）。标志整条链
-        // 一致（busy 期间 UI 锁定 plan 切换），每轮输入都带。
-        let input = if plan_active {
-            format!(
-                "<system-reminder>\nPLAN MODE ACTIVE: you are in plan mode. Research and design \
-                only — do not execute changes. Write the plan to the plan file, then present it \
-                for review. Exit plan mode happens from the UI after user approval.\n</system-reminder>\n\n{text}"
-            )
-        } else {
-            text.clone()
-        };
+        // 一致（busy 期间 UI 锁定 plan 切换），作为前置 Text 块插入（不改
+        // 用户原始块——附件消息的 Image/Data 块保持原位）。
+        if plan_active {
+            msg.content.insert(
+                0,
+                ContentBlock::Text {
+                    text: "<system-reminder>\nPLAN MODE ACTIVE: you are in plan mode. Research and design \
+                    only — do not execute changes. Write the plan to the plan file, then present it \
+                    for review. Exit plan mode happens from the UI after user approval.\n</system-reminder>"
+                        .to_string(),
+                },
+            );
+        }
 
         let rc = RuntimeContext::new()
             .with_user_id(USER_ID)
             .with_session_id(&session_id);
         let mut rx = match agent
-            .stream_events_with_context(rc, Msg::user("user", input))
+            .stream_events_with_context(rc, msg.clone())
             .await
         {
             Ok(rx) => rx,
@@ -399,7 +442,7 @@ async fn turn_chain(
             },
         );
         turn_id = uuid::Uuid::new_v4().to_string();
-        text = next_text;
+        msg = Msg::user("user", next_text);
         let _ = app.emit(
             "turn-started",
             TurnStarted {

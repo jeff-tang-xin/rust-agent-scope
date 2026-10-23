@@ -379,3 +379,332 @@ label.lbl { display: block; font-size: 12px; color: var(--text-dim); margin: 12p
   border-top: 1px solid var(--border);
   padding-top: 8px;
 }
+
+
+/* ---------- 工作区卡片列表页 ---------- */
+
+.ws-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.ws-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.ws-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.ws-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.ws-card-title { flex: 1; min-width: 0; }
+.ws-card-title .name { font-weight: 600; font-size: 14px; color: var(--text); }
+.ws-card-title .path {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.ws-card-actions { display: flex; gap: 4px; }
+
+.icon-btn {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.icon-btn.danger:hover { background: rgba(213, 72, 79, 0.12); color: var(--red); }
+
+.ws-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.ws-card-foot .proj {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
+
+/* ---------- 运行方式切换（solo/team） ---------- */
+
+.mode-switch {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.mode-switch button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.mode-switch button + button { border-left: 1px solid var(--border); }
+.mode-switch button.active { background: var(--accent); color: #fff; }
+.mode-switch button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- 表单模态 ---------- */
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 23, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 20px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 640px;
+  max-width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+.modal h2 { font-size: 15px; margin-bottom: 8px; }
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.badge.plan {
+  background: var(--amber);
+  color: #fff;
+}
+
+
+/* ---------- 思考过程块（可见化：背景 + 标签，避免与正文混淆） ---------- */
+
+.thinking-block {
+  max-width: 78%;
+  align-self: flex-start;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.thinking-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.thinking-text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+/* ---------- 附件 ---------- */
+
+.attach-btn {
+  align-self: flex-end;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 10px;
+}
+
+.attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 24px 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  padding: 4px 8px;
+  font-size: 12px;
+  max-width: 240px;
+}
+
+.chip img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.chip-icon { font-size: 14px; }
+
+.chip-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-x {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-dim);
+  padding: 0 2px;
+}
+
+.chip-x:hover { color: var(--red); }
+
+.msg-img {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.bubble.file-chip {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+
+/* ---------- markdown 渲染（气泡内紧凑排版） ---------- */
+
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+  margin: 10px 0 6px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.md h1 { font-size: 1.15em; }
+.md h2 { font-size: 1.1em; }
+.md h3, .md h4 { font-size: 1.03em; }
+.md h5, .md h6 { font-size: 1em; }
+
+.md p { margin: 6px 0; }
+
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 2px 0; }
+.md li::marker { color: var(--text-faint); }
+
+.md code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.9em;
+  background: var(--bg-hover);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.md pre {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.92em;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.md th, .md td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.md th { background: var(--bg-hover); font-weight: 600; }
+
+.md blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--accent-soft);
+  color: var(--text-dim);
+}
+
+.md hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+.md a { color: var(--accent); }
+
+/* thinking 内的 markdown 再缩一档 */
+.thinking-text.md { font-size: 12.5px; }
+.thinking-text.md h1, .thinking-text.md h2, .thinking-text.md h3 { font-size: 1em; }
+.thinking-text.md pre, .thinking-text.md table { font-size: 11.5px; }

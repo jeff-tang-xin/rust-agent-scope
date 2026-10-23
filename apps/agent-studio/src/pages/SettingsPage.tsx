@@ -2,7 +2,6 @@
 // 创建与配置。配置持久化到 app config dir（studio-config.json）。
 
 import { useEffect, useState } from "react";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   api,
   type AgentConfig,
@@ -24,9 +23,10 @@ export default function SettingsPage({
 }) {
   const [providers, setProviders] = useState<ModelProviderConfig[]>([]);
   const [providerDraft, setProviderDraft] = useState<ModelProviderConfig | null>(null);
-  const [agentDraft, setAgentDraft] = useState<AgentConfig | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // agent 表单模态：null = 关闭；initial 为 null 表示新建。
+  const [agentForm, setAgentForm] = useState<{ initial: AgentConfig | null } | null>(null);
 
   const load = async () => setProviders(await api.listProviders());
   useEffect(() => {
@@ -67,40 +67,14 @@ export default function SettingsPage({
 
   // ---------- agents ----------
 
-  const saveAgent = async () => {
-    if (!agentDraft) return;
-    try {
-      if (agentDraft.id) {
-        await api.updateAgent(agentDraft);
-        flash(`Agent ${agentDraft.name} updated`);
-      } else {
-        const created = await api.createAgent(agentDraft);
-        flash(`Agent ${created.name} created`);
-      }
-      setAgentDraft(null);
-      onChanged();
-    } catch (e) {
-      fail(e);
-    }
-  };
-
   const deleteAgent = async (id: string) => {
     try {
       await api.deleteAgent(id);
-      if (agentDraft?.id === id) setAgentDraft(null);
       onChanged();
-      flash("Agent deleted (workspace data kept)");
+      flash("工作区已删除（数据保留）");
     } catch (e) {
       fail(e);
     }
-  };
-
-  const patchMember = (index: number, patch: Partial<TeamMemberConfig>) => {
-    if (!agentDraft) return;
-    const members = agentDraft.members.map((m, i) =>
-      i === index ? { ...m, ...patch } : m,
-    );
-    setAgentDraft({ ...agentDraft, members });
   };
 
   return (
@@ -205,14 +179,19 @@ export default function SettingsPage({
         {/* ---------- Agents ---------- */}
         <div className="card">
           <h2>Agents</h2>
-          <div className="desc">每个 Agent 独立 workspace 与会话状态；工具面由模式决定</div>
+          <div className="desc">
+            每个 Agent 独立 workspace 与会话状态；类别决定工具面，协同类的运行方式
+            （solo/team）在进入会话时选择
+          </div>
           {agents.map((a) => (
             <div key={a.id} className="agent-list-item" style={{ cursor: "default" }}>
               <span className="name">{a.name}</span>
-              <span className="badge">{a.mode}</span>
+              <span className="badge">
+                {a.mode === "ops" ? "运维" : a.mode === "db" ? "数据库" : "协同"}
+              </span>
               <span className="desc">{a.description || a.sys_prompt.slice(0, 60)}</span>
               <span className="badge">{a.provider}</span>
-              <button className="btn ghost" onClick={() => setAgentDraft(a)}>
+              <button className="btn ghost" onClick={() => setAgentForm({ initial: a })}>
                 Edit
               </button>
               <button className="btn danger" onClick={() => void deleteAgent(a.id)}>
@@ -220,166 +199,29 @@ export default function SettingsPage({
               </button>
             </div>
           ))}
-          {agentDraft ? (
-            <div style={{ marginTop: 12 }}>
-              <div className="row">
-                <div>
-                  <div className="lbl-row">
-                    <label className="lbl">Name</label>
-                    <PasteButton onPaste={(t) => setAgentDraft({ ...agentDraft, name: t })} />
-                  </div>
-                  <input
-                    className="field"
-                    value={agentDraft.name}
-                    onChange={(e) => setAgentDraft({ ...agentDraft, name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="lbl">Mode</label>
-                  <select
-                    className="field"
-                    value={agentDraft.mode}
-                    onChange={(e) =>
-                      setAgentDraft({ ...agentDraft, mode: e.target.value as AgentConfig["mode"] })
-                    }
-                  >
-                    {MODES.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="lbl">Provider</label>
-                  <select
-                    className="field"
-                    value={agentDraft.provider}
-                    onChange={(e) => setAgentDraft({ ...agentDraft, provider: e.target.value })}
-                  >
-                    {providers.map((p) => (
-                      <option key={p.name} value={p.name}>
-                        {p.name}（{p.model}）
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ maxWidth: 120 }}>
-                  <label className="lbl">Max iters（0=默认）</label>
-                  <input
-                    className="field"
-                    type="number"
-                    min={0}
-                    value={agentDraft.max_iters}
-                    onChange={(e) =>
-                      setAgentDraft({ ...agentDraft, max_iters: Number(e.target.value) || 0 })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="lbl-row">
-                <label className="lbl">Description</label>
-                <PasteButton
-                  onPaste={(t) => setAgentDraft({ ...agentDraft, description: t })}
-                />
-              </div>
-              <input
-                className="field"
-                value={agentDraft.description}
-                onChange={(e) => setAgentDraft({ ...agentDraft, description: e.target.value })}
-              />
-              <div className="lbl-row">
-                <label className="lbl">System prompt</label>
-                <PasteButton
-                  onPaste={(t) => setAgentDraft({ ...agentDraft, sys_prompt: t })}
-                />
-              </div>
-              <textarea
-                className="field"
-                rows={5}
-                value={agentDraft.sys_prompt}
-                onChange={(e) => setAgentDraft({ ...agentDraft, sys_prompt: e.target.value })}
-              />
-
-              <div className="lbl-row">
-                <label className="lbl">Workspace（工作区目录，留空 = 默认 app data）</label>
-                <PasteButton
-                  onPaste={(t) => setAgentDraft({ ...agentDraft, workspace: t })}
-                />
-              </div>
-              <input
-                className="field"
-                placeholder="如 F:\java\my-project —— agent 的文件工具将锚定该目录"
-                value={agentDraft.workspace}
-                onChange={(e) => setAgentDraft({ ...agentDraft, workspace: e.target.value })}
-              />
-
-              {agentDraft.mode === "team" && (
-                <>
-                  <label className="lbl">Team members（lead 之外的成员；每个成员是独立子代理）</label>
-                  {agentDraft.members.map((m, i) => (
-                    <div key={i} className="member-row">
-                      <input
-                        className="field"
-                        placeholder="name"
-                        value={m.name}
-                        onChange={(e) => patchMember(i, { name: e.target.value })}
-                      />
-                      <input
-                        className="field"
-                        placeholder="description（何时委派给它）"
-                        value={m.description}
-                        onChange={(e) => patchMember(i, { description: e.target.value })}
-                      />
-                      <input
-                        className="field"
-                        placeholder="prompt（成员系统提示）"
-                        value={m.prompt}
-                        onChange={(e) => patchMember(i, { prompt: e.target.value })}
-                      />
-                      <button
-                        className="btn danger"
-                        onClick={() =>
-                          setAgentDraft({
-                            ...agentDraft,
-                            members: agentDraft.members.filter((_, j) => j !== i),
-                          })
-                        }
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    className="btn ghost"
-                    onClick={() =>
-                      setAgentDraft({
-                        ...agentDraft,
-                        members: [...agentDraft.members, { name: "", description: "", prompt: "" }],
-                      })
-                    }
-                  >
-                    + Add member
-                  </button>
-                </>
-              )}
-
-              <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-                <button className="btn" onClick={() => void saveAgent()} disabled={!agentDraft.name || !agentDraft.provider}>
-                  {agentDraft.id ? "Save changes" : "Create agent"}
-                </button>
-                <button className="btn ghost" onClick={() => setAgentDraft(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setAgentDraft(emptyAgent(providers))}>
-              + Create agent
-            </button>
-          )}
+          <button
+            className="btn ghost"
+            style={{ marginTop: 8 }}
+            onClick={() => setAgentForm({ initial: null })}
+          >
+            + Create agent
+          </button>
         </div>
       </div>
+
+      {agentForm && (
+        <AgentFormModal
+          initial={agentForm.initial}
+          providers={providers}
+          category={agentForm.initial ? "collab" : "collab"}
+          onClose={() => setAgentForm(null)}
+          onSaved={(msg) => {
+            setAgentForm(null);
+            flash(msg);
+            onChanged();
+          }}
+        />
+      )}
     </>
   );
 }

@@ -3,6 +3,8 @@
 // AgentResult 为最终消息的权威来源，流式 delta 仅作过程展示。
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   api,
   onAgentEvent,
@@ -17,6 +19,8 @@ type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string }
   | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean }
   | { kind: "thinking"; id: string; text: string }
+  | { kind: "image"; id: string; dataUrl: string }
+  | { kind: "file"; id: string; name: string }
   | { kind: "indicator"; id: string; text: string };
 
 let entrySeq = 0;
@@ -49,10 +53,22 @@ function entriesFromBlocks(
     const type = String(b.type ?? "");
     if (type === "text") {
       const text = String(b.text ?? "");
-      if (text) out.push({ kind: "msg", role, text, id: nextId() });
+      if (text.trim()) out.push({ kind: "msg", role, text, id: nextId() });
     } else if (type === "thinking") {
-      const text = String(b.text ?? "");
-      if (text) out.push({ kind: "thinking", text, id: nextId() });
+      // 注意字段名：ContentBlock::Thinking 的 serde 键是 thinking（非 text）。
+      const text = String(b.thinking ?? "");
+      if (text.trim()) out.push({ kind: "thinking", text, id: nextId() });
+    } else if (type === "image") {
+      const src = b.source as { media_type?: string; data?: string } | undefined;
+      if (src?.data) {
+        out.push({
+          kind: "image",
+          dataUrl: `data:${src.media_type ?? "image/png"};base64,${src.data}`,
+          id: nextId(),
+        });
+      }
+    } else if (type === "data") {
+      out.push({ kind: "file", name: String(b.name ?? "attachment"), id: nextId() });
     } else if (type === "tool_use") {
       out.push({
         kind: "tool",
@@ -77,7 +93,7 @@ function entriesFromBlocks(
         id: nextId(),
       });
     }
-    // 其余块类型（image/hint/…）历史回放暂不渲染
+    // 其余块类型（hint/audio/video/…）历史回放暂不渲染
   }
   return out;
 }
@@ -102,6 +118,10 @@ export default function Conversation({
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [input, setInput] = useState("");
+  // 待发送附件（base64 内联；preview 仅图片用于本地预览）。
+  const [attachments, setAttachments] = useState<
+    Array<{ name: string; media_type: string; data_base64: string; preview?: string }>
+  >([]);
   const [busy, setBusy] = useState(false);
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
@@ -279,15 +299,57 @@ export default function Conversation({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [entries]);
 
+  // 选附件：FileReader 读 data URL → 拆出 base64（单文件上限 8MB，防 IPC 卡顿）。
+  const pickFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const next: Array<{ name: string; media_type: string; data_base64: string; preview?: string }> = [];
+    for (const f of Array.from(files)) {
+      if (f.size > 8 * 1024 * 1024) {
+        setError(`附件 ${f.name} 超过 8MB，已跳过`);
+        continue;
+      }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(f);
+      });
+      const b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      next.push({
+        name: f.name,
+        media_type: f.type || "application/octet-stream",
+        data_base64: b64,
+        preview: f.type.startsWith("image/") ? dataUrl : undefined,
+      });
+    }
+    setAttachments((prev) => [...prev, ...next]);
+  };
+
   const send = async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if ((!text && attachments.length === 0) || busy) return;
     setError("");
     setInput("");
-    setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
+    // 本地立即显示：文本 + 附件（图片缩略 / 文件 chip）。
+    const local: Entry[] = [];
+    if (text) local.push({ kind: "msg", role: "user", text, id: nextId() });
+    for (const a of attachments) {
+      local.push(
+        a.preview
+          ? { kind: "image", dataUrl: a.preview, id: nextId() }
+          : { kind: "file", name: a.name, id: nextId() },
+      );
+    }
+    setEntries((prev) => [...prev, ...local]);
+    const payload = attachments.map(({ name, media_type, data_base64 }) => ({
+      name,
+      media_type,
+      data_base64,
+    }));
+    setAttachments([]);
     setBusy(true);
     try {
-      await api.sendMessage(agent.id, runtimeMode, sessionId, text);
+      await api.sendMessage(agent.id, runtimeMode, sessionId, text, payload);
     } catch (e) {
       setBusy(false);
       setError(String(e));
@@ -423,14 +485,39 @@ export default function Conversation({
           if (e.kind === "msg") {
             return (
               <div key={e.id} className={`msg ${e.role}`}>
-                <div className="bubble">{e.text}</div>
+                {/* assistant 输出走 markdown 渲染（GFM 表格/任务列表）；
+                    user 输入保持纯文本（避免用户打的 * _ 被意外格式化）。 */}
+                {e.role === "assistant" ? (
+                  <div className="bubble md">
+                    <Markdown remarkPlugins={[remarkGfm]}>{e.text}</Markdown>
+                  </div>
+                ) : (
+                  <div className="bubble">{e.text}</div>
+                )}
               </div>
             );
           }
           if (e.kind === "thinking") {
             return (
               <div key={e.id} className="thinking-block">
-                {e.text}
+                <div className="thinking-label">💭 思考过程</div>
+                <div className="thinking-text md">
+                  <Markdown remarkPlugins={[remarkGfm]}>{e.text}</Markdown>
+                </div>
+              </div>
+            );
+          }
+          if (e.kind === "image") {
+            return (
+              <div key={e.id} className="msg user">
+                <img className="msg-img" src={e.dataUrl} alt="attachment" />
+              </div>
+            );
+          }
+          if (e.kind === "file") {
+            return (
+              <div key={e.id} className="msg user">
+                <div className="bubble file-chip">📎 {e.name}</div>
               </div>
             );
           }
@@ -458,6 +545,29 @@ export default function Conversation({
           );
         })}
       </div>
+      {attachments.length > 0 && (
+        <div className="attach-chips">
+          {attachments.map((a, i) => (
+            <span key={`${a.name}-${i}`} className="chip">
+              {a.preview ? (
+                <img src={a.preview} alt={a.name} />
+              ) : (
+                <span className="chip-icon">📎</span>
+              )}
+              <span className="chip-name" title={a.name}>
+                {a.name}
+              </span>
+              <button
+                className="chip-x"
+                title="移除"
+                onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="composer">
         {supportsPlan && (
           <button className="btn ghost" onClick={togglePlan} disabled={busy}>
@@ -465,6 +575,18 @@ export default function Conversation({
           </button>
         )}
         {planActive && <span className="badge plan" style={{ alignSelf: "center" }}>PLAN MODE</span>}
+        <label className="btn ghost attach-btn" title="添加附件（图片/文件，≤8MB）">
+          📎
+          <input
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              void pickFiles(e.target.files);
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
