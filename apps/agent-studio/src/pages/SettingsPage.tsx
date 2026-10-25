@@ -1,10 +1,14 @@
-// 设置页：模型 Provider（≈ Environment）+ Agent 定义（≈ Managed Agent）的
-// 创建与配置。配置持久化到 app config dir（studio-config.json）。
+// 设置页：模型 Provider（≈ Environment）+ 智能体定义（≈ Managed Agent）的
+// 创建与配置。智能体是纯定义（人设 + Provider）；工作区在左侧导航各分类页管理。
+// 配置持久化到 app config dir（studio-config.json）。
 
 import { useEffect, useState } from "react";
 import {
   api,
+  DEFAULT_AGENT_ID,
   type AgentConfig,
+  type DatabaseKindInfo,
+  type DatabaseServerConfig,
   type ModelProviderConfig,
 } from "../api";
 import AgentFormModal from "../components/AgentFormModal";
@@ -12,6 +16,19 @@ import PasteButton from "../components/PasteButton";
 
 function emptyProvider(): ModelProviderConfig {
   return { name: "", base_url: "https://api.openai.com/v1", api_key: "", model: "" };
+}
+
+function emptyDatabase(): DatabaseServerConfig {
+  return {
+    name: "",
+    db_type: "mysql",
+    host: "",
+    port: 3306,
+    database: "",
+    username: "",
+    password: "",
+    description: "",
+  };
 }
 
 export default function SettingsPage({
@@ -23,12 +40,20 @@ export default function SettingsPage({
 }) {
   const [providers, setProviders] = useState<ModelProviderConfig[]>([]);
   const [providerDraft, setProviderDraft] = useState<ModelProviderConfig | null>(null);
+  const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
+  const [dbDraft, setDbDraft] = useState<DatabaseServerConfig | null>(null);
+  // 数据库类型注册表（后端 DATABASE_KINDS 投影；新增类型自动出现在下拉里）。
+  const [dbKinds, setDbKinds] = useState<DatabaseKindInfo[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   // agent 表单模态：null = 关闭；initial 为 null 表示新建。
   const [agentForm, setAgentForm] = useState<{ initial: AgentConfig | null } | null>(null);
 
-  const load = async () => setProviders(await api.listProviders());
+  const load = async () => {
+    setProviders(await api.listProviders());
+    setDatabases(await api.listDatabases());
+    setDbKinds(await api.listDatabaseKinds());
+  };
   useEffect(() => {
     void load();
   }, []);
@@ -65,23 +90,50 @@ export default function SettingsPage({
     }
   };
 
+  // ---------- databases ----------
+
+  const saveDatabase = async () => {
+    if (!dbDraft) return;
+    try {
+      await api.saveDatabase(dbDraft);
+      setDbDraft(null);
+      await load();
+      flash(`数据库 ${dbDraft.name} 已保存`);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const deleteDatabase = async (name: string) => {
+    try {
+      await api.deleteDatabase(name);
+      await load();
+      flash(`数据库 ${name} 已删除`);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
   // ---------- agents ----------
 
   const deleteAgent = async (id: string) => {
     try {
       await api.deleteAgent(id);
       onChanged();
-      flash("工作区已删除（数据保留）");
+      flash("智能体已删除");
     } catch (e) {
       fail(e);
     }
   };
 
+  // 当前编辑中的数据库类型描述符（字段启停/标签/驱动提示都按注册表元数据走）。
+  const dbKind = dbDraft ? dbKinds.find((k) => k.id === dbDraft.db_type) : undefined;
+
   return (
     <>
       <header className="page-header">
         <h1>Settings</h1>
-        <span className="sub">模型 Provider 与 Agent 定义（本地持久化）</span>
+        <span className="sub">模型 Provider、数据库服务器与 Agent 定义（本地持久化）</span>
       </header>
       <div className="page-body">
         {error && <div className="notice error">{error}</div>}
@@ -176,27 +228,207 @@ export default function SettingsPage({
           )}
         </div>
 
+        {/* ---------- Databases ---------- */}
+        <div className="card">
+          <h2>Database Servers</h2>
+          <div className="desc">
+            数据库服务器连接档案（MySQL / PostgreSQL / SQLite / SQL Server），仅存本地配置文件
+          </div>
+          {databases.map((d) => {
+            const k = dbKinds.find((x) => x.id === d.db_type);
+            const endpoint =
+              (k?.needs_port ? `${d.host}:${d.port}` : d.host) +
+              (k?.needs_database ? `/${d.database}` : "");
+            return (
+              <div key={d.name} className="agent-list-item" style={{ cursor: "default" }}>
+                <span className="name">{d.name}</span>
+                <span className="badge">{k?.label ?? d.db_type}</span>
+                <span className="desc">
+                  {endpoint}
+                  {d.username ? ` · ${d.username}` : ""}
+                  {d.description ? ` · ${d.description}` : ""}
+                </span>
+                <span className="badge">{d.password ? "密码已设" : "无密码"}</span>
+                <button className="btn ghost" onClick={() => setDbDraft(d)}>
+                  Edit
+                </button>
+                <button className="btn danger" onClick={() => void deleteDatabase(d.name)}>
+                  Delete
+                </button>
+              </div>
+            );
+          })}
+          {dbDraft ? (
+            <div style={{ marginTop: 12 }}>
+              <div className="row">
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Name</label>
+                    <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, name: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={dbDraft.name}
+                    disabled={databases.some((d) => d.name === dbDraft.name)}
+                    onChange={(e) => setDbDraft({ ...dbDraft, name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="lbl">Type</label>
+                  <select
+                    className="field"
+                    value={dbDraft.db_type}
+                    onChange={(e) => {
+                      const kind = dbKinds.find((k) => k.id === e.target.value);
+                      setDbDraft({
+                        ...dbDraft,
+                        db_type: e.target.value,
+                        // 切类型自动带出默认端口（无端口类型归 0）。
+                        port: kind ? kind.default_port : dbDraft.port,
+                      });
+                    }}
+                  >
+                    {dbKinds.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const kind = dbKinds.find((k) => k.id === dbDraft.db_type);
+                    if (!kind) return null;
+                    return (
+                      <div className="desc" style={{ margin: "4px 0 0" }}>
+                        {kind.driver.mode === "Bundled"
+                          ? "驱动：内置（rusqlite，无外部依赖）"
+                          : `驱动：外部客户端 ${kind.driver.program}（需已在 PATH，应用不内置驱动）`}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              <div className="row">
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">
+                      {dbKind && !dbKind.needs_port ? "数据库文件路径" : "Host"}
+                    </label>
+                    <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, host: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={dbDraft.host}
+                    placeholder={dbKind && !dbKind.needs_port ? "C:\\data\\app.db" : "10.0.0.8"}
+                    onChange={(e) => setDbDraft({ ...dbDraft, host: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="lbl">Port</label>
+                  <input
+                    className="field"
+                    type="number"
+                    min={0}
+                    max={65535}
+                    value={dbDraft.port}
+                    disabled={!dbKind?.needs_port}
+                    onChange={(e) =>
+                      setDbDraft({ ...dbDraft, port: Number(e.target.value) || 0 })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="row">
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Database</label>
+                    <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, database: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={dbDraft.database}
+                    disabled={!dbKind?.needs_database}
+                    onChange={(e) => setDbDraft({ ...dbDraft, database: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Username</label>
+                    <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, username: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={dbDraft.username}
+                    onChange={(e) => setDbDraft({ ...dbDraft, username: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="lbl-row">
+                <label className="lbl">Password（仅存本地配置文件）</label>
+                <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, password: t })} />
+              </div>
+              <input
+                className="field"
+                type="password"
+                value={dbDraft.password}
+                onChange={(e) => setDbDraft({ ...dbDraft, password: e.target.value })}
+              />
+              <div className="lbl-row">
+                <label className="lbl">Description</label>
+                <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, description: t })} />
+              </div>
+              <input
+                className="field"
+                value={dbDraft.description}
+                onChange={(e) => setDbDraft({ ...dbDraft, description: e.target.value })}
+              />
+              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                <button
+                  className="btn"
+                  onClick={() => void saveDatabase()}
+                  disabled={
+                    !dbDraft.name ||
+                    (dbDraft.db_type !== "sqlite" && !dbDraft.host.trim())
+                  }
+                >
+                  Save database
+                </button>
+                <button className="btn ghost" onClick={() => setDbDraft(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="btn ghost"
+              style={{ marginTop: 8 }}
+              onClick={() => setDbDraft(emptyDatabase())}
+            >
+              + Add database
+            </button>
+          )}
+        </div>
+
         {/* ---------- Agents ---------- */}
         <div className="card">
           <h2>Agents</h2>
           <div className="desc">
-            每个 Agent 独立 workspace 与会话状态；类别决定工具面，协同类的运行方式
-            （solo/team）在进入会话时选择
+            智能体 = 纯定义（人设 + Provider），在此创建与维护；
+            工作区（协同 / 运维 / 数据库运维）选用智能体并决定目录、成员与工具面
           </div>
           {agents.map((a) => (
             <div key={a.id} className="agent-list-item" style={{ cursor: "default" }}>
               <span className="name">{a.name}</span>
-              <span className="badge">
-                {a.mode === "ops" ? "运维" : a.mode === "db" ? "数据库" : "协同"}
-              </span>
+              {a.id === DEFAULT_AGENT_ID && <span className="badge ok">内置</span>}
               <span className="desc">{a.description || a.sys_prompt.slice(0, 60)}</span>
-              <span className="badge">{a.provider}</span>
+              <span className="badge">{a.provider || "未绑定 Provider"}</span>
               <button className="btn ghost" onClick={() => setAgentForm({ initial: a })}>
                 Edit
               </button>
-              <button className="btn danger" onClick={() => void deleteAgent(a.id)}>
-                Delete
-              </button>
+              {a.id !== DEFAULT_AGENT_ID && (
+                <button className="btn danger" onClick={() => void deleteAgent(a.id)}>
+                  Delete
+                </button>
+              )}
             </div>
           ))}
           <button
@@ -213,7 +445,6 @@ export default function SettingsPage({
         <AgentFormModal
           initial={agentForm.initial}
           providers={providers}
-          category={agentForm.initial ? "collab" : "collab"}
           onClose={() => setAgentForm(null)}
           onSaved={(msg) => {
             setAgentForm(null);

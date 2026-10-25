@@ -122,6 +122,17 @@ pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
     }
     let text = extract_text_content(msg);
     let name = Some(sanitize_name(&msg.name));
+    // assistant 历史回传思考内容（对齐 Java convertAssistantMessage：取首个
+    // ThinkingBlock；推理模型要求 reasoning 保留在请求历史中）。
+    let reasoning_content = match msg.role {
+        Role::Assistant => msg.content.iter().find_map(|b| match b {
+            ContentBlock::Thinking { thinking } => {
+                if thinking.is_empty() { None } else { Some(thinking.clone()) }
+            }
+            _ => None,
+        }),
+        _ => None,
+    };
     match msg.role {
         Role::System => OpenAIMessage {
             role: "system".into(),
@@ -129,6 +140,7 @@ pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
             name,
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
         },
         Role::User => OpenAIMessage {
             role: "user".into(),
@@ -136,6 +148,7 @@ pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
             name,
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
         },
         Role::Assistant => {
             let tool_calls: Vec<OpenAIToolCall> = msg
@@ -165,6 +178,7 @@ pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
                     Some(tool_calls)
                 },
                 tool_call_id: None,
+                reasoning_content,
             }
         }
         Role::Tool => convert_tool_message(msg),
@@ -195,6 +209,7 @@ fn convert_tool_message(msg: &Msg) -> OpenAIMessage {
         name: None,
         tool_calls: None,
         tool_call_id: Some(tool_call_id),
+        reasoning_content: None,
     }
 }
 
@@ -279,12 +294,23 @@ fn user_content_value(msg: &Msg, text: String) -> Value {
 // ---------- OpenAI 响应 → ChatResponse ----------
 
 /// 把 OpenAI 响应消息转换回 [`ChatResponse`]（对应 Java `OpenAIResponseParser`）。
+///
+/// 块顺序对齐 Java：Thinking（reasoning_content，`reasoning` 为其别名回退）
+/// → Text → ToolUse。`reasoning_details`（OpenRouter/Gemini 签名回传）未复刻，
+/// Rust 侧 Thinking 块暂无 metadata 载体。
 pub(crate) fn response_to_chat_response(
     message: crate::ChoiceMessage,
     usage: Option<OpenAIUsage>,
     finish_reason: Option<String>,
 ) -> Result<ChatResponse> {
     let mut content = Vec::new();
+    let thinking = message
+        .reasoning_content
+        .filter(|t| !t.is_empty())
+        .or_else(|| message.reasoning.filter(|t| !t.is_empty()));
+    if let Some(thinking) = thinking {
+        content.push(ContentBlock::Thinking { thinking });
+    }
     if let Some(text) = message.content {
         if !text.is_empty() {
             content.push(ContentBlock::Text { text });
@@ -474,6 +500,49 @@ mod tests {
         assert!(matches!(&resp.content[0], ContentBlock::Text { text } if text == "答案是 3"));
         assert!(matches!(&resp.content[1], ContentBlock::ToolUse { name, .. } if name == "add"));
         assert_eq!(resp.finish_reason.as_deref(), Some("tool_calls"));
+    }
+
+    /// 非流式思考内容：reasoning_content → Thinking 块，排在 Text 之前
+    /// （对齐 Java parseCompletionResponse 的块顺序 Thinking → Text → ToolUse）。
+    #[test]
+    fn response_parses_thinking_before_text() {
+        let raw = json!({ "content": "答案", "reasoning_content": "推理过程" });
+        let message: crate::ChoiceMessage = serde_json::from_value(raw).unwrap();
+        let resp = response_to_chat_response(message, None, Some("stop".into())).unwrap();
+        assert_eq!(resp.content.len(), 2);
+        assert!(matches!(&resp.content[0], ContentBlock::Thinking { thinking } if thinking == "推理过程"));
+        assert!(matches!(&resp.content[1], ContentBlock::Text { text } if text == "答案"));
+    }
+
+    /// `reasoning` 字段名回退（vLLM 部署形态；对齐 Java @JsonAlias("reasoning")）。
+    #[test]
+    fn response_parses_reasoning_alias() {
+        let raw = json!({ "content": "答案", "reasoning": "alias 推理" });
+        let message: crate::ChoiceMessage = serde_json::from_value(raw).unwrap();
+        let resp = response_to_chat_response(message, None, None).unwrap();
+        assert!(matches!(&resp.content[0], ContentBlock::Thinking { thinking } if thinking == "alias 推理"));
+    }
+
+    /// assistant 历史回传：Thinking 块 → reasoning_content 字段
+    /// （对齐 Java convertAssistantMessage；DeepSeek thinking 模式要求保留）。
+    #[test]
+    fn assistant_thinking_backfills_reasoning_content() {
+        let msg = Msg::assistant(
+            "assistant",
+            vec![
+                ContentBlock::Thinking { thinking: "推理".into() },
+                ContentBlock::Text { text: "答案".into() },
+            ],
+        );
+        let oai = convert_message(&msg);
+        assert_eq!(oai.reasoning_content.as_deref(), Some("推理"));
+        let v = serde_json::to_value(&oai).unwrap();
+        assert_eq!(v["reasoning_content"], "推理");
+
+        // 无思考块时不携带该字段（skip_serializing_if 生效）
+        let plain = Msg::assistant("assistant", vec![ContentBlock::Text { text: "hi".into() }]);
+        let v = serde_json::to_value(convert_message(&plain)).unwrap();
+        assert!(v.get("reasoning_content").is_none());
     }
 
     // ---------- apply_options / apply_tools / apply_tool_choice ----------

@@ -288,6 +288,8 @@ impl RunContext {
 struct StreamAggregator {
     blocks: Vec<ContentBlock>,
     current_block_id: Option<String>,
+    /// 当前思考块的 block id（思考与文本块可交替，各自独立开合）。
+    current_thinking_id: Option<String>,
 }
 
 impl StreamAggregator {
@@ -295,6 +297,7 @@ impl StreamAggregator {
         Self {
             blocks: Vec::new(),
             current_block_id: None,
+            current_thinking_id: None,
         }
     }
 
@@ -302,6 +305,8 @@ impl StreamAggregator {
     async fn absorb(&mut self, ctx: &RunContext, event: ModelEvent) {
         match event {
             ModelEvent::TextDelta { text } => {
+                // 文本块与思考块互斥开合：文本到来前先闭合思考块。
+                self.close_thinking_block(ctx).await;
                 let block_id = match self.current_block_id.clone() {
                     Some(id) => id,
                     None => {
@@ -326,8 +331,36 @@ impl StreamAggregator {
                     _ => self.blocks.push(ContentBlock::Text { text }),
                 }
             }
+            ModelEvent::ThinkingDelta { text } => {
+                // 思考块与文本块互斥开合：思考到来前先闭合文本块。
+                self.close_text_block(ctx).await;
+                let block_id = match self.current_thinking_id.clone() {
+                    Some(id) => id,
+                    None => {
+                        let id = Uuid::new_v4().simple().to_string();
+                        ctx.emit(AgentEventKind::ThinkingBlockStart {
+                            reply_id: ctx.reply_id.clone(),
+                            block_id: id.clone(),
+                        })
+                        .await;
+                        self.current_thinking_id = Some(id.clone());
+                        id
+                    }
+                };
+                ctx.emit(AgentEventKind::ThinkingBlockDelta {
+                    reply_id: ctx.reply_id.clone(),
+                    block_id: block_id.clone(),
+                    delta: text.clone(),
+                })
+                .await;
+                match self.blocks.last_mut() {
+                    Some(ContentBlock::Thinking { thinking: acc }) => acc.push_str(&text),
+                    _ => self.blocks.push(ContentBlock::Thinking { thinking: text }),
+                }
+            }
             ModelEvent::ToolUse { id, name, input } => {
                 self.close_text_block(ctx).await;
+                self.close_thinking_block(ctx).await;
                 ctx.emit(AgentEventKind::ToolCallStart {
                     reply_id: ctx.reply_id.clone(),
                     tool_call_id: id.clone(),
@@ -358,6 +391,7 @@ impl StreamAggregator {
             }
             ModelEvent::Done { usage, .. } => {
                 self.close_text_block(ctx).await;
+                self.close_thinking_block(ctx).await;
                 ctx.emit(AgentEventKind::ModelCallEnd {
                     reply_id: ctx.reply_id.clone(),
                     usage,
@@ -371,6 +405,17 @@ impl StreamAggregator {
     async fn close_text_block(&mut self, ctx: &RunContext) {
         if let Some(block_id) = self.current_block_id.take() {
             ctx.emit(AgentEventKind::TextBlockEnd {
+                reply_id: ctx.reply_id.clone(),
+                block_id,
+            })
+            .await;
+        }
+    }
+
+    /// 关闭当前思考块（块切换或流结束时调用，发 ThinkingBlockEnd）。
+    async fn close_thinking_block(&mut self, ctx: &RunContext) {
+        if let Some(block_id) = self.current_thinking_id.take() {
+            ctx.emit(AgentEventKind::ThinkingBlockEnd {
                 reply_id: ctx.reply_id.clone(),
                 block_id,
             })
@@ -1628,6 +1673,65 @@ mod tests {
             }
         }
         assert_eq!(reply_ids.len(), 1);
+    }
+
+    /// 思考块流：Thinking 块经默认 call_stream 降级映射为 ThinkingDelta，
+    /// 聚合器产出 ThinkingBlock 三段事件且先于文本块（对齐 Java chunk
+    /// 处理顺序 Thinking → Text），对话真相保留思考块。
+    #[tokio::test]
+    async fn stream_events_thinking_block_flow() {
+        let agent = agent_with(vec![crate::model::ChatResponse {
+            content: vec![
+                ContentBlock::Thinking { thinking: "先想一想".into() },
+                ContentBlock::Text { text: "答案是 3".into() },
+            ],
+            ..Default::default()
+        }]);
+
+        let mut rx = agent
+            .stream_events(Msg::user("user", "1加2等于几？"))
+            .await
+            .unwrap();
+        let mut kinds = Vec::new();
+        while let Some(event) = rx.recv().await {
+            kinds.push(match event.kind {
+                AgentEventKind::AgentStart { .. } => "agent_start",
+                AgentEventKind::AgentEnd { .. } => "agent_end",
+                AgentEventKind::AgentResult { .. } => "agent_result",
+                AgentEventKind::ModelCallStart { .. } => "model_call_start",
+                AgentEventKind::ModelCallEnd { .. } => "model_call_end",
+                AgentEventKind::ThinkingBlockStart { .. } => "thinking_start",
+                AgentEventKind::ThinkingBlockDelta { .. } => "thinking_delta",
+                AgentEventKind::ThinkingBlockEnd { .. } => "thinking_end",
+                AgentEventKind::TextBlockStart { .. } => "text_start",
+                AgentEventKind::TextBlockDelta { .. } => "text_delta",
+                AgentEventKind::TextBlockEnd { .. } => "text_end",
+                other => unreachable!("unexpected event in thinking flow test: {other:?}"),
+            });
+        }
+        assert_eq!(
+            kinds,
+            vec![
+                "agent_start",
+                "model_call_start",
+                "thinking_start",
+                "thinking_delta",
+                "thinking_end",
+                "text_start",
+                "text_delta",
+                "text_end",
+                "model_call_end",
+                "agent_result",
+                "agent_end",
+            ]
+        );
+
+        // 对话真相保留思考块（存于记忆但不回传 LLM——formatter 跳过 Thinking）
+        let history = history(&agent);
+        assert!(matches!(
+            &history[1].content[0],
+            ContentBlock::Thinking { thinking } if thinking == "先想一想"
+        ));
     }
 
     // ---------- middleware / permission ----------

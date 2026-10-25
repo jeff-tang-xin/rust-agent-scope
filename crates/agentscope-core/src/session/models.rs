@@ -180,6 +180,7 @@ impl Model for RecordedModel {
                         // 分片逐条落日志（尽力而为：日志写失败不中断流）
                         let chunk = match other {
                             ModelEvent::TextDelta { text } => json!({"text": text}),
+                            ModelEvent::ThinkingDelta { text } => json!({"thinking": text}),
                             ModelEvent::ToolUse { id, name, input } => {
                                 json!({"toolUse": {"id": id, "name": name, "input": input}})
                             }

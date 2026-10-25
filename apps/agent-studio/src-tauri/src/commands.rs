@@ -17,17 +17,17 @@ use agentscope_core::{Msg, RuntimeContext};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::config::{AgentConfig, ConfigStore, ModelProviderConfig, StudioConfig};
+use crate::config::{AgentConfig, ConfigStore, DatabaseServerConfig, ModelProviderConfig, StudioConfig, WorkspaceConfig, WORKSPACE_KINDS};
 use crate::factory;
 use crate::session::{AgentHandle, SessionHandle, TurnInfo};
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
 const USER_ID: &str = "studio";
 
-/// 事件信封：前端按 (agentId, sessionId, turnId) 归流，event 为 AgentEvent JSON。
+/// 事件信封：前端按 (workspaceId, sessionId, turnId) 归流，event 为 AgentEvent JSON。
 #[derive(Debug, Clone, Serialize)]
 struct EventEnvelope {
-    agent_id: String,
+    workspace_id: String,
     session_id: String,
     turn_id: String,
     event: serde_json::Value,
@@ -36,7 +36,7 @@ struct EventEnvelope {
 /// turn 终态通知（对齐 Java Task.settled() 的前端可观测形态）。
 #[derive(Debug, Clone, Serialize)]
 struct TurnFinished {
-    agent_id: String,
+    workspace_id: String,
     session_id: String,
     turn_id: String,
     /// completed | interrupted | failed
@@ -93,11 +93,11 @@ impl AppState {
         self.config_store.save(config)
     }
 
-    /// 取（或懒装配）agent 句柄（对齐 service 的 agent 按需实例化）。
-    /// 缓存 key = `{agent_id}:{mode}`——同一 agent 可按运行方式（solo/team）
-    /// 装配不同实例（工具面与成员装配不同）。
-    pub fn handle(&self, agent_id: &str, mode: &str) -> Result<Arc<AgentHandle>, String> {
-        let key = format!("{agent_id}:{mode}");
+    /// 取（或懒装配）工作区句柄（对齐 service 的 agent 按需实例化）。
+    /// 缓存 key = `{workspace_id}:{runtime_mode}`——协同工作区可按运行方式
+    /// （solo/team）装配不同实例（工具面与成员装配不同）。
+    pub fn handle(&self, workspace_id: &str, runtime_mode: &str) -> Result<Arc<AgentHandle>, String> {
+        let key = format!("{workspace_id}:{runtime_mode}");
         if let Some(handle) = self
             .handles
             .lock()
@@ -107,15 +107,44 @@ impl AppState {
             return Ok(Arc::clone(handle));
         }
         let config = self.snapshot();
-        let cfg = config
-            .agent(agent_id)
+        let ws = config
+            .workspace(workspace_id)
             .cloned()
-            .ok_or_else(|| format!("unknown agent `{agent_id}`"))?;
+            .ok_or_else(|| format!("unknown workspace `{workspace_id}`"))?;
+        let cfg = config
+            .agent(&ws.agent_id)
+            .cloned()
+            .ok_or_else(|| format!("workspace `{workspace_id}` 引用的智能体 `{}` 不存在", ws.agent_id))?;
+        // 未绑定 provider（如内置默认智能体首次使用）给明确指引，而非
+        // `references unknown provider \`\`` 的空名报错。
+        if cfg.provider.trim().is_empty() {
+            return Err(format!(
+                "智能体 `{}` 尚未绑定模型 Provider，请在设置页配置后重试",
+                cfg.name
+            ));
+        }
         let provider = config
             .provider(&cfg.provider)
             .cloned()
-            .ok_or_else(|| format!("agent `{agent_id}` references unknown provider `{}`", cfg.provider))?;
-        let built = factory::build_agent(&cfg, &provider, &self.data_dir, mode)?;
+            .ok_or_else(|| format!("智能体 `{}` 引用了未知 provider `{}`", cfg.name, cfg.provider))?;
+        // team 运行方式：成员是工作区引用的已有智能体（协同 = 多个智能体），
+        // 此处解析成员定义与其 provider，缺失即报错（保存时也校验）。
+        let mut member_defs = Vec::new();
+        for mid in &ws.members {
+            if mid == &ws.agent_id {
+                return Err("team 成员不能是 lead 智能体自己".to_string());
+            }
+            let m = config
+                .agent(mid)
+                .cloned()
+                .ok_or_else(|| format!("team 成员 `{mid}` 不存在，请检查工作区成员配置"))?;
+            let mp = config
+                .provider(&m.provider)
+                .cloned()
+                .ok_or_else(|| format!("team 成员 `{mid}` 引用了未知 provider `{}`", m.provider))?;
+            member_defs.push((m, mp));
+        }
+        let built = factory::build_agent(&ws, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs)?;
         let handle = Arc::new(AgentHandle::new(built.agent));
         self.handles
             .lock()
@@ -124,9 +153,9 @@ impl AppState {
         Ok(handle)
     }
 
-    /// 配置变更后失效缓存（下次 handle 重建）；移除该 agent 所有运行方式的实例。
-    fn invalidate(&self, agent_id: &str) {
-        let prefix = format!("{agent_id}:");
+    /// 配置变更后失效缓存（下次 handle 重建）；移除该工作区所有运行方式的实例。
+    fn invalidate(&self, workspace_id: &str) {
+        let prefix = format!("{workspace_id}:");
         self.handles
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -159,11 +188,69 @@ pub fn delete_provider(state: State<'_, AppState>, name: String) -> Result<(), S
     state.persist(&config)
 }
 
+// ---------- databases ----------
+
+#[tauri::command]
+pub fn list_databases(state: State<'_, AppState>) -> Vec<DatabaseServerConfig> {
+    state.snapshot().databases
+}
+
+#[tauri::command]
+pub fn save_database(
+    state: State<'_, AppState>,
+    database: DatabaseServerConfig,
+) -> Result<(), String> {
+    let name = database.name.trim().to_string();
+    if name.is_empty() {
+        return Err("database name is empty".to_string());
+    }
+    // 类型合法性查注册表（新增类型在 db_kind::DATABASE_KINDS 加一行即可）。
+    let kind = crate::db_kind::DatabaseKind::find(&database.db_type)
+        .ok_or_else(|| format!("unknown db_type `{}`", database.db_type))?;
+    if kind.needs_host && database.host.trim().is_empty() {
+        return Err(format!("{} requires a host (or file path)", kind.label));
+    }
+    let mut database = database;
+    database.name = name;
+    let mut config = state.snapshot();
+    config.databases.retain(|d| d.name != database.name);
+    config.databases.push(database);
+    state.persist(&config)
+}
+
+#[tauri::command]
+pub fn delete_database(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let mut config = state.snapshot();
+    // 目前尚无 agent 绑定数据库资源（接线后这里补引用检查，对齐 delete_provider）。
+    config.databases.retain(|d| d.name != name);
+    state.persist(&config)
+}
+
+/// 数据库类型注册表（前端下拉与字段启停的数据源；新增类型自动跟随）。
+#[tauri::command]
+pub fn list_database_kinds() -> &'static [crate::db_kind::DatabaseKind] {
+    crate::db_kind::DATABASE_KINDS
+}
+
 // ---------- agents ----------
 
 #[tauri::command]
 pub fn list_agents(state: State<'_, AppState>) -> Vec<AgentConfig> {
     state.snapshot().agents
+}
+
+/// 校验 team 成员引用完整性：成员必须是已存在的其他智能体（协同 = 多个
+/// 智能体，lead 引用自己会造成自委派环）。
+fn validate_members(config: &StudioConfig, ws: &WorkspaceConfig) -> Result<(), String> {
+    for mid in &ws.members {
+        if *mid == ws.agent_id {
+            return Err("team 成员不能是 lead 智能体自己".to_string());
+        }
+        if !config.agents.iter().any(|a| &a.id == mid) {
+            return Err(format!("team 成员 `{mid}` 不存在，请先在设置页创建该智能体"));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -174,8 +261,6 @@ pub fn create_agent(state: State<'_, AppState>, mut agent: AgentConfig) -> Resul
     if agent.created_at == 0 {
         agent.created_at = unix_now();
     }
-    factory::StudioMode::parse(&agent.mode)
-        .ok_or_else(|| format!("unknown mode `{}`", agent.mode))?;
     let mut config = state.snapshot();
     if config.agents.iter().any(|a| a.id == agent.id) {
         return Err(format!("agent `{}` already exists", agent.id));
@@ -183,6 +268,77 @@ pub fn create_agent(state: State<'_, AppState>, mut agent: AgentConfig) -> Resul
     config.agents.push(agent.clone());
     state.persist(&config)?;
     Ok(agent)
+}
+
+// ---------- workspaces（工作区 = 针对一个项目的工作环境） ----------
+
+/// 校验工作区引用完整性：类型合法、智能体存在、team 成员存在。
+fn validate_workspace(config: &StudioConfig, ws: &WorkspaceConfig) -> Result<(), String> {
+    if !ws.kind_valid() {
+        return Err(format!(
+            "unknown workspace kind `{}` (expected one of {:?})",
+            ws.kind, WORKSPACE_KINDS
+        ));
+    }
+    if !config.agents.iter().any(|a| a.id == ws.agent_id) {
+        return Err(format!("工作区引用的智能体 `{}` 不存在", ws.agent_id));
+    }
+    validate_members(config, ws)
+}
+
+#[tauri::command]
+pub fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceConfig>, String> {
+    Ok(state.snapshot().workspaces)
+}
+
+#[tauri::command]
+pub fn create_workspace(
+    state: State<'_, AppState>,
+    mut workspace: WorkspaceConfig,
+) -> Result<WorkspaceConfig, String> {
+    if workspace.id.is_empty() {
+        workspace.id = uuid::Uuid::new_v4().simple().to_string();
+    }
+    if workspace.created_at == 0 {
+        workspace.created_at = unix_now();
+    }
+    let mut config = state.snapshot();
+    if config.workspaces.iter().any(|w| w.id == workspace.id) {
+        return Err(format!("workspace `{}` already exists", workspace.id));
+    }
+    validate_workspace(&config, &workspace)?;
+    config.workspaces.push(workspace.clone());
+    state.persist(&config)?;
+    Ok(workspace)
+}
+
+#[tauri::command]
+pub fn update_workspace(
+    state: State<'_, AppState>,
+    workspace: WorkspaceConfig,
+) -> Result<(), String> {
+    let mut config = state.snapshot();
+    validate_workspace(&config, &workspace)?;
+    let slot = config
+        .workspaces
+        .iter_mut()
+        .find(|w| w.id == workspace.id)
+        .ok_or_else(|| format!("unknown workspace `{}`", workspace.id))?;
+    *slot = workspace;
+    let id = slot.id.clone();
+    state.persist(&config)?;
+    state.invalidate(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_workspace(state: State<'_, AppState>, workspace_id: String) -> Result<(), String> {
+    let mut config = state.snapshot();
+    config.workspaces.retain(|w| w.id != workspace_id);
+    state.persist(&config)?;
+    state.invalidate(&workspace_id);
+    // 数据目录保留（会话状态不丢；彻底清除属破坏性操作，由用户手动做）。
+    Ok(())
 }
 
 #[tauri::command]
@@ -193,20 +349,59 @@ pub fn update_agent(state: State<'_, AppState>, agent: AgentConfig) -> Result<()
         .iter_mut()
         .find(|a| a.id == agent.id)
         .ok_or_else(|| format!("unknown agent `{}`", agent.id))?;
+    // 内置智能体同样全字段可编辑（预置默认值的普通智能体）；不可删除由
+    // delete_agent 拒绝 + ensure_default_agent 兜底保证。
     *slot = agent;
     let id = slot.id.clone();
     state.persist(&config)?;
-    state.invalidate(&id);
+    // 智能体定义变了：引用它的所有工作区句柄全部失效重建。
+    let affected: Vec<String> = config
+        .workspaces
+        .iter()
+        .filter(|w| w.agent_id == id)
+        .map(|w| w.id.clone())
+        .collect();
+    for wid in affected {
+        state.invalidate(&wid);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub fn delete_agent(state: State<'_, AppState>, agent_id: String) -> Result<(), String> {
+    if agent_id == crate::config::DEFAULT_AGENT_ID {
+        // 内置 agent 不可删除（前端不渲染 Delete；这里是保护边界）。
+        return Err("内置 Agent「全能助手」不可删除".to_string());
+    }
     let mut config = state.snapshot();
+    // 引用检查（对齐 delete_provider）：有工作区在用就不许删。
+    let used_by: Vec<String> = config
+        .workspaces
+        .iter()
+        .filter(|w| w.agent_id == agent_id)
+        .map(|w| w.name.clone())
+        .collect();
+    if !used_by.is_empty() {
+        return Err(format!(
+            "智能体正被工作区使用：{}；请先删除或改绑对应工作区",
+            used_by.join("、")
+        ));
+    }
+    let member_of: Vec<String> = config
+        .workspaces
+        .iter()
+        .filter(|w| w.members.iter().any(|m| m == &agent_id))
+        .map(|w| w.name.clone())
+        .collect();
+    if !member_of.is_empty() {
+        return Err(format!(
+            "智能体是工作区 {} 的 team 成员；请先在工作区中移除该成员",
+            member_of.join("、")
+        ));
+    }
     config.agents.retain(|a| a.id != agent_id);
     state.persist(&config)?;
-    state.invalidate(&agent_id);
-    // 数据目录保留（对话状态与 workspace 不丢；彻底清除属破坏性操作，由用户手动做）。
+    // 数据目录保留（彻底清除属破坏性操作，由用户手动做）。
     Ok(())
 }
 
@@ -232,14 +427,14 @@ fn merge_with_pending(session: &SessionHandle, message: &str) -> String {
 pub async fn send_message(
     app: AppHandle,
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
     message: String,
     // 附件（图片 → Image 块，其他文件 → Data 块；base64 内联）。
     attachments: Option<Vec<AttachmentInput>>,
 ) -> Result<TurnInfo, String> {
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
     // turn 互斥：guard 所有权 move 进事件循环 task，持锁到 turn 链结束。
     let turn_guard = session
@@ -288,7 +483,7 @@ pub async fn send_message(
         Arc::clone(&session),
         turn_guard,
         TurnChainCtx {
-            agent_id,
+            workspace_id,
             session_id: session_id.clone(),
             plan_active,
         },
@@ -314,7 +509,7 @@ pub struct AttachmentInput {
 
 /// turn 链的静态上下文（收拢参数，避免过长签名）。
 struct TurnChainCtx {
-    agent_id: String,
+    workspace_id: String,
     session_id: String,
     /// plan 注入标志（busy 期间 UI 锁定 plan 切换，整条链一致）。
     plan_active: bool,
@@ -335,7 +530,7 @@ async fn turn_chain(
     mut msg: Msg,
 ) {
     let TurnChainCtx {
-        agent_id,
+        workspace_id,
         session_id,
         plan_active,
     } = ctx;
@@ -368,7 +563,7 @@ async fn turn_chain(
                 let _ = app.emit(
                     "turn-finished",
                     TurnFinished {
-                        agent_id,
+                        workspace_id,
                         session_id,
                         turn_id,
                         outcome: "failed",
@@ -382,7 +577,7 @@ async fn turn_chain(
         while let Some(event) = rx.recv().await {
             let payload = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
             let envelope = EventEnvelope {
-                agent_id: agent_id.clone(),
+                workspace_id: workspace_id.clone(),
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 event: payload,
@@ -403,7 +598,7 @@ async fn turn_chain(
             let _ = app.emit(
                 "turn-finished",
                 TurnFinished {
-                    agent_id,
+                    workspace_id,
                     session_id,
                     turn_id,
                     outcome: "completed",
@@ -420,7 +615,7 @@ async fn turn_chain(
                 let _ = app.emit(
                     "turn-finished",
                     TurnFinished {
-                        agent_id,
+                        workspace_id,
                         session_id,
                         turn_id,
                         outcome: "completed",
@@ -434,7 +629,7 @@ async fn turn_chain(
         let _ = app.emit(
             "turn-finished",
             TurnFinished {
-                agent_id: agent_id.clone(),
+                workspace_id: workspace_id.clone(),
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 outcome: "completed",
@@ -446,7 +641,7 @@ async fn turn_chain(
         let _ = app.emit(
             "turn-started",
             TurnStarted {
-                agent_id: agent_id.clone(),
+                workspace_id: workspace_id.clone(),
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 reason: "steer",
@@ -458,7 +653,7 @@ async fn turn_chain(
 /// 续轮开始通知（steer 驱动；前端更新当前 turn 并保持 busy）。
 #[derive(Debug, Clone, Serialize)]
 struct TurnStarted {
-    agent_id: String,
+    workspace_id: String,
     session_id: String,
     turn_id: String,
     reason: &'static str,
@@ -471,7 +666,7 @@ struct TurnStarted {
 #[tauri::command]
 pub async fn steer_turn(
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
     message: String,
@@ -479,7 +674,7 @@ pub async fn steer_turn(
     if message.trim().is_empty() {
         return Err("steer message is empty".to_string());
     }
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
     session.queue_steer(Msg::user("user", message));
     Ok(true)
@@ -493,18 +688,18 @@ pub async fn steer_turn(
 pub async fn interrupt_turn(
     app: AppHandle,
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
 ) -> Result<bool, String> {
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
     let interrupted = session.interrupt().await;
     if interrupted {
         let _ = app.emit(
             "turn-finished",
             TurnFinished {
-                agent_id,
+                workspace_id,
                 session_id,
                 turn_id: String::new(),
                 outcome: "interrupted",
@@ -520,12 +715,12 @@ pub async fn interrupt_turn(
 #[tauri::command]
 pub async fn set_plan_mode(
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
     active: bool,
 ) -> Result<PlanStatus, String> {
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     if active {
         let plan_file = handle
             .agent
@@ -552,11 +747,11 @@ pub async fn set_plan_mode(
 #[tauri::command]
 pub async fn get_plan_status(
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
 ) -> Result<PlanStatus, String> {
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     Ok(PlanStatus {
         active: handle
             .agent
@@ -572,11 +767,11 @@ pub async fn get_plan_status(
 #[tauri::command]
 pub fn list_sessions(
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
 ) -> Result<Vec<SessionSummary>, String> {
     // JsonFileAgentStateStore 布局：<root>/<safe(user)>/<safe(session)>/；
     // USER_ID="studio" 与前端生成的 uuid（hex）都是安全命名，不触发转义。
-    let user_dir = factory::agent_dir(&state.data_dir, &agent_id)
+    let user_dir = factory::workspace_dir(&state.data_dir, &workspace_id)
         .join("state")
         .join(USER_ID);
     let mut out = Vec::new();
@@ -619,11 +814,11 @@ pub fn list_sessions(
 #[tauri::command]
 pub async fn get_history(
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
 ) -> Result<Vec<HistoryItem>, String> {
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     // AgentState.context 是唯一对话真相（对齐 Java contextMutable 语义）：
     // 历史视图直接从状态读，重启后依然完整。
     let agent_state = handle
@@ -651,11 +846,11 @@ pub async fn get_history(
 #[tauri::command]
 pub async fn clear_session(
     state: State<'_, AppState>,
-    agent_id: String,
+    workspace_id: String,
     mode: String,
     session_id: String,
 ) -> Result<(), String> {
-    let handle = state.handle(&agent_id, &mode)?;
+    let handle = state.handle(&workspace_id, &mode)?;
     handle
         .agent
         .delegate()
@@ -704,10 +899,18 @@ pub fn run() {
             list_providers,
             save_provider,
             delete_provider,
+            list_databases,
+            save_database,
+            delete_database,
+            list_database_kinds,
             list_agents,
             create_agent,
             update_agent,
             delete_agent,
+            list_workspaces,
+            create_workspace,
+            update_workspace,
+            delete_workspace,
             send_message,
             steer_turn,
             interrupt_turn,

@@ -1,10 +1,10 @@
 // 应用骨架：左侧导航（协同 / 运维 / 数据库运维 + 设置）+ 主区。
 // 工作区三大类对齐产品概念：协同（solo/team 可切换，plan/free 可切换）、
-// 运维（shell/web）、数据库运维（只读 SQL）。每类是卡片列表页，
-// 点「进入」进入对话视图。
+// 运维（shell/web）、数据库运维（只读 SQL）——都是工作区，针对不同的项目。
+// 每类是工作区卡片列表页，点「进入」进入对话视图。
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type AgentConfig } from "./api";
+import { api, type AgentConfig, type WorkspaceConfig, type WorkspaceKind } from "./api";
 import Conversation from "./components/Conversation";
 import WorkspacePage, { type Category } from "./pages/WorkspacePage";
 import SettingsPage from "./pages/SettingsPage";
@@ -12,20 +12,21 @@ import "./styles.css";
 
 type Tab = Category | "settings";
 
-const CATS: { key: Category; label: string; modes: AgentConfig["mode"][] }[] = [
-  { key: "collab", label: "协同", modes: ["solo", "team"] },
-  { key: "ops", label: "运维", modes: ["ops"] },
-  { key: "db", label: "数据库运维", modes: ["db"] },
+const CATS: { key: WorkspaceKind; label: string }[] = [
+  { key: "collab", label: "协同" },
+  { key: "ops", label: "运维" },
+  { key: "db", label: "数据库运维" },
 ];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("collab");
   const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceConfig[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  // 协同类 agent 的运行方式（solo/team）：进入对话时选择，切换即重开会话。
+  // 协同工作区的运行方式（solo/team）：进入对话时选择，切换即重开会话。
   const [runtimeMode, setRuntimeMode] = useState<"solo" | "team">("solo");
   // 主题：localStorage 优先，否则跟随系统；浅色为默认观感。
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -40,10 +41,10 @@ export default function App() {
   }, [theme]);
 
   const reload = useCallback(async () => {
-    const list = await api.listAgents();
-    setAgents(list);
+    const [a, ws] = await Promise.all([api.listAgents(), api.listWorkspaces()]);
+    setAgents(a);
+    setWorkspaces(ws);
     setLoaded(true);
-    return list;
   }, []);
 
   useEffect(() => {
@@ -58,10 +59,14 @@ export default function App() {
   const fail = (msg: string) => setError(msg);
 
   const cat = CATS.find((c) => c.key === tab);
-  const selected = agents.find((a) => a.id === selectedId);
-  // 对话视图仅在选中 agent 属于当前类时展示；否则显示列表页。
-  const inCat = cat ? agents.filter((a) => cat.modes.includes(a.mode)) : [];
-  const showConversation = Boolean(cat && selected && inCat.some((a) => a.id === selected.id));
+  const selected = workspaces.find((w) => w.id === selectedId);
+  // 对话视图仅在选中工作区属于当前类时展示；否则显示列表页。
+  const inCat = cat ? workspaces.filter((w) => w.kind === cat.key) : [];
+  const showConversation = Boolean(cat && selected && inCat.some((w) => w.id === selected.id));
+  // 会话用的智能体 = 工作区选定的智能体。
+  const selectedAgent = selected
+    ? agents.find((a) => a.id === selected.agent_id)
+    : undefined;
 
   return (
     <div className="app">
@@ -79,7 +84,7 @@ export default function App() {
           >
             {c.label}
             <span className="mode-tag">
-              {agents.filter((a) => c.modes.includes(a.mode)).length}
+              {workspaces.filter((w) => w.kind === c.key).length}
             </span>
           </button>
         ))}
@@ -114,10 +119,11 @@ export default function App() {
         )}
         {tab === "settings" ? (
           <SettingsPage agents={agents} onChanged={() => void reload()} />
-        ) : showConversation && selected ? (
+        ) : showConversation && selected && selectedAgent ? (
           <Conversation
             key={`${selected.id}:${runtimeMode}`}
-            agent={selected}
+            workspace={selected}
+            agent={selectedAgent}
             runtimeMode={runtimeMode}
             onModeChange={setRuntimeMode}
             onBack={() => setSelectedId("")}
@@ -126,9 +132,10 @@ export default function App() {
           <WorkspacePage
             category={tab}
             agents={loaded ? agents : []}
-            onOpen={(a) => {
+            workspaces={loaded ? workspaces : []}
+            onOpen={(w) => {
               setRuntimeMode("solo");
-              setSelectedId(a.id);
+              setSelectedId(w.id);
             }}
             onChanged={() => void reload()}
             onNotice={flash}

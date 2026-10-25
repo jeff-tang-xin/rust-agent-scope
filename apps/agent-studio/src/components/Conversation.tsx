@@ -1,4 +1,5 @@
-// 会话组件：消息流 + composer + 事件归流渲染。
+// 会话组件：消息流 + composer + 事件归流渲染（按工作区归流——会话状态
+// 属于工作区，同一智能体在不同工作区各有独立会话）。
 // 事件处理对齐 Java AgentSessionView.apply 的思路：增量 apply 事件维护视图，
 // AgentResult 为最终消息的权威来源，流式 delta 仅作过程展示。
 
@@ -13,18 +14,57 @@ import {
   type AgentConfig,
   type AgentEventPayload,
   type SessionSummary,
+  type WorkspaceConfig,
 } from "../api";
 
 type Entry =
-  | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string }
-  | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean }
-  | { kind: "thinking"; id: string; text: string }
-  | { kind: "image"; id: string; dataUrl: string }
-  | { kind: "file"; id: string; name: string }
-  | { kind: "indicator"; id: string; text: string };
+  | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean }
+  | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean; ts?: string }
+  | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean }
+  | { kind: "image"; id: string; dataUrl: string; ts?: string }
+  | { kind: "file"; id: string; name: string; ts?: string }
+  | { kind: "indicator"; id: string; text: string; ts?: string };
 
 let entrySeq = 0;
 const nextId = () => `e${++entrySeq}`;
+
+/** 本地时间 HH:MM:SS（时间线节点标签）。 */
+const nowTime = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+
+/** 历史时间戳（ISO-8601）→ HH:MM:SS；非 ISO 原样返回。 */
+function fmtTime(ts?: string): string | undefined {
+  if (!ts) return undefined;
+  return /^\d{4}-\d{2}-\d{2}T/.test(ts) ? ts.slice(11, 19) : ts;
+}
+
+/** 打字机：流式期间按帧渐进显示（自适应步长追平积压），结束后整段显示。 */
+function Typewriter({ text, active }: { text: string; active: boolean }) {
+  const [shown, setShown] = useState(() => (active ? 0 : text.length));
+  useEffect(() => {
+    if (!active) {
+      setShown(text.length);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      setShown((prev) => {
+        if (prev >= text.length) return prev;
+        // 积压越多 reveal 越快：保持打字节奏又不掉队
+        const step = Math.max(1, Math.ceil((text.length - prev) / 15));
+        return Math.min(text.length, prev + step);
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [text, active]);
+  return (
+    <>
+      <Markdown remarkPlugins={[remarkGfm]}>{text.slice(0, shown)}</Markdown>
+      {active && <span className="type-cursor" aria-hidden />}
+    </>
+  );
+}
 
 function extractText(content: unknown): string {
   if (!Array.isArray(content)) return "";
@@ -43,38 +83,42 @@ function shortJson(value: unknown, max = 300): string {
   }
 }
 
-/** 把历史消息的 ContentBlock 列表转成渲染条目（块级 transcript 回放）。 */
+/** 把历史消息的 ContentBlock 列表转成渲染条目（块级 transcript 回放）。
+ *  ts 为消息级时间戳（块级无独立时间，统一用所属消息的）。 */
 function entriesFromBlocks(
   role: "user" | "assistant" | "system",
   blocks: Array<Record<string, unknown>>,
+  ts?: string,
 ): Entry[] {
   const out: Entry[] = [];
   for (const b of blocks) {
     const type = String(b.type ?? "");
     if (type === "text") {
       const text = String(b.text ?? "");
-      if (text.trim()) out.push({ kind: "msg", role, text, id: nextId() });
+      if (text.trim()) out.push({ kind: "msg", role, text, ts, id: nextId() });
     } else if (type === "thinking") {
       // 注意字段名：ContentBlock::Thinking 的 serde 键是 thinking（非 text）。
       const text = String(b.thinking ?? "");
-      if (text.trim()) out.push({ kind: "thinking", text, id: nextId() });
+      if (text.trim()) out.push({ kind: "thinking", text, ts, id: nextId() });
     } else if (type === "image") {
       const src = b.source as { media_type?: string; data?: string } | undefined;
       if (src?.data) {
         out.push({
           kind: "image",
           dataUrl: `data:${src.media_type ?? "image/png"};base64,${src.data}`,
+          ts,
           id: nextId(),
         });
       }
     } else if (type === "data") {
-      out.push({ kind: "file", name: String(b.name ?? "attachment"), id: nextId() });
+      out.push({ kind: "file", name: String(b.name ?? "attachment"), ts, id: nextId() });
     } else if (type === "tool_use") {
       out.push({
         kind: "tool",
         callId: String(b.id ?? ""),
         name: String(b.name ?? "tool"),
         args: shortJson(b.input ?? {}, 600),
+        ts,
         id: nextId(),
       });
     } else if (type === "tool_result") {
@@ -90,6 +134,7 @@ function entriesFromBlocks(
         args: "",
         result: text || shortJson(output, 600),
         ok: String(b.state ?? "success") === "success",
+        ts,
         id: nextId(),
       });
     }
@@ -99,19 +144,23 @@ function entriesFromBlocks(
 }
 
 export default function Conversation({
+  workspace,
   agent,
   runtimeMode,
   onModeChange,
   onBack,
 }: {
+  /** 会话所属工作区（命令与事件都按工作区归流）。 */
+  workspace: WorkspaceConfig;
+  /** 工作区选定的智能体（显示名与空态文案用）。 */
   agent: AgentConfig;
-  /** 运行方式（solo/team）：协同类可切换，切换即重开会话（新实例）。 */
+  /** 运行方式（solo/team）：协同工作区可切换，切换即重开会话（新实例）。 */
   runtimeMode: "solo" | "team";
   onModeChange: (mode: "solo" | "team") => void;
   onBack: () => void;
 }) {
-  // 协同类 agent 的配置 mode 固定 "solo"（类别语义）；ops/db 无运行方式切换。
-  const isCollab = agent.mode === "solo";
+  // 仅协同工作区有 solo/team 运行方式切换；ops/db 工具面由类型决定。
+  const isCollab = workspace.kind === "collab";
   // 会话管理：默认 main（team 运行用独立默认会话，与 solo 空间分开）；
   // 可切换历史会话或新建（对齐 service 的多会话语义）。
   const [sessionId, setSessionId] = useState(runtimeMode === "team" ? "team-main" : "main");
@@ -135,13 +184,24 @@ export default function Conversation({
     setEntries((prev) => prev.map((e) => (e.id === id ? patch(e) : e)));
   }, []);
 
+  // 收流：把流式中的 msg/thinking 条目置为完成（打字机停走、光标消失）。
+  // AGENT_RESULT / AGENT_END / turn 终态三处调用，中断也能可靠复位。
+  const finalizeStreams = useCallback(() => {
+    const sid = streamRef.current;
+    const tid = thinkRef.current;
+    streamRef.current = null;
+    thinkRef.current = null;
+    if (sid) upsert(sid, (e) => (e.kind === "msg" ? { ...e, streaming: false } : e));
+    if (tid) upsert(tid, (e) => (e.kind === "thinking" ? { ...e, streaming: false } : e));
+  }, [upsert]);
+
   const reloadSessions = useCallback(async () => {
     try {
-      setSessions(await api.listSessions(agent.id));
+      setSessions(await api.listSessions(workspace.id));
     } catch {
       /* 会话发现失败不阻塞主流程 */
     }
-  }, [agent.id]);
+  }, [workspace.id]);
 
   // 下拉选项：已落盘会话 + 当前会话（新建未发消息时尚未落盘，补临时项）。
   const sessionOptions = sessions.some((s) => s.session_id === sessionId)
@@ -156,7 +216,7 @@ export default function Conversation({
     thinkRef.current = null;
     toolRef.current.clear();
     setBusy(false);
-    api.getHistory(agent.id, runtimeMode, sessionId).then((history) => {
+    api.getHistory(workspace.id, runtimeMode, sessionId).then((history) => {
       if (!alive) return;
       const restored: Entry[] = [];
       for (const h of history) {
@@ -164,32 +224,36 @@ export default function Conversation({
           | "user"
           | "assistant"
           | "system";
+        const ts = fmtTime(h.timestamp);
         if (h.blocks?.length) {
-          restored.push(...entriesFromBlocks(role, h.blocks));
+          restored.push(...entriesFromBlocks(role, h.blocks, ts));
         } else if (h.text) {
-          restored.push({ kind: "msg", role, text: h.text, ts: h.timestamp, id: nextId() });
+          restored.push({ kind: "msg", role, text: h.text, ts, id: nextId() });
         }
       }
       setEntries(restored);
     });
-    api.getPlanStatus(agent.id, runtimeMode, sessionId).then((s) => alive && setPlanActive(s.active));
+    api.getPlanStatus(workspace.id, runtimeMode, sessionId).then((s) => alive && setPlanActive(s.active));
     void reloadSessions();
     return () => {
       alive = false;
     };
-  }, [agent.id, sessionId, runtimeMode, reloadSessions]);
+  }, [workspace.id, sessionId, runtimeMode, reloadSessions]);
 
   // 事件归流：只处理 (agent_id, session_id) 匹配本组件的事件。
   useEffect(() => {
-    const applies = (p: { agent_id: string; session_id: string }) =>
-      p.agent_id === agent.id && p.session_id === sessionId;
+    const applies = (p: { workspace_id: string; session_id: string }) =>
+      p.workspace_id === workspace.id && p.session_id === sessionId;
 
     const un1 = onAgentEvent((payload: AgentEventPayload) => {
       if (!applies(payload)) return;
       const ev = payload.event;
       switch (ev?.type) {
         case "MODEL_CALL_START":
-          setEntries((prev) => [...prev, { kind: "indicator", text: "thinking…", id: nextId() }]);
+          setEntries((prev) => [
+            ...prev,
+            { kind: "indicator", text: "thinking…", ts: nowTime(), id: nextId() },
+          ]);
           break;
         case "MODEL_CALL_END":
           setEntries((prev) => prev.filter((e) => e.kind !== "indicator"));
@@ -200,7 +264,10 @@ export default function Conversation({
           if (!streamRef.current) {
             const id = nextId();
             streamRef.current = id;
-            setEntries((prev) => [...prev, { kind: "msg", role: "assistant", text: delta, id }]);
+            setEntries((prev) => [
+              ...prev,
+              { kind: "msg", role: "assistant", text: delta, ts: nowTime(), streaming: true, id },
+            ]);
           } else {
             const id = streamRef.current;
             upsert(id, (e) => (e.kind === "msg" ? { ...e, text: e.text + delta } : e));
@@ -213,7 +280,10 @@ export default function Conversation({
           if (!thinkRef.current) {
             const id = nextId();
             thinkRef.current = id;
-            setEntries((prev) => [...prev, { kind: "thinking", text: delta, id }]);
+            setEntries((prev) => [
+              ...prev,
+              { kind: "thinking", text: delta, ts: nowTime(), streaming: true, id },
+            ]);
           } else {
             const id = thinkRef.current;
             upsert(id, (e) => (e.kind === "thinking" ? { ...e, text: e.text + delta } : e));
@@ -228,7 +298,7 @@ export default function Conversation({
           toolRef.current.set(callKey, id);
           setEntries((prev) => [
             ...prev,
-            { kind: "tool", callId: callKey, name, args, id },
+            { kind: "tool", callId: callKey, name, args, ts: nowTime(), id },
           ]);
           break;
         }
@@ -246,24 +316,35 @@ export default function Conversation({
           break;
         }
         case "AGENT_RESULT": {
-          // 最终消息是权威来源：替换流式缓冲。
+          // 最终消息是权威来源：替换流式缓冲并结束流式态。
           const result = ev.result as { content?: unknown } | undefined;
           const text = extractText(result?.content);
           const streamingId = streamRef.current;
+          const thinkId = thinkRef.current;
           streamRef.current = null;
           thinkRef.current = null;
           if (text) {
             if (streamingId) {
-              upsert(streamingId, (e) => (e.kind === "msg" ? { ...e, text } : e));
+              upsert(streamingId, (e) =>
+                e.kind === "msg" ? { ...e, text, streaming: false } : e,
+              );
             } else {
-              setEntries((prev) => [...prev, { kind: "msg", role: "assistant", text, id: nextId() }]);
+              setEntries((prev) => [
+                ...prev,
+                { kind: "msg", role: "assistant", text, ts: nowTime(), id: nextId() },
+              ]);
             }
+          } else if (streamingId) {
+            // 权威结果无文本（纯工具轮）：仅结束流式态
+            upsert(streamingId, (e) => (e.kind === "msg" ? { ...e, streaming: false } : e));
+          }
+          if (thinkId) {
+            upsert(thinkId, (e) => (e.kind === "thinking" ? { ...e, streaming: false } : e));
           }
           break;
         }
         case "AGENT_END":
-          streamRef.current = null;
-          thinkRef.current = null;
+          finalizeStreams();
           break;
         default:
           break;
@@ -273,6 +354,7 @@ export default function Conversation({
     const un2 = onTurnFinished((payload) => {
       if (!applies(payload)) return;
       setBusy(false);
+      finalizeStreams(); // 中断/失败兜底：复位流式态，打字机停走
       if (payload.outcome === "failed") {
         setError(payload.error ?? "turn failed");
       }
@@ -292,7 +374,7 @@ export default function Conversation({
       un2.then((f) => f());
       un3.then((f) => f());
     };
-  }, [agent.id, sessionId, upsert, reloadSessions]);
+  }, [workspace.id, sessionId, upsert, finalizeStreams, reloadSessions]);
 
   // 自动滚底。
   useEffect(() => {
@@ -349,7 +431,7 @@ export default function Conversation({
     setAttachments([]);
     setBusy(true);
     try {
-      await api.sendMessage(agent.id, runtimeMode, sessionId, text, payload);
+      await api.sendMessage(workspace.id, runtimeMode, sessionId, text, payload);
     } catch (e) {
       setBusy(false);
       setError(String(e));
@@ -364,7 +446,7 @@ export default function Conversation({
     setInput("");
     setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
     try {
-      await api.steerTurn(agent.id, runtimeMode, sessionId, text);
+      await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
       setNotice("Steering queued — the agent will pick it up after the current step.");
       setTimeout(() => setNotice(""), 3000);
     } catch (e) {
@@ -383,7 +465,7 @@ export default function Conversation({
 
   const togglePlan = async () => {
     try {
-      const status = await api.setPlanMode(agent.id, runtimeMode, sessionId, !planActive);
+      const status = await api.setPlanMode(workspace.id, runtimeMode, sessionId, !planActive);
       setPlanActive(status.active);
     } catch (e) {
       setError(String(e));
@@ -392,7 +474,7 @@ export default function Conversation({
 
   const interrupt = async () => {
     try {
-      await api.interruptTurn(agent.id, runtimeMode, sessionId);
+      await api.interruptTurn(workspace.id, runtimeMode, sessionId);
     } catch (e) {
       setError(String(e));
     }
@@ -400,7 +482,7 @@ export default function Conversation({
 
   const clear = async () => {
     try {
-      await api.clearSession(agent.id, runtimeMode, sessionId);
+      await api.clearSession(workspace.id, runtimeMode, sessionId);
       setEntries([]);
       void reloadSessions();
     } catch (e) {
@@ -411,11 +493,71 @@ export default function Conversation({
   // plan/free 仅 solo 运行方式下可用（产品语义）。
   const supportsPlan = runtimeMode === "solo";
 
+  // 单条消息渲染（时间线行内）。assistant 流式输出接打字机；
+  // user 输入保持纯文本（避免用户打的 * _ 被意外格式化）。
+  const renderEntry = (e: Entry) => {
+    if (e.kind === "msg") {
+      return (
+        <div className={`msg ${e.role}`}>
+          {e.role === "assistant" ? (
+            <div className="bubble md">
+              <Typewriter text={e.text} active={e.streaming === true} />
+            </div>
+          ) : (
+            <div className="bubble">{e.text}</div>
+          )}
+        </div>
+      );
+    }
+    if (e.kind === "thinking") {
+      return (
+        <div className="thinking-block">
+          <div className="thinking-label">💭 思考过程</div>
+          <div className="thinking-text md">
+            <Typewriter text={e.text} active={e.streaming === true} />
+          </div>
+        </div>
+      );
+    }
+    if (e.kind === "image") {
+      return (
+        <div className="msg user">
+          <img className="msg-img" src={e.dataUrl} alt="attachment" />
+        </div>
+      );
+    }
+    if (e.kind === "file") {
+      return (
+        <div className="msg user">
+          <div className="bubble file-chip">📎 {e.name}</div>
+        </div>
+      );
+    }
+    if (e.kind === "indicator") {
+      return <div className="turn-indicator">{e.text}</div>;
+    }
+    return (
+      <div className="tool-block">
+        <div className="tool-head">
+          <span>🛠</span>
+          <span className="tool-name">{e.name}</span>
+          <span className={`status ${e.ok === undefined ? "" : e.ok ? "ok" : "err"}`}>
+            {e.ok === undefined ? "running…" : e.ok ? "done" : "error"}
+          </span>
+        </div>
+        <div className="tool-body">
+          {e.args && `in: ${e.args}\n`}
+          {e.result !== undefined && `out: ${e.result}`}
+        </div>
+      </div>
+    );
+  };
+
   // 切换运行方式（solo ↔ team）：以当前 agent 重新进入（App 层换实例重开会话）。
   const switchMode = (next: "solo" | "team") => {
     if (next === runtimeMode) return;
-    if (next === "team" && agent.members.length === 0) {
-      if (!window.confirm("Team 模式当前未配置成员（lead 将单干）。可在编辑里添加成员。继续切换？")) {
+    if (next === "team" && workspace.members.length === 0) {
+      if (!window.confirm("Team 模式当前未配置成员（lead 将单干）。可在编辑工作区里添加成员。继续切换？")) {
         return;
       }
     }
@@ -476,70 +618,29 @@ export default function Conversation({
           <div className="empty">
             <div>Start the conversation with {agent.name}</div>
             <div style={{ fontSize: 12 }}>
-              mode: {isCollab ? `collab · ${runtimeMode}` : agent.mode}
+              {workspace.kind === "collab"
+                ? `collab · ${runtimeMode}`
+                : workspace.kind === "ops"
+                  ? "ops · shell + web"
+                  : "db · read-only SQL"}
               {supportsPlan ? " · plan/free switchable" : ""}
             </div>
           </div>
         )}
         {entries.map((e) => {
-          if (e.kind === "msg") {
-            return (
-              <div key={e.id} className={`msg ${e.role}`}>
-                {/* assistant 输出走 markdown 渲染（GFM 表格/任务列表）；
-                    user 输入保持纯文本（避免用户打的 * _ 被意外格式化）。 */}
-                {e.role === "assistant" ? (
-                  <div className="bubble md">
-                    <Markdown remarkPlugins={[remarkGfm]}>{e.text}</Markdown>
-                  </div>
-                ) : (
-                  <div className="bubble">{e.text}</div>
-                )}
-              </div>
-            );
-          }
-          if (e.kind === "thinking") {
-            return (
-              <div key={e.id} className="thinking-block">
-                <div className="thinking-label">💭 思考过程</div>
-                <div className="thinking-text md">
-                  <Markdown remarkPlugins={[remarkGfm]}>{e.text}</Markdown>
-                </div>
-              </div>
-            );
-          }
-          if (e.kind === "image") {
-            return (
-              <div key={e.id} className="msg user">
-                <img className="msg-img" src={e.dataUrl} alt="attachment" />
-              </div>
-            );
-          }
-          if (e.kind === "file") {
-            return (
-              <div key={e.id} className="msg user">
-                <div className="bubble file-chip">📎 {e.name}</div>
-              </div>
-            );
-          }
-          if (e.kind === "indicator") {
-            return (
-              <div key={e.id} className="turn-indicator">
-                {e.text}
-              </div>
-            );
-          }
+          // 时间线行：左侧节点圆点 + 时间标签，右侧原条目渲染。
+          const rowKind =
+            e.kind === "msg"
+              ? e.role
+              : e.kind === "image" || e.kind === "file"
+                ? "user"
+                : e.kind;
           return (
-            <div key={e.id} className="tool-block">
-              <div className="tool-head">
-                <span>🛠</span>
-                <span className="tool-name">{e.name}</span>
-                <span className={`status ${e.ok === undefined ? "" : e.ok ? "ok" : "err"}`}>
-                  {e.ok === undefined ? "running…" : e.ok ? "done" : "error"}
-                </span>
-              </div>
-              <div className="tool-body">
-                {e.args && `in: ${e.args}\n`}
-                {e.result !== undefined && `out: ${e.result}`}
+            <div key={e.id} className={`tl-row tl-${rowKind}`}>
+              <span className="tl-dot" aria-hidden />
+              <div className="tl-body">
+                {e.ts ? <div className="tl-time">{e.ts}</div> : null}
+                {renderEntry(e)}
               </div>
             </div>
           );

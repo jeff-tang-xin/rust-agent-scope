@@ -85,11 +85,13 @@ impl ChatResponse {
     }
 }
 
-/// 流式模型事件：文本增量、聚合完成的工具调用、结束元信息。
+/// 流式模型事件：文本增量、思考增量、聚合完成的工具调用、结束元信息。
 #[derive(Debug, Clone)]
 pub enum ModelEvent {
     /// 文本增量分片。
     TextDelta { text: String },
+    /// 思考 / 推理增量分片（推理模型输出，如 DeepSeek `reasoning_content`）。
+    ThinkingDelta { text: String },
     /// 聚合完成的工具调用（实现方负责把协议层的分片拼完整再产出）。
     ToolUse { id: String, name: String, input: serde_json::Value },
     /// 流结束元信息（最后发出；对应 Java 版 chunk 携带的 usage / finish_reason）。
@@ -124,6 +126,7 @@ pub trait Model: Send + Sync {
             for block in response.content {
                 let event = match block {
                     ContentBlock::Text { text } => ModelEvent::TextDelta { text },
+                    ContentBlock::Thinking { thinking } => ModelEvent::ThinkingDelta { text: thinking },
                     ContentBlock::ToolUse { id, name, input, .. } => ModelEvent::ToolUse { id, name, input },
                     other => {
                         let _ = tx

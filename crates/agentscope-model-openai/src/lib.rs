@@ -163,6 +163,11 @@ pub struct OpenAIMessage {
     pub tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// assistant 历史回传的思考内容（对齐 Java `OpenAIMessageConverter`：
+    /// 推理模型要求 reasoning 保留在请求历史里，DeepSeek thinking 模式
+    /// 带工具调用时缺失会 HTTP 400）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -211,6 +216,11 @@ pub struct Choice {
 pub struct ChoiceMessage {
     #[serde(default)]
     pub content: Option<String>,
+    /// 思考 / 推理内容（非流式；`reasoning_content` 优先，回退 `reasoning`）。
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
+    #[serde(default)]
+    pub reasoning: Option<String>,
     #[serde(default)]
     pub tool_calls: Option<Vec<OpenAIToolCall>>,
 }
@@ -322,6 +332,12 @@ struct StreamChoice {
 struct StreamDelta {
     #[serde(default)]
     content: Option<String>,
+    /// 思考 / 推理增量（DeepSeek、SiliconFlow、DashScope 等用 `reasoning_content`，
+    /// OpenRouter 及部分 vLLM 部署用 `reasoning`；两者都不出现即非推理模型）。
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<StreamToolCall>>,
 }
@@ -355,8 +371,18 @@ struct PendingToolCall {
 /// 单个 chunk 解析后的产出。
 struct ChunkOutcome {
     text_delta: Option<String>,
+    thinking_delta: Option<String>,
     finish_reason: Option<String>,
     usage: Option<Usage>,
+}
+
+/// 取思考增量：`reasoning_content` 优先，缺失时回退 `reasoning`。
+fn delta_thinking(delta: &StreamDelta) -> Option<String> {
+    delta
+        .reasoning_content
+        .clone()
+        .or_else(|| delta.reasoning.clone())
+        .filter(|t| !t.is_empty())
 }
 
 /// 把一个流式 chunk 应用到聚合状态（对齐 Java 版 `parseChunkResponse` 的语义，
@@ -367,6 +393,7 @@ fn apply_stream_chunk(
 ) -> ChunkOutcome {
     let mut outcome = ChunkOutcome {
         text_delta: None,
+        thinking_delta: None,
         finish_reason: None,
         usage: None,
     };
@@ -383,10 +410,15 @@ fn apply_stream_chunk(
         if choice.finish_reason.is_some() {
             outcome.finish_reason = choice.finish_reason;
         }
+        // 先取思考增量（借用），再 move content，避免部分移动后借用
+        let thinking = delta_thinking(&choice.delta);
         if let Some(text) = choice.delta.content {
             if !text.is_empty() {
                 outcome.text_delta = Some(text);
             }
+        }
+        if let Some(thinking) = thinking {
+            outcome.thinking_delta = Some(thinking);
         }
         if let Some(calls) = choice.delta.tool_calls {
             for call in calls {
@@ -505,6 +537,15 @@ async fn pump_sse(
             }
 
             let outcome = apply_stream_chunk(parsed, &mut pending);
+            if let Some(text) = outcome.thinking_delta {
+                if tx
+                    .send(Ok(ModelEvent::ThinkingDelta { text }))
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+            }
             if let Some(text) = outcome.text_delta {
                 if tx.send(Ok(ModelEvent::TextDelta { text })).await.is_err() {
                     return Ok(());
@@ -593,6 +634,34 @@ mod tests {
         let chunk: StreamChunk =
             serde_json::from_str(r#"{"error":{"message":"rate limited"}}"#).unwrap();
         assert_eq!(chunk.error.unwrap().message.as_deref(), Some("rate limited"));
+    }
+
+    /// 思考增量 chunk：`reasoning_content`（DeepSeek/DashScope）与 `reasoning`
+    /// （vLLM 部署，对齐 Java @JsonAlias）两种字段名都解析；空串不产出增量。
+    #[test]
+    fn stream_reasoning_chunks() {
+        let mut pending = BTreeMap::new();
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning_content":"思考中"}}]}"#,
+        )
+        .unwrap();
+        let o = apply_stream_chunk(chunk, &mut pending);
+        assert_eq!(o.thinking_delta.as_deref(), Some("思考中"));
+        assert!(o.text_delta.is_none());
+
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning":"alias thinking"}}]}"#,
+        )
+        .unwrap();
+        let o = apply_stream_chunk(chunk, &mut pending);
+        assert_eq!(o.thinking_delta.as_deref(), Some("alias thinking"));
+
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning_content":""}}]}"#,
+        )
+        .unwrap();
+        let o = apply_stream_chunk(chunk, &mut pending);
+        assert!(o.thinking_delta.is_none());
     }
 
     /// 流式请求体必须带 stream=true 与 stream_options.include_usage（对齐 Java 版）。

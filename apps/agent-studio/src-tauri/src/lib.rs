@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod commands;
 mod config;
+mod db_kind;
 mod factory;
 mod session;
 mod sql_tool;

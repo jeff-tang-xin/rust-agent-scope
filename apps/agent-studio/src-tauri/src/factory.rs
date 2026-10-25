@@ -3,7 +3,7 @@
 //! 装配顺序对齐 Java harness 的语义：
 //! 1. workspace（每 agent 独立，目录布局对齐 `WorkspaceConstants`）；
 //! 2. state store（JsonFile，会话状态跨重启持久）；
-//! 3. team 模式先建成员 agent（先有成员再有 team），再建 leader；
+//! 3. team 运行方式先建成员 agent（先有成员再有 team），再建 lead；
 //! 4. 工具面按模式分化（solo/team/ops/db），基础面 = filesystem 6 + memory 3；
 //! 5. `HarnessAgent::builder()` 组装并 `build()`。
 
@@ -23,7 +23,7 @@ use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::{LocalFilesystem, LocalFsMode, PathPolicy, WorkspaceManager};
 use agentscope_model_openai::OpenAIChatModel;
 
-use crate::config::{AgentConfig, ModelProviderConfig, TeamMemberConfig};
+use crate::config::{AgentConfig, ModelProviderConfig, WorkspaceConfig};
 use crate::sql_tool::SqlQueryTool;
 use crate::team::{MemberRegistry, TeamDelegateTool};
 
@@ -54,9 +54,10 @@ pub struct BuiltAgent {
     pub agent: HarnessAgent,
 }
 
-/// agent 数据目录（workspace / state / members 都挂在它下面）。
-pub(crate) fn agent_dir(data_dir: &Path, agent_id: &str) -> PathBuf {
-    data_dir.join("agents").join(agent_id)
+/// 工作区数据目录（workspace / state / members 都挂在它下面；会话状态
+/// 按工作区隔离——同一智能体在不同工作区各有独立会话）。
+pub(crate) fn workspace_dir(data_dir: &Path, workspace_id: &str) -> PathBuf {
+    data_dir.join("workspaces").join(workspace_id)
 }
 
 /// 构建 OpenAI 兼容模型。
@@ -97,23 +98,26 @@ fn register_base_tools(toolkit: &mut Toolkit, workspace: &Arc<WorkspaceManager>)
 }
 
 /// 单个成员 agent（team 模式；独立 workspace + 独立 state，Isolated 语义）。
-/// 成员工作区根由 build_agent 决定（leader 自定义目录时在其下隔离，见 build_agent）。
+/// 成员是**引用的已有智能体**：用成员自己的人设（sys_prompt）与 provider 装配
+/// ——协同 = 多个智能体，各自带定义入队。成员工作区根由 build_agent 决定。
 fn build_member(
-    leader: &AgentConfig,
+    workspace_id: &str,
+    member: &AgentConfig,
     provider: &ModelProviderConfig,
     data_dir: &Path,
-    member: &TeamMemberConfig,
     members_workspace_root: &Path,
 ) -> Result<HarnessAgent, String> {
-    let member_id = format!("{}-{}", leader.id, member.name);
-    let dir = agent_dir(data_dir, &member_id);
+    let member_id = format!("{}-{}", workspace_id, member.id);
+    let dir = workspace_dir(data_dir, &member_id);
     let workspace = build_workspace(&members_workspace_root.join(&member.name))?;
     let state_store = build_state_store(&dir.join("state"))?;
     let mut toolkit = Toolkit::new();
     register_base_tools(&mut toolkit, &workspace)?;
     HarnessAgentBuilder::new()
         .name(&member.name)
-        .sys_prompt(agentscope_harness::agent::build_subagent_sys_prompt(&member.prompt))
+        .sys_prompt(agentscope_harness::agent::build_subagent_sys_prompt(
+            &member.sys_prompt,
+        ))
         .model(build_model(provider)?)
         .toolkit(toolkit)
         .workspace_manager(workspace)
@@ -130,25 +134,34 @@ fn build_state_store(root: &Path) -> Result<Arc<dyn AgentStateStore>, String> {
     Ok(Arc::new(store))
 }
 
-/// 装配一个 agent（含 team 成员）。
-/// `runtime_mode` 是运行方式（solo/team/ops/db），与 agent 配置解耦——
-/// 协同类 agent 配置固定存 "solo"，进入会话时由用户选择以 solo 或 team
-/// 运行（team 以该 agent 为 lead，成员取配置里的 members）。
+/// 装配一个工作区的执行 agent（含 team 成员）。
+///
+/// `runtime_mode` 是运行方式（solo/team），仅协同工作区可切；运维/数据库
+/// 运维工作区的工具面由工作区类型决定（kind=ops/db），运行方式参数被忽略。
+/// team 成员取 `member_defs`——工作区 members 引用的已有智能体。
 pub fn build_agent(
-    cfg: &AgentConfig,
+    ws: &WorkspaceConfig,
+    agent: &AgentConfig,
     provider: &ModelProviderConfig,
     data_dir: &Path,
     runtime_mode: &str,
+    member_defs: &[(AgentConfig, ModelProviderConfig)],
 ) -> Result<BuiltAgent, String> {
-    let mode = StudioMode::parse(runtime_mode)
-        .ok_or_else(|| format!("unknown mode `{}` (expected solo|team|ops|db)", runtime_mode))?;
-    let dir = agent_dir(data_dir, &cfg.id);
-    // 工作区：配置指定绝对路径则用之（agent 直接在真实项目里干活），
+    // 运行方式解析：协同 → solo/team（用户可切）；ops/db → 由类型决定。
+    let mode = match ws.kind.as_str() {
+        "ops" => StudioMode::Ops,
+        "db" => StudioMode::Db,
+        _ => StudioMode::parse(runtime_mode)
+            .filter(|m| matches!(m, StudioMode::Solo | StudioMode::Team))
+            .unwrap_or(StudioMode::Solo),
+    };
+    let dir = workspace_dir(data_dir, &ws.id);
+    // 工作目录：配置指定绝对路径则用之（agent 直接在真实项目里干活），
     // 否则用默认目录。Sandboxed 模式把所有文件工具锚定在该根上。
-    let workspace_root = if cfg.workspace.trim().is_empty() {
+    let workspace_root = if ws.dir.trim().is_empty() {
         dir.join("workspace")
     } else {
-        std::path::PathBuf::from(cfg.workspace.trim())
+        std::path::PathBuf::from(ws.dir.trim())
     };
     let workspace = build_workspace(&workspace_root)?;
     let state_store = build_state_store(&dir.join("state"))?;
@@ -157,20 +170,22 @@ pub fn build_agent(
     // 成员工作区根：leader 用自定义目录时在其下 `.studio-members/` 隔离
     // （成员在项目里干活但不与 leader 抢同一目录）；默认时保持各自
     // agent_dir/workspace（原行为）。
-    let members_ws_root = if cfg.workspace.trim().is_empty() {
+    let members_ws_root = if ws.dir.trim().is_empty() {
         None
     } else {
         Some(workspace_root.join(".studio-members"))
     };
     let mut members: HashMap<String, Arc<HarnessAgent>> = HashMap::new();
     if mode == StudioMode::Team {
-        for member in &cfg.members {
+        for (member, member_provider) in member_defs {
             let agent = match &members_ws_root {
-                Some(root) => build_member(cfg, provider, data_dir, member, root)?,
+                Some(root) => build_member(&ws.id, member, member_provider, data_dir, root)?,
                 None => {
-                    let fallback = agent_dir(data_dir, &format!("{}-{}", cfg.id, member.name))
+                    let fallback = workspace_dir(data_dir, &ws.id)
+                        .join("members")
+                        .join(&member.id)
                         .join("workspace");
-                    build_member(cfg, provider, data_dir, member, &fallback)?
+                    build_member(&ws.id, member, member_provider, data_dir, &fallback)?
                 }
             };
             members.insert(member.name.clone(), Arc::new(agent));
@@ -215,15 +230,15 @@ pub fn build_agent(
     }
 
     let mut builder = HarnessAgentBuilder::new()
-        .name(&cfg.name)
-        .sys_prompt(sys_prompt_for(cfg, mode))
+        .name(&agent.name)
+        .sys_prompt(sys_prompt_for(agent, mode))
         .model(build_model(provider)?)
         .toolkit(toolkit)
         .workspace_manager(Arc::clone(&workspace))
         .state_store(state_store)
         .default_session_id("main");
-    if cfg.max_iters > 0 {
-        builder = builder.max_iters(cfg.max_iters as usize);
+    if agent.max_iters > 0 {
+        builder = builder.max_iters(agent.max_iters as usize);
     }
     if mode == StudioMode::Solo {
         // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
@@ -232,16 +247,15 @@ pub fn build_agent(
     }
     if mode == StudioMode::Team {
         // 成员声明注册：SubagentsMiddleware 会把成员指引并入 leader 系统提示
-        // （对齐 TeamContext 注入成员快照的语义）。
-        for member in &cfg.members {
-            // SubagentDeclaration 未实现 Default：显式给出全部字段（默认值
-            // 对齐 serde defaults：steps=10、inherit_parent_permissions=true）。
+        // （对齐 TeamContext 注入成员快照的语义）。成员是引用的已有智能体：
+        // name/description/sys_prompt 都取成员自己的定义。
+        for (member, _) in member_defs {
             builder = builder.subagent(SubagentDeclaration {
                 name: member.name.clone(),
                 description: member.description.clone(),
                 workspace_mode: Default::default(),
                 workspace_path: None,
-                inline_agents_body: Some(member.prompt.clone()),
+                inline_agents_body: Some(member.sys_prompt.clone()),
                 model: None,
                 temperature: None,
                 top_p: None,
@@ -267,13 +281,13 @@ pub fn build_agent(
 }
 
 /// 系统提示：用户定义 + 模式职责说明（对齐 service 的 agent instructions 面）。
-fn sys_prompt_for(cfg: &AgentConfig, mode: StudioMode) -> String {
+fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     let mut prompt = String::new();
-    if !cfg.description.is_empty() {
-        prompt.push_str(&cfg.description);
+    if !agent.description.is_empty() {
+        prompt.push_str(&agent.description);
         prompt.push_str("\n\n");
     }
-    prompt.push_str(cfg.sys_prompt.trim());
+    prompt.push_str(agent.sys_prompt.trim());
     let role_note = match mode {
         StudioMode::Solo => {
             "You are working in solo mode: one assistant, one user, full file and memory \
