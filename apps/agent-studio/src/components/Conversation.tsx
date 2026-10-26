@@ -465,6 +465,9 @@ export default function Conversation({
   // 「模型先说话再调工具」的 turn 里，权威结果到达时末尾是工具卡，
   // 按末尾比对会落空导致同一句话渲染两条。
   const turnTextsRef = useRef<Set<string>>(new Set());
+  // 本 turn 是否出现过工具卡（TOOL_CALL_START 登记）：区分「纯工具轮的
+  // 空权威结果」（正常）与「空响应」（模型只产出 thinking，无正文无工具）。
+  const turnToolSeenRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -515,6 +518,7 @@ export default function Conversation({
     streamRef.current = null;
     toolRef.current.clear();
     turnTextsRef.current = new Set();
+    turnToolSeenRef.current = false;
     setBusy(false);
     api.getHistory(workspace.id, runtimeMode, sessionId).then((history) => {
       if (!alive) return;
@@ -631,6 +635,7 @@ export default function Conversation({
           const id = nextId();
           const callKey = String(ev.tool_call_id ?? ev.call_id ?? ev.id ?? `${name}-${id}`);
           toolRef.current.set(callKey, id);
+          turnToolSeenRef.current = true;
           setEntries((prev) => [
             ...prev,
             {
@@ -755,11 +760,27 @@ export default function Conversation({
                 ]);
               }
             }
-          } else if (cur) {
-            // 权威结果无文本（纯工具轮）：仅结束流式态
-            upsert(cur.entryId, (e) =>
-              e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
-            );
+          } else {
+            // 权威结果无文本：仅结束流式态。若本 turn 既没有渲染过正文、
+            // 也没有任何工具卡（模型只产出 thinking 或完全空响应），
+            // 显示占位提示——否则回合「无疾而终」，用户不知道发生了什么。
+            if (cur) {
+              upsert(cur.entryId, (e) =>
+                e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
+              );
+            }
+            if (!turnTextsRef.current.size && !turnToolSeenRef.current) {
+              setEntries((prev) => [
+                ...prev,
+                {
+                  kind: "msg",
+                  role: "assistant",
+                  text: "（模型本轮没有产出可见回答，请重试或换个问法）",
+                  ts: nowTime(),
+                  id: nextId(),
+                },
+              ]);
+            }
           }
           break;
         }
@@ -776,6 +797,7 @@ export default function Conversation({
       setBusy(false);
       finalizeStreams(); // 中断/失败兜底：复位流式态，打字机停走
       turnTextsRef.current = new Set(); // turn 边界：判重集合清零
+      turnToolSeenRef.current = false;
       if (payload.outcome === "failed") {
         setError(payload.error ?? "turn failed");
       }
@@ -786,6 +808,7 @@ export default function Conversation({
       if (!applies(payload)) return;
       setBusy(true);
       turnTextsRef.current = new Set(); // 新 turn：判重集合清零
+      turnToolSeenRef.current = false;
       setNotice("Continuing with your steering input…");
       setTimeout(() => setNotice(""), 3000);
     });

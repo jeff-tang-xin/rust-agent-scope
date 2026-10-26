@@ -996,6 +996,9 @@ impl ReActAgent {
         })
         .await;
 
+        // 空响应重试计数：reasoning 模型偶发只输出 thinking、正文为空且无
+        // 工具调用（见下方防御），限重试一次防循环。
+        let mut empty_retries = 0usize;
         for iteration in 0..self.max_iters {
             // 一步 = 一轮 reasoning（+ acting）。步边界是恢复时的最小定位单位。
             ctx.step(iteration)?;
@@ -1016,6 +1019,17 @@ impl ReActAgent {
             }
             let assistant = self.reasoning(ctx, streaming).await?;
             if assistant.tool_uses().is_empty() {
+                // 空响应防御：模型偶发只产出 thinking、正文为空且无工具调用——
+                // 直接当最终回复会让回合「无疾而终」（前端无任何可见输出）。
+                // 注入提示重试一次；仍空则照常结束（前端有占位兜底）。
+                if assistant.text().trim().is_empty() && empty_retries == 0 {
+                    empty_retries += 1;
+                    ctx.push(Msg::user(
+                        "system",
+                        "你的上一条回复没有正文内容（可能只有思考过程）。请直接给出最终回答。",
+                    ));
+                    continue;
+                }
                 // 无工具调用 → 最终回复（携带停止原因，对齐 Java GenerateReason）
                 let final_msg = assistant.with_generate_reason(GenerateReason::ModelStop);
                 // 落进对话真相的必须是带 reason 的那条，否则历史与返回值不一致
@@ -1780,6 +1794,7 @@ mod tests {
     use super::*;
     use crate::memory::InMemoryMemory;
     use crate::message::ToolResultState;
+    use crate::message::Role;
     use crate::middleware::FinalAnswerFilter;
     use crate::tool::{Tool, ToolGroupScope, Toolkit};
     use serde_json::{json, Value};
@@ -1912,6 +1927,47 @@ mod tests {
         let reply = agent.call(Msg::user("user", "你好")).await.unwrap();
         assert_eq!(reply.text(), "直接回答");
         assert_eq!(history(&agent).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn empty_response_retries_once_then_answers() {
+        // 第一轮：模型只产出 thinking、正文为空且无工具调用（空响应）——
+        // 注入提示重试；第二轮：正常回答。最终回复不能是空。
+        // 注意 MockModel 用 Vec::pop（LIFO）：序列按调用逆序书写。
+        let agent = agent_with(vec![
+            crate::model::ChatResponse::from_text("这次有正文了"),
+            crate::model::ChatResponse {
+                content: vec![ContentBlock::Thinking {
+                    thinking: "只想不说".into(),
+                }],
+                ..Default::default()
+            },
+        ]);
+        let reply = agent.call(Msg::user("user", "你好")).await.unwrap();
+        assert_eq!(reply.text(), "这次有正文了");
+        // 空响应的 assistant 不入历史：user / system(重试提示) / assistant(最终)
+        let history = history(&agent);
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[1].role, Role::User);
+        assert!(history[1].text().contains("没有正文内容"));
+        assert_eq!(history[2].text(), "这次有正文了");
+    }
+
+    #[tokio::test]
+    async fn empty_response_twice_ends_with_empty_result() {
+        // 两次都空：不再无限重试，回合以空正文结束（前端有占位兜底）。
+        let empty = crate::model::ChatResponse {
+            content: vec![ContentBlock::Thinking {
+                thinking: "只想不说".into(),
+            }],
+            ..Default::default()
+        };
+        // 两个响应相同，pop 顺序无影响。
+        let agent = agent_with(vec![empty.clone(), empty]);
+        let reply = agent.call(Msg::user("user", "你好")).await.unwrap();
+        assert_eq!(reply.text(), "");
+        // user / system(重试提示) / assistant(空，第二次仍空照常结束)
+        assert_eq!(history(&agent).len(), 3);
     }
 
     #[tokio::test]
