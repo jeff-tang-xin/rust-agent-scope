@@ -44,7 +44,10 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body, #root { height: 100%; }
+/* zoom 补偿：body 上 zoom 会把 100vh/100% 渲染放大 zoom 倍，根元素按反比
+   声明高度，使 body 实际渲染高度恰好等于视口（否则底部 composer 被推出视口）。 */
+html { height: calc(100% / var(--app-zoom, 1)); }
+body, #root { height: 100%; }
 
 body {
   background: var(--bg);
@@ -56,7 +59,7 @@ body {
 
 /* ---------- 布局骨架 ---------- */
 
-.app { display: flex; flex-direction: column; height: 100vh; }
+.app { display: flex; flex-direction: column; height: 100%; }
 
 /* 顶部导航条：品牌 + 类别导航 + 主题切换（Element 顶部导航模式） */
 .topbar {
@@ -639,6 +642,9 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .modal-mask {
   position: fixed;
   inset: 0;
+  /* fixed 相对视口，同样被 zoom 放大——按反比收回，遮罩恰好盖满视口 */
+  width: calc(100% / var(--app-zoom, 1));
+  height: calc(100% / var(--app-zoom, 1));
   background: rgba(15, 17, 23, 0.45);
   display: flex;
   align-items: flex-start;

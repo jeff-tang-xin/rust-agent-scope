@@ -187,6 +187,7 @@ export default function SettingsPage({
                   onClick={() => {
                     localStorage.setItem("studio-zoom", z);
                     document.body.style.zoom = z;
+                    document.documentElement.style.setProperty("--app-zoom", z);
                   }}
                 >
                   {label}

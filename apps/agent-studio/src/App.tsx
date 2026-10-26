@@ -66,7 +66,10 @@ export default function App() {
   // 界面缩放（设置页可调，localStorage 记忆；默认「标准」110%——
   // 14px 基准在高分屏上偏小，取中档）。
   useEffect(() => {
-    document.body.style.zoom = localStorage.getItem("studio-zoom") ?? "1.1";
+    const z = localStorage.getItem("studio-zoom") ?? "1.1";
+    document.body.style.zoom = z;
+    // 同步给 styles.css 的 html/.modal-mask 做视口反比补偿（见彼处注释）
+    document.documentElement.style.setProperty("--app-zoom", z);
   }, []);
 
   const reload = useCallback(async () => {
