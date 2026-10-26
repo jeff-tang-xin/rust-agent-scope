@@ -822,6 +822,15 @@ impl ReActAgent {
             .push(msg);
     }
 
+    /// 丢弃该会话全部未消费的 steer 消息（中断/删除会话时调用）：
+    /// 中断后残留的 steer 不应再驱动后续续轮。
+    pub fn clear_steers(&self, session_id: &str) {
+        self.steers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(session_id);
+    }
+
     /// 取走该会话全部未消费的 steer 消息（turn 结算时调用）。
     pub fn take_steers(&self, session_id: &str) -> Vec<Msg> {
         self.steers

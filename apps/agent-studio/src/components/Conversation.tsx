@@ -878,8 +878,15 @@ export default function Conversation({
           setNotice("Turn is still running — your message was queued as steering input.");
           setTimeout(() => setNotice(""), 4000);
         } catch {
-          setBusy(false);
-          setError(msg);
+          // steer 也被拒（后端守卫：turn 恰好已结束）→ 重试正常发送，
+          // 此时拿锁应成功；消息不丢、不残留。
+          try {
+            await api.sendMessage(workspace.id, runtimeMode, sessionId, text, payload);
+            return;
+          } catch (e2) {
+            setBusy(false);
+            setError(String(e2));
+          }
         }
         return;
       }
@@ -932,18 +939,34 @@ export default function Conversation({
   };
 
   // steer：turn 运行中补充指令（agent 在下一个 step 边界注入上下文，当步生效）。
+  // 后端对「无运行中 turn」的 steer 会拒绝（防残留消息混入后续输入或触发
+  // 自动续轮）——因此先调后端、成功才落本地条目；被拒且 turn 已结束时
+  // 自动转正常发送，消息不丢。
   const steer = async () => {
     const text = input.trim();
     if (!text || !busy) return;
     setError("");
-    setInput("");
-    setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
     try {
       await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
+      setInput("");
+      setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
       setNotice("Steering — the agent will pick it up at the next step.");
       setTimeout(() => setNotice(""), 3000);
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (msg.includes("no turn is running")) {
+        // busy 失真（turn 恰好结束）：改走正常发送。
+        setInput("");
+        setBusy(true);
+        try {
+          await api.sendMessage(workspace.id, runtimeMode, sessionId, text, []);
+        } catch (e2) {
+          setBusy(false);
+          setError(String(e2));
+        }
+        return;
+      }
+      setError(msg);
     }
   };
 

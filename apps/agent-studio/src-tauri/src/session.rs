@@ -52,6 +52,11 @@ impl SessionHandle {
         Arc::clone(&self.turn_lock).try_lock_owned()
     }
 
+    /// 是否有运行中 turn（steer 入队前的守卫依据）。
+    pub async fn is_running(&self) -> bool {
+        self.running.lock().await.is_some()
+    }
+
     /// 中断当前 turn（对齐 `AgentSession.interrupt`）。返回是否有运行中 turn。
     pub async fn interrupt(&self) -> bool {
         let mut guard = self.running.lock().await;

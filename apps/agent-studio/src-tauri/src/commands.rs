@@ -976,6 +976,13 @@ pub async fn steer_turn(
         return Err("steer message is empty".to_string());
     }
     let handle = state.handle(&workspace_id, &mode)?;
+    let session = handle.session(&session_id).await;
+    // 守卫：无运行中 turn 时拒绝入队——否则消息会残留到队列里，被
+    // merge_with_pending 混进用户下一条输入、或在后续 turn 结算时触发
+    // 「莫名其妙」的自动续轮（busy 状态失真窗口的兜底）。
+    if !session.is_running().await {
+        return Err("no turn is running in this session".to_string());
+    }
     handle
         .agent
         .delegate()
@@ -999,6 +1006,9 @@ pub async fn interrupt_turn(
     let session = handle.session(&session_id).await;
     let interrupted = session.interrupt().await;
     if interrupted {
+        // 中断后丢弃未消费的 steer：用户已主动终止，残留的转向消息
+        // 不应混进后续输入或触发自动续轮。
+        handle.agent.delegate().clear_steers(&session_id);
         let _ = app.emit(
             "turn-finished",
             TurnFinished {
@@ -1208,6 +1218,7 @@ pub async fn clear_session(
         .delegate()
         .clear_context_for(Some(USER_ID), &session_id)
         .map_err(|e| e.to_string())?;
+    handle.agent.delegate().clear_steers(&session_id);
     handle.drop_session(&session_id).await;
     Ok(())
 }
@@ -1302,6 +1313,7 @@ pub async fn delete_session(
     for handle in &affected {
         let session = handle.session(&session_id).await;
         session.interrupt().await;
+        handle.agent.delegate().clear_steers(&session_id);
         handle.drop_session(&session_id).await;
     }
     let dir = session_dir(&state, &workspace_id, &session_id)?;
