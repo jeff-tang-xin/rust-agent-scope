@@ -11,9 +11,9 @@ import ServersPanel from "./ServersPanel";
 import DatabasesPanel from "./DatabasesPanel";
 
 type Entry =
-  | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean }
-  | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean; open?: boolean; ts?: string }
-  | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean; open?: boolean }
+  | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean; actor?: string }
+  | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean; open?: boolean; ts?: string; actor?: string }
+  | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean; open?: boolean; actor?: string }
   | { kind: "image"; id: string; dataUrl: string; ts?: string }
   | { kind: "file"; id: string; name: string; ts?: string }
   | { kind: "indicator"; id: string; text: string; ts?: string }
@@ -559,7 +559,15 @@ export default function Conversation({
             streamRef.current = { kind: "msg", blockId, entryId: id };
             setEntries((prev) => [
               ...prev,
-              { kind: "msg", role: "assistant", text: delta, ts: nowTime(), streaming: true, id },
+              {
+                kind: "msg",
+                role: "assistant",
+                text: delta,
+                ts: nowTime(),
+                streaming: true,
+                id,
+                actor: ev.source ? String(ev.source) : undefined,
+              },
             ]);
           } else {
             upsert(cur.entryId, (e) => (e.kind === "msg" ? { ...e, text: e.text + delta } : e));
@@ -578,7 +586,15 @@ export default function Conversation({
             streamRef.current = { kind: "thinking", blockId, entryId: id };
             setEntries((prev) => [
               ...prev,
-              { kind: "thinking", text: delta, ts: nowTime(), streaming: true, open: true, id },
+              {
+                kind: "thinking",
+                text: delta,
+                ts: nowTime(),
+                streaming: true,
+                open: true,
+                id,
+                actor: ev.source ? String(ev.source) : undefined,
+              },
             ]);
           } else {
             upsert(cur.entryId, (e) => (e.kind === "thinking" ? { ...e, text: e.text + delta } : e));
@@ -599,7 +615,16 @@ export default function Conversation({
           toolRef.current.set(callKey, id);
           setEntries((prev) => [
             ...prev,
-            { kind: "tool", callId: callKey, name, args: "", ts: nowTime(), open: true, id },
+            {
+              kind: "tool",
+              callId: callKey,
+              name,
+              args: "",
+              ts: nowTime(),
+              open: true,
+              id,
+              actor: ev.source ? String(ev.source) : undefined,
+            },
           ]);
           break;
         }
@@ -925,7 +950,7 @@ export default function Conversation({
         <div className={`msg ${e.role}`}>
           {e.role === "assistant" ? (
             <>
-              <div className="msg-role">✦ 回答</div>
+              <div className="msg-role">{e.actor ? `✦ ${e.actor}` : "✦ 回答"}</div>
               <div className="bubble md">
                 <Typewriter text={e.text} active={e.streaming === true} />
               </div>
@@ -944,6 +969,7 @@ export default function Conversation({
           <button className="entry-head" onClick={() => toggleEntry(e.id)}>
             <span className="entry-icon">💭</span>
             <span className="entry-title">思考过程</span>
+            {e.actor && <span className="actor-badge">{e.actor}</span>}
             {e.streaming && <span className="status running">thinking…</span>}
             <span className="entry-caret">{open ? "▾" : "▸"}</span>
           </button>
@@ -1024,6 +1050,7 @@ export default function Conversation({
         <button className="entry-head" onClick={() => toggleEntry(e.id)}>
           <span className="entry-icon">🛠</span>
           <span className="entry-title tool-name">{e.name}</span>
+          {e.actor && <span className="actor-badge">{e.actor}</span>}
           <span className={`status ${e.ok === undefined ? "" : e.ok ? "ok" : "err"}`}>
             {e.ok === undefined ? "running…" : e.ok ? "done" : "error"}
           </span>

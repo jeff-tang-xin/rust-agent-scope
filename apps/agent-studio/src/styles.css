@@ -335,6 +335,21 @@ body {
 }
 
 .tool-block .tool-head .tool-name { color: var(--amber); font-family: Consolas, monospace; }
+
+/* 成员徽标：team 模式下标注该条目由哪个成员执行（事件 source） */
+.actor-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.14);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  white-space: nowrap;
+}
+.msg-role .actor-badge, .msg-role.actor-inline { margin-left: 6px; }
 .tool-block .tool-head .status { margin-left: auto; font-size: 11px; }
 .tool-block .tool-head .status.ok { color: var(--green); }
 .tool-block .tool-head .status.err { color: var(--red); }
