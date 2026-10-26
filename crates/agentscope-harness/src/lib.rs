@@ -45,7 +45,7 @@ pub use memory::{
     DEFAULT_CONSOLIDATION_MIN_GAP, DEFAULT_DAILY_FILE_RETENTION_DAYS,
 };
 pub use middleware_memory::{MemoryFlushMiddleware, MemoryMaintenanceMiddleware};
-pub use plan::PlanModeManager;
+pub use plan::{PlanModeManager, PlanModeMiddleware};
 pub use subagents_middleware::{
     build_delivery_reminder, build_subagent_state_msg, build_task_summary,
     is_visible_to_llm, prepend_to_system_message, render_subagent_catalog,

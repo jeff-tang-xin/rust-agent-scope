@@ -32,7 +32,8 @@ use agentscope_core::permission::PermissionContextState;
 use agentscope_core::tool::Toolkit;
 use tokio::sync::mpsc;
 
-use crate::plan::PlanModeManager;
+use crate::plan::{PlanModeManager, PlanModeMiddleware};
+use crate::tools::{PlanEnterTool, PlanExitTool, PlanWriteTool};
 use crate::subagent::{
     AgentSpecLoader, DefaultAgentManager, SubagentDeclaration, SubagentEntry,
     SubagentFactory, WorkspaceMode,
@@ -701,7 +702,7 @@ impl HarnessAgentBuilder {
 
         // 4) 工具箱与子代理管理器（先于 delegate 构建——SubagentsMiddleware
         //    要注册进 delegate 的中间件链，需要 manager 与任务仓库就绪）
-        let toolkit = self.toolkit.unwrap_or_default();
+        let mut toolkit = self.toolkit.unwrap_or_default();
         let subagent_manager = if self.disable_subagents || self.as_leaf_subagent {
             None
         } else {
@@ -749,6 +750,32 @@ impl HarnessAgentBuilder {
                 task_repository.clone(),
             ))
         });
+        let mut plan_middleware: Option<Arc<PlanModeMiddleware>> = None;
+
+        // 5.5) 计划模式：plan 三工具 + PlanModeMiddleware（对齐 Java HarnessAgent
+        //      2972-2992 的 enablePlanMode 装配）。必须在 delegate builder 之前——
+        //      工具要进 toolkit（760 行 copy 给 delegate），中间件要进中间件链。
+        //      只读谓词从 toolkit 按名查（对齐 Java toolkit.isReadOnly 谓词）。
+        let plan_mode_manager = if self.enable_plan_mode {
+            let manager = Arc::new(match self.plan_file_dir {
+                Some(dir) => PlanModeManager::with_dir(dir),
+                None => PlanModeManager::new(),
+            });
+            toolkit.register(Arc::new(PlanEnterTool::new(Arc::clone(&manager))));
+            toolkit.register(Arc::new(PlanWriteTool::new(
+                Arc::clone(&manager),
+                Arc::clone(&workspace_manager),
+            )));
+            toolkit.register(Arc::new(PlanExitTool::new(Arc::clone(&manager))));
+            let ro_toolkit = toolkit.copy();
+            let is_read_only: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(move |name| {
+                ro_toolkit.get(name).map(|t| t.is_read_only()).unwrap_or(false)
+            });
+            plan_middleware = Some(Arc::new(PlanModeMiddleware::new(is_read_only, Vec::new())));
+            Some(manager)
+        } else {
+            None
+        };
 
         // 6) delegate ReActAgent
         let mut builder = ReActAgent::builder()
@@ -779,20 +806,13 @@ impl HarnessAgentBuilder {
         if let Some(middleware) = &subagents_middleware {
             builder = builder.middleware(middleware.clone());
         }
+        if let Some(middleware) = &plan_middleware {
+            builder = builder.middleware(middleware.clone());
+        }
         let delegate = Arc::new(builder.build().map_err(|error| error.to_string())?);
         if let Some(middleware) = &subagents_middleware {
             middleware.bind_agent(&delegate);
         }
-
-        // 6) 计划模式
-        let plan_mode_manager = if self.enable_plan_mode {
-            Some(Arc::new(match self.plan_file_dir {
-                Some(dir) => PlanModeManager::with_dir(dir),
-                None => PlanModeManager::new(),
-            }))
-        } else {
-            None
-        };
 
         Ok(HarnessAgent {
             delegate,

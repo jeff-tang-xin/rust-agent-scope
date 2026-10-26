@@ -1,11 +1,17 @@
-//! 计划模式：进入/退出与计划文件写入（对应 Java `workspace.plan.PlanModeManager`）。
+//! 计划模式：进入/退出与计划文件写入（对应 Java `workspace.plan.PlanModeManager`），
+//! 以及运行中拦截中间件（对应 Java `middleware.PlanModeMiddleware`）。
 //!
 //! 与 Java 一致：计划文件路径记录在 `AgentState.plan_mode_context.current_plan_file`
 //! （随会话状态持久化），默认 `{plan_dir}/PLAN.md`；`enter`/`exit` 只改状态标志
 //! （幂等），文件写入走 `write_plan`。计划模式是「只读设计阶段」——运行中的
-//! 写操作拦截由 `PlanModeMiddleware` 负责（未复刻，见 lib.rs 差异声明）。
+//! 写操作由 [`PlanModeMiddleware`] 在 `on_acting` 确定性拦截：只放行只读工具与
+//! 白名单，被拒调用合成 `Denied` 工具结果写进上下文（模型下一轮可见）。
+
+use std::sync::{Arc, Mutex};
 
 use agentscope_core::context::RuntimeContext;
+use agentscope_core::message::{Msg, ToolResultState};
+use agentscope_core::middleware::{ActingInput, Middleware, ReasoningInput};
 use agentscope_core::state::{AgentState, PlanModeContextState};
 
 use crate::workspace::WorkspaceManager;
@@ -112,6 +118,197 @@ impl Default for PlanModeManager {
     }
 }
 
+// ===========================================================================
+// PlanModeMiddleware（对应 Java `middleware.PlanModeMiddleware`）
+// ===========================================================================
+
+/// plan 模式下始终放行的工具（对齐 Java `ALWAYS_ALLOWED`：plan 自身三件套 +
+/// todo + 子代理/任务工具——它们是计划与投递语义的一部分，无副作用）。
+const PLAN_ALWAYS_ALLOWED: &[&str] = &[
+    "plan_enter",
+    "plan_write",
+    "plan_exit",
+    "todo_write",
+    "agent_spawn",
+    "agent_send",
+    "agent_list",
+    "task_output",
+    "task_list",
+];
+
+/// 追踪的并发调用状态句柄上限（同 `TaskReminderMiddleware` 的防增长策略）。
+const PLAN_MAX_TRACKED_CALLS: usize = 64;
+
+/// 计划模式中间件：
+/// - `on_acting`：plan 激活时只放行只读工具与白名单；被拒调用合成 `Denied`
+///   工具结果写进上下文（对齐 Java 的 DENIED ToolResult——模型下一轮可见，
+///   tool_use/tool_result 配对完整，不会打爆 API）；
+/// - `on_system_prompt`：plan 激活注入指令横幅（ACT 必须调工具/信息不足就问/
+///   写完 plan 提交评审）；BUILD 态有计划文件时注入「路径≠批准证据」提示；
+/// - `on_reasoning`：注入 `<RUNTIME_STATE>` 计划状态尾消息（每次模型调用重建，
+///   不进上下文——与 SubagentsMiddleware 的易变状态同一模式）。
+///
+/// 状态句柄经 `on_agent_state_ready` 登记（同 `TaskReminderMiddleware` 的
+/// remember/state_for 模式，按 reply_id 寻址）。
+pub struct PlanModeMiddleware {
+    is_read_only: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    additional_allowed: Vec<String>,
+    state_handles: Mutex<Vec<(String, Arc<Mutex<AgentState>>)>>,
+}
+
+impl PlanModeMiddleware {
+    /// 装配：管理器 + 只读判定谓词（装配方从 toolkit 构建，见
+    /// `HarnessAgentBuilder::build`）+ 额外放行名单（Java `additionalAllowed`，
+    /// `planModeAllowShell` 等价于把 shell 工具名加进此名单）。
+    pub fn new(
+        is_read_only: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+        additional_allowed: Vec<String>,
+    ) -> Self {
+        Self {
+            is_read_only,
+            additional_allowed,
+            state_handles: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// 登记本次调用的状态句柄（同 reply_id 重复登记覆盖，超上限淘汰最旧）。
+    fn remember_state(&self, reply_id: &str, state: &Arc<Mutex<AgentState>>) {
+        let mut handles = self
+            .state_handles
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        handles.retain(|(id, _)| id != reply_id);
+        handles.push((reply_id.to_string(), Arc::clone(state)));
+        while handles.len() > PLAN_MAX_TRACKED_CALLS {
+            handles.remove(0);
+        }
+    }
+
+    /// 取本次调用的状态句柄。先克隆 Arc 再出锁——绝不在持锁期间进入另一个
+    /// lock（临时 MutexGuard 存活到语句结束的自死锁坑，项目已多次踩中）。
+    fn state_for(&self, reply_id: &str) -> Option<Arc<Mutex<AgentState>>> {
+        self.state_handles
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .find(|(id, _)| id == reply_id)
+            .map(|(_, handle)| Arc::clone(handle))
+    }
+
+    /// 当前计划状态：`(plan_active, current_plan_file)`。无状态句柄 → `None`
+    /// （调用方透传——中间件不参与无状态调用）。
+    fn plan_status(&self, reply_id: &str) -> Option<(bool, Option<String>)> {
+        let handle = self.state_for(reply_id)?;
+        let state = handle.lock().unwrap_or_else(|error| error.into_inner());
+        Some((
+            state.plan_mode_context.plan_active,
+            state.plan_mode_context.current_plan_file.clone(),
+        ))
+    }
+}
+
+impl Middleware for PlanModeMiddleware {
+    fn name(&self) -> &str {
+        "plan-mode"
+    }
+
+    fn on_agent_state_ready(
+        &self,
+        ctx: &RuntimeContext,
+        _input_msgs: &mut Vec<Msg>,
+        state: &Arc<Mutex<AgentState>>,
+    ) {
+        self.remember_state(ctx.reply_id(), state);
+    }
+
+    fn on_acting(&self, ctx: &RuntimeContext, input: ActingInput) -> ActingInput {
+        let Some((active, _)) = self.plan_status(ctx.reply_id()) else {
+            return input;
+        };
+        if !active {
+            return input;
+        }
+        let (allowed, denied): (Vec<_>, Vec<_>) = input.tool_calls.into_iter().partition(|call| {
+            (self.is_read_only)(&call.name)
+                || PLAN_ALWAYS_ALLOWED.contains(&call.name.as_str())
+                || self.additional_allowed.iter().any(|a| a == &call.name)
+        });
+        if !denied.is_empty() {
+            if let Some(handle) = self.state_for(ctx.reply_id()) {
+                let mut state = handle.lock().unwrap_or_else(|error| error.into_inner());
+                for call in denied {
+                    state.context.push(Msg::tool_result(
+                        "plan-mode",
+                        call.id.clone(),
+                        call.name.clone(),
+                        format!(
+                            "[plan mode] tool `{}` was denied: plan mode is read-only research \
+and design. Record the intended action in the plan file instead, or ask the user.",
+                            call.name
+                        ),
+                        ToolResultState::Denied,
+                    ));
+                }
+            }
+        }
+        ActingInput { tool_calls: allowed }
+    }
+
+    fn on_system_prompt(&self, ctx: &RuntimeContext, current: String) -> String {
+        let Some((active, plan_file)) = self.plan_status(ctx.reply_id()) else {
+            return current;
+        };
+        if active {
+            let mut banner = format!(
+                "{current}\n\n<plan-mode>\nPLAN MODE ACTIVE: research and design only — \
+do not execute changes.\n- In each ACT step you MUST call a tool (read files, search, \
+plan_write); do not narrate an action without calling.\n- If required information is \
+missing, ask the user instead of guessing.\n- Write the plan with plan_write, then \
+present it for review."
+            );
+            if let Some(file) = plan_file {
+                banner.push_str(&format!("\n- Plan file: {file}"));
+            }
+            banner.push_str("\n</plan-mode>");
+            banner
+        } else if let Some(file) = plan_file {
+            // BUILD 态：已有计划文件 → 逐步执行提示（对齐 Java BUILD_MODE_PLAN_HINT）。
+            format!(
+                "{current}\n\n<plan-mode-hint>\nAn approved plan exists at {file}. The plan \
+path is NOT approval evidence by itself — read it and execute it step by step.\n</plan-mode-hint>"
+            )
+        } else {
+            current
+        }
+    }
+
+    fn on_reasoning(&self, ctx: &RuntimeContext, input: ReasoningInput) -> ReasoningInput {
+        let Some((active, plan_file)) = self.plan_status(ctx.reply_id()) else {
+            return input;
+        };
+        let mode = if active { "PLAN" } else { "BUILD" };
+        let mut sb = String::from("<RUNTIME_STATE>\n");
+        sb.push_str(&format!("Plan mode: {mode}\n"));
+        match &plan_file {
+            Some(file) => {
+                sb.push_str(&format!("Plan reference: {file}\n"));
+                sb.push_str(
+                    "The plan file is a design record, not approval evidence; execute it \
+step by step after leaving plan mode.\n",
+                );
+            }
+            None => sb.push_str("No plan file recorded.\n"),
+        }
+        sb.push_str("</RUNTIME_STATE>");
+        let mut messages = input.messages;
+        messages.push(Msg::system("system", sb));
+        ReasoningInput {
+            messages,
+            options: input.options,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +381,97 @@ mod tests {
             Some("plans/PLAN.md")
         );
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    // ---------- PlanModeMiddleware ----------
+
+    use agentscope_core::middleware::ActingInput;
+    use agentscope_core::model::GenerateOptions;
+    use agentscope_core::message::ContentBlock;
+    use agentscope_core::middleware::ToolCallSpec;
+    use serde_json::json;
+
+    fn middleware_with_state(
+        state: &Arc<Mutex<AgentState>>,
+        reply_id: &str,
+    ) -> PlanModeMiddleware {
+        let is_ro: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(|n| n == "read_file");
+        let mw = PlanModeMiddleware::new(is_ro, vec![]);
+        mw.remember_state(reply_id, state);
+        mw
+    }
+
+    #[tokio::test]
+    async fn plan_middleware_blocks_writes_and_injects_state() {
+        let manager = Arc::new(PlanModeManager::new());
+        let state = Arc::new(Mutex::new(AgentState::default()));
+        let mw = middleware_with_state(&state, "r1");
+        manager.enter(&mut state.lock().unwrap());
+        let ctx = RuntimeContext::new().with_reply_id("r1");
+
+        // on_acting：只读放行、写工具拦截并合成 Denied 结果进上下文。
+        let input = ActingInput {
+            tool_calls: vec![
+                ToolCallSpec { id: "1".into(), name: "read_file".into(), input: json!({}) },
+                ToolCallSpec { id: "2".into(), name: "write_file".into(), input: json!({}) },
+            ],
+        };
+        let out = mw.on_acting(&ctx, input);
+        assert_eq!(out.tool_calls.len(), 1);
+        assert_eq!(out.tool_calls[0].name, "read_file");
+        {
+            let s = state.lock().unwrap();
+            assert_eq!(s.context.len(), 1, "被拒调用应有合成的 Denied 结果");
+            match &s.context[0].content[0] {
+                ContentBlock::ToolResult { name, output, state, .. } => {
+                    assert_eq!(name, "write_file");
+                    assert!(matches!(state, ToolResultState::Denied));
+                    assert!(format!("{output:?}").contains("denied"));
+                }
+                other => panic!("expected tool result block, got {other:?}"),
+            }
+        }
+
+        // on_reasoning：PLAN 态注入 RUNTIME_STATE 尾消息。
+        let ri = mw.on_reasoning(
+            &ctx,
+            ReasoningInput { messages: vec![], options: GenerateOptions::default() },
+        );
+        let last = ri.messages.last().unwrap().text();
+        assert!(last.contains("Plan mode: PLAN"), "{last}");
+
+        // BUILD 态（exit 后）：不再拦截，状态消息切 BUILD。
+        manager.exit(&mut state.lock().unwrap());
+        let input = ActingInput {
+            tool_calls: vec![ToolCallSpec {
+                id: "3".into(),
+                name: "write_file".into(),
+                input: json!({}),
+            }],
+        };
+        let out = mw.on_acting(&ctx, input);
+        assert_eq!(out.tool_calls.len(), 1, "BUILD 态透传");
+        let ri = mw.on_reasoning(
+            &ctx,
+            ReasoningInput { messages: vec![], options: GenerateOptions::default() },
+        );
+        assert!(ri.messages.last().unwrap().text().contains("Plan mode: BUILD"));
+    }
+
+    #[tokio::test]
+    async fn plan_middleware_passthrough_without_state() {
+        // 无状态句柄（未经 on_agent_state_ready）→ 全部透传。
+        let is_ro: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(|_| false);
+        let mw = PlanModeMiddleware::new(is_ro, vec![]);
+        let ctx = RuntimeContext::new().with_reply_id("nope");
+        let input = ActingInput {
+            tool_calls: vec![ToolCallSpec {
+                id: "1".into(),
+                name: "write_file".into(),
+                input: json!({}),
+            }],
+        };
+        let out = mw.on_acting(&ctx, input);
+        assert_eq!(out.tool_calls.len(), 1);
     }
 }

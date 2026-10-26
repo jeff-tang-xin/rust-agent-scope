@@ -19,8 +19,8 @@ use crate::db_exec::{DbCatalog, DbDmlTool, DbQueryTool};
 use crate::ssh_tool::{RemoteShellTool, SshPool};
 use agentscope_core::agent::ReActAgent;
 use agentscope_harness::agent::{
-    build_subagent_sys_prompt, HarnessAgent, HarnessAgentBuilder, GENERAL_PURPOSE_DESCRIPTION,
-    GENERAL_PURPOSE_NAME,
+    allowlisted_inherited_toolkit, build_subagent_sys_prompt, HarnessAgent, HarnessAgentBuilder,
+    GENERAL_PURPOSE_DESCRIPTION, GENERAL_PURPOSE_NAME,
 };
 use agentscope_harness::subagent::{
     DeclarationMode, DefaultAgentManager, SubagentDeclaration, SubagentEntry, SubagentFactory,
@@ -167,19 +167,18 @@ fn build_member(
         .build()
 }
 
-/// 构建一个 spawn 子代理实例（ReActAgent）：lead 的分身——同文件/记忆工具面、
-/// 同模型；会话状态复用工作区 state store（spawn 派生的 child session id 不冲突）。
+/// 构建一个 spawn 子代理实例（ReActAgent）：lead 的分身——**全量继承 lead 的
+/// 工具面**（对齐 Java `buildGeneralPurposeFactory` 的 `capturedParentToolkit.copy()`：
+/// 分身能干 lead 能干的活，含 shell/web/db），同模型；会话状态复用工作区
+/// state store（spawn 派生的 child session id 不冲突）。
 fn build_spawn_agent(
     name: &str,
     sys_prompt_body: &str,
     provider: &ModelProviderConfig,
-    workspace_root: &Path,
     state_store: Arc<dyn AgentStateStore>,
+    lead_toolkit: &Toolkit,
 ) -> Result<Arc<ReActAgent>, String> {
-    let workspace = build_workspace(workspace_root)?;
-    let memory_workspace = build_memory_workspace(workspace.root())?;
-    let mut toolkit = Toolkit::new();
-    register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
+    let toolkit = allowlisted_inherited_toolkit(Some(lead_toolkit), &[]);
     let agent = ReActAgent::builder()
         .name(name)
         .sys_prompt(build_subagent_sys_prompt(sys_prompt_body))
@@ -193,21 +192,30 @@ fn build_spawn_agent(
 }
 
 /// solo 的 spawn 子代理注册表：一个条目 = lead 的分身（general-purpose，
-/// 继承 lead 的 sys_prompt 与模型）。team 的成员协作走 TeamDelegateTool，
-/// 不进 spawn 池（AgentScope 语义：solo 派分身，team 派成员）。
+/// 继承 lead 的 sys_prompt、模型与**完整工具面**）。team 的成员协作走
+/// TeamDelegateTool，不进 spawn 池（AgentScope 语义：solo 派分身，team 派成员）。
+///
+/// 必须在 lead 的全部业务工具（shell/web/db）注册完成之后调用——分身继承的
+/// 是调用此刻的 toolkit 快照。
 fn build_subagent_manager(
     provider: &ModelProviderConfig,
-    workspace_root: &Path,
     lead_sys_prompt: &str,
     state_store: Arc<dyn AgentStateStore>,
+    lead_toolkit: &Toolkit,
 ) -> Result<Arc<DefaultAgentManager>, String> {
     let manager = Arc::new(DefaultAgentManager::new());
-    let root = workspace_root.to_path_buf();
     let store = Arc::clone(&state_store);
     let body = lead_sys_prompt.to_string();
     let provider = provider.clone();
+    let lead_toolkit = lead_toolkit.copy();
     let factory: Arc<SubagentFactory> = Arc::new(move |_rc| {
-        build_spawn_agent(GENERAL_PURPOSE_NAME, &body, &provider, &root, Arc::clone(&store))
+        build_spawn_agent(
+            GENERAL_PURPOSE_NAME,
+            &body,
+            &provider,
+            Arc::clone(&store),
+            &lead_toolkit,
+        )
     });
     let decl: SubagentDeclaration = serde_json::from_value(serde_json::json!({
         "name": GENERAL_PURPOSE_NAME,
@@ -315,19 +323,9 @@ pub fn build_agent(
             toolkit.register(Arc::new(TeamDelegateTool::new(Arc::clone(&members))));
         }
         StudioMode::Solo => {
-            // spawn 分身体系（AgentScope 语义：solo 派自己的分身，独立会话跑
-            // 子任务；team 的成员协作走 TeamDelegateTool，不在此处）。
-            let manager = build_subagent_manager(
-                provider,
-                &workspace_root,
-                &agent.sys_prompt,
-                Arc::clone(&state_store),
-            )?;
+            // 任务工具（spawn 三件套在下方「远程能力统一注册」之后装配——
+            // 分身要继承 lead 的完整工具面，必须等 shell/db 注册完成）。
             let repo: Arc<dyn TaskRepository> = Arc::new(InMemoryTaskRepository::new());
-            let core = AgentSpawnCore::new(manager, Arc::clone(&repo), 0);
-            toolkit.register(Arc::new(AgentSpawnTool::new(Arc::clone(&core))));
-            toolkit.register(Arc::new(AgentSendTool::new(Arc::clone(&core))));
-            toolkit.register(Arc::new(AgentListTool::new(core)));
             toolkit.register(Arc::new(
                 agentscope_harness::tools::TaskOutputTool::new(Arc::clone(&repo)),
             ));
@@ -362,6 +360,24 @@ pub fn build_agent(
             Arc::clone(&resources.db_catalog),
             allowed,
         )));
+    }
+
+    // solo 的 spawn 分身体系（AgentScope 语义：solo 派自己的分身，独立会话跑
+    // 子任务）。必须在全部业务工具注册完成之后构建——分身全量继承 lead 的
+    // 工具面（对齐 Java buildGeneralPurposeFactory 的 capturedParentToolkit.copy()），
+    // 否则分身缺 shell/web/db，接到需要执行命令的子任务只能失败重试。
+    if mode == StudioMode::Solo {
+        let manager = build_subagent_manager(
+            provider,
+            &agent.sys_prompt,
+            Arc::clone(&state_store),
+            &toolkit,
+        )?;
+        let repo: Arc<dyn TaskRepository> = Arc::new(InMemoryTaskRepository::new());
+        let core = AgentSpawnCore::new(manager, Arc::clone(&repo), 0);
+        toolkit.register(Arc::new(AgentSpawnTool::new(Arc::clone(&core))));
+        toolkit.register(Arc::new(AgentSendTool::new(Arc::clone(&core))));
+        toolkit.register(Arc::new(AgentListTool::new(core)));
     }
 
     let mut builder = HarnessAgentBuilder::new()
