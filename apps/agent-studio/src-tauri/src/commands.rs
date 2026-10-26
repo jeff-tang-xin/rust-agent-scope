@@ -983,10 +983,13 @@ pub async fn steer_turn(
     if !session.is_running().await {
         return Err("no turn is running in this session".to_string());
     }
-    handle
-        .agent
-        .delegate()
-        .push_steer(&session_id, Msg::user("user", message));
+    // 同一条 steer 重复入队没有价值：IME 连击等极端竞态下前端防重可能
+    // 失效，模型会把重复指令当两轮各处理一遍。队列已有相同内容时静默
+    // 忽略（对前端表现为成功，条目只显示一条、模型只处理一遍）。
+    let delegate = handle.agent.delegate();
+    if !delegate.has_duplicate_steer(&session_id, &message) {
+        delegate.push_steer(&session_id, Msg::user("user", message));
+    }
     Ok(true)
 }
 

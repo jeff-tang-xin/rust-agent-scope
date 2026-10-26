@@ -822,6 +822,17 @@ impl ReActAgent {
             .push(msg);
     }
 
+    /// 该会话是否已有内容完全相同的未消费 steer（重复入队防御：
+    /// IME 连击等极端竞态下同一句插话入队两次，模型会当两轮指令各处理一遍）。
+    pub fn has_duplicate_steer(&self, session_id: &str, text: &str) -> bool {
+        self.steers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(session_id)
+            .map(|queue| queue.iter().any(|m| m.text() == text))
+            .unwrap_or(false)
+    }
+
     /// 丢弃该会话全部未消费的 steer 消息（中断/删除会话时调用）：
     /// 中断后残留的 steer 不应再驱动后续续轮。
     pub fn clear_steers(&self, session_id: &str) {
@@ -2853,6 +2864,23 @@ mod tests {
                 .pop()
                 .ok_or_else(|| Error::Model("no more mock responses".into()))
         }
+    }
+
+    #[test]
+    fn steer_dedup_detects_identical_pending_message() {
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .sys_prompt("p")
+            .model(Arc::new(MockModel { responses: Mutex::new(vec![]) }))
+            .build()
+            .unwrap();
+        agent.push_steer("s1", Msg::user("user", "不要吞异常"));
+        assert!(agent.has_duplicate_steer("s1", "不要吞异常"));
+        assert!(!agent.has_duplicate_steer("s1", "别的插话"));
+        assert!(!agent.has_duplicate_steer("s2", "不要吞异常"));
+        // 取走后不再重复
+        assert_eq!(agent.take_steers("s1").len(), 1);
+        assert!(!agent.has_duplicate_steer("s1", "不要吞异常"));
     }
 
     #[tokio::test]

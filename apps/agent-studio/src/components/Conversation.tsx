@@ -468,6 +468,10 @@ export default function Conversation({
   // 本 turn 是否出现过工具卡（TOOL_CALL_START 登记）：区分「纯工具轮的
   // 空权威结果」（正常）与「空响应」（模型只产出 thinking，无正文无工具）。
   const turnToolSeenRef = useRef(false);
+  // 提交在途标记：steer/send 的 IPC 往返期间忽略再次提交。IME 组词确认的
+  // Enter 与发送的 Enter 连击（间隔可短于 IPC 往返）会把同一条消息提交
+  // 两次——steer 双条入队会被模型当两轮指令各处理一遍。
+  const submittingRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -994,7 +998,17 @@ export default function Conversation({
   };
 
   // Enter 发送；busy 时 Enter 转为 steer（运行中也能打字补充指令）。
-  const submit = () => (busy ? void steer() : void send());
+  // 在途防重：IPC 往返未完成前忽略再次提交（见 submittingRef 注释）。
+  const submit = () => {
+    if (submittingRef.current) return;
+    const text = input.trim();
+    if (!text) return;
+    submittingRef.current = true;
+    const op = busy ? steer() : send();
+    void op.finally(() => {
+      submittingRef.current = false;
+    });
+  };
 
   const newSession = () => {
     const id = `${runtimeMode}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -1317,6 +1331,9 @@ export default function Conversation({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            // IME 组词期间（中文输入法确认候选词）的 Enter 不触发发送/插话：
+            // 否则「确认组词的 Enter + 发送的 Enter」会把同一条消息提交两次。
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
