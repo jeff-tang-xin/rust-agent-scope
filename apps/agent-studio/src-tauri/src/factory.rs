@@ -14,8 +14,17 @@ use std::sync::Arc;
 use agentscope_core::model::Model;
 use agentscope_core::state::{AgentStateStore, JsonFileAgentStateStore};
 use agentscope_core::tool::Toolkit;
-use agentscope_harness::agent::{HarnessAgent, HarnessAgentBuilder};
-use agentscope_harness::subagent::{DeclarationMode, SubagentDeclaration};
+use agentscope_core::agent::ReActAgent;
+use agentscope_harness::agent::{
+    build_subagent_sys_prompt, HarnessAgent, HarnessAgentBuilder, GENERAL_PURPOSE_DESCRIPTION,
+    GENERAL_PURPOSE_NAME,
+};
+use agentscope_harness::subagent::{
+    DeclarationMode, DefaultAgentManager, SubagentDeclaration, SubagentEntry, SubagentFactory,
+};
+use agentscope_harness::tools_agent_spawn::{
+    AgentListTool, AgentSendTool, AgentSpawnCore, AgentSpawnTool,
+};
 use agentscope_harness::task::{InMemoryTaskRepository, TaskRepository};
 use agentscope_harness::tools::{ShellExecuteTool, WebFetchTool, WebSearchTool};
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
@@ -149,6 +158,59 @@ fn build_member(
         .build()
 }
 
+/// 构建一个 spawn 子代理实例（ReActAgent）：lead 的分身——同文件/记忆工具面、
+/// 同模型；会话状态复用工作区 state store（spawn 派生的 child session id 不冲突）。
+fn build_spawn_agent(
+    name: &str,
+    sys_prompt_body: &str,
+    provider: &ModelProviderConfig,
+    workspace_root: &Path,
+    state_store: Arc<dyn AgentStateStore>,
+) -> Result<Arc<ReActAgent>, String> {
+    let workspace = build_workspace(workspace_root)?;
+    let memory_workspace = build_memory_workspace(workspace.root())?;
+    let mut toolkit = Toolkit::new();
+    register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
+    let agent = ReActAgent::builder()
+        .name(name)
+        .sys_prompt(build_subagent_sys_prompt(sys_prompt_body))
+        .model(build_model(provider)?)
+        .toolkit(toolkit)
+        .state_store(state_store)
+        .default_session_id("subagent")
+        .build()
+        .map_err(|e| format!("build subagent `{name}`: {e}"))?;
+    Ok(Arc::new(agent))
+}
+
+/// solo 的 spawn 子代理注册表：一个条目 = lead 的分身（general-purpose，
+/// 继承 lead 的 sys_prompt 与模型）。team 的成员协作走 TeamDelegateTool，
+/// 不进 spawn 池（AgentScope 语义：solo 派分身，team 派成员）。
+fn build_subagent_manager(
+    provider: &ModelProviderConfig,
+    workspace_root: &Path,
+    lead_sys_prompt: &str,
+    state_store: Arc<dyn AgentStateStore>,
+) -> Result<Arc<DefaultAgentManager>, String> {
+    let manager = Arc::new(DefaultAgentManager::new());
+    let root = workspace_root.to_path_buf();
+    let store = Arc::clone(&state_store);
+    let body = lead_sys_prompt.to_string();
+    let provider = provider.clone();
+    let factory: Arc<SubagentFactory> = Arc::new(move |_rc| {
+        build_spawn_agent(GENERAL_PURPOSE_NAME, &body, &provider, &root, Arc::clone(&store))
+    });
+    let decl: SubagentDeclaration = serde_json::from_value(serde_json::json!({
+        "name": GENERAL_PURPOSE_NAME,
+        "description": GENERAL_PURPOSE_DESCRIPTION,
+    }))
+    .map_err(|e| format!("general-purpose declaration: {e}"))?;
+    manager
+        .register(SubagentEntry::new(GENERAL_PURPOSE_NAME, Some(decl), factory))
+        .map_err(|e| format!("register general-purpose: {e}"))?;
+    Ok(manager)
+}
+
 /// 构建 JsonFile 状态库（会话状态跨重启持久）。
 fn build_state_store(root: &Path) -> Result<Arc<dyn AgentStateStore>, String> {
     let store = JsonFileAgentStateStore::new(root)
@@ -246,7 +308,33 @@ pub fn build_agent(
             // 进程内委派（≈ LocalTeamClient）。
             toolkit.register(Arc::new(TeamDelegateTool::new(Arc::clone(&members))));
         }
-        StudioMode::Solo => {}
+        StudioMode::Solo => {
+            // spawn 分身体系（AgentScope 语义：solo 派自己的分身，独立会话跑
+            // 子任务；team 的成员协作走 TeamDelegateTool，不在此处）。
+            let manager = build_subagent_manager(
+                provider,
+                &workspace_root,
+                &agent.sys_prompt,
+                Arc::clone(&state_store),
+            )?;
+            let repo: Arc<dyn TaskRepository> = Arc::new(InMemoryTaskRepository::new());
+            let core = AgentSpawnCore::new(manager, Arc::clone(&repo), 0);
+            toolkit.register(Arc::new(AgentSpawnTool::new(Arc::clone(&core))));
+            toolkit.register(Arc::new(AgentSendTool::new(Arc::clone(&core))));
+            toolkit.register(Arc::new(AgentListTool::new(core)));
+            toolkit.register(Arc::new(
+                agentscope_harness::tools::TaskOutputTool::new(Arc::clone(&repo)),
+            ));
+            toolkit.register(Arc::new(
+                agentscope_harness::tools::TaskListTool::new(Arc::clone(&repo)),
+            ));
+            toolkit.register(Arc::new(
+                agentscope_harness::tools::TaskCancelTool::new(Arc::clone(&repo)),
+            ));
+            toolkit.register(Arc::new(
+                agentscope_harness::tools::WaitAsyncResultsTool::new(repo, None),
+            ));
+        }
     }
 
     let mut builder = HarnessAgentBuilder::new()
@@ -308,32 +396,40 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
         prompt.push_str("\n\n");
     }
     prompt.push_str(agent.sys_prompt.trim());
-    let role_note = match mode {
+    let role_note: String = match mode {
         StudioMode::Solo => {
             "You are working in solo mode: one assistant, one user, full file and memory \
              tools in your workspace. When asked to plan first, write the plan into the \
-             plan file before executing."
+             plan file before executing.\n\nYou can spawn subagents that are clones of \
+             yourself (same instructions, model and tools) with the agent_spawn tool; \
+             they run in isolated sessions, so delegate self-contained subtasks with \
+             all the context they need, then verify and integrate their results. Use \
+             agent_send for follow-up messages and agent_list to check active ones."
+                .to_string()
         }
         StudioMode::Team => {
             "You are the team lead. Delegate self-contained tasks to your members with \
              the team_delegate tool, review their results, and synthesize the final \
              answer for the user. Do the work yourself only when delegation is not \
              warranted."
+                .to_string()
         }
         StudioMode::Ops => {
             "You are an operations engineer. You can run shell commands and fetch web \
              pages. Be precise and conservative: prefer read-only inspection before \
              mutating actions, and explain the impact of destructive commands before \
              running them."
+                .to_string()
         }
         StudioMode::Db => {
             "You are a database analyst. You can run read-only SQL (SELECT/WITH/EXPLAIN/\
              PRAGMA) against the workspace SQLite database via sql_query. Inspect the \
              schema first, then answer with evidence from actual query results."
+                .to_string()
         }
     };
     prompt.push_str("\n\n");
-    prompt.push_str(role_note);
+    prompt.push_str(&role_note);
     // .ox 数据规范：非业务产出与业务代码分离（记忆工具已自动锚定 .ox/）。
     prompt.push_str(
         "\n\nWorkspace data convention: keep the project root clean. All          non-business artifacts you produce (plans, task lists, notes,          summaries, reports, scratch files) must live under the `.ox/`          directory at the workspace root; memory tools are already rooted          there. Only business code and documents requested by the user go          elsewhere. Never create memory/ or MEMORY.md at the project root.",
