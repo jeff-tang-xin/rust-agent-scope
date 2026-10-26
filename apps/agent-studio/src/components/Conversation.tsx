@@ -131,6 +131,9 @@ function entriesFromBlocks(
   role: "user" | "assistant" | "system",
   blocks: Array<Record<string, unknown>>,
   ts?: string,
+  /** callId → tool_use 条目（跨消息合并：tool_result 回填到对应调用条目，
+   *  不再各建一条导致「running + done」双卡）。 */
+  byCall?: Map<string, Entry>,
 ): Entry[] {
   const out: Entry[] = [];
   for (const b of blocks) {
@@ -155,27 +158,38 @@ function entriesFromBlocks(
     } else if (type === "data") {
       out.push({ kind: "file", name: String(b.name ?? "attachment"), ts, id: nextId() });
     } else if (type === "tool_use") {
-      out.push({
+      const entry: Entry = {
         kind: "tool",
         callId: String(b.id ?? ""),
         name: String(b.name ?? "tool"),
         args: shortJson(b.input ?? {}, 600),
         ts,
         id: nextId(),
-      });
+      };
+      out.push(entry);
+      if (entry.callId) byCall?.set(entry.callId, entry);
     } else if (type === "tool_result") {
       const output = Array.isArray(b.output) ? b.output : [];
       const text = output
         .filter((o) => (o as { type?: string })?.type === "text")
         .map((o) => (o as { text?: string }).text ?? "")
         .join("\n");
+      const callId = String(b.id ?? "");
+      const ok = String(b.state ?? "success") === "success";
+      const hit = callId ? byCall?.get(callId) : undefined;
+      if (hit && hit.kind === "tool") {
+        // 同一调用的结果：回填到 tool_use 条目（合并为一张卡）。
+        hit.result = text || shortJson(output, 600);
+        hit.ok = ok;
+        return out;
+      }
       out.push({
         kind: "tool",
-        callId: String(b.id ?? ""),
+        callId,
         name: String(b.name ?? "tool"),
         args: "",
         result: text || shortJson(output, 600),
-        ok: String(b.state ?? "success") === "success",
+        ok,
         ts,
         id: nextId(),
       });
@@ -459,6 +473,7 @@ export default function Conversation({
     api.getHistory(workspace.id, runtimeMode, sessionId).then((history) => {
       if (!alive) return;
       const restored: Entry[] = [];
+      const byCall = new Map<string, Entry>(); // callId → tool_use 条目（结果回填合并）
       for (const h of history) {
         const role = (h.role === "user" || h.role === "assistant" ? h.role : "system") as
           | "user"
@@ -466,10 +481,14 @@ export default function Conversation({
           | "system";
         const ts = fmtTime(h.timestamp);
         if (h.blocks?.length) {
-          restored.push(...entriesFromBlocks(role, h.blocks, ts));
+          restored.push(...entriesFromBlocks(role, h.blocks, ts, byCall));
         } else if (h.text) {
           restored.push({ kind: "msg", role, text: h.text, ts, id: nextId() });
         }
+      }
+      // 历史里没有结果的调用（中断/挂起）不再是「运行中」：标记未完成（红色）。
+      for (const e of restored) {
+        if (e.kind === "tool" && e.ok === undefined) e.ok = false;
       }
       setEntries(restored);
     });

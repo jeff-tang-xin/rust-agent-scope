@@ -1032,6 +1032,10 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 
 /* ---------- 权限审批卡（AgentScope HITL：REQUIRE_USER_CONFIRM） ---------- */
 .status.ask { color: var(--amber); }
+
+/* 工具卡片状态色（entry-card 结构；.tool-block 作用域的旧规则覆盖不到这里） */
+.entry-head .status.ok { color: var(--green); }
+.entry-head .status.err { color: var(--red); }
 .confirm-card { border-color: var(--amber); }
 .confirm-card .confirm-head { cursor: default; }
 .confirm-body { padding: 8px 12px; display: flex; flex-direction: column; gap: 10px; }
