@@ -127,6 +127,10 @@ body {
  * 导致 composer 被推出视口底部（实测踩坑）。 */
 .conversation { display: flex; flex-direction: row; flex: 1; min-height: 0; }
 
+/* keep-alive 会话容器：非当前的隐藏（组件不卸载，事件持续归流） */
+.conv-keep { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.conv-keep.hidden { display: none; }
+
 /* 会话主列（session-bar / messages / composer 都在里面） */
 .conv-main {
   display: flex;

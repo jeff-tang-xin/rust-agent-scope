@@ -2,6 +2,9 @@
 // 工作区三大类对齐产品概念：协同（solo/team 可切换，plan/free 可切换）、
 // 运维（shell/web）、数据库运维（只读 SQL）——都是工作区，针对不同的项目。
 // 每类是工作区卡片列表页，点「进入」进入对话视图。
+//
+// 会话 keep-alive：打开过的工作区会话不随切换卸载（仅隐藏）——事件监听
+// 持续归流，多项目并行时切走再切回，流式内容/工具进度/busy 状态无缝续接。
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type AgentConfig, type WorkspaceConfig, type WorkspaceKind } from "./api";
@@ -26,8 +29,10 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  // 协同工作区的运行方式（solo/team）：进入对话时选择，切换即重开会话。
-  const [runtimeMode, setRuntimeMode] = useState<"solo" | "team">("solo");
+  // 已打开会话的工作区（keep-alive：切走仅隐藏，不卸载）。
+  const [opened, setOpened] = useState<string[]>([]);
+  // 每个工作区独立的运行方式（solo/team）——多项目互不干扰。
+  const [modes, setModes] = useState<Record<string, "solo" | "team">>({});
   // 主题：localStorage 优先，否则跟随系统；浅色为默认观感。
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("studio-theme");
@@ -44,6 +49,8 @@ export default function App() {
     const [a, ws] = await Promise.all([api.listAgents(), api.listWorkspaces()]);
     setAgents(a);
     setWorkspaces(ws);
+    // 已删除的工作区同步移出 keep-alive 列表。
+    setOpened((prev) => prev.filter((id) => ws.some((w) => w.id === id)));
     setLoaded(true);
   }, []);
 
@@ -63,10 +70,12 @@ export default function App() {
   // 对话视图仅在选中工作区属于当前类时展示；否则显示列表页。
   const inCat = cat ? workspaces.filter((w) => w.kind === cat.key) : [];
   const showConversation = Boolean(cat && selected && inCat.some((w) => w.id === selected.id));
-  // 会话用的智能体 = 工作区选定的智能体。
-  const selectedAgent = selected
-    ? agents.find((a) => a.id === selected.agent_id)
-    : undefined;
+
+  const openWorkspace = (w: WorkspaceConfig) => {
+    setOpened((prev) => (prev.includes(w.id) ? prev : [...prev, w.id]));
+    setModes((prev) => (prev[w.id] ? prev : { ...prev, [w.id]: "solo" }));
+    setSelectedId(w.id);
+  };
 
   return (
     <div className="app">
@@ -119,28 +128,39 @@ export default function App() {
         )}
         {tab === "settings" ? (
           <SettingsPage agents={agents} onChanged={() => void reload()} />
-        ) : showConversation && selected && selectedAgent ? (
-          <Conversation
-            key={`${selected.id}:${runtimeMode}`}
-            workspace={selected}
-            agent={selectedAgent}
-            runtimeMode={runtimeMode}
-            onModeChange={setRuntimeMode}
-            onBack={() => setSelectedId("")}
-          />
         ) : (
-          <WorkspacePage
-            category={tab}
-            agents={loaded ? agents : []}
-            workspaces={loaded ? workspaces : []}
-            onOpen={(w) => {
-              setRuntimeMode("solo");
-              setSelectedId(w.id);
-            }}
-            onChanged={() => void reload()}
-            onNotice={flash}
-            onError={fail}
-          />
+          <>
+            {/* keep-alive 会话：打开过的都挂着，非当前的隐藏（事件持续归流）。 */}
+            {opened.map((id) => {
+              const w = workspaces.find((x) => x.id === id);
+              const agent = w ? agents.find((a) => a.id === w.agent_id) : undefined;
+              if (!w || !agent) return null; // 工作区或智能体被删除才真正卸载
+              const active = showConversation && selected?.id === id;
+              const mode = modes[id] ?? "solo";
+              return (
+                <div key={`${id}:${mode}`} className={`conv-keep ${active ? "" : "hidden"}`}>
+                  <Conversation
+                    workspace={w}
+                    agent={agent}
+                    runtimeMode={mode}
+                    onModeChange={(m) => setModes((prev) => ({ ...prev, [id]: m }))}
+                    onBack={() => setSelectedId("")}
+                  />
+                </div>
+              );
+            })}
+            {!showConversation && (
+              <WorkspacePage
+                category={tab}
+                agents={loaded ? agents : []}
+                workspaces={loaded ? workspaces : []}
+                onOpen={openWorkspace}
+                onChanged={() => void reload()}
+                onNotice={flash}
+                onError={fail}
+              />
+            )}
+          </>
         )}
       </main>
     </div>

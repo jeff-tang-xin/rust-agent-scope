@@ -731,7 +731,7 @@ export default function Conversation({
         }}
       >
       <div className="session-bar">
-        <button className="btn ghost" onClick={onBack} title="返回工作区列表" disabled={busy}>
+        <button className="btn ghost" onClick={onBack} title="返回工作区列表（任务继续在后台跑）">
           ←
         </button>
         {isCollab && (
