@@ -772,8 +772,23 @@ export default function Conversation({
     try {
       await api.sendMessage(workspace.id, runtimeMode, sessionId, text, payload);
     } catch (e) {
+      const msg = String(e);
+      // turn 互斥撞锁（steer 续轮的 turn-finished→turn-started 间隙前端 busy
+      // 短暂失真等场景）：后端确实在跑 → 纯文本消息降级为 steer 排队，
+      // turn 结算时自动消费；带附件时无法走 steer，提示稍后重发。
+      if (msg.includes("already running") && payload.length === 0) {
+        try {
+          await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
+          setNotice("Turn is still running — your message was queued as steering input.");
+          setTimeout(() => setNotice(""), 4000);
+        } catch {
+          setBusy(false);
+          setError(msg);
+        }
+        return;
+      }
       setBusy(false);
-      setError(String(e));
+      setError(msg);
     }
   };
 

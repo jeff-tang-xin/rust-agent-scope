@@ -40,12 +40,55 @@ impl DbCatalog {
     }
 
     pub fn get(&self, name: &str) -> std::result::Result<DatabaseServerConfig, String> {
-        self.map
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(name)
+        let map = self.map.read().unwrap_or_else(|e| e.into_inner());
+        map.get(name).cloned().ok_or_else(|| {
+            // 报错带可用 id 清单：模型传错名时下一轮即可自纠。
+            let mut ids: Vec<&String> = map.keys().collect();
+            ids.sort();
+            let list = if ids.is_empty() {
+                "（当前没有任何数据库档案，请先在设置页添加）".to_string()
+            } else {
+                ids.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            };
+            format!("数据库 `{name}` 不存在。可用数据库 id：{list}")
+        })
+    }
+
+    /// 可用数据库 id 列表（按名字排序；allowed 非空时只列白名单内的）。
+    pub fn ids(&self, allowed: Option<&[String]>) -> Vec<String> {
+        let map = self.map.read().unwrap_or_else(|e| e.into_inner());
+        let mut names: Vec<String> = map
+            .keys()
+            .filter(|n| match allowed {
+                Some(a) => a.iter().any(|x| x == *n),
+                None => true,
+            })
             .cloned()
-            .ok_or_else(|| format!("数据库 `{name}` 不存在，请先在设置页添加数据库连接"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// 可用数据库摘要（供工具参数 schema 动态生成）：`id (类型) 地址 库名`。
+    /// 刻意不含账号密码——LLM 只需要 id 与位置信息，凭证永不进模型上下文。
+    pub fn summaries(&self, allowed: Option<&[String]>) -> Vec<String> {
+        let map = self.map.read().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<String> = map
+            .values()
+            .filter(|d| match allowed {
+                Some(a) => a.iter().any(|x| x == &d.name),
+                None => true,
+            })
+            .map(|d| match d.db_type.as_str() {
+                "sqlite" => format!("{} (sqlite) path={}", d.name, d.host),
+                _ => format!(
+                    "{} ({}) {}:{} database={}",
+                    d.name, d.db_type, d.host, d.port, d.database
+                ),
+            })
+            .collect();
+        out.sort();
+        out
     }
 }
 
@@ -289,14 +332,39 @@ impl Tool for DbQueryTool {
     fn description(&self) -> &str {
         "Run a single read-only SQL statement (SELECT/WITH/EXPLAIN/SHOW/DESCRIBE) \
          against a configured database and return the result as CSV text. \
-         Use this to inspect schema and data; no confirmation needed."
+         Use this to inspect schema and data (SHOW TABLES / information_schema / \
+         pragma table_info all work); no confirmation needed. The `database` \
+         parameter must be one of the ids enumerated in the parameter schema — \
+         never guess an id."
     }
 
     fn parameters(&self) -> Value {
+        // 动态生成：可用库清单（id + 类型 + 地址 + 库名，无账号密码）实时读
+        // catalog——设置页增删库后，下一个 turn 的工具 schema 即为最新。
+        let allowed = self.allowed_databases.as_deref();
+        let ids = self.catalog.ids(allowed);
+        let summaries = self.catalog.summaries(allowed);
+        let mut database = json!({
+            "type": "string",
+            "description": "Database id — must be one of the enum values; never guess.",
+        });
+        if ids.is_empty() {
+            database["description"] = json!(
+                "Database id — no database is available in this workspace yet; \
+                 tell the user to add one in Settings first."
+            );
+        } else {
+            database["description"] = json!(format!(
+                "Database id — must be one of the enum values; never guess. \
+                 Available: {}",
+                summaries.join("; ")
+            ));
+            database["enum"] = json!(ids);
+        }
         json!({
             "type": "object",
             "properties": {
-                "database": {"type": "string", "description": "Database connection name (from the databases panel)."},
+                "database": database,
                 "sql": {"type": "string", "description": "A single read-only SQL statement."}
             },
             "required": ["database", "sql"]
@@ -363,14 +431,37 @@ impl Tool for DbDmlTool {
     fn description(&self) -> &str {
         "Run a single data-changing SQL statement (INSERT/UPDATE/DELETE/DDL) \
          against a configured database. Every execution requires user \
-         confirmation — explain the affected tables and expected row count first."
+         confirmation — explain the affected tables and expected row count first. \
+         The `database` parameter must be one of the ids enumerated in the \
+         parameter schema — never guess an id."
     }
 
     fn parameters(&self) -> Value {
+        // 动态生成（语义同 DbQueryTool::parameters）。
+        let allowed = self.allowed_databases.as_deref();
+        let ids = self.catalog.ids(allowed);
+        let summaries = self.catalog.summaries(allowed);
+        let mut database = json!({
+            "type": "string",
+            "description": "Database id — must be one of the enum values; never guess.",
+        });
+        if ids.is_empty() {
+            database["description"] = json!(
+                "Database id — no database is available in this workspace yet; \
+                 tell the user to add one in Settings first."
+            );
+        } else {
+            database["description"] = json!(format!(
+                "Database id — must be one of the enum values; never guess. \
+                 Available: {}",
+                summaries.join("; ")
+            ));
+            database["enum"] = json!(ids);
+        }
         json!({
             "type": "object",
             "properties": {
-                "database": {"type": "string", "description": "Database connection name (from the databases panel)."},
+                "database": database,
                 "sql": {"type": "string", "description": "A single data-changing SQL statement."}
             },
             "required": ["database", "sql"]
