@@ -15,6 +15,8 @@ use agentscope_core::model::Model;
 use agentscope_core::permission::{PermissionBehavior, PermissionContextState, PermissionRule};
 use agentscope_core::state::{AgentStateStore, JsonFileAgentStateStore};
 use agentscope_core::tool::Toolkit;
+use crate::db_exec::{DbCatalog, DbDmlTool, DbQueryTool};
+use crate::ssh_tool::{RemoteShellTool, SshPool};
 use agentscope_core::agent::ReActAgent;
 use agentscope_harness::agent::{
     build_subagent_sys_prompt, HarnessAgent, HarnessAgentBuilder, GENERAL_PURPOSE_DESCRIPTION,
@@ -27,14 +29,13 @@ use agentscope_harness::tools_agent_spawn::{
     AgentListTool, AgentSendTool, AgentSpawnCore, AgentSpawnTool,
 };
 use agentscope_harness::task::{InMemoryTaskRepository, TaskRepository};
-use agentscope_harness::tools::{ShellExecuteTool, WebFetchTool, WebSearchTool};
+use agentscope_harness::tools::{WebFetchTool, WebSearchTool};
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
 use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::{LocalFilesystem, LocalFsMode, PathPolicy, WorkspaceManager};
 use agentscope_model_openai::OpenAIChatModel;
 
 use crate::config::{AgentConfig, ModelProviderConfig, WorkspaceConfig};
-use crate::sql_tool::SqlQueryTool;
 use crate::team::{MemberRegistry, TeamDelegateTool};
 
 /// 工作区模式（类型化，替代字符串魔法值；对齐 service 的 agent 类型分化）。
@@ -44,6 +45,13 @@ pub enum StudioMode {
     Team,
     Ops,
     Db,
+}
+
+/// 工具面共享的资源句柄（AppState 持有，装配时传给工具）。
+#[derive(Clone)]
+pub struct ResourceHandles {
+    pub ssh_pool: Arc<SshPool>,
+    pub db_catalog: Arc<DbCatalog>,
 }
 
 impl StudioMode {
@@ -231,6 +239,7 @@ pub fn build_agent(
     data_dir: &Path,
     runtime_mode: &str,
     member_defs: &[(AgentConfig, ModelProviderConfig)],
+    resources: &ResourceHandles,
 ) -> Result<BuiltAgent, String> {
     // 运行方式解析：协同 → solo/team（用户可切）；ops/db → 由类型决定。
     let mode = match ws.kind.as_str() {
@@ -280,16 +289,21 @@ pub fn build_agent(
     register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
     match mode {
         StudioMode::Ops => {
-            toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
-                agentscope_harness::tools::LocalShellBackend::new(),
+            // 远程运维工具面：remote_shell（ask 规则 → 每次确认）+ web 检索。
+            toolkit.register(Arc::new(RemoteShellTool::new(Arc::clone(
+                &resources.ssh_pool,
             ))));
             toolkit.register(Arc::new(WebFetchTool::new()));
             toolkit.register(Arc::new(WebSearchTool::new()));
         }
         StudioMode::Db => {
-            toolkit.register(Arc::new(SqlQueryTool::new(
-                workspace.root().join(crate::sql_tool::DEFAULT_DB_FILE),
-            )));
+            // 数据库工具面：db_query（只读免确认）+ db_dml（ask 规则 → 每次确认）。
+            toolkit.register(Arc::new(DbQueryTool::new(Arc::clone(
+                &resources.db_catalog,
+            ))));
+            toolkit.register(Arc::new(DbDmlTool::new(Arc::clone(
+                &resources.db_catalog,
+            ))));
         }
         StudioMode::Team => {
             // 任务工具（对齐 Java subagent/task 体系的工具面）。
@@ -352,7 +366,7 @@ pub fn build_agent(
     // 危险工具默认走用户授权（AgentScope 权限引擎 ask 规则，会话级持久化）：
     // shell 执行与文件写入/编辑需用户批准后才会执行；目录穿越由 Sandboxed
     // 文件层硬拒（path escapes workspace root），不在此列。
-    builder = builder.permission_context(default_permission_context());
+    builder = builder.permission_context(default_permission_context(mode));
 
     if mode == StudioMode::Solo {
         // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
@@ -397,9 +411,18 @@ pub fn build_agent(
 /// 新会话的默认权限上下文：危险工具（shell 执行、文件写入/编辑）→ ask 行为，
 /// 由 AgentScope 权限引擎在执行前挂起等待用户确认（对齐 Java ask 规则语义）。
 /// 用户批准时可附带 allow 规则（「始终允许」），写进会话权限上下文后生效。
-fn default_permission_context() -> PermissionContextState {
+fn default_permission_context(mode: StudioMode) -> PermissionContextState {
+    // ask 工具集按工作区类别区分：
+    // - collab（solo/team）：shell 执行与文件写入/编辑；
+    // - ops：remote_shell（远程命令每次确认）；
+    // - db：db_dml（数据变更每次确认；db_query 只读免确认）。
+    let ask_tools: &[&str] = match mode {
+        StudioMode::Ops => &["remote_shell"],
+        StudioMode::Db => &["db_dml"],
+        StudioMode::Solo | StudioMode::Team => &["execute", "write_file", "edit_file"],
+    };
     let mut context = PermissionContextState::default();
-    for tool in ["execute", "write_file", "edit_file"] {
+    for tool in ask_tools {
         context.add_ask_rule(PermissionRule {
             tool_name: tool.to_string(),
             rule_content: None,

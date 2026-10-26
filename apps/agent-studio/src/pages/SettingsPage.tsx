@@ -10,6 +10,7 @@ import {
   type DatabaseKindInfo,
   type DatabaseServerConfig,
   type ModelProviderConfig,
+  type ServerConfig,
 } from "../api";
 import AgentFormModal from "../components/AgentFormModal";
 import PasteButton from "../components/PasteButton";
@@ -31,6 +32,10 @@ function emptyDatabase(): DatabaseServerConfig {
   };
 }
 
+function emptyServer(): ServerConfig {
+  return { name: "", host: "", port: 22, username: "root", password: "", description: "" };
+}
+
 export default function SettingsPage({
   agents,
   onChanged,
@@ -42,6 +47,8 @@ export default function SettingsPage({
   const [providerDraft, setProviderDraft] = useState<ModelProviderConfig | null>(null);
   const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
   const [dbDraft, setDbDraft] = useState<DatabaseServerConfig | null>(null);
+  const [servers, setServers] = useState<ServerConfig[]>([]);
+  const [serverDraft, setServerDraft] = useState<ServerConfig | null>(null);
   // 数据库类型注册表（后端 DATABASE_KINDS 投影；新增类型自动出现在下拉里）。
   const [dbKinds, setDbKinds] = useState<DatabaseKindInfo[]>([]);
   const [error, setError] = useState("");
@@ -53,6 +60,7 @@ export default function SettingsPage({
     setProviders(await api.listProviders());
     setDatabases(await api.listDatabases());
     setDbKinds(await api.listDatabaseKinds());
+    setServers(await api.listServers());
   };
   useEffect(() => {
     void load();
@@ -109,6 +117,28 @@ export default function SettingsPage({
       await api.deleteDatabase(name);
       await load();
       flash(`数据库 ${name} 已删除`);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const saveServer = async () => {
+    if (!serverDraft) return;
+    try {
+      await api.saveServer(serverDraft);
+      setServerDraft(null);
+      await load();
+      flash(`服务器 ${serverDraft.name} 已保存`);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const deleteServer = async (name: string) => {
+    try {
+      await api.deleteServer(name);
+      await load();
+      flash(`服务器 ${name} 已删除`);
     } catch (e) {
       fail(e);
     }
@@ -431,6 +461,127 @@ export default function SettingsPage({
               onClick={() => setDbDraft(emptyDatabase())}
             >
               + Add database
+            </button>
+          )}
+        </div>
+
+        {/* ---------- SSH Servers ---------- */}
+        <div className="card">
+          <h2>SSH Servers</h2>
+          <div className="desc">
+            服务器连接档案（ops 工作区的 remote_shell / 文件操作按名字引用），仅存本地配置文件
+          </div>
+          {servers.map((s) => (
+            <div key={s.name} className="agent-list-item" style={{ cursor: "default" }}>
+              <span className="name">{s.name}</span>
+              <span className="badge">
+                {s.username}@{s.host}:{s.port}
+              </span>
+              <span className="desc">{s.description}</span>
+              <span className="badge">{s.password ? "密码已设" : "无密码"}</span>
+              <button className="btn ghost" onClick={() => setServerDraft(s)}>
+                Edit
+              </button>
+              <button className="btn danger" onClick={() => void deleteServer(s.name)}>
+                Delete
+              </button>
+            </div>
+          ))}
+          {serverDraft ? (
+            <div style={{ marginTop: 12 }}>
+              <div className="row">
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Name</label>
+                    <PasteButton onPaste={(t) => setServerDraft({ ...serverDraft, name: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={serverDraft.name}
+                    disabled={servers.some((s) => s.name === serverDraft.name)}
+                    onChange={(e) => setServerDraft({ ...serverDraft, name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Host</label>
+                    <PasteButton onPaste={(t) => setServerDraft({ ...serverDraft, host: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={serverDraft.host}
+                    placeholder="10.0.0.8"
+                    onChange={(e) => setServerDraft({ ...serverDraft, host: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="lbl">Port</label>
+                  <input
+                    className="field"
+                    type="number"
+                    min={0}
+                    max={65535}
+                    value={serverDraft.port}
+                    onChange={(e) =>
+                      setServerDraft({ ...serverDraft, port: Number(e.target.value) || 22 })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="row">
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Username</label>
+                    <PasteButton onPaste={(t) => setServerDraft({ ...serverDraft, username: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    value={serverDraft.username}
+                    onChange={(e) => setServerDraft({ ...serverDraft, username: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div className="lbl-row">
+                    <label className="lbl">Password（留空走本机 ssh agent/默认密钥）</label>
+                    <PasteButton onPaste={(t) => setServerDraft({ ...serverDraft, password: t })} />
+                  </div>
+                  <input
+                    className="field"
+                    type="password"
+                    value={serverDraft.password}
+                    onChange={(e) => setServerDraft({ ...serverDraft, password: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="lbl-row">
+                <label className="lbl">Description</label>
+                <PasteButton onPaste={(t) => setServerDraft({ ...serverDraft, description: t })} />
+              </div>
+              <input
+                className="field"
+                value={serverDraft.description}
+                onChange={(e) => setServerDraft({ ...serverDraft, description: e.target.value })}
+              />
+              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                <button
+                  className="btn"
+                  onClick={() => void saveServer()}
+                  disabled={!serverDraft.name || !serverDraft.host.trim()}
+                >
+                  Save server
+                </button>
+                <button className="btn ghost" onClick={() => setServerDraft(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="btn ghost"
+              style={{ marginTop: 8 }}
+              onClick={() => setServerDraft(emptyServer())}
+            >
+              + Add server
             </button>
           )}
         </div>

@@ -77,6 +77,29 @@ export interface DatabaseKindInfo {
   driver: DatabaseDriverInfo;
 }
 
+/** SSH 服务器档案（设置页管理；ops 工作区 remote_shell/SFTP 按名字引用）。 */
+export interface ServerConfig {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  description: string;
+}
+
+/** 远程命令执行结果（sh 模式投影）。 */
+export interface ExecResult {
+  exit_code: number;
+  output: string;
+}
+
+/** 远程目录条目（SFTP read_dir 投影）。 */
+export interface DirEntry {
+  name: string;
+  is_dir: boolean;
+  size: number;
+}
+
 export interface PlanStatus {
   active: boolean;
   plan_file?: string;
@@ -164,6 +187,28 @@ export const api = {
     invoke<void>("save_database", { database }),
   deleteDatabase: (name: string) => invoke<void>("delete_database", { name }),
   listDatabaseKinds: () => invoke<DatabaseKindInfo[]>("list_database_kinds"),
+
+  // SSH 服务器档案 + 连接 + SFTP 文件操作（ops 工作区服务器面板）。
+  listServers: () => invoke<ServerConfig[]>("list_servers"),
+  saveServer: (server: ServerConfig) => invoke<void>("save_server", { server }),
+  deleteServer: (name: string) => invoke<void>("delete_server", { name }),
+  sshConnect: (name: string) => invoke<void>("ssh_connect", { name }),
+  sshDisconnect: (name: string) => invoke<void>("ssh_disconnect", { name }),
+  sshExec: (name: string, command: string) =>
+    invoke<{ exit_code: number; output: string }>("ssh_exec", { name, command }),
+  sshStatus: (name: string) => invoke<boolean>("ssh_status", { name }),
+  sshListDir: (name: string, path: string) =>
+    invoke<DirEntry[]>("ssh_list_dir", { name, path }),
+  sshUpload: (name: string, localPath: string, remotePath: string) =>
+    invoke<number>("ssh_upload", { name, localPath, remotePath }),
+  sshDownload: (name: string, remotePath: string, localPath: string) =>
+    invoke<number>("ssh_download", { name, remotePath, localPath }),
+  sshDeleteFile: (name: string, remotePath: string) =>
+    invoke<void>("ssh_delete_file", { name, remotePath }),
+
+  // 查询模式直接执行 SQL（DML 的确认由前端弹窗承担；AI 模式走权限引擎）。
+  dbExecute: (database: string, sql: string) =>
+    invoke<string>("db_execute", { database, sql }),
 
   listAgents: () => invoke<AgentConfig[]>("list_agents"),
   createAgent: (agent: AgentConfig) => invoke<AgentConfig>("create_agent", { agent }),

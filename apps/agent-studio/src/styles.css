@@ -1048,3 +1048,59 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 }
 .confirm-actions { display: flex; gap: 8px; }
 .confirm-actions .btn { padding: 3px 12px; font-size: 12px; }
+
+/* ---------- 服务器面板（ops）与数据库面板（db） ---------- */
+.server-list { display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow-y: auto; }
+.server-item { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.server-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; cursor: pointer; background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.server-head:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.server-name { font-weight: 600; font-size: 13px; }
+.server-host { color: var(--text-dim); font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: none; }
+.dot.on { background: #22c55e; box-shadow: 0 0 4px #22c55e88; }
+.remote-tree { border-top: 1px solid var(--border); }
+.remote-cwd {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; font-size: 12px; color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.sh-console { border-top: 1px solid var(--border); padding: 8px 10px; }
+.sh-out {
+  max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  font-size: 12px; color: var(--text-dim); background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-radius: 6px; padding: 8px; margin-bottom: 6px;
+}
+.sh-in { display: flex; align-items: center; gap: 6px; }
+.sh-in input {
+  flex: 1; min-width: 0; padding: 5px 8px; font-size: 12.5px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);
+}
+.db-browser { border-top: 1px solid var(--border); padding: 8px 10px; }
+.db-section-title { font-size: 11.5px; color: var(--text-dim); margin: 6px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.db-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 3px 10px; font-size: 12px; border: 1px solid var(--border);
+  border-radius: 999px; background: none; color: var(--text); cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.db-table-list { max-height: 180px; overflow-y: auto; }
+.query-console { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 4px; }
+.query-input {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 8px;
+  font-size: 12.5px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text);
+}
+.query-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.query-result { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.result-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.result-table th, .result-table td {
+  border-bottom: 1px solid var(--border); padding: 4px 8px;
+  text-align: left; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+}
+.result-table th { position: sticky; top: 0; background: var(--bg); font-weight: 600; }
+.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+.hint { color: var(--text-dim); font-size: 11.5px; }

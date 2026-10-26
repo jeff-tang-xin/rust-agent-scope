@@ -119,6 +119,29 @@ impl DatabaseServerConfig {
     // 后端不再重复实现一份 endpoint()。
 }
 
+/// SSH 服务器档案（ops 工作区的远程资源；remote_shell / SFTP 文件操作都
+/// 挂在它上面）。密码仅存本地配置文件（与数据库密码、api_key 同策略），
+/// 不进日志与事件；留空则走用户机器上已配置的 ssh agent/默认密钥。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    /// 展示名（唯一键）。
+    pub name: String,
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    /// 密码（可空：空 = 依赖本机 ssh agent / 默认密钥）。
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
 /// Studio 全量配置。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StudioConfig {
@@ -130,6 +153,9 @@ pub struct StudioConfig {
     pub workspaces: Vec<WorkspaceConfig>,
     #[serde(default)]
     pub databases: Vec<DatabaseServerConfig>,
+    /// SSH 服务器档案（ops 工作区资源）。
+    #[serde(default)]
+    pub servers: Vec<ServerConfig>,
 }
 
 impl StudioConfig {
@@ -139,6 +165,47 @@ impl StudioConfig {
     pub fn ensure_default_agent(&mut self) {
         if !self.agents.iter().any(|a| a.id == DEFAULT_AGENT_ID) {
             self.agents.push(default_agent());
+        }
+        if !self.agents.iter().any(|a| a.id == OPS_AGENT_ID) {
+            self.agents.push(default_ops_agent());
+        }
+        if !self.agents.iter().any(|a| a.id == DB_AGENT_ID) {
+            self.agents.push(default_db_agent());
+        }
+    }
+
+    /// 确保内置 ops/db 工作区在列（幂等）：目录固定在 `{data_dir}/ops`、
+    /// `{data_dir}/db`（≈ ~/.ox/ops、~/.ox/db），智能体指向内置运维/数据库
+    /// 智能体。用户仍可自建同类别工作区；内置项可改不可删。
+    pub fn ensure_default_workspaces(&mut self, data_dir: &std::path::Path) {
+        let builtins = [
+            (
+                BUILTIN_OPS_WS_ID,
+                "运维工作区",
+                "ops",
+                OPS_AGENT_ID,
+                data_dir.join("ops"),
+            ),
+            (
+                BUILTIN_DB_WS_ID,
+                "数据库运维工作区",
+                "db",
+                DB_AGENT_ID,
+                data_dir.join("db"),
+            ),
+        ];
+        for (id, name, kind, agent_id, dir) in builtins {
+            if !self.workspaces.iter().any(|w| w.id == id) {
+                self.workspaces.push(WorkspaceConfig {
+                    id: id.into(),
+                    name: name.into(),
+                    kind: kind.into(),
+                    agent_id: agent_id.into(),
+                    dir: dir.to_string_lossy().into_owned(),
+                    members: Vec::new(),
+                    created_at: 0,
+                });
+            }
         }
     }
     pub fn provider(&self, name: &str) -> Option<&ModelProviderConfig> {
@@ -162,6 +229,14 @@ impl StudioConfig {
 
 /// 内置默认智能体的稳定 id（前后端共享：不可删除，其余字段可改）。
 pub const DEFAULT_AGENT_ID: &str = "default-assistant";
+/// 内置运维智能体（ops 工作区默认绑定）。
+pub const OPS_AGENT_ID: &str = "builtin-ops-agent";
+/// 内置数据库智能体（db 工作区默认绑定）。
+pub const DB_AGENT_ID: &str = "builtin-db-agent";
+/// 内置运维工作区（目录 `{data_dir}/ops`）。
+pub const BUILTIN_OPS_WS_ID: &str = "builtin-ops";
+/// 内置数据库运维工作区（目录 `{data_dir}/db`）。
+pub const BUILTIN_DB_WS_ID: &str = "builtin-db";
 
 /// 内置默认智能体：一个开箱即用的全能型助手（预置默认值的普通智能体，
 /// 可改不可删；由 [`StudioConfig::ensure_default_agent`] 保证始终在列）。
@@ -188,6 +263,49 @@ fn default_agent() -> AgentConfig {
     }
 }
 
+/// 内置运维智能体：远程服务器运维（remote_shell + SFTP 文件管理 + web 检索）。
+/// 每次执行远程命令都会请求用户确认（权限引擎 ask 规则），提示词对齐该语义。
+fn default_ops_agent() -> AgentConfig {
+    AgentConfig {
+        id: OPS_AGENT_ID.into(),
+        name: "运维助手".into(),
+        description: "内置的远程运维助手：remote_shell 执行、文件上传下载、web 检索。".into(),
+        sys_prompt: [
+            "你是运维助手，负责远程服务器的日常运维。你可以：",
+            "- 用 remote_shell 在已连接的远程服务器上执行命令（每次执行都需要用户确认，请把要做什么、为什么说清楚）；",
+            "- 服务器目录浏览、文件上传/下载/删除由用户在右侧服务器面板操作，你也可以用 remote_shell 完成（ls/cat/df/free 等）；",
+            "- 用 web_fetch / web_search 查文档与排错资料；",
+            "- 输出结论时给出关键证据（命令输出摘录），下一步建议明确可执行。",
+            "谨慎对待破坏性操作（rm、systemctl stop、重启、改配置），执行前向用户说明影响。用中文与用户交流。",
+        ]
+        .join("\n"),
+        provider: String::new(),
+        max_iters: 0,
+        created_at: 0,
+    }
+}
+
+/// 内置数据库智能体：远程数据库查询与 DML（query 只读免确认，DML 每次确认）。
+fn default_db_agent() -> AgentConfig {
+    AgentConfig {
+        id: DB_AGENT_ID.into(),
+        name: "数据库助手".into(),
+        description: "内置的数据库助手：db_query 只读查询、db_dml 变更（需确认）。".into(),
+        sys_prompt: [
+            "你是数据库助手，负责已连接数据库的查询与变更。你可以：",
+            "- 用 db_query 执行只读 SQL（SELECT/WITH/EXPLAIN/SHOW），无需确认，适合探查表结构与数据；",
+            "- 用 db_dml 执行变更（INSERT/UPDATE/DELETE/DDL），每次执行都需要用户确认，请先说明影响范围（表、预计行数）；",
+            "- 先 db_query 摸清 schema 与数据分布，再提出变更方案，避免盲改；",
+            "- 输出结论时给出关键数字与口径（schema、过滤条件、行数）。",
+            "不确定就说不确定，不编造查询结果。用中文与用户交流。",
+        ]
+        .join("\n"),
+        provider: String::new(),
+        max_iters: 0,
+        created_at: 0,
+    }
+}
+
 /// 配置文件读写（JSON；位于 app config dir，不进代码仓库）。
 pub struct ConfigStore {
     path: PathBuf,
@@ -201,21 +319,19 @@ impl ConfigStore {
         }
     }
 
-    pub fn load(&self) -> StudioConfig {
-        match std::fs::read(&self.path) {
-            Ok(bytes) => {
-                let mut config: StudioConfig =
-                    serde_json::from_slice(&bytes).unwrap_or_default();
-                config.ensure_default_agent();
-                config
-            }
+    /// 加载配置并保证内置 agent/工作区在列。`data_dir` 给定时同时 seed
+    /// 内置 ops/db 工作区（目录挂 `{data_dir}/ops`、`{data_dir}/db`）。
+    pub fn load_with_data_dir(&self, data_dir: Option<&std::path::Path>) -> StudioConfig {
+        let mut config = match std::fs::read(&self.path) {
+            Ok(bytes) => serde_json::from_slice::<StudioConfig>(&bytes).unwrap_or_default(),
             // 首次初始化（文件不存在）：注入内置默认 agent，开箱即用。
-            Err(_) => {
-                let mut config = StudioConfig::default();
-                config.ensure_default_agent();
-                config
-            }
+            Err(_) => StudioConfig::default(),
+        };
+        config.ensure_default_agent();
+        if let Some(dir) = data_dir {
+            config.ensure_default_workspaces(dir);
         }
+        config
     }
 
     pub fn save(&self, config: &StudioConfig) -> Result<(), String> {
@@ -245,27 +361,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let store = ConfigStore::new(&dir);
 
-        // 首次 load（文件不存在）：注入内置全能助手。
-        let first = store.load();
-        assert_eq!(first.agents.len(), 1);
-        let d = &first.agents[0];
-        assert_eq!(d.id, DEFAULT_AGENT_ID);
+        // 首次 load（文件不存在）：注入三个内置智能体（全能/运维/数据库）。
+        let first = store.load_with_data_dir(None);
+        assert_eq!(first.agents.len(), 3);
+        let d = first.agent(DEFAULT_AGENT_ID).unwrap();
         assert_eq!(d.name, "全能助手");
         assert!(d.provider.is_empty());
+        assert!(first.agent(OPS_AGENT_ID).is_some());
+        assert!(first.agent(DB_AGENT_ID).is_some());
 
         // 老配置文件升级（无 default）：load 自动补上。
         let legacy = br#"{"providers":[],"agents":[]}"#;
         std::fs::write(dir.join("studio-config.json"), legacy).unwrap();
-        assert!(store.load().agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
+        assert!(store.load_with_data_dir(None).agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
 
         // 历史遗留的删除标记（旧版本语义）：同样注入（标记已废弃、被忽略）。
         let marked = br#"{"providers":[],"agents":[],"default_agent_removed":true}"#;
         std::fs::write(dir.join("studio-config.json"), marked).unwrap();
-        assert!(store.load().agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
+        assert!(store.load_with_data_dir(None).agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
 
         // 损坏的配置文件：兜底为空配置 + 注入内置 agent（至少开箱可用）。
         std::fs::write(dir.join("studio-config.json"), b"not json").unwrap();
-        assert!(store.load().agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
+        assert!(store.load_with_data_dir(None).agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

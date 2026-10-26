@@ -18,7 +18,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::config::{AgentConfig, ConfigStore, DatabaseServerConfig, ModelProviderConfig, StudioConfig, WorkspaceConfig, WORKSPACE_KINDS};
+use crate::config::ServerConfig;
+use crate::db_exec::{self, DbCatalog};
 use crate::factory;
+use crate::ssh_tool::{self, SshPool};
 use crate::session::{AgentHandle, SessionHandle, TurnInfo};
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
@@ -85,6 +88,10 @@ pub struct AppState {
     /// 已装配 agent 缓存（懒装配；配置变更后失效重建）。
     pub handles: Mutex<HashMap<String, Arc<AgentHandle>>>,
     pub data_dir: std::path::PathBuf,
+    /// SSH 连接池（ops 工作区：remote_shell 工具与服务器面板共用）。
+    pub ssh_pool: Arc<SshPool>,
+    /// 数据库档案目录（db 工作区：db_query/db_dml 工具与查询模式共用）。
+    pub db_catalog: Arc<DbCatalog>,
 }
 
 impl AppState {
@@ -148,7 +155,11 @@ impl AppState {
                 .ok_or_else(|| format!("team 成员 `{mid}` 引用了未知 provider `{}`", m.provider))?;
             member_defs.push((m, mp));
         }
-        let built = factory::build_agent(&ws, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs)?;
+        let resources = factory::ResourceHandles {
+            ssh_pool: Arc::clone(&self.ssh_pool),
+            db_catalog: Arc::clone(&self.db_catalog),
+        };
+        let built = factory::build_agent(&ws, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs, &resources)?;
         let handle = Arc::new(AgentHandle::new(built.agent));
         self.handles
             .lock()
@@ -218,15 +229,16 @@ pub fn save_database(
     database.name = name;
     let mut config = state.snapshot();
     config.databases.retain(|d| d.name != database.name);
-    config.databases.push(database);
+    config.databases.push(database.clone());
+    state.db_catalog.replace_all(&config.databases);
     state.persist(&config)
 }
 
 #[tauri::command]
 pub fn delete_database(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let mut config = state.snapshot();
-    // 目前尚无 agent 绑定数据库资源（接线后这里补引用检查，对齐 delete_provider）。
     config.databases.retain(|d| d.name != name);
+    state.db_catalog.replace_all(&config.databases);
     state.persist(&config)
 }
 
@@ -234,6 +246,145 @@ pub fn delete_database(state: State<'_, AppState>, name: String) -> Result<(), S
 #[tauri::command]
 pub fn list_database_kinds() -> &'static [crate::db_kind::DatabaseKind] {
     crate::db_kind::DATABASE_KINDS
+}
+
+// ---------- ssh servers（ops 工作区：连接 + 目录/文件操作） ----------
+
+/// SSH 服务器档案 CRUD（对齐数据库档案：本地配置文件存储，密码不进日志）。
+#[tauri::command]
+pub fn list_servers(state: State<'_, AppState>) -> Vec<ServerConfig> {
+    state.snapshot().servers
+}
+
+#[tauri::command]
+pub fn save_server(state: State<'_, AppState>, server: ServerConfig) -> Result<(), String> {
+    let name = server.name.trim().to_string();
+    if name.is_empty() {
+        return Err("server name is empty".to_string());
+    }
+    if server.host.trim().is_empty() {
+        return Err("server host is empty".to_string());
+    }
+    let mut server = server;
+    server.name = name;
+    let mut config = state.snapshot();
+    config.servers.retain(|s| s.name != server.name);
+    config.servers.push(server);
+    state.persist(&config)
+}
+
+#[tauri::command]
+pub fn delete_server(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let mut config = state.snapshot();
+    config.servers.retain(|s| s.name != name);
+    state.persist(&config)
+}
+
+/// 按名取 SSH 服务器档案。
+fn find_server(config: &StudioConfig, name: &str) -> Result<ServerConfig, String> {
+    config
+        .servers
+        .iter()
+        .find(|s| s.name == name)
+        .cloned()
+        .ok_or_else(|| format!("server `{name}` not found"))
+}
+
+/// 连接 SSH 服务器（密码认证；成功后缓存进连接池）。
+#[tauri::command]
+pub async fn ssh_connect(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let server = find_server(&state.snapshot(), &name)?;
+    state.ssh_pool.connect(server).await.map(|_| ())
+}
+
+/// 断开并移除连接。
+#[tauri::command]
+pub async fn ssh_disconnect(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    state.ssh_pool.disconnect(&name).await;
+    Ok(())
+}
+
+/// 连接状态查询。
+#[tauri::command]
+pub async fn ssh_status(state: State<'_, AppState>, name: String) -> Result<bool, String> {
+    Ok(state.ssh_pool.is_connected(&name).await)
+}
+
+/// 手动执行远程命令（sh 模式：用户在服务器面板直接输入命令；用户本人
+/// 操作不需要 HITL 确认——确认机制针对 agent 自主调用 remote_shell）。
+#[tauri::command]
+pub async fn ssh_exec(
+    state: State<'_, AppState>,
+    name: String,
+    command: String,
+) -> Result<ssh_tool::ExecResult, String> {
+    let conn = state.ssh_pool.get(&name).await?;
+    conn.exec(&command).await.map(|o| ssh_tool::ExecResult {
+        exit_code: o.exit_code,
+        output: o.text,
+    })
+}
+
+/// 列远程目录（名称 + 类型 + 大小；目录在前）。
+#[tauri::command]
+pub async fn ssh_list_dir(
+    state: State<'_, AppState>,
+    name: String,
+    path: String,
+) -> Result<Vec<ssh_tool::DirEntry>, String> {
+    let conn = state.ssh_pool.get(&name).await?;
+    conn.list_dir(&path).await
+}
+
+/// 上传本地文件到远程（local_path 来自前端文件选择对话框）。
+#[tauri::command]
+pub async fn ssh_upload(
+    state: State<'_, AppState>,
+    name: String,
+    local_path: String,
+    remote_path: String,
+) -> Result<u64, String> {
+    let conn = state.ssh_pool.get(&name).await?;
+    conn.upload(std::path::Path::new(&local_path), &remote_path)
+        .await
+}
+
+/// 下载远程文件到本地。
+#[tauri::command]
+pub async fn ssh_download(
+    state: State<'_, AppState>,
+    name: String,
+    remote_path: String,
+    local_path: String,
+) -> Result<u64, String> {
+    let conn = state.ssh_pool.get(&name).await?;
+    conn.download(&remote_path, std::path::Path::new(&local_path))
+        .await
+}
+
+/// 删除远程文件（前端二次确认后调用）。
+#[tauri::command]
+pub async fn ssh_delete_file(
+    state: State<'_, AppState>,
+    name: String,
+    remote_path: String,
+) -> Result<(), String> {
+    let conn = state.ssh_pool.get(&name).await?;
+    conn.delete_file(&remote_path).await
+}
+
+// ---------- db execute（查询模式：前端确认后直接执行） ----------
+
+/// 直接执行一条 SQL（查询模式）。AI 模式的确认由权限引擎 ask 规则兜底；
+/// 查询模式的 DML 确认由前端弹窗承担（本命令不做二次拦截）。
+#[tauri::command]
+pub async fn db_execute(
+    state: State<'_, AppState>,
+    database: String,
+    sql: String,
+) -> Result<String, String> {
+    let db = state.db_catalog.get(&database)?;
+    db_exec::execute(&db, &sql).await
 }
 
 // ---------- workspace files（会话右侧文件列表） ----------
@@ -1094,6 +1245,7 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             use tauri::Manager;
@@ -1110,12 +1262,16 @@ pub fn run() {
             }
             let config_dir = data_dir.join("config");
             let config_store = ConfigStore::new(&config_dir);
-            let config = config_store.load();
+            let config = config_store.load_with_data_dir(Some(&data_dir));
+            let db_catalog = Arc::new(DbCatalog::new());
+            db_catalog.replace_all(&config.databases);
             app.manage(AppState {
                 config_store,
                 config: Mutex::new(config),
                 handles: Mutex::new(HashMap::new()),
                 data_dir,
+                ssh_pool: Arc::new(SshPool::new()),
+                db_catalog,
             });
             Ok(())
         })
@@ -1127,6 +1283,18 @@ pub fn run() {
             save_database,
             delete_database,
             list_database_kinds,
+            list_servers,
+            save_server,
+            delete_server,
+            ssh_connect,
+            ssh_disconnect,
+            ssh_exec,
+            ssh_status,
+            ssh_list_dir,
+            ssh_upload,
+            ssh_download,
+            ssh_delete_file,
+            db_execute,
             list_workspace_files,
             read_workspace_file,
             list_agents,

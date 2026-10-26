@@ -34,6 +34,9 @@ async-trait = "0.1"
 agentscope-core = { path = "../../../crates/agentscope-core" }
 agentscope-model-openai = { path = "../../../crates/agentscope-model-openai" }
 agentscope-harness = { path = "../../../crates/agentscope-harness" }
+russh = { version = "0.46", features = ["flate2"] }
+russh-sftp = "2"
+tauri-plugin-dialog = "2.8.3"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
+import ServersPanel from "./ServersPanel";
+import DatabasesPanel from "./DatabasesPanel";
 
 type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean }
@@ -1178,14 +1180,20 @@ export default function Conversation({
       {dragActive && <div className="drop-hint">松开以添加附件</div>}
       </div>
       {filesOpen ? (
-        <FilePanel workspaceId={workspace.id} onCollapse={() => setFilesOpen(false)} />
+        workspace.kind === "ops" ? (
+          <ServersPanel onCollapse={() => setFilesOpen(false)} />
+        ) : workspace.kind === "db" ? (
+          <DatabasesPanel onCollapse={() => setFilesOpen(false)} />
+        ) : (
+          <FilePanel workspaceId={workspace.id} onCollapse={() => setFilesOpen(false)} />
+        )
       ) : (
         <button
           className="file-panel-tab"
-          title="展开文件面板"
+          title={workspace.kind === "ops" ? "展开服务器面板" : workspace.kind === "db" ? "展开数据库面板" : "展开文件面板"}
           onClick={() => setFilesOpen(true)}
         >
-          📁
+          {workspace.kind === "ops" ? "🖥" : workspace.kind === "db" ? "🗄" : "📁"}
         </button>
       )}
     </div>
