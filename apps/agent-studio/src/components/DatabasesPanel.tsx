@@ -87,10 +87,13 @@ function isWriteSql(sql: string): boolean {
 export default function DatabasesPanel({
   onCollapse,
   boundDatabases,
+  onConfirm,
 }: {
   onCollapse: () => void;
   /** 工作区绑定的数据库白名单；非空时只显示绑定的（能力收窄的可视化）。 */
   boundDatabases?: string[];
+  /** 全局确认弹窗（App 层渲染，替代 window.confirm）。 */
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
   const [active, setActive] = useState(""); // 当前展开的数据库
@@ -135,6 +138,7 @@ export default function DatabasesPanel({
             <DatabaseItem
               key={d.name}
               database={d}
+              onConfirm={onConfirm}
               expanded={active === d.name}
               onToggle={() => setActive(active === d.name ? "" : d.name)}
             />
@@ -150,10 +154,12 @@ function DatabaseItem({
   database,
   expanded,
   onToggle,
+  onConfirm,
 }: {
   database: DatabaseServerConfig;
   expanded: boolean;
   onToggle: () => void;
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   return (
     <div className="server-item">
@@ -167,13 +173,19 @@ function DatabaseItem({
           {database.database ? ` · ${database.database}` : ""}
         </span>
       </div>
-      {expanded && <DatabaseBrowser database={database} />}
+      {expanded && <DatabaseBrowser database={database} onConfirm={onConfirm} />}
     </div>
   );
 }
 
 /** 连接浏览：sqlite 直接列表；网络库先列库/schema（点击选择）再列表。 */
-function DatabaseBrowser({ database }: { database: DatabaseServerConfig }) {
+function DatabaseBrowser({
+  database,
+  onConfirm,
+}: {
+  database: DatabaseServerConfig;
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
+}) {
   const [catalog, setCatalog] = useState(""); // 选中的库/schema（sqlite 为空）
   const [catalogs, setCatalogs] = useState<string[]>([]);
   const [tables, setTables] = useState<string[]>([]);
@@ -278,7 +290,11 @@ function DatabaseBrowser({ database }: { database: DatabaseServerConfig }) {
           </div>
         </div>
       )}
-      <QueryConsole database={database} catalog={catalog} />
+      <QueryConsole
+              database={database}
+              catalog={catalog}
+              onConfirm={onConfirm}
+            />
     </div>
   );
 }
@@ -287,9 +303,11 @@ function DatabaseBrowser({ database }: { database: DatabaseServerConfig }) {
 function QueryConsole({
   database,
   catalog,
+  onConfirm,
 }: {
   database: DatabaseServerConfig;
   catalog: string;
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<{ header: string[]; rows: string[][]; text: string } | null>(
@@ -302,10 +320,11 @@ function QueryConsole({
     if (!sql.trim() || busy) return;
     if (isWriteSql(sql)) {
       const target = catalog || database.database || database.name;
-      const ok = window.confirm(
+      const ok = await onConfirm?.(
+        "执行变更语句",
         `即将在 ${database.name}${target ? `（${target}）` : ""} 执行变更语句：\n\n${sql}\n\n确认执行？`,
       );
-      if (!ok) return;
+      if (ok === false) return;
     }
     setBusy(true);
     setError("");

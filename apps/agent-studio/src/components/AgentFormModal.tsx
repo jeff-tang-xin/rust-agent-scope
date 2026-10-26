@@ -2,7 +2,7 @@
 // 类别 / 工作目录 / team 成员都不在这里：那些是工作区的属性，在工作区表单里选。
 // 内置智能体（default-assistant）：全字段可改，但不可删除（后端同样拒绝）。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, DEFAULT_AGENT_ID, type AgentConfig } from "../api";
 import PasteButton from "./PasteButton";
 
@@ -34,10 +34,14 @@ export default function AgentFormModal({
   const builtin = initial?.id === DEFAULT_AGENT_ID;
   const [draft, setDraft] = useState<AgentConfig>(initial ?? emptyAgent());
   const [error, setError] = useState("");
+  // 保存中防重复提交。
+  const [saving, setSaving] = useState(false);
 
   const set = (patch: Partial<AgentConfig>) => setDraft({ ...draft, ...patch });
 
   const save = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       if (editing) {
         await api.updateAgent(draft);
@@ -48,11 +52,21 @@ export default function AgentFormModal({
       }
     } catch (e) {
       setError(String(e));
+      setSaving(false);
     }
   };
 
+  // Esc 关闭（保存中不响应）；遮罩点击关闭由 mask 的 onClick 承担。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
+
   return (
-    <div className="modal-mask" onClick={onClose}>
+    <div className="modal-mask" onClick={() => !saving && onClose()}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{editing ? "编辑智能体" : "新建智能体"}</h2>
         {error && <div className="notice error">{error}</div>}
@@ -118,10 +132,14 @@ export default function AgentFormModal({
         />
 
         <div className="modal-actions">
-          <button className="btn" onClick={() => void save()} disabled={!draft.name}>
-            {editing ? "保存修改" : "创建"}
+          <button
+            className="btn"
+            onClick={() => void save()}
+            disabled={!draft.name || saving}
+          >
+            {saving ? "保存中…" : editing ? "保存修改" : "创建"}
           </button>
-          <button className="btn ghost" onClick={onClose}>
+          <button className="btn ghost" onClick={onClose} disabled={saving}>
             取消
           </button>
         </div>

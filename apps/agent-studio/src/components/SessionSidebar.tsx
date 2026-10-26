@@ -71,15 +71,9 @@ export default function SessionSidebar({
   };
 
   const removeSession = async (wsId: string, sessionId: string) => {
-    if (!window.confirm(`删除会话「${sessionId}」？对话历史将被清除，不可恢复。`)) return;
-    try {
-      await onDeleteSession(wsId, sessionId);
-      await load();
-      // 删的是当前会话 → 直接开新会话（App 层生成新 id 并切换）。
-      if (sessionByWs[wsId] === sessionId) onNewSession(wsId);
-    } catch {
-      /* 删除失败静默 */
-    }
+    // 确认弹窗在 App 层（统一 confirm + toast 反馈）；这里只负责触发与刷新。
+    await onDeleteSession(wsId, sessionId);
+    await load();
   };
 
   // turn 结束刷新 session 摘要（新会话落盘 / 消息数变化）。

@@ -3,7 +3,7 @@
 // 协同类还可配置 team 运行方式的成员（引用已有智能体，lead 之外）。
 // 智能体定义（人设 / Provider）在设置页管理，这里只做「选谁 + 叫什么 + 在哪干活」。
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   api,
   type AgentConfig,
@@ -52,6 +52,8 @@ export default function WorkspaceFormModal({
   const [boundServers, setBoundServers] = useState<string[]>(initial?.bound_servers ?? []);
   const [boundDatabases, setBoundDatabases] = useState<string[]>(initial?.bound_databases ?? []);
   const [error, setError] = useState("");
+  // 保存中：按钮禁用防重复提交（后端写配置文件非原子瞬间）。
+  const [saving, setSaving] = useState(false);
 
   const editing = Boolean(initial?.id);
   const agent = agents.find((a) => a.id === agentId);
@@ -72,7 +74,8 @@ export default function WorkspaceFormModal({
   };
 
   const save = async () => {
-    if (!agent) return;
+    if (!agent || saving) return;
+    setSaving(true);
     const payload: WorkspaceConfig = {
       id: initial?.id ?? "",
       name,
@@ -94,11 +97,21 @@ export default function WorkspaceFormModal({
       }
     } catch (e) {
       setError(String(e));
+      setSaving(false);
     }
   };
 
+  // Esc 关闭弹窗（桌面惯例）；保存中不响应，防误触丢填写。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
+
   return (
-    <div className="modal-mask" onClick={onClose}>
+    <div className="modal-mask" onClick={() => !saving && onClose()}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{editing ? `编辑${KIND_LABEL[kind]}工作区` : `新建${KIND_LABEL[kind]}工作区`}</h2>
         {error && <div className="notice error">{error}</div>}
@@ -222,11 +235,11 @@ export default function WorkspaceFormModal({
           <button
             className="btn"
             onClick={() => void save()}
-            disabled={!name || !agent}
+            disabled={!name || !agent || saving}
           >
-            {editing ? "保存修改" : "创建"}
+            {saving ? "保存中…" : editing ? "保存修改" : "创建"}
           </button>
-          <button className="btn ghost" onClick={onClose}>
+          <button className="btn ghost" onClick={onClose} disabled={saving}>
             取消
           </button>
         </div>

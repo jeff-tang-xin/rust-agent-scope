@@ -19,10 +19,13 @@ function fmtSize(n: number): string {
 export default function ServersPanel({
   onCollapse,
   boundServers,
+  onConfirm,
 }: {
   onCollapse: () => void;
   /** 工作区绑定的服务器白名单；非空时只显示绑定的（能力收窄的可视化）。 */
   boundServers?: string[];
+  /** 全局确认弹窗（App 层渲染，替代 window.confirm）。 */
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   const [servers, setServers] = useState<ServerConfig[]>([]);
   const [connected, setConnected] = useState<Set<string>>(new Set());
@@ -98,6 +101,7 @@ export default function ServersPanel({
             <ServerItem
               key={s.name}
               server={s}
+              onConfirm={onConfirm}
               connected={connected.has(s.name)}
               expanded={active === s.name && connected.has(s.name)}
               busy={busy}
@@ -125,6 +129,7 @@ function ServerItem({
   onConnect,
   onDisconnect,
   onToggle,
+  onConfirm,
 }: {
   server: ServerConfig;
   connected: boolean;
@@ -133,6 +138,7 @@ function ServerItem({
   onConnect: () => void;
   onDisconnect: () => void;
   onToggle: () => void;
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   return (
     <div className="server-item">
@@ -172,7 +178,7 @@ function ServerItem({
       </div>
       {expanded && (
         <>
-          <RemoteTree server={server.name} />
+          <RemoteTree server={server.name} onConfirm={onConfirm} />
           <ShConsole server={server.name} />
         </>
       )}
@@ -181,7 +187,13 @@ function ServerItem({
 }
 
 /** 远程目录树（懒加载；文件行内操作：下载/删除；目录头部：上传到此目录）。 */
-function RemoteTree({ server }: { server: string }) {
+function RemoteTree({
+  server,
+  onConfirm,
+}: {
+  server: string;
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
+}) {
   const [dirs, setDirs] = useState<Map<string, DirEntry[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["/"]));
   const [cwd, setCwd] = useState("/");
@@ -247,7 +259,11 @@ function RemoteTree({ server }: { server: string }) {
   };
 
   const remove = async (dir: string, entry: DirEntry) => {
-    if (!window.confirm(`删除远程${entry.is_dir ? "目录" : "文件"} ${dir}/${entry.name}？`)) return;
+    const ok = await onConfirm?.(
+    "删除远程文件",
+    `确定删除远程${entry.is_dir ? "目录" : "文件"} ${dir}/${entry.name}？\n此操作不可恢复。`,
+  );
+  if (ok === false) return;
     setError("");
     try {
       // 目录删除走 sh rm -rf（SFTP 只支持单文件）；文件走 SFTP。

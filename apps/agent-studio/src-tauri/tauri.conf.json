@@ -13,10 +13,11 @@
     "windows": [
       {
         "title": "AgentScope Studio",
-        "width": 1360,
-        "height": 860,
-        "minWidth": 1024,
-        "minHeight": 640
+        "width": 1200,
+        "height": 720,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {

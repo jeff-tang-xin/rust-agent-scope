@@ -395,6 +395,8 @@ export default function Conversation({
   sessionId,
   onSessionChange,
   onModeChange,
+  onToast,
+  onConfirm,
 }: {
   /** 会话所属工作区（命令与事件都按工作区归流）。 */
   workspace: WorkspaceConfig;
@@ -406,9 +408,19 @@ export default function Conversation({
   sessionId: string;
   onSessionChange: (sessionId: string) => void;
   onModeChange: (mode: "solo" | "team") => void;
+  /** 全局 toast（App 层渲染）：会话内错误/提示统一走右上角通知。 */
+  onToast?: (kind: "info" | "error", text: string) => void;
+  /** 全局确认弹窗（App 层渲染，替代 window.confirm）。 */
+  onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   // 仅协同工作区有 solo/team 运行方式切换；ops/db 工具面由类型决定。
   const isCollab = workspace.kind === "collab";
+
+  // 会话切换/新建时聚焦输入框（桌面 IM 惯例，直接可打字）。
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [sessionId]);
+
   // 会话由 App 层受控（左栏切换/新建）；本组件只消费 sessionId。
   const [entries, setEntries] = useState<Entry[]>([]);
   const [input, setInput] = useState("");
@@ -424,12 +436,29 @@ export default function Conversation({
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  // 会话内错误/提示统一走全局 toast（右上角）：state 只作事件通道，
+  // 变化即转发并清空——所有既有 setError/setNotice 调用点无需改动。
+  useEffect(() => {
+    if (error) {
+      onToast?.("error", error);
+      setError("");
+    }
+  }, [error, onToast]);
+  useEffect(() => {
+    if (notice) {
+      onToast?.("info", notice);
+      setNotice("");
+    }
+  }, [notice, onToast]);
+
   // 当前流式块（按 block_id 分组：同一块追加，块切换定格旧条目开新条目，
   // 保证 思考→工具→思考→输出 按真实时间交错显示）。
   const streamRef = useRef<{ kind: "msg" | "thinking"; blockId: string; entryId: string } | null>(null);
   const toolRef = useRef<Map<string, string>>(new Map()); // callKey -> entry id
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerScrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   // 用户是否停在底部附近（上滚查看历史时不强拉到底——可控性）。
   const nearBottomRef = useRef(true);
 
@@ -1013,9 +1042,13 @@ export default function Conversation({
   const switchMode = (next: "solo" | "team") => {
     if (next === runtimeMode) return;
     if (next === "team" && workspace.members.length === 0) {
-      if (!window.confirm("Team 模式当前未配置成员（lead 将单干）。可在编辑工作区里添加成员。继续切换？")) {
-        return;
-      }
+      void onConfirm?.(
+        "切换到协同模式",
+        "当前工作区尚未配置成员（lead 将单干）。\n可稍后在编辑工作区里添加成员。继续切换？",
+      ).then((ok) => {
+        if (ok) onModeChange(next);
+      });
+      return;
     }
     onModeChange(next);
   };
@@ -1064,8 +1097,8 @@ export default function Conversation({
         <span className="spacer" />
         <span className="badge">{sessionId.slice(0, 8)}</span>
       </div>
-      {error && <div className="notice error" style={{ margin: "10px 20px 0" }}>{error}</div>}
-      {notice && <div className="notice info" style={{ margin: "10px 20px 0" }}>{notice}</div>}
+      
+      
       <div
         className="messages"
         ref={scrollRef}
@@ -1077,15 +1110,25 @@ export default function Conversation({
       >
         <div className="messages-inner" ref={innerScrollRef}>
         {entries.length === 0 && (
-          <div className="empty">
-            <div>Start the conversation with {agent.name}</div>
-            <div style={{ fontSize: 12 }}>
+          <div className="empty-hero">
+            <div className="hero-avatar" aria-hidden>
+              {agent.name.slice(0, 1)}
+            </div>
+            <div className="hero-title">与 {agent.name} 开始对话</div>
+            <div className="hero-sub">
               {workspace.kind === "collab"
-                ? `collab · ${runtimeMode}`
+                ? runtimeMode === "team"
+                  ? "协同模式：可派发子代理并行干活"
+                  : "单兵模式：编码、文件、检索、规划"
                 : workspace.kind === "ops"
-                  ? "ops · shell + web"
-                  : "db · read-only SQL"}
-              {supportsPlan ? " · plan/free switchable" : ""}
+                  ? "远程运维：shell 执行（需确认）、文件管理、资料检索"
+                  : "数据库：只读查询免确认，变更需确认"}
+            </div>
+            <div className="hero-tags">
+              <span className="badge">Enter 发送</span>
+              <span className="badge">Shift+Enter 换行</span>
+              <span className="badge">Ctrl+V 粘贴图片</span>
+              {supportsPlan && <span className="badge">计划模式先行</span>}
             </div>
           </div>
         )}
@@ -1135,10 +1178,14 @@ export default function Conversation({
       <div className="composer">
         {supportsPlan && (
           <button className="btn ghost" onClick={togglePlan} disabled={busy}>
-            {planActive ? "Switch to free" : "Switch to plan"}
+            {planActive ? "退出计划模式" : "计划模式"}
           </button>
         )}
-        {planActive && <span className="badge plan" style={{ alignSelf: "center" }}>PLAN MODE</span>}
+        {planActive && (
+          <span className="badge plan" style={{ alignSelf: "center" }}>
+            计划模式
+          </span>
+        )}
         <label className="btn ghost attach-btn" title="添加附件（图片/文件，≤8MB）">
           📎
           <input
@@ -1170,26 +1217,26 @@ export default function Conversation({
           }}
           placeholder={
             busy
-              ? "Type to steer the running turn… (Enter to steer)"
-              : "Type a message… (Enter to send, Shift+Enter for newline)"
+              ? "运行中也可输入补充指令…（Enter 转向，下一步生效）"
+              : "输入消息…（Enter 发送，Shift+Enter 换行）"
           }
         />
         {busy ? (
           <button className="btn warn" onClick={() => void steer()} disabled={!input.trim()}>
-            Steer
+            转向
           </button>
         ) : (
           <button className="btn" onClick={() => void send()} disabled={!input.trim()}>
-            Send
+            发送
           </button>
         )}
         {busy && (
           <button className="btn danger" onClick={interrupt}>
-            Stop
+            停止
           </button>
         )}
-        <button className="btn ghost" onClick={clear} title="Clear session context">
-          Clear
+        <button className="btn ghost" onClick={clear} title="清空会话上下文（不可恢复）">
+          清空
         </button>
       </div>
       {dragActive && <div className="drop-hint">松开以添加附件</div>}
@@ -1199,11 +1246,13 @@ export default function Conversation({
           <ServersPanel
             onCollapse={() => setFilesOpen(false)}
             boundServers={workspace.bound_servers}
+            onConfirm={onConfirm}
           />
         ) : workspace.kind === "db" ? (
           <DatabasesPanel
             onCollapse={() => setFilesOpen(false)}
             boundDatabases={workspace.bound_databases}
+            onConfirm={onConfirm}
           />
         ) : (
           <FilePanel workspaceId={workspace.id} onCollapse={() => setFilesOpen(false)} />

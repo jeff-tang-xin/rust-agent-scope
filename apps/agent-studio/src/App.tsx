@@ -45,8 +45,14 @@ export default function App() {
   const [servers, setServers] = useState<ServerConfig[]>([]);
   const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
+  // 全局 toast 栈（右上角，自动消失；error 停留更久且可手动关闭）。
+  const [toasts, setToasts] = useState<{ id: number; kind: "info" | "error"; text: string }[]>([]);
+  // 确认弹窗（替换 window.confirm）：promise resolve 挂在 state 上。
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
   // 当前选中的工作区（切类别时自动落到该类第一个）。
   const [selectedId, setSelectedId] = useState("");
   // 每个工作区独立的运行方式（solo/team）与当前 session——多项目互不干扰。
@@ -116,12 +122,34 @@ export default function App() {
     };
   }, []);
 
-  const flash = (msg: string) => {
-    setNotice(msg);
-    setError("");
-    setTimeout(() => setNotice(""), 2500);
+  const dismissToast = (id: number) =>
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+
+  const toast = (kind: "info" | "error", text: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev.slice(-3), { id, kind, text }]);
+    // 成功提示短驻；错误停留更久（可手动关）。
+    setTimeout(() => dismissToast(id), kind === "error" ? 8000 : 2500);
   };
-  const fail = (msg: string) => setError(msg);
+  const flash = (msg: string) => toast("info", msg);
+  const fail = (msg: string) => toast("error", msg);
+
+  /** 统一确认弹窗（替代 window.confirm）：resolve(true)=确认。 */
+  const confirm = (title: string, message: string) =>
+    new Promise<boolean>((resolve) => setConfirmState({ title, message, resolve }));
+
+  // 确认弹窗的 Esc = 取消（桌面应用基本预期）。
+  useEffect(() => {
+    if (!confirmState) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        confirmState.resolve(false);
+        setConfirmState(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmState]);
 
   const cat = CATS.find((c) => c.key === tab);
   const inCat = cat ? workspaces.filter((w) => w.kind === cat.key) : [];
@@ -144,11 +172,31 @@ export default function App() {
   };
 
   const removeWorkspace = async (w: WorkspaceConfig) => {
-    if (!window.confirm(`删除工作区「${w.name}」？会话数据保留，仅移除工作区配置。`)) return;
+    const ok = await confirm(
+      "删除工作区",
+      `确定删除工作区「${w.name}」？\n会话数据保留，仅移除工作区配置。`,
+    );
+    if (!ok) return;
     try {
       await api.deleteWorkspace(w.id);
       flash("工作区已删除（会话数据保留）");
       await reload();
+    } catch (e) {
+      fail(String(e));
+    }
+  };
+
+  /** 删除会话（SessionSidebar 调用）：确认 → 删除 → 反馈；删当前会话自动开新会话。 */
+  const removeSession = async (wsId: string, sessionId: string) => {
+    const ok = await confirm(
+      "删除会话",
+      `确定删除会话「${sessionId}」？\n对话历史将被清除，不可恢复。`,
+    );
+    if (!ok) return;
+    try {
+      await api.deleteSession(wsId, modes[wsId] ?? "solo", sessionId);
+      flash("会话已删除");
+      if (sessionByWs[wsId] === sessionId) newSession(wsId);
     } catch (e) {
       fail(String(e));
     }
@@ -176,33 +224,29 @@ export default function App() {
             className={`nav-item ${tab === "settings" ? "active" : ""}`}
             onClick={() => setTab("settings")}
           >
-            Agents &amp; Providers
+            智能体与模型
           </button>
         </nav>
         <span className="spacer" />
         <button
           className="nav-item"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          title="Toggle color theme"
+          title="切换深浅主题"
+          aria-label="切换深浅主题"
         >
-          {theme === "dark" ? "☀  Light mode" : "☾  Dark mode"}
+          {theme === "dark" ? "☀ 浅色" : "☾ 深色"}
         </button>
       </header>
 
       <main className="main">
-        {error && (
-          <div className="notice error" style={{ margin: "10px 20px 0" }}>
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="notice info" style={{ margin: "10px 20px 0" }}>
-            {notice}
-          </div>
-        )}
         {tab === "settings" ? (
           <SettingsPage agents={agents} onChanged={() => void reload()} />
-        ) : !loaded ? null : inCat.length === 0 ? (
+        ) : !loaded ? (
+          <div className="app-loading">
+            <div className="spinner" aria-hidden />
+            <span>正在加载…</span>
+          </div>
+        ) : inCat.length === 0 ? (
           /* 无工作区：空态创建页（保留创建入口） */
           <WorkspacePage category={tab} onCreate={() => setWsForm({ kind: "new" })} />
         ) : (
@@ -217,9 +261,7 @@ export default function App() {
                 setSessionByWs((prev) => ({ ...prev, [wsId]: sid }))
               }
               onNewSession={newSession}
-              onDeleteSession={(wsId, sid) => {
-                void api.deleteSession(wsId, modes[wsId] ?? "solo", sid);
-              }}
+              onDeleteSession={(wsId, sid) => void removeSession(wsId, sid)}
               running={running}
               onEditWorkspace={(w) => setWsForm({ kind: "edit", initial: w })}
               onDeleteWorkspace={(w) => void removeWorkspace(w)}
@@ -237,6 +279,8 @@ export default function App() {
                     workspace={w}
                     agent={agent}
                     runtimeMode={mode}
+                    onToast={toast}
+                    onConfirm={confirm}
                     sessionId={sessionByWs[w.id] ?? defaultSession(mode)}
                     onSessionChange={(sid) =>
                       setSessionByWs((prev) => ({ ...prev, [w.id]: sid }))
@@ -249,6 +293,66 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* 全局 toast 栈（右上角） */}
+      {toasts.length > 0 && (
+        <div className="toast-stack" role="status" aria-live="polite">
+          {toasts.map((t) => (
+            <div key={t.id} className={`toast ${t.kind}`}>
+              <span className="toast-icon" aria-hidden>
+                {t.kind === "error" ? "✕" : "✓"}
+              </span>
+              <span className="toast-text">{t.text}</span>
+              <button className="toast-x" onClick={() => dismissToast(t.id)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 统一确认弹窗（Esc/遮罩关闭 = 取消） */}
+      {confirmState && (
+        <div
+          className="modal-mask"
+          onClick={() => {
+            confirmState.resolve(false);
+            setConfirmState(null);
+          }}
+        >
+          <div
+            className="modal confirm-modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label={confirmState.title}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="confirm-title">{confirmState.title}</div>
+            <div className="confirm-message">{confirmState.message}</div>
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  confirmState.resolve(false);
+                  setConfirmState(null);
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="btn danger solid"
+                autoFocus
+                onClick={() => {
+                  confirmState.resolve(true);
+                  setConfirmState(null);
+                }}
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {wsForm && (
         <WorkspaceFormModal
