@@ -164,71 +164,79 @@ export default function WorkspaceFormModal({
 
         {kind === "collab" && (
           <>
-            <label className="lbl">
-              Team members（team 运行方式下的成员；每个成员是独立子代理，lead 之外）
-            </label>
+            <label className="lbl">团队成员</label>
+            <div className="desc" style={{ marginBottom: 4 }}>
+              team 运行方式下的成员，每个成员是独立子代理（lead 之外）
+            </div>
             {agents.filter((a) => a.id !== agentId).length === 0 ? (
               <div className="desc">暂无其他智能体可作成员；可先到 Settings 创建。</div>
             ) : (
-              agents
-                .filter((a) => a.id !== agentId)
-                .map((a) => (
-                  <label key={a.id} className="member-check">
-                    <input
-                      type="checkbox"
-                      checked={members.includes(a.id)}
-                      onChange={() => toggleMember(a.id)}
-                    />
-                    <span className="name">{a.name}</span>
-                    <span className="desc">{a.description || a.sys_prompt.slice(0, 40)}</span>
-                  </label>
-                ))
+              <div className="check-group">
+                {agents
+                  .filter((a) => a.id !== agentId)
+                  .map((a) => (
+                    <label key={a.id} className="member-check">
+                      <input
+                        type="checkbox"
+                        checked={members.includes(a.id)}
+                        onChange={() => toggleMember(a.id)}
+                      />
+                      <span className="name">{a.name}</span>
+                      <span className="desc">{a.description || a.sys_prompt.slice(0, 40)}</span>
+                    </label>
+                  ))}
+              </div>
             )}
           </>
         )}
 
-        <label className="lbl">
-          绑定服务器（勾选后本工作区开放 remote_shell 能力，且只能操作勾选的服务器；
-          运维工作区不勾选 = 默认可操作全部）
-        </label>
+        <label className="lbl">绑定服务器</label>
+        <div className="desc" style={{ marginBottom: 4 }}>
+          勾选后开放 remote_shell 且仅限勾选的服务器；不勾选 = 可操作全部
+        </div>
         {servers.length === 0 ? (
           <div className="desc">暂无服务器档案——可先到 Settings 添加。</div>
         ) : (
-          servers.map((s) => (
-            <label key={s.name} className="member-check">
-              <input
-                type="checkbox"
-                checked={boundServers.includes(s.name)}
-                onChange={() => toggleBound(setBoundServers, s.name)}
-              />
-              <span className="name">{s.name}</span>
-              <span className="desc">
-                {s.host}:{s.port}
-              </span>
-            </label>
-          ))
+          <div className="check-group">
+            {servers.map((s) => (
+              <label key={s.name} className="member-check">
+                <input
+                  type="checkbox"
+                  checked={boundServers.includes(s.name)}
+                  onChange={() => toggleBound(setBoundServers, s.name)}
+                />
+                <span className="name">{s.name}</span>
+                <span className="desc">
+                  {s.host}:{s.port}
+                </span>
+              </label>
+            ))}
+          </div>
         )}
 
-        <label className="lbl">
-          绑定数据库（勾选后本工作区开放 db_query / db_dml 能力，且只能访问勾选的库；
-          数据库工作区不勾选 = 默认可访问全部）
-        </label>
+        <label className="lbl">绑定数据库</label>
+        <div className="desc" style={{ marginBottom: 4 }}>
+          勾选后开放 db_query / db_dml 且仅限勾选的库；不勾选 = 可访问全部
+        </div>
         {databases.length === 0 ? (
           <div className="desc">暂无数据库档案——可先到 Settings 添加。</div>
         ) : (
-          databases.map((d) => (
-            <label key={d.name} className="member-check">
-              <input
-                type="checkbox"
-                checked={boundDatabases.includes(d.name)}
-                onChange={() => toggleBound(setBoundDatabases, d.name)}
-              />
-              <span className="name">{d.name}</span>
-              <span className="desc">
-                {d.db_type} · {d.database}
-              </span>
-            </label>
-          ))
+          <div className="check-group">
+            {databases.map((d) => (
+              <label key={d.name} className="member-check">
+                <input
+                  type="checkbox"
+                  checked={boundDatabases.includes(d.name)}
+                  onChange={() => toggleBound(setBoundDatabases, d.name)}
+                />
+                <span className="name">{d.name}</span>
+                <span className="desc">
+                  {d.db_type}
+                  {d.database ? ` · ${d.database}` : ""}
+                </span>
+              </label>
+            ))}
+          </div>
         )}
 
         <div className="modal-actions">
