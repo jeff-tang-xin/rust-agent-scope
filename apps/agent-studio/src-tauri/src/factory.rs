@@ -92,7 +92,11 @@ fn build_workspace(root: &Path) -> Result<Arc<WorkspaceManager>, String> {
 }
 
 /// 基础工具面：filesystem 6 + memory 3（所有模式共有）。
-fn register_base_tools(toolkit: &mut Toolkit, workspace: &Arc<WorkspaceManager>) -> Result<(), String> {
+fn register_base_tools(
+    toolkit: &mut Toolkit,
+    workspace: &Arc<WorkspaceManager>,
+    memory_workspace: Arc<WorkspaceManager>,
+) -> Result<(), String> {
     let fs = workspace
         .filesystem()
         .cloned()
@@ -100,11 +104,18 @@ fn register_base_tools(toolkit: &mut Toolkit, workspace: &Arc<WorkspaceManager>)
     for tool in FilesystemToolSet::new(fs, None).all() {
         toolkit.register(tool);
     }
-    let memory = MemoryToolSet::new(Arc::clone(workspace));
+    // 记忆工具锚定独立的 .ox 记忆工作区（<项目>/.ox/）：MEMORY.md 与
+    // memory/ 台账不落项目根，非业务产出与业务代码分离（.ox 数据规范）。
+    let memory = MemoryToolSet::new(memory_workspace);
     toolkit.register(Arc::new(memory.memory_save));
     toolkit.register(Arc::new(memory.memory_get));
     toolkit.register(Arc::new(memory.memory_search));
     Ok(())
+}
+
+/// 记忆工作区根：<工作区根>/.ox（Sandboxed 锚定，记忆读写不出 .ox）。
+fn build_memory_workspace(root: &Path) -> Result<Arc<WorkspaceManager>, String> {
+    build_workspace(&root.join(".ox"))
 }
 
 /// 单个成员 agent（team 模式；独立 workspace + 独立 state，Isolated 语义）。
@@ -120,9 +131,10 @@ fn build_member(
     let member_id = format!("{}-{}", workspace_id, member.id);
     let dir = workspace_dir(data_dir, &member_id);
     let workspace = build_workspace(&members_workspace_root.join(&member.name))?;
+    let memory_workspace = build_memory_workspace(workspace.root())?;
     let state_store = build_state_store(&dir.join("state"))?;
     let mut toolkit = Toolkit::new();
-    register_base_tools(&mut toolkit, &workspace)?;
+    register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
     HarnessAgentBuilder::new()
         .name(&member.name)
         .sys_prompt(agentscope_harness::agent::build_subagent_sys_prompt(
@@ -170,6 +182,7 @@ pub fn build_agent(
     // 否则用默认目录。Sandboxed 模式把所有文件工具锚定在该根上。
     let workspace_root = resolve_workspace_root(data_dir, ws);
     let workspace = build_workspace(&workspace_root)?;
+    let memory_workspace = build_memory_workspace(&workspace_root)?;
     let state_store = build_state_store(&dir.join("state"))?;
 
     // team：先建成员（对齐 Java「先有成员再有 team」的装配顺序）。
@@ -179,7 +192,8 @@ pub fn build_agent(
     let members_ws_root = if ws.dir.trim().is_empty() {
         None
     } else {
-        Some(workspace_root.join(".studio-members"))
+        // 成员工作目录也归 .ox（非业务内容不散落项目根）。
+        Some(workspace_root.join(".ox").join("members"))
     };
     let mut members: HashMap<String, Arc<HarnessAgent>> = HashMap::new();
     if mode == StudioMode::Team {
@@ -200,7 +214,7 @@ pub fn build_agent(
     let members: MemberRegistry = Arc::new(members);
 
     let mut toolkit = Toolkit::new();
-    register_base_tools(&mut toolkit, &workspace)?;
+    register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
     match mode {
         StudioMode::Ops => {
             toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
@@ -320,5 +334,9 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     };
     prompt.push_str("\n\n");
     prompt.push_str(role_note);
+    // .ox 数据规范：非业务产出与业务代码分离（记忆工具已自动锚定 .ox/）。
+    prompt.push_str(
+        "\n\nWorkspace data convention: keep the project root clean. All          non-business artifacts you produce (plans, task lists, notes,          summaries, reports, scratch files) must live under the `.ox/`          directory at the workspace root; memory tools are already rooted          there. Only business code and documents requested by the user go          elsewhere. Never create memory/ or MEMORY.md at the project root.",
+    );
     prompt
 }

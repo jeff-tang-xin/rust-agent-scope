@@ -987,6 +987,51 @@ fn unix_now() -> u64 {
 
 // ---------- app setup ----------
 
+/// 旧版数据一次性迁移：AppData 下的 workspaces/ 与 studio-config.json
+/// 搬到 ~/.ox（仅当新位置还没有数据时执行，幂等可重入）。
+fn migrate_legacy_data(legacy: &std::path::Path, data_dir: &std::path::Path) {
+    if legacy == data_dir || !legacy.exists() {
+        return;
+    }
+    let new_workspaces = data_dir.join("workspaces");
+    if !new_workspaces.exists() {
+        let old_workspaces = legacy.join("workspaces");
+        if old_workspaces.exists() && copy_dir_all(&old_workspaces, &new_workspaces).is_ok() {
+            eprintln!("[.ox] migrated workspaces data to {}", data_dir.display());
+        }
+    }
+    let new_config = data_dir.join("config").join("studio-config.json");
+    if !new_config.exists() {
+        for old_cfg in [
+            legacy.join("config").join("studio-config.json"),
+            legacy.join("studio-config.json"),
+        ] {
+            if old_cfg.exists() {
+                if std::fs::copy(&old_cfg, &new_config).is_ok() {
+                    eprintln!("[.ox] migrated studio-config.json to {}", new_config.display());
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// 递归复制目录（std 无此 API；迁移专用，失败不阻塞启动）。
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// Builder 装配（lib.rs 调用）。
 pub fn run() {
     tauri::Builder::default()
@@ -994,15 +1039,18 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             use tauri::Manager;
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("agent-studio"));
+            // .ox 数据规范：应用数据统一放 ~/.ox/（会话历史、工作区状态、
+            // 配置都在 .ox 下），不再散落在系统 AppData 目录。
+            let data_dir = match app.path().home_dir() {
+                Ok(home) => home.join(".ox"),
+                Err(_) => std::env::temp_dir().join(".ox"),
+            };
             std::fs::create_dir_all(&data_dir).ok();
-            let config_dir = app
-                .path()
-                .app_config_dir()
-                .unwrap_or_else(|_| data_dir.clone());
+            // 一次性迁移：旧版数据在 Tauri AppData 目录下，搬进 ~/.ox。
+            if let Ok(legacy) = app.path().app_data_dir() {
+                migrate_legacy_data(&legacy, &data_dir);
+            }
+            let config_dir = data_dir.join("config");
             let config_store = ConfigStore::new(&config_dir);
             let config = config_store.load();
             app.manage(AppState {
