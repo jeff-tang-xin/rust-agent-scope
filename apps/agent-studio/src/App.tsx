@@ -1,9 +1,9 @@
-// 应用骨架：左侧导航（协同 / 运维 / 数据库运维 + 设置）+ 主区。
+// 应用骨架：顶部导航条（品牌 + 协同/运维/数据库运维/设置 + 主题）+ 主区。
 // 工作区三大类对齐产品概念：协同（solo/team 可切换，plan/free 可切换）、
 // 运维（shell/web）、数据库运维（只读 SQL）——都是工作区，针对不同的项目。
 //
 // 布局：无工作区 → 空态创建页；有工作区 → 会话视图（左栏工作区+session 列表
-// + 运行状态 | 消息流 | 右侧文件面板）。
+// + 消息流 | 右侧文件面板），导航在顶部横条。
 // 会话 keep-alive：所有工作区的会话常挂（仅隐藏非当前）——事件监听持续归流，
 // 多项目并行时切走再切回，流式内容/工具进度/busy 状态无缝续接。
 
@@ -139,38 +139,38 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">AgentScope Studio</div>
-        <div className="nav-section">工作区</div>
-        {CATS.map((c) => (
+      {/* 顶部导航条：品牌 + 类别导航 + 主题切换（原左侧竖栏上移，四栏变三栏） */}
+      <header className="topbar">
+        <span className="brand">AgentScope Studio</span>
+        <nav className="topbar-nav">
+          {CATS.map((c) => (
+            <button
+              key={c.key}
+              className={`nav-item ${tab === c.key ? "active" : ""}`}
+              onClick={() => setTab(c.key)}
+            >
+              {c.label}
+              <span className="mode-tag">
+                {workspaces.filter((w) => w.kind === c.key).length}
+              </span>
+            </button>
+          ))}
           <button
-            key={c.key}
-            className={`nav-item ${tab === c.key ? "active" : ""}`}
-            onClick={() => setTab(c.key)}
+            className={`nav-item ${tab === "settings" ? "active" : ""}`}
+            onClick={() => setTab("settings")}
           >
-            {c.label}
-            <span className="mode-tag">
-              {workspaces.filter((w) => w.kind === c.key).length}
-            </span>
+            Agents &amp; Providers
           </button>
-        ))}
-        <div className="nav-section">Settings</div>
+        </nav>
+        <span className="spacer" />
         <button
-          className={`nav-item ${tab === "settings" ? "active" : ""}`}
-          onClick={() => setTab("settings")}
+          className="nav-item"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title="Toggle color theme"
         >
-          Agents & Providers
+          {theme === "dark" ? "☀  Light mode" : "☾  Dark mode"}
         </button>
-        <div className="sidebar-footer">
-          <button
-            className="nav-item"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            title="Toggle color theme"
-          >
-            {theme === "dark" ? "☀  Light mode" : "☾  Dark mode"}
-          </button>
-        </div>
-      </aside>
+      </header>
 
       <main className="main">
         {error && (
