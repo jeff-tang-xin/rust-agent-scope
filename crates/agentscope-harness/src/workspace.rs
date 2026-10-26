@@ -330,6 +330,21 @@ fn paginate_lines(content: &str, offset: usize, limit: usize) -> String {
     lines[offset..end].join("\n")
 }
 
+/// glob 递归遍历的目录访问上限（防巨型仓库失控）。
+const GLOB_WALK_LIMIT: usize = 20_000;
+/// glob 递归遍历跳过的目录（依赖与构建产物：噪音大且拖慢遍历）。
+const GLOB_SKIP_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    "node_modules",
+    "dist",
+    "build",
+    ".idea",
+    ".easyClaw",
+    ".venv",
+    "__pycache__",
+];
+
 /// 本地磁盘实现：以工作区根为界（对应 Java `LocalFilesystem`）。
 ///
 /// `mode` 控制绝对路径的处理（见 [`LocalFsMode`]）；`Rooted` 模式用 [`PathPolicy`]
@@ -560,39 +575,65 @@ impl Filesystem for LocalFilesystem {
         cwd: &str,
     ) -> Result<Vec<FileInfo>, String> {
         let dir = self.resolve(cwd)?;
+        let matcher = glob_to_regex(pattern)?;
         let mut out = Vec::new();
-        let mut entries = tokio::fs::read_dir(&dir)
-            .await
-            .map_err(|error| error.to_string())?;
-        while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
-            let file_type = entry.file_type().await.map_err(|e| e.to_string())?;
-            if !file_type.is_file() {
-                continue;
+        // 递归遍历（`**` 语义需要）；跳过依赖/构建产物目录，设访问上限防失控。
+        let mut stack = vec![dir.clone()];
+        let mut visited = 0usize;
+        while let Some(current) = stack.pop() {
+            visited += 1;
+            if visited > GLOB_WALK_LIMIT {
+                break;
             }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !glob_match(pattern, &name) {
-                continue;
-            }
-            let meta = entry.metadata().await.map_err(|e| e.to_string())?;
-            let modified_at = meta
-                .modified()
-                .ok()
-                .and_then(|time| {
-                    time.duration_since(std::time::UNIX_EPOCH)
-                        .ok()
-                        .map(|d| d.as_millis() as i64)
+            let mut entries = tokio::fs::read_dir(&current)
+                .await
+                .map_err(|error| error.to_string())?;
+            while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+                let file_type = entry.file_type().await.map_err(|e| e.to_string())?;
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if file_type.is_dir() {
+                    if GLOB_SKIP_DIRS.contains(&name.as_str()) {
+                        continue;
+                    }
+                    stack.push(path);
+                    continue;
+                }
+                if !file_type.is_file() {
+                    continue;
+                }
+                // 匹配用相对 cwd 的路径（`**` 语义基准）；返回值拼回 cwd
+                // 前缀——Local 后端 glob 返回带 cwd 前缀的路径是既有约定
+                // （skill 仓库的 normalize_glob_path 依赖该形态）。
+                let rel = path
+                    .strip_prefix(&dir)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if !matcher.is_match(&rel) {
+                    continue;
+                }
+                let full = if cwd.trim().is_empty() || cwd == "." {
+                    rel.clone()
+                } else {
+                    format!("{}/{}", cwd.trim_end_matches('/'), rel)
+                };
+                let meta = entry.metadata().await.map_err(|e| e.to_string())?;
+                let modified_at = meta
+                    .modified()
+                    .ok()
+                    .and_then(|time| {
+                        time.duration_since(std::time::UNIX_EPOCH)
+                            .ok()
+                            .map(|d| d.as_millis() as i64)
+                    });
+                out.push(FileInfo {
+                    path: full,
+                    size: Some(meta.len()),
+                    is_directory: false,
+                    modified_at,
                 });
-            let relative = if cwd.trim().is_empty() || cwd == "." {
-                name.clone()
-            } else {
-                format!("{}/{}", cwd.trim_end_matches('/'), name)
-            };
-            out.push(FileInfo {
-                path: relative,
-                size: Some(meta.len()),
-                is_directory: false,
-                modified_at,
-            });
+            }
         }
         out.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(out)
@@ -667,18 +708,48 @@ impl Filesystem for LocalFilesystem {
     }
 }
 
-/// 极简 glob：只支持 `*` 通配（与 `WorkspaceManager` 的 `*.md` / `*.json` 用法对齐）。
+/// glob → 正则编译：`**/` 匹配零或多层目录段、`**` 跨段通配、
+/// `*` 段内通配（不跨 `/`）、`?` 单字符；其余字符按字面转义。
+/// 匹配对象是 `/` 分隔的相对路径（或裸文件名）。
+pub(crate) fn glob_to_regex(pattern: &str) -> Result<regex::Regex, String> {
+    let mut re = String::from("^");
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '*' if i + 1 < chars.len() && chars[i + 1] == '*' => {
+                if i + 2 < chars.len() && chars[i + 2] == '/' {
+                    re.push_str("(?:[^/]*/)*");
+                    i += 3;
+                } else {
+                    re.push_str(".*");
+                    i += 2;
+                }
+            }
+            '*' => {
+                re.push_str("[^/]*");
+                i += 1;
+            }
+            '?' => {
+                re.push_str("[^/]");
+                i += 1;
+            }
+            other => {
+                re.push_str(&regex::escape(&other.to_string()));
+                i += 1;
+            }
+        }
+    }
+    re.push('$');
+    regex::Regex::new(&re).map_err(|e| format!("invalid glob pattern `{pattern}`: {e}"))
+}
+
+/// glob 匹配（每次调用编译正则；调用方在循环里过滤时应先编译一次复用）。
 pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
-    if pattern == "*" {
-        return true;
+    match glob_to_regex(pattern) {
+        Ok(re) => re.is_match(name),
+        Err(_) => pattern == name,
     }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return name.ends_with(suffix);
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return name.starts_with(prefix);
-    }
-    pattern == name
 }
 
 /// 工作区管理器：两层读（filesystem 优先、本地回退）+ 全走 filesystem 的写
@@ -1124,6 +1195,31 @@ fn collect_files_recursive(dir: &Path, root: &Path, out: &mut HashSet<String>) {
 mod tests {
     use super::*;
     use crate::task::TaskRecord;
+
+    #[test]
+    fn glob_matches_recursive_and_single_star_semantics() {
+        // `**/` 跨任意深度（含零层）
+        assert!(glob_match("**/GenericRepositoryImpl.java", "GenericRepositoryImpl.java"));
+        assert!(glob_match(
+            "**/GenericRepositoryImpl.java",
+            "a/b/c/GenericRepositoryImpl.java"
+        ));
+        assert!(!glob_match("**/GenericRepositoryImpl.java", "Other.java"));
+        // `*` 不跨目录段
+        assert!(glob_match("*.java", "Foo.java"));
+        assert!(!glob_match("*.java", "a/Foo.java"));
+        assert!(glob_match("src/**/*.java", "src/a/b/Foo.java"));
+        assert!(glob_match("src/**/*.java", "src/Foo.java"));
+        // `?` 单字符
+        assert!(glob_match("file?.txt", "file1.txt"));
+        assert!(!glob_match("file?.txt", "file10.txt"));
+        // 旧用法兼容：`*.md` / `*.json` 文件名匹配
+        assert!(glob_match("*.md", "AGENTS.md"));
+        assert!(glob_match("*.json", "config.json"));
+        // 字面量
+        assert!(glob_match("exact.txt", "exact.txt"));
+        assert!(!glob_match("exact.txt", "other.txt"));
+    }
 
     fn temp_workspace(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

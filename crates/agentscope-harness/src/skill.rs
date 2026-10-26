@@ -303,12 +303,11 @@ impl WorkspaceSkillRepository {
     ///
     /// glob 返回路径形态跨后端不一致（Local 带 cwd 前缀、InMemory/Overlay
     /// 相对 cwd），`normalize_glob_path` 统一为相对技能根的路径后再读回。
-    /// 注意：Local 后端 glob 只搜单层（既有能力缺口），深层技能仅
-    /// InMemory/Overlay 后端可发现。
+    /// 注意：Local 后端 glob 已递归（`**/SKILL.md`），深层技能同样能发现。
     pub async fn get_all_skills(&self, rc: &RuntimeContext) -> Vec<AgentSkill> {
         let matches = match self
             .filesystem
-            .glob(rc, SKILL_FILE, &self.skills_relative_dir)
+            .glob(rc, "**/SKILL.md", &self.skills_relative_dir)
             .await
         {
             Ok(matches) => matches,

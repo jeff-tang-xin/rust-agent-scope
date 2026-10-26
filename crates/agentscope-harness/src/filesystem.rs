@@ -738,6 +738,8 @@ impl Filesystem for InMemoryFilesystem {
             let Some(relative) = file_path.strip_prefix(&prefix) else {
                 continue;
             };
+            // 文件名匹配（与旧语义一致：`*` 枚举全部、`*.md` 按名过滤；
+            // `**/SKILL.md` 这类前缀模式对裸文件名同样成立——`**/` 匹配零段）。
             let name = relative.rsplit('/').next().unwrap_or(relative);
             if !crate::workspace::glob_match(pattern, name) {
                 continue;
