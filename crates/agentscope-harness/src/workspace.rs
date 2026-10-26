@@ -449,10 +449,29 @@ impl Filesystem for LocalFilesystem {
         let content = tokio::fs::read_to_string(&resolved)
             .await
             .map_err(|error| error.to_string())?;
-        let occurrences = content.matches(old_string).count();
-        if occurrences == 0 {
-            return Err(format!("String not found in file: {path}"));
-        }
+        // 行尾宽容：read_file 经 lines().join("\n") 返回，CRLF 文件在 LLM 眼里
+        // 是 LF——它照抄回的 old_string 与磁盘逐字节比对必然失败（Windows 项目
+        // 高频）。精确匹配失败时按文件主行尾归一化 old/new 重试，替换仍保持
+        // 文件原有行尾风格；精确匹配成功则行为与从前完全一致。
+        let (old_string, new_string, occurrences) = match content.matches(old_string).count() {
+            0 => {
+                let crlf = content.contains("\r\n");
+                let normalize = |s: &str| -> String {
+                    if crlf {
+                        s.replace("\r\n", "\n").replace('\n', "\r\n")
+                    } else {
+                        s.replace("\r\n", "\n")
+                    }
+                };
+                let old_normalized = normalize(old_string);
+                let count = content.matches(&old_normalized).count();
+                if count == 0 {
+                    return Err(format!("String not found in file: {path}"));
+                }
+                (old_normalized, normalize(new_string), count)
+            }
+            n => (old_string.to_string(), new_string.to_string(), n),
+        };
         if !replace_all && occurrences > 1 {
             return Err(format!(
                 "Found {occurrences} occurrences of the string in {path}; \
@@ -460,9 +479,9 @@ impl Filesystem for LocalFilesystem {
             ));
         }
         let updated = if replace_all {
-            content.replace(old_string, new_string)
+            content.replace(&old_string, &new_string)
         } else {
-            content.replacen(old_string, new_string, 1)
+            content.replacen(&old_string, &new_string, 1)
         };
         tokio::fs::write(&resolved, updated)
             .await
@@ -1175,6 +1194,42 @@ mod tests {
         );
         fs.delete(&rc, "notes/moved.txt").await.unwrap();
         assert!(!fs.exists(&rc, "notes/moved.txt").await.unwrap());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[tokio::test]
+    async fn local_filesystem_edit_tolerates_line_endings() {
+        let root = temp_workspace("edit-eol");
+        let fs = LocalFilesystem::new(&root, LocalFsMode::Rooted, PathPolicy::empty());
+        let rc = RuntimeContext::new();
+        // CRLF 文件 + LF old_string（LLM 从 read_file 看到的行尾就是 LF）。
+        fs.write(
+            &rc,
+            "page.jsp",
+            "<div>\r\n  <p>hello</p>\r\n</div>\r\n",
+        )
+        .await
+        .unwrap();
+        let n = fs
+            .edit(&rc, "page.jsp", "<p>hello</p>", "<p>hi</p>", false)
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(
+            fs.read(&rc, "page.jsp").await.unwrap().unwrap(),
+            "<div>\r\n  <p>hi</p>\r\n</div>\r\n"
+        );
+        // 反向：LF 文件 + CRLF old_string 同样宽容，替换保持文件 LF 风格。
+        fs.write(&rc, "plain.txt", "a\nb\nc\n").await.unwrap();
+        fs.edit(&rc, "plain.txt", "a\r\nb", "x\r\ny", false)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs.read(&rc, "plain.txt").await.unwrap().unwrap(),
+            "x\ny\nc\n"
+        );
+        // 真正不存在的内容仍报原错误。
+        assert!(fs.edit(&rc, "plain.txt", "nope", "x", false).await.is_err());
         std::fs::remove_dir_all(&root).ok();
     }
 
