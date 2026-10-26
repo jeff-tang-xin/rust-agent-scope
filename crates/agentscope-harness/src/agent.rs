@@ -32,6 +32,8 @@ use agentscope_core::permission::PermissionContextState;
 use agentscope_core::tool::Toolkit;
 use tokio::sync::mpsc;
 
+use crate::compaction::{maybe_compact_context, CompactionConfig, ConversationCompactor};
+use crate::memory::MemoryFlushManager;
 use crate::plan::{PlanModeManager, PlanModeMiddleware};
 use crate::tools::{PlanEnterTool, PlanExitTool, PlanWriteTool};
 use crate::subagent::{
@@ -324,6 +326,10 @@ pub struct HarnessAgent {
     plan_mode_manager: Option<Arc<PlanModeManager>>,
     subagent_manager: Option<Arc<DefaultAgentManager>>,
     task_repository: Option<Arc<dyn TaskRepository>>,
+    compactor: Option<Arc<ConversationCompactor>>,
+    compaction_config: Option<CompactionConfig>,
+    /// 模型上下文窗口（0 = 未知；压缩动态触发预算用，见 compaction.rs）。
+    compaction_window: usize,
 }
 
 impl HarnessAgent {
@@ -334,6 +340,7 @@ impl HarnessAgent {
         msg: Msg,
     ) -> Result<Msg, agentscope_core::Error> {
         let runtime = self.ensure_session_defaults(runtime);
+        self.maybe_compact(&runtime).await?;
         self.delegate.call_with_context(runtime, msg).await
     }
 
@@ -344,7 +351,24 @@ impl HarnessAgent {
         msg: Msg,
     ) -> Result<mpsc::Receiver<agentscope_core::event::AgentEvent>, agentscope_core::Error> {
         let runtime = self.ensure_session_defaults(runtime);
+        self.maybe_compact(&runtime).await?;
         self.delegate.stream_events_with_context(runtime, msg).await
+    }
+
+    /// turn 入口的上下文压缩检查（对齐 Java CompactionMiddleware 的触发语义；
+    /// 挂在 turn 入口而非每轮 ReAct 迭代——差异见 compaction.rs 模块文档）。
+    async fn maybe_compact(&self, runtime: &RuntimeContext) -> Result<(), agentscope_core::Error> {
+        let (Some(compactor), Some(config)) = (&self.compactor, &self.compaction_config) else {
+            return Ok(());
+        };
+        maybe_compact_context(
+            &self.delegate,
+            compactor,
+            config,
+            runtime,
+            self.compaction_window,
+        )
+        .await
     }
 
     /// 会话 id 缺省：`RuntimeContext.session_id` > builder 的 `default_session_id` >
@@ -512,6 +536,9 @@ pub struct HarnessAgentBuilder {
     /// 新会话的初始权限上下文（透传给 delegate ReActAgent，见
     /// `ReActAgentBuilder::permission_context`）。
     permission_context: Option<PermissionContextState>,
+    /// 上下文压缩配置（默认开启，对齐 Java `CompactionConfig.builder().build()`；
+    /// `disable_compaction` 置 None）。
+    compaction_config: Option<CompactionConfig>,
 }
 
 impl HarnessAgentBuilder {
@@ -538,6 +565,7 @@ impl HarnessAgentBuilder {
             middlewares: Vec::new(),
             model_resolver: None,
             permission_context: None,
+            compaction_config: Some(CompactionConfig::default()),
         }
     }
 
@@ -574,6 +602,18 @@ impl HarnessAgentBuilder {
     /// 新会话的初始权限上下文（透传给 delegate ReActAgent）。
     pub fn permission_context(mut self, context: PermissionContextState) -> Self {
         self.permission_context = Some(context);
+        self
+    }
+
+    /// 自定义上下文压缩配置（默认开启，默认值对齐 Java `CompactionConfig`）。
+    pub fn compaction(mut self, config: CompactionConfig) -> Self {
+        self.compaction_config = Some(config);
+        self
+    }
+
+    /// 禁用上下文压缩（对齐 Java `disableCompaction`）。
+    pub fn disable_compaction(mut self) -> Self {
+        self.compaction_config = None;
         self
     }
 
@@ -671,6 +711,9 @@ impl HarnessAgentBuilder {
             .unwrap_or("ReActAgent")
             .to_string();
         let model = self.model.ok_or_else(|| "model is required".to_string())?;
+        // 压缩器与 flush 共用主模型（对齐 Java：compactionModel 缺省用主 model）；
+        // 先 clone，model 本体随后 move 进 delegate。
+        let compaction_model = model.clone();
 
         // 1) workspace：显式 manager > 显式路径 > 默认 `.agents/<agent_id>/workspace`
         let workspace_manager = match self.workspace_manager {
@@ -814,6 +857,25 @@ impl HarnessAgentBuilder {
             middleware.bind_agent(&delegate);
         }
 
+        // 7) 上下文压缩（默认开启；flush 复用 MemoryFlushManager 的默认抽取提示词）
+        let compaction_window = model.context_window_size();
+        let (compactor, compaction_config) = match self.compaction_config {
+            Some(config) => {
+                let flush = Arc::new(MemoryFlushManager::new(
+                    Arc::clone(&workspace_manager),
+                    compaction_model.clone(),
+                ));
+                (
+                    Some(Arc::new(ConversationCompactor::new(
+                        compaction_model,
+                        flush,
+                    ))),
+                    Some(config),
+                )
+            }
+            None => (None, None),
+        };
+
         Ok(HarnessAgent {
             delegate,
             agent_id,
@@ -823,6 +885,9 @@ impl HarnessAgentBuilder {
             plan_mode_manager,
             subagent_manager,
             task_repository: Some(task_repository),
+            compactor,
+            compaction_config,
+            compaction_window,
         })
     }
 }

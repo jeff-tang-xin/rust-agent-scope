@@ -109,6 +109,12 @@ pub trait Model: Send + Sync {
         "model"
     }
 
+    /// 上下文窗口大小（token；对应 Java `getContextWindowSize`）。
+    /// 0 = 未知（调用方回落到自己的预算策略，如压缩的 FALLBACK_TRIGGER_TOKENS）。
+    fn context_window_size(&self) -> usize {
+        0
+    }
+
     /// 非流式调用：一次性返回完整响应。
     async fn call(&self, request: ChatRequest) -> Result<ChatResponse>;
 
