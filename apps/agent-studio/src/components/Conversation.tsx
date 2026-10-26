@@ -98,6 +98,23 @@ function extractText(content: unknown): string {
     .join("");
 }
 
+/** 工具参数展示：单 string 字段的 JSON 直接显示字段值（memory_save 的
+ *  content 等 markdown 正文可读，\n 不再是字面转义）；其余 pretty 缩进。 */
+function prettyArgs(args: string): string {
+  try {
+    const v = JSON.parse(args);
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const keys = Object.keys(v);
+      if (keys.length === 1 && typeof v[keys[0]] === "string") return v[keys[0]];
+      return JSON.stringify(v, null, 2);
+    }
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return args;
+  }
+}
+
 function shortJson(value: unknown, max = 300): string {
   try {
     const s = typeof value === "string" ? value : JSON.stringify(value);
@@ -405,10 +422,19 @@ export default function Conversation({
 
   // 收流：把流式中的 msg/thinking 条目置为完成（打字机停走、光标消失）。
   // 块切换 / 块结束 / 工具开始 / AGENT_RESULT / AGENT_END / turn 终态都会调用。
-  /** 用户点击卡片头部：手动展开/收起（覆盖 running 展开 / done 收起的默认行为）。 */
-  const toggleEntry = useCallback((id: string) => {
-    upsert(id, (e) => ("open" in e ? { ...e, open: !(e.open ?? true) } : e));
-  }, [upsert]);
+  /** 用户点击卡片头部：手动展开/收起（覆盖 running 展开 / done 收起的默认行为）。
+   *  注意按条目类型取默认值——历史回放的 thinking/tool 条目没有 open 字段，
+   *  不能用 `"open" in e` 判断（那会让历史条目点击无反应）。 */
+  const toggleEntry = useCallback(
+    (id: string) => {
+      upsert(id, (e) => {
+        if (e.kind === "thinking") return { ...e, open: !(e.open ?? e.streaming === true) };
+        if (e.kind === "tool") return { ...e, open: !(e.open ?? e.ok === undefined) };
+        return e;
+      });
+    },
+    [upsert],
+  );
 
   const finalizeStreams = useCallback(() => {
     const cur = streamRef.current;
@@ -837,7 +863,7 @@ export default function Conversation({
         </button>
         {open && (
           <AutoScrollBody className="entry-body tool-body" active={e.ok === undefined}>
-            {e.args && <pre className="tool-io">{e.args}</pre>}
+            {e.args && <pre className="tool-io">{prettyArgs(e.args)}</pre>}
             {e.result !== undefined && <pre className="tool-io out">{e.result}</pre>}
           </AutoScrollBody>
         )}

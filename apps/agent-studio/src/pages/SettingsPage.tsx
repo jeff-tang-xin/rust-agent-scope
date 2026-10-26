@@ -139,6 +139,33 @@ export default function SettingsPage({
         {error && <div className="notice error">{error}</div>}
         {notice && <div className="notice info">{notice}</div>}
 
+        {/* ---------- 界面 ---------- */}
+        <div className="card">
+          <h2>界面</h2>
+          <div className="desc">界面缩放——立即生效，本地记忆（默认「标准」）</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {([
+              ["1", "紧凑 100%"],
+              ["1.1", "标准 110%"],
+              ["1.25", "宽松 125%"],
+            ] as const).map(([z, label]) => {
+              const current = localStorage.getItem("studio-zoom") ?? "1.1";
+              return (
+                <button
+                  key={z}
+                  className={`btn ${current === z ? "" : "ghost"}`}
+                  onClick={() => {
+                    localStorage.setItem("studio-zoom", z);
+                    document.body.style.zoom = z;
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* ---------- Providers ---------- */}
         <div className="card">
           <h2>Model Providers</h2>

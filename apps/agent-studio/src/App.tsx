@@ -63,6 +63,12 @@ export default function App() {
     localStorage.setItem("studio-theme", theme);
   }, [theme]);
 
+  // 界面缩放（设置页可调，localStorage 记忆；默认「标准」110%——
+  // 14px 基准在高分屏上偏小，取中档）。
+  useEffect(() => {
+    document.body.style.zoom = localStorage.getItem("studio-zoom") ?? "1.1";
+  }, []);
+
   const reload = useCallback(async () => {
     const [a, ws] = await Promise.all([api.listAgents(), api.listWorkspaces()]);
     setAgents(a);
