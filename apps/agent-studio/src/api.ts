@@ -107,6 +107,8 @@ export interface SessionSummary {
   session_id: string;
   messages: number;
   updated_at: number;
+  /** 派生本会话的父会话（spawn 子代理会话才有）。 */
+  parent_session_id?: string;
 }
 
 /** 工作区文件条目（相对工作区根，/ 分隔）。 */

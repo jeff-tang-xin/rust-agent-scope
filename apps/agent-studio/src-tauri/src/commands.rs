@@ -72,6 +72,10 @@ pub struct SessionSummary {
     pub messages: usize,
     /// 状态文件最后修改时间（unix 秒；用于排序）。
     pub updated_at: u64,
+    /// 派生本会话的父会话（spawn 子代理会话才有；来自父会话
+    /// tool_context.spawn_registry，前端据此树形归属）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
 }
 
 /// 全局应用状态。
@@ -906,6 +910,38 @@ pub fn list_sessions(
         Ok(entries) => entries,
         Err(_) => return Ok(out), // 还没有任何会话
     };
+    // 子会话归属：父会话 agent_state.json 的 tool_context.spawn_registry
+    // 记录了它派生的子会话 id——先收集 child→parent 映射，再填进摘要。
+    let mut parent_of: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let parent_id = entry.file_name().to_string_lossy().to_string();
+        let state_path = entry.path().join("agent_state.json");
+        let registry = std::fs::read(&state_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|v| {
+                v.get("tool_context")
+                    .and_then(|t| t.get("spawn_registry"))
+                    .and_then(|r| r.as_object())
+                    .cloned()
+            });
+        if let Some(registry) = registry {
+            for (_k, sp) in registry {
+                if let Some(child) = sp.get("session_id").and_then(|s| s.as_str()) {
+                    parent_of.entry(child.to_string()).or_insert_with(|| parent_id.clone());
+                }
+            }
+        }
+    }
+    let entries = std::fs::read_dir(&user_dir);
+    let entries = match entries {
+        Ok(entries) => entries,
+        Err(_) => return Ok(out),
+    };
     for entry in entries.flatten() {
         if !entry.path().is_dir() {
             continue;
@@ -929,6 +965,7 @@ pub fn list_sessions(
             })
             .unwrap_or(0);
         out.push(SessionSummary {
+            parent_session_id: parent_of.get(&session_id).cloned(),
             session_id,
             messages,
             updated_at,

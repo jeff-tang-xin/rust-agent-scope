@@ -925,6 +925,10 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 }
 .ss-dot.run { background: #2da44e; box-shadow: 0 0 4px #2da44e; }
 .ss-session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* spawn 子代理会话：挂在父会话下的缩进子节点 */
+.ss-session.is-child { padding-left: 30px; font-size: 11px; color: var(--text-dim); }
+.ss-session.is-child .ss-dot { background: transparent; border: 1.5px solid var(--text-faint); width: 6px; height: 6px; }
+.ss-session.is-child .ss-dot.run { background: #2da44e; border-color: #2da44e; }
 .ss-session-state { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 .ss-empty { padding: 4px 18px; font-size: 11px; color: var(--text-dim); }
 .ss-new {

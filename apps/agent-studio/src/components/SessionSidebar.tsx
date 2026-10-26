@@ -70,6 +70,14 @@ export default function SessionSidebar({
       ? [{ session_id: currentSession, messages: 0, updated_at: 0 }, ...sessions]
       : sessions;
 
+  // 树形归属：spawn 子代理会话（parent_session_id 指向父）缩进挂在父下；
+  // 父不在列表（已清上下文）的子会话按顶层显示，不丢。
+  const topSessions = sessionItems.filter(
+    (s) => !s.parent_session_id || !sessionItems.some((p) => p.session_id === s.parent_session_id),
+  );
+  const childrenOf = (parentId: string) =>
+    sessionItems.filter((s) => s.parent_session_id === parentId);
+
   return (
     <aside className="session-sidebar">
       <div className="ss-head">工作区</div>
@@ -110,24 +118,32 @@ export default function SessionSidebar({
                 {w.dir.trim() || "默认工作区（~/.ox）"}
               </div>
               <div className="ss-sessions">
-              {sessionItems.map((s) => {
-                const isRunning = running.has(`${w.id}:${s.session_id}`);
-                const isCurrent = currentSession === s.session_id;
-                return (
-                  <button
-                    key={s.session_id}
-                    className={`ss-session ${isCurrent ? "active" : ""}`}
-                    onClick={() => onSelectSession(w.id, s.session_id)}
-                    title={s.session_id}
-                  >
-                    <span className={`ss-dot ${isRunning ? "run" : ""}`} aria-hidden />
-                    <span className="ss-session-name">{s.session_id.slice(0, 12)}</span>
-                    <span className="ss-session-state">
-                      {isRunning ? "运行中" : `${s.messages} 条`}
-                    </span>
-                  </button>
-                );
-              })}
+              {(() => {
+                const renderRow = (s: SessionSummary, child: boolean) => {
+                  const isRunning = running.has(`${w.id}:${s.session_id}`);
+                  const isCurrent = currentSession === s.session_id;
+                  return (
+                    <button
+                      key={s.session_id}
+                      className={`ss-session ${isCurrent ? "active" : ""} ${child ? "is-child" : ""}`}
+                      onClick={() => onSelectSession(w.id, s.session_id)}
+                      title={child ? `子代理会话（派生自 ${s.parent_session_id}）` : s.session_id}
+                    >
+                      <span className={`ss-dot ${isRunning ? "run" : ""}`} aria-hidden />
+                      <span className="ss-session-name">{s.session_id.slice(0, 12)}</span>
+                      <span className="ss-session-state">
+                        {isRunning ? "运行中" : child ? "子代理" : `${s.messages} 条`}
+                      </span>
+                    </button>
+                  );
+                };
+                return topSessions.map((s) => (
+                  <div key={s.session_id}>
+                    {renderRow(s, false)}
+                    {childrenOf(s.session_id).map((c) => renderRow(c, true))}
+                  </div>
+                ));
+              })()}
               {sessionItems.length === 0 && <div className="ss-empty">（暂无会话）</div>}
               <button className="ss-new" onClick={() => onNewSession(w.id)}>
                 + 新会话
