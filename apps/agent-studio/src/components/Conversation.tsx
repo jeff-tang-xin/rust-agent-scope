@@ -142,7 +142,11 @@ function entriesFromBlocks(
     const type = String(b.type ?? "");
     if (type === "text") {
       const text = String(b.text ?? "");
-      if (text.trim()) out.push({ kind: "msg", role, text, ts, id: nextId() });
+      // 运行时注入的 system-reminder（如 plan 模式约束）是给模型的指令，
+      // 不作为对话内容渲染。
+      if (text.trim() && !text.startsWith("<system-reminder>")) {
+        out.push({ kind: "msg", role, text, ts, id: nextId() });
+      }
     } else if (type === "thinking") {
       // 注意字段名：ContentBlock::Thinking 的 serde 键是 thinking（非 text）。
       const text = String(b.thinking ?? "");
@@ -514,7 +518,10 @@ export default function Conversation({
         if (h.blocks?.length) {
           restored.push(...entriesFromBlocks(role, h.blocks, ts, byCall));
         } else if (h.text) {
-          restored.push({ kind: "msg", role, text: h.text, ts, id: nextId() });
+          // 同上：system-reminder 注入消息不渲染。
+          if (!h.text.startsWith("<system-reminder>")) {
+            restored.push({ kind: "msg", role, text: h.text, ts, id: nextId() });
+          }
         }
       }
       // 历史里没有结果的调用（中断/挂起）不再是「运行中」：标记未完成（红色）。
@@ -710,10 +717,17 @@ export default function Conversation({
                   e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
                 );
               }
-              setEntries((prev) => [
-                ...prev,
-                { kind: "msg", role: "assistant", text, ts: nowTime(), id: nextId() },
-              ]);
+              // 流式块已由 *_BLOCK_END 定格（streamRef 已清）：权威结果只是
+              // 同一内容的回执——末尾已是相同文本时不重复 append（否则
+              // plan/工具轮较长的 turn 会出现两条一样的回复）。
+              setEntries((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.kind === "msg" && last.text === text) return prev;
+                return [
+                  ...prev,
+                  { kind: "msg", role: "assistant", text, ts: nowTime(), id: nextId() },
+                ];
+              });
             }
           } else if (cur) {
             // 权威结果无文本（纯工具轮）：仅结束流式态

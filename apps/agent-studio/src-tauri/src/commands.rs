@@ -1119,6 +1119,12 @@ pub fn list_sessions(
             continue;
         }
         let session_id = entry.file_name().to_string_lossy().to_string();
+        // 成员会话残留过滤：team 委派的成员会话是固定 id（team-<成员名>），
+        // 现已落 studio-member 独立域；历史版本留在 studio 域的（team- 前缀
+        // 但后缀既非 12 位 hex 也非 main）不是用户会话，温和隐藏不列出。
+        if is_member_session_id(&session_id) {
+            continue;
+        }
         let state_path = entry.path().join("agent_state.json");
         let updated_at = state_path
             .metadata()
@@ -1279,15 +1285,42 @@ pub async fn delete_session(
     mode: String,
     session_id: String,
 ) -> Result<(), String> {
-    let handle = state.handle(&workspace_id, &mode)?;
-    let session = handle.session(&session_id).await;
-    session.interrupt().await;
-    handle.drop_session(&session_id).await;
+    // mode 参数保留（前端 invoke 签名兼容）；清理范围已覆盖所有 mode。
+    let _ = &mode;
+    // 跨 mode 清理：solo/team 是两个 handle 实例（缓存 key 含 mode），
+    // 只清当前 mode 的话，另一 mode 内存里的运行态还在——若该会话正在
+    // 那边跑 turn，结束后会重新落盘，表现为「删了又复活」。
+    let prefix = format!("{workspace_id}:");
+    let affected: Vec<Arc<AgentHandle>> = state
+        .handles
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(k, _)| k.starts_with(&prefix))
+        .map(|(_, h)| Arc::clone(h))
+        .collect();
+    for handle in &affected {
+        let session = handle.session(&session_id).await;
+        session.interrupt().await;
+        handle.drop_session(&session_id).await;
+    }
     let dir = session_dir(&state, &workspace_id, &session_id)?;
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 成员会话 id 判定：`team-<成员名>`（成员名 sanitize 后非 12 位 hex、
+/// 非 `main`）。用户会话是 `team-main` / `team-<12hex>` / `solo-*` / `main`。
+fn is_member_session_id(session_id: &str) -> bool {
+    let Some(suffix) = session_id.strip_prefix("team-") else {
+        return false;
+    };
+    if suffix == "main" {
+        return false;
+    }
+    suffix.len() != 12 || !suffix.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn unix_now() -> u64 {

@@ -18,6 +18,9 @@ use agentscope_core::{Msg, RuntimeContext};
 use agentscope_harness::HarnessAgent;
 use serde_json::{json, Value};
 
+/// 成员会话的 user 域：与用户会话（`studio`）隔离的持久化命名空间。
+pub const MEMBER_USER_ID: &str = "studio-member";
+
 /// 成员表：成员名 → 成员 agent（装配期固定）。
 pub type MemberRegistry = Arc<HashMap<String, Arc<HarnessAgent>>>;
 
@@ -100,8 +103,11 @@ impl TeamDelegateTool {
         // 的持久成员会话）。名字经 sanitize 防路径/存储键注入。
         let session_key = agentscope_harness::agent::sanitize_identifier(member)
             .unwrap_or_else(|| "member".to_string());
+        // 成员会话落独立 user 域（state/studio-member/）：与用户会话
+        // （state/studio/）隔离——侧栏列表只扫 studio 域，成员会话不出现、
+        // 不被误删（固定 id 的成员会话在委派时按需重建，属内部实现细节）。
         let rc = RuntimeContext::new()
-            .with_user_id("studio")
+            .with_user_id(MEMBER_USER_ID)
             .with_session_id(format!("team-{session_key}"));
 
         // 无事件出口：保持原非流式路径（黑盒执行，只回最终答复）。

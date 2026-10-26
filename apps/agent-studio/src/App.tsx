@@ -196,7 +196,11 @@ export default function App() {
     try {
       await api.deleteSession(wsId, modes[wsId] ?? "solo", sessionId);
       flash("会话已删除");
-      if (sessionByWs[wsId] === sessionId) newSession(wsId);
+      // 当前生效会话（显式选中或 default 回退）被删时才开新会话——
+      // 只比 sessionByWs 会漏掉「尚未显式选中、正用着 default」的情形，
+      // 删除后继续指向已删 id，下次发消息就把会话「复活」了。
+      const current = sessionByWs[wsId] ?? defaultSession(modes[wsId] ?? "solo");
+      if (current === sessionId) newSession(wsId);
     } catch (e) {
       fail(String(e));
     }
@@ -285,7 +289,18 @@ export default function App() {
                     onSessionChange={(sid) =>
                       setSessionByWs((prev) => ({ ...prev, [w.id]: sid }))
                     }
-                    onModeChange={(m) => setModes((prev) => ({ ...prev, [w.id]: m }))}
+                    onModeChange={(m) => {
+                      setModes((prev) => ({ ...prev, [w.id]: m }));
+                      // 会话 id 带 mode 前缀（main/team-main/<mode>-<id>）：
+                      // 切换后前缀不符就跳到该模式的默认会话，避免 solo 的
+                      // 历史与运行态混进 team（反之亦然）。
+                      const cur = sessionByWs[w.id] ?? defaultSession(m);
+                      const belongs =
+                        cur === "main" ? m === "solo" : cur.startsWith(m === "team" ? "team-" : "");
+                      if (!belongs) {
+                        setSessionByWs((prev) => ({ ...prev, [w.id]: defaultSession(m) }));
+                      }
+                    }}
                   />
                 </div>
               );
