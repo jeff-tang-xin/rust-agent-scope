@@ -28,6 +28,7 @@ use agentscope_core::middleware::Middleware;
 use agentscope_core::model::Model;
 use agentscope_core::session::SessionLogStore;
 use agentscope_core::state::AgentStateStore;
+use agentscope_core::permission::PermissionContextState;
 use agentscope_core::tool::Toolkit;
 use tokio::sync::mpsc;
 
@@ -507,6 +508,9 @@ pub struct HarnessAgentBuilder {
     plan_file_dir: Option<String>,
     middlewares: Vec<Arc<dyn Middleware>>,
     model_resolver: Option<ModelResolver>,
+    /// 新会话的初始权限上下文（透传给 delegate ReActAgent，见
+    /// `ReActAgentBuilder::permission_context`）。
+    permission_context: Option<PermissionContextState>,
 }
 
 impl HarnessAgentBuilder {
@@ -532,6 +536,7 @@ impl HarnessAgentBuilder {
             plan_file_dir: None,
             middlewares: Vec::new(),
             model_resolver: None,
+            permission_context: None,
         }
     }
 
@@ -562,6 +567,12 @@ impl HarnessAgentBuilder {
     /// 最大迭代轮数。
     pub fn max_iters(mut self, max_iters: usize) -> Self {
         self.max_iters = Some(max_iters);
+        self
+    }
+
+    /// 新会话的初始权限上下文（透传给 delegate ReActAgent）。
+    pub fn permission_context(mut self, context: PermissionContextState) -> Self {
+        self.permission_context = Some(context);
         self
     }
 
@@ -758,6 +769,9 @@ impl HarnessAgentBuilder {
         }
         if let Some(session_id) = &self.default_session_id {
             builder = builder.default_session_id(session_id.clone());
+        }
+        if let Some(context) = self.permission_context {
+            builder = builder.permission_context(context);
         }
         for middleware in self.middlewares {
             builder = builder.middleware(middleware);

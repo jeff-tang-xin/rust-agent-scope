@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
+import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 
 type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean }
@@ -14,7 +14,8 @@ type Entry =
   | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean; open?: boolean }
   | { kind: "image"; id: string; dataUrl: string; ts?: string }
   | { kind: "file"; id: string; name: string; ts?: string }
-  | { kind: "indicator"; id: string; text: string; ts?: string };
+  | { kind: "indicator"; id: string; text: string; ts?: string }
+  | { kind: "confirm"; id: string; calls: Array<Record<string, unknown>>; ts?: string };
 
 let entrySeq = 0;
 const nextId = () => `e${++entrySeq}`;
@@ -605,6 +606,20 @@ export default function Conversation({
           }
           break;
         }
+        case "REQUIRE_USER_CONFIRM": {
+          // 权限 HITL：引擎请求用户授权（工具调用已挂起，未执行）。
+          finalizeStreams();
+          const calls = Array.isArray(ev.tool_calls)
+            ? (ev.tool_calls as Array<Record<string, unknown>>)
+            : [];
+          if (calls.length > 0) {
+            setEntries((prev) => [
+              ...prev,
+              { kind: "confirm", calls, ts: nowTime(), id: nextId() },
+            ]);
+          }
+          break;
+        }
         case "AGENT_RESULT": {
           // 最终消息是权威来源：替换最后一个文本流块并结束流式态。
           const result = ev.result as { content?: unknown } | undefined;
@@ -741,6 +756,49 @@ export default function Conversation({
     }
   };
 
+  // 权限裁决：对挂起的工具调用答复（批准/始终允许/拒绝）→ 确认消息恢复回合。
+  // tool_call 原样回传事件里的 ToolUse 块（core 据此定位 ASKING 块）；
+  // 「始终允许」附带 allow 规则，core 写进会话权限上下文后对后续调用生效。
+  const resolveConfirm = async (
+    entryId: string,
+    call: Record<string, unknown>,
+    confirmed: boolean,
+    always: boolean,
+  ) => {
+    // 从卡片移除该调用（全部裁决完卡片自然消失）。
+    setEntries((prev) =>
+      prev
+        .map((e) => {
+          if (e.id !== entryId || e.kind !== "confirm") return e;
+          const rest = e.calls.filter((x) => x !== call);
+          return rest.length > 0 ? { ...e, calls: rest } : null;
+        })
+        .filter((x): x is Entry => x !== null),
+    );
+    const result: ConfirmResultPayload = {
+      confirmed,
+      tool_call: call,
+      ...(always
+        ? {
+            rules: [
+              {
+                tool_name: String(call.name ?? ""),
+                behavior: "allow",
+                source: "user",
+              },
+            ],
+          }
+        : {}),
+    };
+    setBusy(true);
+    try {
+      await api.sendConfirm(workspace.id, runtimeMode, sessionId, [result]);
+    } catch (err) {
+      setBusy(false);
+      setError(String(err));
+    }
+  };
+
   // steer：turn 运行中补充指令（排队 → 当前 turn 结算后自动续轮消费）。
   const steer = async () => {
     const text = input.trim();
@@ -843,6 +901,51 @@ export default function Conversation({
       return (
         <div className="msg user">
           <div className="bubble file-chip">📎 {e.name}</div>
+        </div>
+      );
+    }
+    if (e.kind === "confirm") {
+      // 权限审批卡：每个挂起调用独立裁决；全部裁决后卡片消失。
+      return (
+        <div className="entry-card confirm-card">
+          <div className="entry-head confirm-head">
+            <span className="entry-icon">🔐</span>
+            <span className="entry-title">工具授权请求</span>
+            <span className="status ask">待确认</span>
+          </div>
+          <div className="entry-body confirm-body">
+            {e.calls.map((call, idx) => {
+              const name = String(call.name ?? "tool");
+              const input = JSON.stringify(call.input ?? {}, null, 2);
+              return (
+                <div key={String(call.id ?? idx)} className="confirm-call">
+                  <div className="confirm-tool">{name}</div>
+                  <pre className="tool-io">{input}</pre>
+                  <div className="confirm-actions">
+                    <button
+                      className="btn primary"
+                      onClick={() => void resolveConfirm(e.id, call, true, false)}
+                    >
+                      批准
+                    </button>
+                    <button
+                      className="btn ghost"
+                      title="批准并始终允许该工具（写入会话权限规则）"
+                      onClick={() => void resolveConfirm(e.id, call, true, true)}
+                    >
+                      始终允许
+                    </button>
+                    <button
+                      className="btn danger"
+                      onClick={() => void resolveConfirm(e.id, call, false, false)}
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       );
     }

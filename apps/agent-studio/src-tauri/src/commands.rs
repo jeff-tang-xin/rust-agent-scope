@@ -555,6 +555,7 @@ fn merge_with_pending(session: &SessionHandle, message: &str) -> String {
 /// turn 互斥 → 合并排队 steer → 事件循环逐事件 emit → 结算（有未消费
 /// steer 自动续轮，对齐 Java settleSession）→ 终态通知。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command 参数即 invoke 协议，不宜打包结构体
 pub async fn send_message(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -564,6 +565,9 @@ pub async fn send_message(
     message: String,
     // 附件（图片 → Image 块，其他文件 → Data 块；base64 内联）。
     attachments: Option<Vec<AttachmentInput>>,
+    // 权限确认结果（AgentScope HITL：对 REQUIRE_USER_CONFIRM 挂起调用的答复）。
+    // 非空时本消息是「确认答复」：携带 CONFIRM_RESULTS metadata，不进聊天输入。
+    confirm_results: Option<Vec<agentscope_core::event::ConfirmResult>>,
 ) -> Result<TurnInfo, String> {
     let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
@@ -597,10 +601,18 @@ pub async fn send_message(
             });
         }
     }
-    if blocks.is_empty() {
-        return Err("message is empty".to_string());
-    }
-    let user_msg = Msg::new(Role::User, "user", blocks);
+    // 确认答复：无聊天内容，metadata 携带确认结果（core 恢复时提取应用，
+    // 且不重放成用户消息——对齐 Java METADATA_CONFIRM_RESULTS 语义）。
+    let user_msg = if let Some(results) = confirm_results.filter(|r| !r.is_empty()) {
+        Msg::new(Role::User, "user", Vec::new()).with_metadata(serde_json::json!({
+            agentscope_core::message::metadata_keys::CONFIRM_RESULTS: results,
+        }))
+    } else {
+        if blocks.is_empty() {
+            return Err("message is empty".to_string());
+        }
+        Msg::new(Role::User, "user", blocks)
+    };
 
     let turn_id = uuid::Uuid::new_v4().to_string();
     let agent = Arc::clone(handle.agent.delegate());

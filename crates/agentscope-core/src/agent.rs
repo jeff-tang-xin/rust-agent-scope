@@ -13,9 +13,9 @@ use uuid::Uuid;
 
 use crate::context::RuntimeContext;
 use crate::error::{Error, Result};
-use crate::event::{AgentEvent, AgentEventEmitter, AgentEventKind};
+use crate::event::{AgentEvent, AgentEventEmitter, AgentEventKind, ConfirmResult};
 use crate::memory::Memory;
-use crate::message::{ContentBlock, GenerateReason, Msg};
+use crate::message::{ContentBlock, GenerateReason, Msg, ToolCallState};
 use crate::session::execution::SessionExecution;
 use crate::session::journal::SessionLog;
 use crate::session::projection::SessionProjection;
@@ -29,7 +29,9 @@ use crate::middleware::{
     ReasoningInput, ToolCallSpec,
 };
 use crate::model::{ChatRequest, GenerateOptions, Model, ModelEvent};
-use crate::permission::{PermissionChecker, PermissionDecision, PermissionEngine};
+use crate::permission::{
+    PermissionChecker, PermissionContextState, PermissionDecision, PermissionEngine,
+};
 use crate::tool::{ToolContext, ToolOutput, Toolkit};
 
 /// Agent 抽象：统一执行入口（对应 Java 版统一的 `call()` / `streamEvents()`）。
@@ -73,6 +75,8 @@ pub struct ReActAgent {
     /// 中间件链（构造时按 `order()` 排好序，不可变）
     middlewares: MiddlewareChain,
     permission: Arc<dyn PermissionChecker>,
+    /// 新会话的初始权限上下文（见 builder `permission_context`）。
+    permission_context: Option<PermissionContextState>,
     max_iters: usize,
 }
 
@@ -99,6 +103,9 @@ pub struct ReActAgentBuilder {
     default_session_id: Option<String>,
     middlewares: Vec<Arc<dyn Middleware>>,
     permission: Arc<dyn PermissionChecker>,
+    /// 新会话的初始权限上下文（对应 Java builder `permissionContext`）：
+    /// 仅在会话状态首次创建时写入；已有会话以持久化状态为准。
+    permission_context: Option<PermissionContextState>,
     max_iters: usize,
 }
 
@@ -117,6 +124,7 @@ impl ReActAgent {
             default_session_id: None,
             middlewares: Vec::new(),
             permission: Arc::new(crate::permission::AllowAll),
+            permission_context: None,
             max_iters: 10,
         }
     }
@@ -543,12 +551,18 @@ impl ReActAgent {
             });
         }
         let is_new = !slots.contains_key(&key);
+        let initial_permission = self.permission_context.clone();
         let entry = slots
             .entry(key)
             .or_insert_with(|| {
-                SlotEntry::new(
-                    AgentState::with_session_id(&session_id).with_user_id(user_id.clone()),
-                )
+                let mut state =
+                    AgentState::with_session_id(&session_id).with_user_id(user_id.clone());
+                // 新会话注入 builder 的初始权限上下文（对应 Java initialPermissionContext）；
+                // 已有会话由 reload_state 从持久层恢复，不受影响。
+                if let Some(context) = initial_permission {
+                    state.permission_context = context;
+                }
+                SlotEntry::new(state)
             })
             .clone();
         Ok((
@@ -903,7 +917,16 @@ impl ReActAgent {
         let state_handle = ctx.state_handle();
         self.middlewares
             .notify_state_ready(&ctx.runtime, &mut input.msgs, &state_handle);
+        // 权限 HITL：输入里的确认答复先应用（批准/拒绝），再过滤掉不进对话历史
+        // （对齐 Java `validateAndAcceptConfirmResults` + resume 滤掉确认答复）。
+        let confirm_results = extract_confirm_results(&input.msgs);
+        if !confirm_results.is_empty() {
+            self.apply_confirm_results(ctx, confirm_results).await?;
+        }
         for msg in &input.msgs {
+            if has_confirm_results(msg) {
+                continue;
+            }
             ctx.push(msg.clone());
         }
         // 会话开始：基线 / 运行 / 回合 / 输入
@@ -970,7 +993,32 @@ impl ReActAgent {
                 return Ok(final_msg);
             }
             ctx.push(assistant.clone());
-            self.acting(ctx, &assistant).await?;
+            if self.acting(ctx, &assistant).await? {
+                // 权限 HITL 挂起：本轮终止，等用户确认（对齐 Java ASKING pause，
+                // caller MUST supply confirmations）。回合正常结算：状态已落盘，
+                // ASKING 块在 context 里；确认结果随下一次 call 的
+                // `CONFIRM_RESULTS` metadata 传入。
+                let final_msg = assistant.with_generate_reason(GenerateReason::PermissionAsking);
+                if let Some(recorder) = &ctx.recorder {
+                    recorder.result(&final_msg);
+                }
+                if let (Some(recorder), Some(execution)) = (&ctx.recorder, &ctx.execution) {
+                    execution
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .continue_or_close(recorder)
+                        .map_err(Error::Session)?;
+                }
+                ctx.emit(AgentEventKind::AgentResult {
+                    result: final_msg.clone(),
+                })
+                .await;
+                ctx.emit(AgentEventKind::AgentEnd {
+                    reply_id: ctx.reply_id.clone(),
+                })
+                .await;
+                return Ok(final_msg);
+            }
         }
 
         ctx.emit(AgentEventKind::ExceedMaxIters {
@@ -1057,7 +1105,7 @@ impl ReActAgent {
     }
 
     /// 一轮 acting：中间件改写待执行的工具调用后逐个执行，结果写回状态。
-    async fn acting(&self, ctx: &RunContext, assistant: &Msg) -> Result<()> {
+    async fn acting(&self, ctx: &RunContext, assistant: &Msg) -> Result<bool> {
         let tool_calls: Vec<ToolCallSpec> = assistant
             .tool_uses()
             .into_iter()
@@ -1073,9 +1121,172 @@ impl ReActAgent {
         let input = self
             .middlewares
             .apply_acting(&ctx.runtime, ActingInput { tool_calls });
+        // 批量预裁决（对齐 Java `evaluatePermissions`）：RequireApproval 的调用
+        // 标 ASKING 挂起、不执行；其余按裁决执行。
+        let mut asking: Vec<ContentBlock> = Vec::new();
         for call in input.tool_calls {
-            self.execute_tool(ctx, &call.id, &call.name, &call.input)
+            let decision = self.decide_permission(ctx, &call.name, &call.input).await;
+            if matches!(decision, PermissionDecision::RequireApproval) {
+                self.mark_tool_call_state(ctx, &call.id, ToolCallState::Asking)?;
+                asking.push(ContentBlock::ToolUse {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    input: call.input.clone(),
+                    state: Some(ToolCallState::Asking),
+                    content: None,
+                });
+                continue;
+            }
+            self.execute_tool(ctx, &call.id, &call.name, &call.input, decision)
                 .await?;
+        }
+        if !asking.is_empty() {
+            // 权限 HITL：挂起等待用户确认（对齐 Java `RequireUserConfirmEvent`）；
+            // 确认结果经 metadata `CONFIRM_RESULTS` 随下一次 call 传入。
+            ctx.emit(AgentEventKind::RequireUserConfirm {
+                reply_id: ctx.reply_id.clone(),
+                tool_calls: asking,
+            })
+            .await;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// 权限裁决（对齐 Java `evaluateOne`）：会话权限上下文非 trivial（配置了规则
+    /// 或非默认模式）时走规则引擎；trivial 时退化为工具自检（PermissionChecker，
+    /// builder 默认 AllowAll）。引擎在锁外裁决：锁内只 clone 快照，
+    /// 避免 std Mutex 跨 await 持有。
+    async fn decide_permission(
+        &self,
+        ctx: &RunContext,
+        name: &str,
+        input: &Value,
+    ) -> PermissionDecision {
+        let permission_context = ctx
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .permission_context
+            .clone();
+        if permission_context.is_trivial() {
+            self.permission.check(name, input).await
+        } else {
+            let tool = self.toolkit.get(name).map(|tool| tool.as_ref());
+            PermissionEngine::new(permission_context)
+                .check(tool, name, input)
+                .await
+        }
+    }
+
+    /// 把 context 里指定 id 的 ToolUse 块标记为目标状态（对齐 Java
+    /// `MessageUtils.replaceToolUseBlocks` + `ToolUseBlock.withState`）。
+    fn mark_tool_call_state(
+        &self,
+        ctx: &RunContext,
+        id: &str,
+        target: ToolCallState,
+    ) -> Result<()> {
+        let mut state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+        'outer: for msg in state.context.iter_mut().rev() {
+            for block in msg.content.iter_mut() {
+                if let ContentBlock::ToolUse {
+                    id: block_id,
+                    state: block_state,
+                    ..
+                } = block
+                {
+                    if block_id == id {
+                        *block_state = Some(target);
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 指定 id 的 ToolUse 块当前是否处于目标状态。
+    fn tool_call_state_is(
+        &self,
+        ctx: &RunContext,
+        id: &str,
+        expected: ToolCallState,
+    ) -> Result<bool> {
+        let state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+        for msg in state.context.iter().rev() {
+            for block in &msg.content {
+                if let ContentBlock::ToolUse {
+                    id: block_id,
+                    state: block_state,
+                    ..
+                } = block
+                {
+                    if block_id == id {
+                        return Ok(*block_state == Some(expected));
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// 应用权限 HITL 确认结果（对齐 Java `applyConfirmResults`）：
+    /// 批准 → ToolUse 块升 ALLOWED + 建议规则写进会话权限上下文，随后直接执行
+    /// （对齐 Java resume 的 direct execute，不再过权限门）；拒绝 → 写 DENIED
+    /// 工具结果（完整 denied 生命周期）。确认只能引用当前 ASKING 的调用
+    /// （对齐 Java `validateAndAcceptConfirmResults`）。
+    async fn apply_confirm_results(&self, ctx: &RunContext, results: Vec<ConfirmResult>) -> Result<()> {
+        let mut approved: Vec<ToolCallSpec> = Vec::new();
+        for result in results {
+            let ContentBlock::ToolUse {
+                id,
+                name,
+                input,
+                ..
+            } = result.tool_call
+            else {
+                continue;
+            };
+            if !self.tool_call_state_is(ctx, &id, ToolCallState::Asking)? {
+                return Err(Error::InvalidInput(format!(
+                    "confirm result references a tool call that is not asking: {id}"
+                )));
+            }
+            if result.confirmed {
+                // 建议规则写进会话权限上下文（对齐 Java `permissionEngine.addRule`；
+                // Rust 侧引擎每次从状态快照构造，写状态即对后续裁决生效）
+                if let Some(rules) = result.rules {
+                    let mut state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+                    for rule in rules {
+                        state.permission_context.add_allow_rule(rule);
+                    }
+                }
+                self.mark_tool_call_state(ctx, &id, ToolCallState::Allowed)?;
+                approved.push(ToolCallSpec { id, name, input });
+            } else {
+                let reason = result
+                    .reason
+                    .unwrap_or_else(|| "Permission denied by user".to_string());
+                self.execute_tool(
+                    ctx,
+                    &id,
+                    &name,
+                    &input,
+                    PermissionDecision::Deny(reason),
+                )
+                .await?;
+            }
+        }
+        for call in approved {
+            self.execute_tool(
+                ctx,
+                &call.id,
+                &call.name,
+                &call.input,
+                PermissionDecision::Allow,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -1095,6 +1306,7 @@ impl ReActAgent {
         id: &str,
         name: &str,
         input: &Value,
+        decision: PermissionDecision,
     ) -> Result<()> {
         // 工具调用上下文：reply_id / 调用 id / agent 身份 / 事件出口
         // （对应 Java ToolExecutionContext + ToolEmitter 注入）
@@ -1133,27 +1345,11 @@ impl ReActAgent {
             }),
         )?;
 
-        // 权限门控：非 Allow 以对应状态的结果回传给模型，由模型自行调整；
-        // 工具执行失败同样不中断循环（对齐 Java ToolResultState 语义：
-        // denied 是独立状态，与执行错误 error 区分）
-        // 权限门控：会话权限上下文非 trivial（配置了规则或非默认模式）时走规则引擎
-        // （对齐 Java `useEngine = !permissionContext.isTrivial()`）；
-        // trivial 时退化为工具自检（PermissionChecker，builder 默认 AllowAll）。
-        // 引擎在锁外裁决：锁内只 clone 快照，避免 std Mutex 跨 await 持有。
-        let permission_context = ctx
-            .state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .permission_context
-            .clone();
-        let decision = if permission_context.is_trivial() {
-            self.permission.check(name, input).await
-        } else {
-            let tool = self.toolkit.get(name).map(|tool| tool.as_ref());
-            PermissionEngine::new(permission_context)
-                .check(tool, name, input)
-                .await
-        };
+        // 权限门控：裁决由 acting 预裁决传入（`decide_permission`）；恢复路径对
+        // 已批准的调用传 Allow 直执行（对齐 Java resume 的 direct execute）。
+        // 非 Allow 以对应状态的结果回传给模型，由模型自行调整；工具执行失败
+        // 同样不中断循环（对齐 Java ToolResultState 语义：denied 是独立状态，
+        // 与执行错误 error 区分）。
         let allowed = matches!(decision, PermissionDecision::Allow);
         if allowed {
             // 执行前快照：工具一旦产生副作用，执行前的状态就是唯一的现场
@@ -1195,8 +1391,10 @@ impl ReActAgent {
             PermissionDecision::Deny(reason) => {
                 ToolOutput::denied(format!("permission denied: {reason}"))
             }
+            // 正常流程下 RequireApproval 在 acting 预裁决时已被拦截挂起，
+            // 不会走到这里；保留分支仅为 match 穷尽（防御性兜底）。
             PermissionDecision::RequireApproval => ToolOutput::denied(
-                "permission denied: user approval required (approval flow not supported yet)",
+                "permission denied: user approval required",
             ),
         };
         let result_state = output.state;
@@ -1243,6 +1441,38 @@ impl ReActAgent {
         ctx.push(result);
         Ok(())
     }
+}
+
+/// 提取输入消息里的权限确认结果（metadata `agentscope_confirm_results`，
+/// 对齐 Java `Msg.METADATA_CONFIRM_RESULTS` + `extractConfirmResults`）。
+fn extract_confirm_results(msgs: &[Msg]) -> Vec<ConfirmResult> {
+    let mut collected = Vec::new();
+    for msg in msgs {
+        let Some(raw) = msg
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.as_object())
+            .and_then(|object| object.get(crate::message::metadata_keys::CONFIRM_RESULTS))
+        else {
+            continue;
+        };
+        match serde_json::from_value::<Vec<ConfirmResult>>(raw.clone()) {
+            Ok(results) => collected.extend(results),
+            Err(_) => continue,
+        }
+    }
+    collected
+}
+
+/// 消息是否携带权限确认结果（这类消息是「对未决请求的答复」，不进对话历史；
+/// 与 `session::execution` 的同名判定同源）。
+fn has_confirm_results(message: &Msg) -> bool {
+    message
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.as_object())
+        .map(|object| object.contains_key(crate::message::metadata_keys::CONFIRM_RESULTS))
+        .unwrap_or(false)
 }
 
 #[async_trait::async_trait]
@@ -1403,6 +1633,13 @@ impl ReActAgentBuilder {
         self
     }
 
+    /// 新会话的初始权限上下文（对应 Java builder `permissionContext`）。
+    /// 规则表非空或模式非 Default 时，工具执行路径启用 PermissionEngine 门控。
+    pub fn permission_context(mut self, context: PermissionContextState) -> Self {
+        self.permission_context = Some(context);
+        self
+    }
+
     /// ReAct 循环最大迭代次数（默认 10）。
     pub fn max_iters(mut self, max_iters: usize) -> Self {
         self.max_iters = max_iters;
@@ -1437,6 +1674,7 @@ impl ReActAgentBuilder {
             slots: Arc::new(Mutex::new(HashMap::new())),
             middlewares: MiddlewareChain::new(self.middlewares),
             permission: self.permission,
+            permission_context: self.permission_context,
             max_iters: self.max_iters,
         })
     }

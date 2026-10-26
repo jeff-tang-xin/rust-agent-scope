@@ -134,6 +134,15 @@ export interface AgentEventPayload {
   event: { type?: string; [key: string]: unknown };
 }
 
+/** 权限确认结果（对齐 core ConfirmResult；tool_call 原样回传事件里的 ToolUse 块）。 */
+export interface ConfirmResultPayload {
+  confirmed: boolean;
+  tool_call: Record<string, unknown>;
+  /** 「始终允许」时附带的建议规则（allow 行为，写进会话权限上下文）。 */
+  rules?: Array<{ tool_name: string; rule_content?: string | null; behavior: string; source: string }>;
+  reason?: string;
+}
+
 export interface TurnFinishedPayload {
   workspace_id: string;
   session_id: string;
@@ -177,6 +186,19 @@ export const api = {
     attachments?: AttachmentInput[],
   ) =>
     invoke<TurnInfo>("send_message", { workspaceId, mode, sessionId, message, attachments }),
+  sendConfirm: (
+    workspaceId: string,
+    mode: string,
+    sessionId: string,
+    confirmResults: ConfirmResultPayload[],
+  ) =>
+    invoke<TurnInfo>("send_message", {
+      workspaceId,
+      mode,
+      sessionId,
+      message: "",
+      confirmResults,
+    }),
   steerTurn: (workspaceId: string, mode: string, sessionId: string, message: string) =>
     invoke<boolean>("steer_turn", { workspaceId, mode, sessionId, message }),
   interruptTurn: (workspaceId: string, mode: string, sessionId: string) =>

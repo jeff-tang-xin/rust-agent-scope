@@ -1028,3 +1028,19 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 
 /* 回答：accent 小标识 */
 .msg-role { font-size: 11px; font-weight: 600; color: var(--accent); margin: 0 0 2px 4px; }
+
+
+/* ---------- 权限审批卡（AgentScope HITL：REQUIRE_USER_CONFIRM） ---------- */
+.status.ask { color: var(--amber); }
+.confirm-card { border-color: var(--amber); }
+.confirm-card .confirm-head { cursor: default; }
+.confirm-body { padding: 8px 12px; display: flex; flex-direction: column; gap: 10px; }
+.confirm-call { display: flex; flex-direction: column; gap: 6px; }
+.confirm-tool {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--amber);
+}
+.confirm-actions { display: flex; gap: 8px; }
+.confirm-actions .btn { padding: 3px 12px; font-size: 12px; }

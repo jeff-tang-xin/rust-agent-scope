@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use agentscope_core::model::Model;
+use agentscope_core::permission::{PermissionBehavior, PermissionContextState, PermissionRule};
 use agentscope_core::state::{AgentStateStore, JsonFileAgentStateStore};
 use agentscope_core::tool::Toolkit;
 use agentscope_core::agent::ReActAgent;
@@ -348,6 +349,11 @@ pub fn build_agent(
     if agent.max_iters > 0 {
         builder = builder.max_iters(agent.max_iters as usize);
     }
+    // 危险工具默认走用户授权（AgentScope 权限引擎 ask 规则，会话级持久化）：
+    // shell 执行与文件写入/编辑需用户批准后才会执行；目录穿越由 Sandboxed
+    // 文件层硬拒（path escapes workspace root），不在此列。
+    builder = builder.permission_context(default_permission_context());
+
     if mode == StudioMode::Solo {
         // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
         // 能力，否则 enter_plan_mode 报 "plan mode is not enabled on this agent"。
@@ -386,6 +392,22 @@ pub fn build_agent(
     }
     let agent = builder.build()?;
     Ok(BuiltAgent { agent })
+}
+
+/// 新会话的默认权限上下文：危险工具（shell 执行、文件写入/编辑）→ ask 行为，
+/// 由 AgentScope 权限引擎在执行前挂起等待用户确认（对齐 Java ask 规则语义）。
+/// 用户批准时可附带 allow 规则（「始终允许」），写进会话权限上下文后生效。
+fn default_permission_context() -> PermissionContextState {
+    let mut context = PermissionContextState::default();
+    for tool in ["execute", "write_file", "edit_file"] {
+        context.add_ask_rule(PermissionRule {
+            tool_name: tool.to_string(),
+            rule_content: None,
+            behavior: PermissionBehavior::Ask,
+            source: "project".to_string(),
+        });
+    }
+    context
 }
 
 /// 系统提示：用户定义 + 模式职责说明（对齐 service 的 agent instructions 面）。

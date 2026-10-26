@@ -32,6 +32,10 @@ pub struct ConfirmResult {
     pub confirmed: bool,
     /// 被确认的工具调用。
     pub tool_call: ContentBlock,
+    /// 批准时用户选择的建议规则（如「始终允许」→ allow 规则），批准后
+    /// 写入会话权限上下文（对应 Java `permissionEngine.addRule`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Vec<crate::permission::PermissionRule>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -416,6 +420,7 @@ mod tests {
             confirm_results: vec![ConfirmResult {
                 confirmed: false,
                 tool_call: tool_use,
+                rules: None,
                 reason: Some("危险命令".into()),
             }],
         });
