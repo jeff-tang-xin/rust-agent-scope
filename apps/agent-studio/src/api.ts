@@ -183,8 +183,8 @@ export const api = {
   listSessions: (workspaceId: string) =>
     invoke<SessionSummary[]>("list_sessions", { workspaceId }),
 
-  listWorkspaceFiles: (workspaceId: string) =>
-    invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceId }),
+  listWorkspaceFiles: (workspaceId: string, path?: string) =>
+    invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceId, path: path ?? null }),
   readWorkspaceFile: (workspaceId: string, path: string) =>
     invoke<string>("read_workspace_file", { workspaceId, path }),
 

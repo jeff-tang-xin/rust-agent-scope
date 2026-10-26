@@ -955,3 +955,55 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
   font-size: 14px;
 }
 .file-panel-tab:hover { color: var(--accent); background: var(--bg-hover); }
+
+/* ── 时间线卡片：思考 / 工具 / 回答 三类视觉区分 ───────────────────── */
+.entry-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 6px 0;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+.entry-card.streaming {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+}
+.entry-head:hover { background: var(--bg-hover); }
+.entry-icon { flex-shrink: 0; }
+.entry-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-title.tool-name { font-family: ui-monospace, Consolas, monospace; }
+.entry-caret { margin-left: auto; color: var(--text-dim); flex-shrink: 0; }
+.entry-body { padding: 8px 12px; border-top: 1px solid var(--border); max-height: 320px; overflow-y: auto; }
+
+/* 思考：灰色调（从属内容） */
+.think-card { border-left: 3px solid #8a8f98; }
+.think-card .entry-title { color: var(--text-dim); }
+
+/* 工具：accent 色调（动作内容） */
+.tool-card { border-left: 3px solid var(--accent); }
+.tool-io {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.tool-io.out { margin-bottom: 0; border-left: 2px solid var(--border); }
+
+/* 回答：accent 小标识 */
+.msg-role { font-size: 11px; font-weight: 600; color: var(--accent); margin: 0 0 2px 4px; }

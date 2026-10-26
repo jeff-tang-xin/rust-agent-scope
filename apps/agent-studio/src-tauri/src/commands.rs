@@ -242,9 +242,8 @@ pub struct WorkspaceFileEntry {
     pub size: u64,
 }
 
-/// 文件列表上限（条目数 / 递归深度），防大目录拖垮 IPC。
-const FILE_LIST_LIMIT: usize = 500;
-const FILE_LIST_DEPTH: usize = 4;
+/// 单层目录条目上限（懒加载：前端点开哪层列哪层，无深度限制）。
+const DIR_LIST_LIMIT: usize = 2000;
 
 /// 解析工作区文件根（与 build_agent 的锚定目录同一解析），不存在则创建。
 fn resolve_ws_root(state: &AppState, workspace_id: &str) -> Result<std::path::PathBuf, String> {
@@ -261,25 +260,22 @@ fn resolve_ws_root(state: &AppState, workspace_id: &str) -> Result<std::path::Pa
     Ok(root)
 }
 
-/// 递归列目录：跳过隐藏条目与常见噪音目录，深度/条目数受限。
-fn walk_files(
-    root: &std::path::Path,
-    dir: &std::path::Path,
-    depth: usize,
-    out: &mut Vec<WorkspaceFileEntry>,
-) {
-    if depth > FILE_LIST_DEPTH || out.len() >= FILE_LIST_LIMIT {
-        return;
-    }
+/// 单层列目录：目录优先、名称升序；跳过隐藏条目（`.ox` 例外——数据规范
+/// 目录要可见）与常见噪音目录；单层上限防大目录拖垮 IPC。
+fn list_dir_entries(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<WorkspaceFileEntry>) {
     let read = match std::fs::read_dir(dir) {
         Ok(r) => r,
         Err(_) => return, // 无权限/已消失的目录静默跳过
     };
     let mut entries: Vec<_> = read.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
+    entries.sort_by(|a, b| {
+        let da = a.path().is_dir();
+        let db = b.path().is_dir();
+        db.cmp(&da).then_with(|| a.file_name().cmp(&b.file_name()))
+    });
+    for e in entries.into_iter().take(DIR_LIST_LIMIT) {
         let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
+        if name.starts_with('.') && name != ".ox" {
             continue;
         }
         let p = e.path();
@@ -299,24 +295,37 @@ fn walk_files(
             .replace('\\', "/");
         let size = if is_dir { 0 } else { e.metadata().map(|m| m.len()).unwrap_or(0) };
         out.push(WorkspaceFileEntry { path: rel, is_dir, size });
-        if is_dir {
-            walk_files(root, &p, depth + 1, out);
-        }
-        if out.len() >= FILE_LIST_LIMIT {
-            return;
-        }
     }
 }
 
+/// 列工作区文件（懒加载）：`path` 为空列根层，否则列该目录的直接子项。
+/// 深层目录由前端逐层请求——不再受递归深度/总量限制，大项目也不卡。
 #[tauri::command]
 pub fn list_workspace_files(
     state: State<'_, AppState>,
     workspace_id: String,
+    path: Option<String>,
 ) -> Result<Vec<WorkspaceFileEntry>, String> {
     let root = resolve_ws_root(&state, &workspace_id)?;
+    let canon_root = root.canonicalize().map_err(|e| format!("resolve root failed: {e}"))?;
+    let target = match path.as_deref().map(str::trim) {
+        None | Some("") => canon_root.clone(),
+        Some(rel) => {
+            let canon = root
+                .join(rel)
+                .canonicalize()
+                .map_err(|e| format!("resolve path failed: {e}"))?;
+            if !canon.starts_with(&canon_root) {
+                return Err("path escapes workspace root".to_string());
+            }
+            if !canon.is_dir() {
+                return Err("path is not a directory".to_string());
+            }
+            canon
+        }
+    };
     let mut out = Vec::new();
-    walk_files(&root, &root, 0, &mut out);
-    out.truncate(FILE_LIST_LIMIT);
+    list_dir_entries(&canon_root, &target, &mut out);
     Ok(out)
 }
 

@@ -10,8 +10,8 @@ import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, typ
 
 type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean }
-  | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean; ts?: string }
-  | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean }
+  | { kind: "tool"; id: string; callId: string; name: string; args: string; result?: string; ok?: boolean; open?: boolean; ts?: string }
+  | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean; open?: boolean }
   | { kind: "image"; id: string; dataUrl: string; ts?: string }
   | { kind: "file"; id: string; name: string; ts?: string }
   | { kind: "indicator"; id: string; text: string; ts?: string };
@@ -141,88 +141,63 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** 平铺文件条目 → 树（按 path 分层；目录节点可折叠）。 */
-type FileNode = { name: string; path: string; isDir: boolean; size: number; children: FileNode[] };
+/** 目录懒加载状态：dirPath → 该层直接子项（点开哪层加载哪层）。 */
 
-function buildFileTree(files: WorkspaceFileEntry[]): FileNode[] {
-  const root: FileNode = { name: "", path: "", isDir: true, size: 0, children: [] };
-  for (const f of files) {
-    const parts = f.path.split("/");
-    let cur = root;
-    for (let i = 0; i < parts.length; i++) {
-      const isLeaf = i === parts.length - 1;
-      const path = parts.slice(0, i + 1).join("/");
-      let next = cur.children.find((c) => c.path === path);
-      if (!next) {
-        next = {
-          name: parts[i],
-          path,
-          isDir: isLeaf ? f.is_dir : true,
-          size: isLeaf ? f.size : 0,
-          children: [],
-        };
-        cur.children.push(next);
-      }
-      cur = next;
-    }
-  }
-  return root.children;
-}
-
-/** 收集所有目录 path（折叠默认集）。 */
-function collectDirs(nodes: FileNode[], into: Set<string>) {
-  for (const n of nodes) {
-    if (n.isDir) {
-      into.add(n.path);
-      collectDirs(n.children, into);
-    }
-  }
-}
-
-function TreeItem({
-  node,
+function DirList({
+  dirPath,
   depth,
-  collapsed,
-  toggle,
+  dirs,
+  expanded,
+  onToggle,
   onOpen,
 }: {
-  node: FileNode;
+  dirPath: string;
   depth: number;
-  collapsed: Set<string>;
-  toggle: (path: string) => void;
+  dirs: Map<string, WorkspaceFileEntry[]>;
+  expanded: Set<string>;
+  onToggle: (path: string, isDir: boolean) => void;
   onOpen: (path: string) => void;
 }) {
-  const open = !collapsed.has(node.path);
+  const items = dirs.get(dirPath);
+  if (!items) {
+    return <div className="file-empty" style={{ paddingLeft: 8 + depth * 12 }}>加载中…</div>;
+  }
   return (
     <>
-      <button
-        className={`file-row ${node.isDir ? "is-dir" : ""}`}
-        style={{ paddingLeft: 8 + depth * 12 }}
-        title={node.path}
-        onClick={() => (node.isDir ? toggle(node.path) : onOpen(node.path))}
-      >
-        <span className="file-icon">{node.isDir ? (open ? "📂" : "📁") : "📄"}</span>
-        <span className="file-name">{node.name}</span>
-        {!node.isDir && node.size > 0 && <span className="file-size">{fmtSize(node.size)}</span>}
-      </button>
-      {node.isDir &&
-        open &&
-        node.children.map((c) => (
-          <TreeItem
-            key={c.path}
-            node={c}
-            depth={depth + 1}
-            collapsed={collapsed}
-            toggle={toggle}
-            onOpen={onOpen}
-          />
-        ))}
+      {items.map((it) => (
+        <div key={it.path}>
+          <button
+            className={`file-row ${it.is_dir ? "is-dir" : ""}`}
+            style={{ paddingLeft: 8 + depth * 12 }}
+            title={it.path}
+            onClick={() => (it.is_dir ? onToggle(it.path, true) : onOpen(it.path))}
+          >
+            <span className="file-icon">{it.is_dir ? (expanded.has(it.path) ? "📂" : "📁") : "📄"}</span>
+            <span className="file-name">{it.path.split("/").pop()}</span>
+            {!it.is_dir && it.size > 0 && <span className="file-size">{fmtSize(it.size)}</span>}
+          </button>
+          {it.is_dir && expanded.has(it.path) && (
+            <DirList
+              dirPath={it.path}
+              depth={depth + 1}
+              dirs={dirs}
+              expanded={expanded}
+              onToggle={onToggle}
+              onOpen={onOpen}
+            />
+          )}
+        </div>
+      ))}
+      {items.length === 0 && (
+        <div className="file-empty" style={{ paddingLeft: 8 + depth * 12 }}>（空目录）</div>
+      )}
     </>
   );
 }
 
 /** 右侧文件面板：工作区根目录的文件树（与 agent 文件工具同一锚定目录）。
- *  目录默认折叠；点击文件预览文本；turn 结束自动刷新；可整体收起。 */
+ *  懒加载：点开哪层加载哪层（后端单层列目录，无深度/总量限制）；
+ *  目录默认折叠；点击文件预览文本；turn 结束自动刷新已展开层；可整体收起。 */
 function FilePanel({
   workspaceId,
   onCollapse,
@@ -230,41 +205,62 @@ function FilePanel({
   workspaceId: string;
   onCollapse: () => void;
 }) {
-  const [files, setFiles] = useState<WorkspaceFileEntry[]>([]);
+  const [dirs, setDirs] = useState<Map<string, WorkspaceFileEntry[]>>(new Map());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
-  // 折叠的目录集合（默认全部折叠——目录默认非打开）。
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const expandedRef = useRef<Set<string>>(expanded);
+  expandedRef.current = expanded;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const list = await api.listWorkspaceFiles(workspaceId);
-      setFiles(list);
-      const dirs = new Set<string>();
-      collectDirs(buildFileTree(list), dirs);
-      setCollapsed(dirs);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId]);
+  const loadDir = useCallback(
+    async (dirPath: string) => {
+      try {
+        const list = await api.listWorkspaceFiles(workspaceId, dirPath || undefined);
+        setDirs((prev) => {
+          const next = new Map(prev);
+          next.set(dirPath, list);
+          return next;
+        });
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [workspaceId],
+  );
 
+  // 初始/切换工作区：重置到根层（目录默认折叠）。
   useEffect(() => {
-    void load();
-  }, [load]);
+    setDirs(new Map());
+    setExpanded(new Set());
+    setPreview(null);
+    setError("");
+    setLoading(true);
+    void loadDir("").finally(() => setLoading(false));
+  }, [loadDir]);
 
+  // turn 结束刷新：根层 + 已展开的目录层（agent 可能改了文件）。
   useEffect(() => {
     const un = onTurnFinished((p) => {
-      if (p.workspace_id === workspaceId) void load();
+      if (p.workspace_id !== workspaceId) return;
+      void loadDir("");
+      for (const d of expandedRef.current) void loadDir(d);
     });
     return () => {
       un.then((f) => f());
     };
-  }, [workspaceId, load]);
+  }, [workspaceId, loadDir]);
+
+  const toggle = (path: string, isDir: boolean) => {
+    if (!isDir) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+    if (!dirs.has(path)) void loadDir(path);
+  };
 
   const open = async (path: string) => {
     try {
@@ -275,22 +271,21 @@ function FilePanel({
     }
   };
 
-  const toggle = (path: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-
-  const tree = buildFileTree(files);
+  const refresh = () => {
+    setLoading(true);
+    void loadDir("")
+      .then(() => {
+        for (const d of expandedRef.current) void loadDir(d);
+      })
+      .finally(() => setLoading(false));
+  };
 
   return (
     <aside className="file-panel">
       <div className="file-panel-head">
         <span>文件</span>
         <span className="spacer" />
-        <button className="icon-btn" title="刷新" onClick={() => void load()}>
+        <button className="icon-btn" title="刷新" onClick={refresh}>
           ⟳
         </button>
         <button className="icon-btn" title="收起面板" onClick={onCollapse}>
@@ -299,18 +294,15 @@ function FilePanel({
       </div>
       {error && <div className="file-panel-error">{error}</div>}
       <div className="file-tree">
-        {loading && files.length === 0 && <div className="file-empty">加载中…</div>}
-        {!loading && files.length === 0 && <div className="file-empty">（空目录）</div>}
-        {tree.map((n) => (
-          <TreeItem
-            key={n.path}
-            node={n}
-            depth={0}
-            collapsed={collapsed}
-            toggle={toggle}
-            onOpen={(p) => void open(p)}
-          />
-        ))}
+        {loading && dirs.get("") === undefined && <div className="file-empty">加载中…</div>}
+        <DirList
+          dirPath=""
+          depth={0}
+          dirs={dirs}
+          expanded={expanded}
+          onToggle={toggle}
+          onOpen={(p) => void open(p)}
+        />
       </div>
       {preview && (
         <div className="modal-mask" onClick={() => setPreview(null)}>
@@ -377,13 +369,20 @@ export default function Conversation({
 
   // 收流：把流式中的 msg/thinking 条目置为完成（打字机停走、光标消失）。
   // 块切换 / 块结束 / 工具开始 / AGENT_RESULT / AGENT_END / turn 终态都会调用。
+  /** 用户点击卡片头部：手动展开/收起（覆盖 running 展开 / done 收起的默认行为）。 */
+  const toggleEntry = useCallback((id: string) => {
+    upsert(id, (e) => ("open" in e ? { ...e, open: !(e.open ?? true) } : e));
+  }, [upsert]);
+
   const finalizeStreams = useCallback(() => {
     const cur = streamRef.current;
     streamRef.current = null;
     if (cur) {
-      upsert(cur.entryId, (e) =>
-        e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
-      );
+      upsert(cur.entryId, (e) => {
+        if (e.kind === "msg") return { ...e, streaming: false };
+        if (e.kind === "thinking") return { ...e, streaming: false, open: false }; // 思考结束默认收起
+        return e;
+      });
     }
   }, [upsert]);
 
@@ -466,7 +465,7 @@ export default function Conversation({
             streamRef.current = { kind: "thinking", blockId, entryId: id };
             setEntries((prev) => [
               ...prev,
-              { kind: "thinking", text: delta, ts: nowTime(), streaming: true, id },
+              { kind: "thinking", text: delta, ts: nowTime(), streaming: true, open: true, id },
             ]);
           } else {
             upsert(cur.entryId, (e) => (e.kind === "thinking" ? { ...e, text: e.text + delta } : e));
@@ -487,7 +486,7 @@ export default function Conversation({
           toolRef.current.set(callKey, id);
           setEntries((prev) => [
             ...prev,
-            { kind: "tool", callId: callKey, name, args: "", ts: nowTime(), id },
+            { kind: "tool", callId: callKey, name, args: "", ts: nowTime(), open: true, id },
           ]);
           break;
         }
@@ -540,7 +539,7 @@ export default function Conversation({
           const entryId = toolRef.current.get(callKey);
           const ok = /^success$/i.test(String(ev.state ?? "success"));
           if (entryId) {
-            upsert(entryId, (e) => (e.kind === "tool" ? { ...e, ok } : e));
+            upsert(entryId, (e) => (e.kind === "tool" ? { ...e, ok, open: false } : e)); // 结束默认收起
           }
           break;
         }
@@ -726,9 +725,12 @@ export default function Conversation({
       return (
         <div className={`msg ${e.role}`}>
           {e.role === "assistant" ? (
-            <div className="bubble md">
-              <Typewriter text={e.text} active={e.streaming === true} />
-            </div>
+            <>
+              <div className="msg-role">✦ 回答</div>
+              <div className="bubble md">
+                <Typewriter text={e.text} active={e.streaming === true} />
+              </div>
+            </>
           ) : (
             <div className="bubble">{e.text}</div>
           )}
@@ -736,12 +738,21 @@ export default function Conversation({
       );
     }
     if (e.kind === "thinking") {
+      // 思考卡片：思考中默认展开，块结束默认收起；点击头部切换。
+      const open = e.open ?? e.streaming === true;
       return (
-        <div className="thinking-block">
-          <div className="thinking-label">💭 思考过程</div>
-          <div className="thinking-text md">
-            <Typewriter text={e.text} active={e.streaming === true} />
-          </div>
+        <div className={`entry-card think-card${e.streaming ? " streaming" : ""}`}>
+          <button className="entry-head" onClick={() => toggleEntry(e.id)}>
+            <span className="entry-icon">💭</span>
+            <span className="entry-title">思考过程</span>
+            {e.streaming && <span className="status running">thinking…</span>}
+            <span className="entry-caret">{open ? "▾" : "▸"}</span>
+          </button>
+          {open && (
+            <div className="entry-body thinking-text md">
+              <Typewriter text={e.text} active={e.streaming === true} />
+            </div>
+          )}
         </div>
       );
     }
@@ -762,23 +773,27 @@ export default function Conversation({
     if (e.kind === "indicator") {
       return <div className="turn-indicator">{e.text}</div>;
     }
+    // 工具卡片：运行中默认展开（参数/输出实时可见），结束默认收起；点击头部切换。
+    const open = e.open ?? e.ok === undefined;
     return (
-      <div className="tool-block">
-        <div className="tool-head">
-          <span>🛠</span>
-          <span className="tool-name">{e.name}</span>
+      <div className={`entry-card tool-card${e.ok === undefined ? " streaming" : ""}`}>
+        <button className="entry-head" onClick={() => toggleEntry(e.id)}>
+          <span className="entry-icon">🛠</span>
+          <span className="entry-title tool-name">{e.name}</span>
           <span className={`status ${e.ok === undefined ? "" : e.ok ? "ok" : "err"}`}>
             {e.ok === undefined ? "running…" : e.ok ? "done" : "error"}
           </span>
-        </div>
-        <div className="tool-body">
-          {e.args && `in: ${e.args}\n`}
-          {e.result !== undefined && `out: ${e.result}`}
-        </div>
+          <span className="entry-caret">{open ? "▾" : "▸"}</span>
+        </button>
+        {open && (
+          <div className="entry-body tool-body">
+            {e.args && <pre className="tool-io">{e.args}</pre>}
+            {e.result !== undefined && <pre className="tool-io out">{e.result}</pre>}
+          </div>
+        )}
       </div>
     );
   };
-
   // 切换运行方式（solo ↔ team）：以当前 agent 重新进入（App 层换实例重开会话）。
   const switchMode = (next: "solo" | "team") => {
     if (next === runtimeMode) return;
