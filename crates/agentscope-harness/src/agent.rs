@@ -1169,4 +1169,74 @@ mod tests {
         agent.close();
         std::fs::remove_dir_all(&workspace).ok();
     }
+
+    /// 复现 studio「失忆」：JsonFileAgentStateStore（Legacy 模式）+ 固定 session，
+    /// 第二次 call 时模型必须能看到第一轮的问答（studio 同款装配的最小复现）。
+    #[tokio::test]
+    async fn legacy_jsonfile_context_reaches_model_across_calls() {
+        use agentscope_core::model::ChatRequest;
+        use std::sync::Mutex as StdMutex;
+
+        struct RecordingModel {
+            requests: StdMutex<Vec<ChatRequest>>,
+        }
+        #[async_trait::async_trait]
+        impl Model for RecordingModel {
+            async fn call(&self, request: ChatRequest) -> agentscope_core::error::Result<ChatResponse> {
+                self.requests.lock().unwrap().push(request);
+                Ok(ChatResponse {
+                    content: vec![ContentBlock::Text {
+                        text: "好的".to_string(),
+                    }],
+                    usage: None,
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+        }
+
+        let workspace = temp_dir("legacy-ctx");
+        let store = Arc::new(
+            agentscope_core::state::JsonFileAgentStateStore::new(workspace.join("state")).unwrap(),
+        );
+        let model = Arc::new(RecordingModel {
+            requests: StdMutex::new(Vec::new()),
+        });
+        let agent = HarnessAgentBuilder::new()
+            .name("assistant")
+            .sys_prompt("你是助手")
+            .model(model.clone() as Arc<dyn Model>)
+            .workspace(&workspace)
+            .state_store(store)
+            .default_session_id("main")
+            .build()
+            .unwrap();
+
+        let rc = || {
+            RuntimeContext::new()
+                .with_user_id("studio")
+                .with_session_id("main")
+        };
+        agent
+            .call(rc(), Msg::user("user", "第一问：我叫什么？"))
+            .await
+            .unwrap();
+        agent
+            .call(rc(), Msg::user("user", "第二问：我刚才问了什么？"))
+            .await
+            .unwrap();
+
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "模型应被调用两次");
+        let joined = requests[1]
+            .messages
+            .iter()
+            .map(|m| m.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("第一问"), "第二次请求缺少第一轮用户消息：{joined}");
+        assert!(joined.contains("好的"), "第二次请求缺少第一轮助手回复：{joined}");
+        assert!(joined.contains("第二问"), "缺少本次输入：{joined}");
+        agent.close();
+        std::fs::remove_dir_all(&workspace).ok();
+    }
 }
