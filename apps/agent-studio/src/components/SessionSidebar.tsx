@@ -9,6 +9,18 @@ import {
   type WorkspaceConfig,
 } from "../api";
 
+/** 会话更新时间（unix 秒）→ 相对时间；非法值返回空串。 */
+function relTime(unixSec: number): string {
+  if (!unixSec) return "";
+  const diff = Date.now() - unixSec * 1000;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 172_800_000) return "昨天";
+  const d = new Date(unixSec * 1000);
+  return `${d.getMonth() + 1}-${d.getDate()}`;
+}
+
 export default function SessionSidebar({
   workspaces,
   selectedId,
@@ -177,8 +189,11 @@ export default function SessionSidebar({
                         <span className="ss-session-name">
                           {s.title || s.session_id.slice(0, 12)}
                         </span>
-                        <span className="ss-session-state">
-                          {isRunning ? "运行中" : child ? "子代理" : `${s.messages} 条`}
+                        <span
+                          className="ss-session-state"
+                          title={`${new Date(s.updated_at * 1000).toLocaleString("zh-CN", { hour12: false })} · ${s.messages} 条消息`}
+                        >
+                          {isRunning ? "运行中" : child ? "子代理" : relTime(s.updated_at) || `${s.messages} 条`}
                         </span>
                       </button>
                       <span className="ss-session-actions">

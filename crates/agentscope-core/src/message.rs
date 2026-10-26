@@ -287,6 +287,30 @@ pub struct Msg {
     pub generate_reason: Option<GenerateReason>,
 }
 
+/// 当前 UTC 时间的 ISO-8601 字符串（如 `2026-10-26T08:15:30.123Z`）。
+/// 核心库不引 chrono：unix 秒 → civil 日期用 Hinnant 的 civil-from-days 算法。
+fn now_iso() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() as i64;
+    let millis = now.subsec_millis();
+    let days = secs.div_euclid(86_400);
+    let sod = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    let (h, mi, s) = (sod / 3600, (sod % 3600) / 60, sod % 60);
+    format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{millis:03}Z")
+}
+
 impl Msg {
     /// 用完整内容块列表构造消息。
     pub fn new(role: Role, name: impl Into<String>, content: Vec<ContentBlock>) -> Self {
@@ -296,7 +320,9 @@ impl Msg {
             role,
             content,
             metadata: None,
-            timestamp: None,
+            // 消息产生时间在构造点统一注入（历史视图/会话列表都依赖它；
+            // 反序列化旧状态文件时缺字段仍回落 None，serde default 兜底）。
+            timestamp: Some(now_iso()),
             usage: None,
             generate_reason: None,
         }
@@ -416,6 +442,55 @@ mod tests {
         let msg = Msg::user("user", "你好");
         assert_eq!(msg.role, Role::User);
         assert_eq!(msg.text(), "你好");
+    }
+
+    #[test]
+    fn new_message_stamps_iso_timestamp() {
+        // 构造点统一注入时间戳：格式必须是 ISO-8601 UTC（前端 fmtTime 依赖）。
+        let msg = Msg::user("user", "hi");
+        let ts = msg.timestamp.expect("timestamp should be stamped");
+        let re = regex_check(&ts);
+        assert!(re, "not ISO-8601: {ts}");
+    }
+
+    /// 轻量校验 `YYYY-MM-DDTHH:MM:SS.mmmZ` 形状（不引 regex 依赖）。
+    fn regex_check(ts: &str) -> bool {
+        let b = ts.as_bytes();
+        b.len() == 24
+            && b[4] == b'-'
+            && b[7] == b'-'
+            && b[10] == b'T'
+            && b[13] == b':'
+            && b[16] == b':'
+            && b[19] == b'.'
+            && b[23] == b'Z'
+            && ts[..23].chars().skip(4).all(|c| c.is_ascii_digit() || c == '-' || c == 'T' || c == ':' || c == '.')
+    }
+
+    #[test]
+    fn civil_from_days_known_epochs() {
+        // 已知历元往返：1970-01-01 → 2026-10-26（含闰年 2024-02-29）。
+        fn iso_at(secs: i64, millis: u32) -> String {
+            let days = secs.div_euclid(86_400);
+            let sod = secs.rem_euclid(86_400);
+            let z = days + 719_468;
+            let era = z.div_euclid(146_097);
+            let doe = z.rem_euclid(146_097);
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let y = yoe + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            let y = if m <= 2 { y + 1 } else { y };
+            let (h, mi, s) = (sod / 3600, (sod % 3600) / 60, sod % 60);
+            format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{millis:03}Z")
+        }
+        assert_eq!(iso_at(0, 0), "1970-01-01T00:00:00.000Z");
+        // 2026-10-26 00:00:00 UTC = 1790304000
+        assert_eq!(iso_at(1_792_972_800, 123), "2026-10-26T00:00:00.123Z");
+        // 2024-02-29 12:34:56 UTC（闰日）= 1709212496
+        assert_eq!(iso_at(1_709_210_096, 0), "2024-02-29T12:34:56.000Z");
     }
 
     #[test]

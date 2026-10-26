@@ -231,7 +231,16 @@ body {
 }
 
 .messages { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 24px; display: flex; flex-direction: column; }
-.messages-inner { display: flex; flex-direction: column; gap: 12px; min-width: 0; max-width: 100%; }
+.messages-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  /* 限宽居中：大屏下一行文字过长难读（聊天应用惯例 ~880px） */
+  max-width: 880px;
+  margin: 0 auto;
+}
 
 /* ---- 事件时间线：左侧竖线 + 节点圆点 + 时间标签 ----
  * 竖线画在每行的 ::before 上（top/bottom 各外扩一个 gap 桥接行距），
@@ -244,7 +253,7 @@ body {
   top: -14px;
   bottom: -14px;
   width: 1px;
-  background: var(--border-lighter);
+  background: var(--border-light);
 }
 .tl-row:first-child::before { top: 0; }
 .tl-row:last-child::before { bottom: 0; }
@@ -266,7 +275,7 @@ body {
 .tl-indicator .tl-dot { opacity: 0.6; }
 
 .tl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.tl-time { font-size: 10px; color: var(--text-faint); margin: 0 4px 2px; }
+.tl-time { font-size: 11px; color: var(--text-dim); margin: 0 4px 2px; }
 .tl-user .tl-body { align-items: flex-end; }
 .tl-user .tl-time { margin-right: 8px; }
 
