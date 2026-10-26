@@ -201,7 +201,7 @@ body {
   overflow: hidden;
 }
 .file-row:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.file-row.is-dir { cursor: default; font-weight: 600; }
+.file-row.is-dir { cursor: pointer; font-weight: 600; }
 .file-icon { flex-shrink: 0; }
 .file-name { overflow: hidden; text-overflow: ellipsis; }
 .file-size { margin-left: auto; flex-shrink: 0; font-size: 11px; color: var(--text-dim, #888); }
@@ -855,3 +855,103 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .thinking-text.md { font-size: 12.5px; }
 .thinking-text.md h1, .thinking-text.md h2, .thinking-text.md h3 { font-size: 1em; }
 .thinking-text.md pre, .thinking-text.md table { font-size: 11.5px; }
+
+/* ── 会话视图布局：左栏（工作区+session） | 会话 | 文件面板 ─────────── */
+.workspace-layout { display: flex; flex: 1; min-width: 0; min-height: 0; }
+
+.session-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  background: var(--bg-panel);
+}
+.ss-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px 6px;
+}
+.ss-ws {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ss-ws:hover { background: var(--bg-hover); }
+.ss-ws.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ss-ws-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-ws-actions { display: none; gap: 2px; }
+.ss-ws:hover .ss-ws-actions { display: flex; }
+.ss-sessions { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px; }
+.ss-session {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 18px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.ss-session:hover { background: var(--bg-hover); }
+.ss-session.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ss-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+.ss-dot.run { background: #2da44e; box-shadow: 0 0 4px #2da44e; }
+.ss-session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-session-state { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.ss-empty { padding: 4px 18px; font-size: 11px; color: var(--text-dim); }
+.ss-new {
+  margin: 2px 8px 0 18px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ss-new:hover { color: var(--accent); border-color: var(--accent); }
+.ss-create {
+  margin-top: auto;
+  padding: 7px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ss-create:hover { color: var(--accent); border-color: var(--accent); }
+
+/* 文件面板收起后的细条入口 */
+.file-panel-tab {
+  width: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+}
+.file-panel-tab:hover { color: var(--accent); background: var(--bg-hover); }

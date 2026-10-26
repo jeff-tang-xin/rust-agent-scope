@@ -6,17 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  api,
-  onAgentEvent,
-  onTurnFinished,
-  onTurnStarted,
-  type AgentConfig,
-  type AgentEventPayload,
-  type SessionSummary,
-  type WorkspaceConfig,
-  type WorkspaceFileEntry,
-} from "../api";
+import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 
 type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean }
@@ -151,19 +141,111 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** 右侧文件面板：工作区根目录的文件列表（与 agent 文件工具同一锚定目录）。
- *  点击文件预览文本；turn 结束自动刷新（agent 产出文件后列表跟随）。 */
-function FilePanel({ workspaceId }: { workspaceId: string }) {
+/** 平铺文件条目 → 树（按 path 分层；目录节点可折叠）。 */
+type FileNode = { name: string; path: string; isDir: boolean; size: number; children: FileNode[] };
+
+function buildFileTree(files: WorkspaceFileEntry[]): FileNode[] {
+  const root: FileNode = { name: "", path: "", isDir: true, size: 0, children: [] };
+  for (const f of files) {
+    const parts = f.path.split("/");
+    let cur = root;
+    for (let i = 0; i < parts.length; i++) {
+      const isLeaf = i === parts.length - 1;
+      const path = parts.slice(0, i + 1).join("/");
+      let next = cur.children.find((c) => c.path === path);
+      if (!next) {
+        next = {
+          name: parts[i],
+          path,
+          isDir: isLeaf ? f.is_dir : true,
+          size: isLeaf ? f.size : 0,
+          children: [],
+        };
+        cur.children.push(next);
+      }
+      cur = next;
+    }
+  }
+  return root.children;
+}
+
+/** 收集所有目录 path（折叠默认集）。 */
+function collectDirs(nodes: FileNode[], into: Set<string>) {
+  for (const n of nodes) {
+    if (n.isDir) {
+      into.add(n.path);
+      collectDirs(n.children, into);
+    }
+  }
+}
+
+function TreeItem({
+  node,
+  depth,
+  collapsed,
+  toggle,
+  onOpen,
+}: {
+  node: FileNode;
+  depth: number;
+  collapsed: Set<string>;
+  toggle: (path: string) => void;
+  onOpen: (path: string) => void;
+}) {
+  const open = !collapsed.has(node.path);
+  return (
+    <>
+      <button
+        className={`file-row ${node.isDir ? "is-dir" : ""}`}
+        style={{ paddingLeft: 8 + depth * 12 }}
+        title={node.path}
+        onClick={() => (node.isDir ? toggle(node.path) : onOpen(node.path))}
+      >
+        <span className="file-icon">{node.isDir ? (open ? "📂" : "📁") : "📄"}</span>
+        <span className="file-name">{node.name}</span>
+        {!node.isDir && node.size > 0 && <span className="file-size">{fmtSize(node.size)}</span>}
+      </button>
+      {node.isDir &&
+        open &&
+        node.children.map((c) => (
+          <TreeItem
+            key={c.path}
+            node={c}
+            depth={depth + 1}
+            collapsed={collapsed}
+            toggle={toggle}
+            onOpen={onOpen}
+          />
+        ))}
+    </>
+  );
+}
+
+/** 右侧文件面板：工作区根目录的文件树（与 agent 文件工具同一锚定目录）。
+ *  目录默认折叠；点击文件预览文本；turn 结束自动刷新；可整体收起。 */
+function FilePanel({
+  workspaceId,
+  onCollapse,
+}: {
+  workspaceId: string;
+  onCollapse: () => void;
+}) {
   const [files, setFiles] = useState<WorkspaceFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
+  // 折叠的目录集合（默认全部折叠——目录默认非打开）。
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setFiles(await api.listWorkspaceFiles(workspaceId));
+      const list = await api.listWorkspaceFiles(workspaceId);
+      setFiles(list);
+      const dirs = new Set<string>();
+      collectDirs(buildFileTree(list), dirs);
+      setCollapsed(dirs);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -193,6 +275,16 @@ function FilePanel({ workspaceId }: { workspaceId: string }) {
     }
   };
 
+  const toggle = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+
+  const tree = buildFileTree(files);
+
   return (
     <aside className="file-panel">
       <div className="file-panel-head">
@@ -201,23 +293,23 @@ function FilePanel({ workspaceId }: { workspaceId: string }) {
         <button className="icon-btn" title="刷新" onClick={() => void load()}>
           ⟳
         </button>
+        <button className="icon-btn" title="收起面板" onClick={onCollapse}>
+          »
+        </button>
       </div>
       {error && <div className="file-panel-error">{error}</div>}
       <div className="file-tree">
         {loading && files.length === 0 && <div className="file-empty">加载中…</div>}
         {!loading && files.length === 0 && <div className="file-empty">（空目录）</div>}
-        {files.map((f) => (
-          <button
-            key={f.path}
-            className={`file-row ${f.is_dir ? "is-dir" : ""}`}
-            style={{ paddingLeft: 8 + (f.path.split("/").length - 1) * 12 }}
-            title={f.path}
-            onClick={() => !f.is_dir && void open(f.path)}
-          >
-            <span className="file-icon">{f.is_dir ? "📁" : "📄"}</span>
-            <span className="file-name">{f.path.split("/").pop()}</span>
-            {!f.is_dir && f.size > 0 && <span className="file-size">{fmtSize(f.size)}</span>}
-          </button>
+        {tree.map((n) => (
+          <TreeItem
+            key={n.path}
+            node={n}
+            depth={0}
+            collapsed={collapsed}
+            toggle={toggle}
+            onOpen={(p) => void open(p)}
+          />
         ))}
       </div>
       {preview && (
@@ -241,8 +333,9 @@ export default function Conversation({
   workspace,
   agent,
   runtimeMode,
+  sessionId,
+  onSessionChange,
   onModeChange,
-  onBack,
 }: {
   /** 会话所属工作区（命令与事件都按工作区归流）。 */
   workspace: WorkspaceConfig;
@@ -250,15 +343,14 @@ export default function Conversation({
   agent: AgentConfig;
   /** 运行方式（solo/team）：协同工作区可切换，切换即重开会话（新实例）。 */
   runtimeMode: "solo" | "team";
+  /** 当前 session（受控：App 层持有，左栏可切换）。 */
+  sessionId: string;
+  onSessionChange: (sessionId: string) => void;
   onModeChange: (mode: "solo" | "team") => void;
-  onBack: () => void;
 }) {
   // 仅协同工作区有 solo/team 运行方式切换；ops/db 工具面由类型决定。
   const isCollab = workspace.kind === "collab";
-  // 会话管理：默认 main（team 运行用独立默认会话，与 solo 空间分开）；
-  // 可切换历史会话或新建（对齐 service 的多会话语义）。
-  const [sessionId, setSessionId] = useState(runtimeMode === "team" ? "team-main" : "main");
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // 会话由 App 层受控（左栏切换/新建）；本组件只消费 sessionId。
   const [entries, setEntries] = useState<Entry[]>([]);
   const [input, setInput] = useState("");
   // 待发送附件（base64 内联；preview 仅图片用于本地预览）。
@@ -268,6 +360,8 @@ export default function Conversation({
   const [busy, setBusy] = useState(false);
   // 拖拽附件进行中（容器高亮提示）。
   const [dragActive, setDragActive] = useState(false);
+  // 文件面板显隐（可收起成细条）。
+  const [filesOpen, setFilesOpen] = useState(true);
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -292,19 +386,6 @@ export default function Conversation({
       );
     }
   }, [upsert]);
-
-  const reloadSessions = useCallback(async () => {
-    try {
-      setSessions(await api.listSessions(workspace.id));
-    } catch {
-      /* 会话发现失败不阻塞主流程 */
-    }
-  }, [workspace.id]);
-
-  // 下拉选项：已落盘会话 + 当前会话（新建未发消息时尚未落盘，补临时项）。
-  const sessionOptions = sessions.some((s) => s.session_id === sessionId)
-    ? sessions
-    : [{ session_id: sessionId, messages: 0, updated_at: 0 }, ...sessions];
 
   // 初始加载：历史（块级回放）+ plan 状态 + 会话列表（重启后从 AgentState 恢复）。
   useEffect(() => {
@@ -331,11 +412,10 @@ export default function Conversation({
       setEntries(restored);
     });
     api.getPlanStatus(workspace.id, runtimeMode, sessionId).then((s) => alive && setPlanActive(s.active));
-    void reloadSessions();
     return () => {
       alive = false;
     };
-  }, [workspace.id, sessionId, runtimeMode, reloadSessions]);
+  }, [workspace.id, sessionId, runtimeMode]);
 
   // 事件归流：只处理 (agent_id, session_id) 匹配本组件的事件。
   useEffect(() => {
@@ -507,7 +587,6 @@ export default function Conversation({
       if (payload.outcome === "failed") {
         setError(payload.error ?? "turn failed");
       }
-      void reloadSessions(); // 消息已落盘，刷新会话摘要
     });
 
     // steer 续轮：后端自动开启的新 turn（前端保持 busy、提示用户）。
@@ -523,7 +602,7 @@ export default function Conversation({
       un2.then((f) => f());
       un3.then((f) => f());
     };
-  }, [workspace.id, sessionId, upsert, finalizeStreams, reloadSessions]);
+  }, [workspace.id, sessionId, upsert, finalizeStreams]);
 
   // 自动滚底。
   useEffect(() => {
@@ -608,8 +687,7 @@ export default function Conversation({
 
   const newSession = () => {
     const id = `${runtimeMode}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-    setSessionId(id);
-    setSessions((prev) => [{ session_id: id, messages: 0, updated_at: 0 }, ...prev]);
+    onSessionChange(id);
   };
 
   const togglePlan = async () => {
@@ -633,7 +711,6 @@ export default function Conversation({
     try {
       await api.clearSession(workspace.id, runtimeMode, sessionId);
       setEntries([]);
-      void reloadSessions();
     } catch (e) {
       setError(String(e));
     }
@@ -731,9 +808,6 @@ export default function Conversation({
         }}
       >
       <div className="session-bar">
-        <button className="btn ghost" onClick={onBack} title="返回工作区列表（任务继续在后台跑）">
-          ←
-        </button>
         {isCollab && (
           <div className="mode-switch">
             <button
@@ -754,21 +828,6 @@ export default function Conversation({
             </button>
           </div>
         )}
-        <select
-          className="field"
-          style={{ width: 260 }}
-          value={sessionId}
-          onChange={(e) => setSessionId(e.target.value)}
-        >
-          {/* 当前会话可能尚未落盘（新建未发消息），补一个临时选项保证选中生效 */}
-          {sessionOptions.map((s) => (
-            <option key={s.session_id} value={s.session_id}>
-              {s.session_id === sessionId
-                ? `● ${s.session_id.slice(0, 8)}`
-                : `${s.session_id.slice(0, 8)} · ${s.messages} msgs`}
-            </option>
-          ))}
-        </select>
         <button className="btn ghost" onClick={newSession} disabled={busy}>
           + New session
         </button>
@@ -895,7 +954,17 @@ export default function Conversation({
       </div>
       {dragActive && <div className="drop-hint">松开以添加附件</div>}
       </div>
-      <FilePanel workspaceId={workspace.id} />
+      {filesOpen ? (
+        <FilePanel workspaceId={workspace.id} onCollapse={() => setFilesOpen(false)} />
+      ) : (
+        <button
+          className="file-panel-tab"
+          title="展开文件面板"
+          onClick={() => setFilesOpen(true)}
+        >
+          📁
+        </button>
+      )}
     </div>
   );
 }
