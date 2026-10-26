@@ -18,7 +18,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use agentscope_core::Msg;
 use agentscope_harness::HarnessAgent;
 use serde::Serialize;
 use tokio::sync::Mutex as AsyncMutex;
@@ -32,19 +31,16 @@ pub struct TurnInfo {
     pub status: &'static str,
 }
 
-/// per-session 运行态：turn 互斥 + 可中断句柄 + steer 排队。
+/// per-session 运行态：turn 互斥 + 可中断句柄。
+///
+/// steer 不在这里排队：运行中插入直接进 `ReActAgent::push_steer` 的步边界
+/// 注入通道（下一 step 生效）；调用结束后未被消费的残留由 agent
+/// `take_steers` 取走（send_message 合并 / turn_chain 结算续轮）。
 pub struct SessionHandle {
     /// turn 互斥（同一会话串行 turn；try_lock 失败即拒绝，前端提示等待）。
     turn_lock: Arc<AsyncMutex<()>>,
     /// 运行中 turn 的中止句柄（interrupt 语义；turn 结束时清空）。
     running: AsyncMutex<Option<tokio::task::AbortHandle>>,
-    /// 运行中收到的转向指令（steer）。
-    ///
-    /// Legacy 历史模式下无法在当前 turn 内注入（execution 链路需要 EventLog +
-    /// 持久日志后端），这里排队；turn 结束后由事件循环取出自动开启续轮
-    /// （对齐 Java `SessionTurnRunner` 结算时「有未消费 steer 就继续跑」的
-    /// settleSession 语义）。用 std Mutex：只在同步临界区读写，不跨 await。
-    pending_steers: std::sync::Mutex<Vec<Msg>>,
 }
 
 impl SessionHandle {
@@ -54,24 +50,6 @@ impl SessionHandle {
         &self,
     ) -> Result<tokio::sync::OwnedMutexGuard<()>, tokio::sync::TryLockError> {
         Arc::clone(&self.turn_lock).try_lock_owned()
-    }
-
-    /// 排队一条转向指令（turn 运行中调用；下一轮自动消费）。
-    pub fn queue_steer(&self, msg: Msg) {
-        self.pending_steers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(msg);
-    }
-
-    /// 取走全部排队中的转向指令（turn 启动/结算时调用）。
-    pub fn take_pending_steers(&self) -> Vec<Msg> {
-        std::mem::take(
-            &mut self
-                .pending_steers
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()),
-        )
     }
 
     /// 中断当前 turn（对齐 `AgentSession.interrupt`）。返回是否有运行中 turn。
@@ -119,7 +97,6 @@ impl AgentHandle {
                 Arc::new(SessionHandle {
                     turn_lock: Arc::new(AsyncMutex::new(())),
                     running: AsyncMutex::new(None),
-                    pending_steers: std::sync::Mutex::new(Vec::new()),
                 })
             })
             .clone()

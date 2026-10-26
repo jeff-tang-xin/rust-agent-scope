@@ -820,7 +820,7 @@ export default function Conversation({
     }
   };
 
-  // steer：turn 运行中补充指令（排队 → 当前 turn 结算后自动续轮消费）。
+  // steer：turn 运行中补充指令（agent 在下一个 step 边界注入上下文，当步生效）。
   const steer = async () => {
     const text = input.trim();
     if (!text || !busy) return;
@@ -829,7 +829,7 @@ export default function Conversation({
     setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
     try {
       await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
-      setNotice("Steering queued — the agent will pick it up after the current step.");
+      setNotice("Steering — the agent will pick it up at the next step.");
       setTimeout(() => setNotice(""), 3000);
     } catch (e) {
       setError(String(e));

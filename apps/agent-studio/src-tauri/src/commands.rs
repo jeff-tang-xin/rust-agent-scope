@@ -690,8 +690,9 @@ pub fn delete_agent(state: State<'_, AppState>, agent_id: String) -> Result<(), 
 // ---------- turns ----------
 
 /// 合并排队中的 steer 消息与本次输入（steer 文本在前——先说的先被看到）。
-fn merge_with_pending(session: &SessionHandle, message: &str) -> String {
-    let steers = session.take_pending_steers();
+fn merge_with_pending(agent: &agentscope_core::ReActAgent, session_id: &str, message: &str) -> String {
+    // 上次运行残留的 steer（循环退出后才到达、没被步边界消费的）合并进本次输入。
+    let steers = agent.take_steers(session_id);
     if steers.is_empty() {
         return message.to_string();
     }
@@ -727,7 +728,7 @@ pub async fn send_message(
         .try_begin_turn()
         .map_err(|_| "a turn is already running in this session".to_string())?;
 
-    let text = merge_with_pending(&session, &message);
+    let text = merge_with_pending(handle.agent.delegate(), &session_id, &message);
     // 消息构造：文本块 + 附件块（图片走 Image，其余走 Data；对齐 Java 多模态块）。
     let mut blocks: Vec<ContentBlock> = Vec::new();
     if !text.is_empty() {
@@ -880,8 +881,9 @@ async fn turn_chain(
         }
         session.untrack().await;
 
-        // 结算：还有排队中的 steer → 自动续轮（对齐 Java settleSession 语义）。
-        let pending = session.take_pending_steers();
+        // 结算：还有未消费的 steer（循环退出后才到达的）→ 自动续轮
+        // （对齐 Java settleSession 语义；步边界已消费的不在这里）。
+        let pending = agent.take_steers(&session_id);
         drop(turn_guard);
         let next_text = pending
             .iter()
@@ -953,10 +955,11 @@ struct TurnStarted {
     reason: &'static str,
 }
 
-/// 排队一条转向指令（steer，≈ AgentSession.steer）。
+/// 运行中插入一条转向指令（steer，≈ AgentSession.steer）。
 ///
-/// Legacy 历史模式下无法在当前 turn 运行中注入（execution 链路需要 EventLog +
-/// 持久日志后端），这里排队：turn 结算时自动续轮消费（见 `turn_chain`）。
+/// 直接进 agent 的步边界注入通道：当前 turn 的**下一个 step** 生效
+/// （对齐 Java beforeStep 语义）；若调用已结束则留在队列，由
+/// `send_message` 合并或 `turn_chain` 结算续轮消费（见各自注释）。
 #[tauri::command]
 pub async fn steer_turn(
     state: State<'_, AppState>,
@@ -969,8 +972,10 @@ pub async fn steer_turn(
         return Err("steer message is empty".to_string());
     }
     let handle = state.handle(&workspace_id, &mode)?;
-    let session = handle.session(&session_id).await;
-    session.queue_steer(Msg::user("user", message));
+    handle
+        .agent
+        .delegate()
+        .push_steer(&session_id, Msg::user("user", message));
     Ok(true)
 }
 

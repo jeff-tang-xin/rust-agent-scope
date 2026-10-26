@@ -72,6 +72,13 @@ pub struct ReActAgent {
     /// （同一会话的两次并发运行会互相踩状态与日志租约，必须串行）；但**不能**把它
     /// 当权威来源——有持久层时每次调用都会重新加载。
     slots: Arc<Mutex<HashMap<String, SlotEntry>>>,
+    /// 运行中插入的转向消息（steer）：`sessionId → 待注入消息`。
+    ///
+    /// 对应 Java `AgentSession.steer`：调用方在 turn 运行中投递，ReAct 循环在
+    /// **下一个步边界**注入对话真相（beforeStep 语义），而不是等本次调用结束。
+    /// Legacy 模式（无 execution 链路）也走这里；调用结束后未被消费的残留
+    /// 由调用方经 [`Self::take_steers`] 取走做结算续轮。
+    steers: Arc<Mutex<HashMap<String, Vec<Msg>>>>,
     /// 中间件链（构造时按 `order()` 排好序，不可变）
     middlewares: MiddlewareChain,
     permission: Arc<dyn PermissionChecker>,
@@ -802,6 +809,36 @@ impl ReActAgent {
             .remove(&key);
     }
 
+    /// 运行中插入一条转向消息（steer，对应 Java `AgentSession.steer`）。
+    ///
+    /// 在该会话**当前调用的下一个步边界**注入对话真相（beforeStep 语义）；
+    /// 若调用已结束则留在队列里，由调用方结算时经 [`Self::take_steers`] 取走。
+    pub fn push_steer(&self, session_id: impl Into<String>, msg: Msg) {
+        self.steers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .entry(session_id.into())
+            .or_default()
+            .push(msg);
+    }
+
+    /// 取走该会话全部未消费的 steer 消息（turn 结算时调用）。
+    pub fn take_steers(&self, session_id: &str) -> Vec<Msg> {
+        self.steers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(session_id)
+            .unwrap_or_default()
+    }
+
+    /// 步边界取走本调用的待注入 steer（无 session id 的调用不会有入队）。
+    fn take_steers_for(&self, session_id: Option<&str>) -> Vec<Msg> {
+        let Some(session_id) = session_id else {
+            return Vec::new();
+        };
+        self.take_steers(session_id)
+    }
+
     /// 默认会话（`default_session_id`）的状态快照。
     pub fn state(&self) -> Result<Option<AgentState>> {
         match &self.default_session_id {
@@ -961,6 +998,12 @@ impl ReActAgent {
                     .unwrap_or_else(|error| error.into_inner())
                     .before_step(recorder, &mut state)
                     .map_err(Error::Session)?;
+            }
+            // 运行中插入（steer）：Legacy 模式（无 execution 链路）的步边界注入，
+            // 语义与上面 inbox steer 一致——插入消息当步生效，而非等调用结束。
+            for msg in self.take_steers_for(ctx.runtime.session_id()) {
+                ctx.push(msg);
+                ctx.capture("steer_injected")?;
             }
             let assistant = self.reasoning(ctx, streaming).await?;
             if assistant.tool_uses().is_empty() {
@@ -1672,6 +1715,7 @@ impl ReActAgentBuilder {
             history_mode,
             default_session_id: Some(default_session_id),
             slots: Arc::new(Mutex::new(HashMap::new())),
+            steers: Arc::new(Mutex::new(HashMap::new())),
             middlewares: MiddlewareChain::new(self.middlewares),
             permission: self.permission,
             permission_context: self.permission_context,
