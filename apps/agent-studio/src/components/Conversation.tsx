@@ -460,6 +460,11 @@ export default function Conversation({
   // 保证 思考→工具→思考→输出 按真实时间交错显示）。
   const streamRef = useRef<{ kind: "msg" | "thinking"; blockId: string; entryId: string } | null>(null);
   const toolRef = useRef<Map<string, string>>(new Map()); // callKey -> entry id
+  // 本 turn 已流式渲染过的 assistant 文本块（TEXT 块定格时登记）：
+  // AGENT_RESULT 的权威文本与之比对，只 append 没渲染过的块——
+  // 「模型先说话再调工具」的 turn 里，权威结果到达时末尾是工具卡，
+  // 按末尾比对会落空导致同一句话渲染两条。
+  const turnTextsRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -491,7 +496,12 @@ export default function Conversation({
     streamRef.current = null;
     if (cur) {
       upsert(cur.entryId, (e) => {
-        if (e.kind === "msg") return { ...e, streaming: false };
+        if (e.kind === "msg") {
+          if (e.role === "assistant" && e.text.trim()) {
+            turnTextsRef.current.add(e.text);
+          }
+          return { ...e, streaming: false };
+        }
         if (e.kind === "thinking") return { ...e, streaming: false, open: false }; // 思考结束默认收起
         return e;
       });
@@ -504,6 +514,7 @@ export default function Conversation({
     setEntries([]);
     streamRef.current = null;
     toolRef.current.clear();
+    turnTextsRef.current = new Set();
     setBusy(false);
     api.getHistory(workspace.id, runtimeMode, sessionId).then((history) => {
       if (!alive) return;
@@ -710,6 +721,7 @@ export default function Conversation({
           streamRef.current = null;
           if (text) {
             if (cur && cur.kind === "msg") {
+              turnTextsRef.current.add(text);
               upsert(cur.entryId, (e) => (e.kind === "msg" ? { ...e, text, streaming: false } : e));
             } else {
               if (cur) {
@@ -717,17 +729,31 @@ export default function Conversation({
                   e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
                 );
               }
-              // 流式块已由 *_BLOCK_END 定格（streamRef 已清）：权威结果只是
-              // 同一内容的回执——末尾已是相同文本时不重复 append（否则
-              // plan/工具轮较长的 turn 会出现两条一样的回复）。
-              setEntries((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.kind === "msg" && last.text === text) return prev;
-                return [
+              // 流式块已由 *_BLOCK_END / TOOL_CALL_START 定格并登记进
+              // turnTextsRef：权威结果只是同一内容的回执。按块比对，只把
+              // 没渲染过的文本块 append——「先说话再调工具」的 turn 里
+              // 权威结果到达时末尾是工具卡，按末尾比对会落空导致重复。
+              const blocks = Array.isArray(result?.content)
+                ? (result?.content as Array<Record<string, unknown>>)
+                : [];
+              const seen = turnTextsRef.current;
+              const fresh = blocks
+                .filter((b) => String(b?.type ?? "") === "text")
+                .map((b) => String(b?.text ?? ""))
+                .filter((t) => t.trim() && !seen.has(t));
+              if (fresh.length > 0) {
+                fresh.forEach((t) => seen.add(t));
+                setEntries((prev) => [
                   ...prev,
-                  { kind: "msg", role: "assistant", text, ts: nowTime(), id: nextId() },
-                ];
-              });
+                  {
+                    kind: "msg",
+                    role: "assistant",
+                    text: fresh.join("\n\n"),
+                    ts: nowTime(),
+                    id: nextId(),
+                  },
+                ]);
+              }
             }
           } else if (cur) {
             // 权威结果无文本（纯工具轮）：仅结束流式态
@@ -749,6 +775,7 @@ export default function Conversation({
       if (!applies(payload)) return;
       setBusy(false);
       finalizeStreams(); // 中断/失败兜底：复位流式态，打字机停走
+      turnTextsRef.current = new Set(); // turn 边界：判重集合清零
       if (payload.outcome === "failed") {
         setError(payload.error ?? "turn failed");
       }
@@ -758,6 +785,7 @@ export default function Conversation({
     const un3 = onTurnStarted((payload) => {
       if (!applies(payload)) return;
       setBusy(true);
+      turnTextsRef.current = new Set(); // 新 turn：判重集合清零
       setNotice("Continuing with your steering input…");
       setTimeout(() => setNotice(""), 3000);
     });
