@@ -1164,6 +1164,34 @@ impl ReActAgent {
         let input = self
             .middlewares
             .apply_acting(&ctx.runtime, ActingInput { tool_calls });
+        // 原地打转检测：本轮工具调用与上一条 assistant 的完全一致（name+input
+        // 逐个相同）说明模型在重复同一动作——多半是工具反复失败后固执重试。
+        // 给这轮的失败结果附加换策略提示，打破「思考→失败→同样思考」循环。
+        let repeated_calls = {
+            let state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+            let last_assistant = state
+                .context
+                .iter()
+                .rev()
+                .find(|msg| msg.role == crate::message::Role::Assistant);
+            match last_assistant {
+                Some(prev) => {
+                    let prev_uses = prev.tool_uses();
+                    !input.tool_calls.is_empty()
+                        && prev_uses.len() == input.tool_calls.len()
+                        && prev_uses.iter().zip(input.tool_calls.iter()).all(|(a, b)| {
+                            matches!(
+                                (a, b),
+                                (
+                                    ContentBlock::ToolUse { name: an, input: ai, .. },
+                                    ToolCallSpec { name: bn, input: bi, .. }
+                                ) if an == bn && ai == bi
+                            )
+                        })
+                }
+                None => false,
+            }
+        };
         // 批量预裁决（对齐 Java `evaluatePermissions`）：RequireApproval 的调用
         // 标 ASKING 挂起、不执行；其余按裁决执行。
         let mut asking: Vec<ContentBlock> = Vec::new();
@@ -1180,7 +1208,7 @@ impl ReActAgent {
                 });
                 continue;
             }
-            self.execute_tool(ctx, &call.id, &call.name, &call.input, decision)
+            self.execute_tool(ctx, &call.id, &call.name, &call.input, decision, repeated_calls)
                 .await?;
         }
         if !asking.is_empty() {
@@ -1317,6 +1345,7 @@ impl ReActAgent {
                     &name,
                     &input,
                     PermissionDecision::Deny(reason),
+                    false,
                 )
                 .await?;
             }
@@ -1328,6 +1357,7 @@ impl ReActAgent {
                 &call.name,
                 &call.input,
                 PermissionDecision::Allow,
+                false,
             )
             .await?;
         }
@@ -1350,6 +1380,7 @@ impl ReActAgent {
         name: &str,
         input: &Value,
         decision: PermissionDecision,
+        repeated_call: bool,
     ) -> Result<()> {
         // 工具调用上下文：reply_id / 调用 id / agent 身份 / 事件出口
         // （对应 Java ToolExecutionContext + ToolEmitter 注入）
@@ -1440,6 +1471,17 @@ impl ReActAgent {
                 "permission denied: user approval required",
             ),
         };
+        // 熔断提示：模型在原地打转（与上一轮完全相同的调用）且这次又失败时，
+        // 在结果里明确要求换策略——否则「同样思考→同样调用→同样失败」会烧满
+        // max_iters，用户看到的就是一串重复的思考卡片。
+        let mut output = output;
+        if repeated_call && output.state == crate::message::ToolResultState::Error {
+            output.content.push_str(
+                "
+
+[system notice] This tool call is identical to your previous one and failed again. Do not retry the same call. Change the approach (different tool, different arguments, or gather more context first), or briefly explain the blocker to the user and stop.",
+            );
+        }
         let result_state = output.state;
 
         // ToolResult 三段事件：Start → 文本增量 → End(state)
