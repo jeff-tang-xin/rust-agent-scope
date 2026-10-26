@@ -1181,9 +1181,15 @@ export default function Conversation({
       </div>
       {filesOpen ? (
         workspace.kind === "ops" ? (
-          <ServersPanel onCollapse={() => setFilesOpen(false)} />
+          <ServersPanel
+            onCollapse={() => setFilesOpen(false)}
+            boundServers={workspace.bound_servers}
+          />
         ) : workspace.kind === "db" ? (
-          <DatabasesPanel onCollapse={() => setFilesOpen(false)} />
+          <DatabasesPanel
+            onCollapse={() => setFilesOpen(false)}
+            boundDatabases={workspace.bound_databases}
+          />
         ) : (
           <FilePanel workspaceId={workspace.id} onCollapse={() => setFilesOpen(false)} />
         )

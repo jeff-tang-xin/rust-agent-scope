@@ -266,11 +266,17 @@ pub fn to_csv(header: &[String], rows: &[Vec<String>]) -> String {
 /// `db_query`：只读 SQL（SELECT/WITH/EXPLAIN/SHOW/DESC），免确认。
 pub struct DbQueryTool {
     catalog: Arc<DbCatalog>,
+    /// 允许访问的数据库档案名白名单；`None` = 不限（工作区未绑定列表时
+    /// 按类别默认开放）。`Some` 时调用参数 `database` 不在名单内即拒绝。
+    allowed_databases: Option<Vec<String>>,
 }
 
 impl DbQueryTool {
-    pub fn new(catalog: Arc<DbCatalog>) -> Self {
-        Self { catalog }
+    pub fn new(catalog: Arc<DbCatalog>, allowed_databases: Option<Vec<String>>) -> Self {
+        Self {
+            catalog,
+            allowed_databases,
+        }
     }
 }
 
@@ -310,6 +316,12 @@ impl Tool for DbQueryTool {
         if name.is_empty() || sql.is_empty() {
             return Ok(ToolOutput::error("database and sql are required"));
         }
+        if let Some(allowed) = &self.allowed_databases
+            && !allowed.iter().any(|n| n == name) {
+                return Ok(ToolOutput::error(format!(
+                    "database `{name}` is not bound to this workspace (bound: {allowed:?})"
+                )));
+            }
         if classify(sql) != "read" {
             return Ok(ToolOutput::error(
                 "db_query 只接受只读语句（SELECT/WITH/EXPLAIN/SHOW/DESCRIBE）；变更请用 db_dml",
@@ -329,11 +341,16 @@ impl Tool for DbQueryTool {
 /// `db_dml`：变更 SQL（INSERT/UPDATE/DELETE/DDL），ask 规则 → 每次确认。
 pub struct DbDmlTool {
     catalog: Arc<DbCatalog>,
+    /// 允许访问的数据库档案名白名单（语义同 [`DbQueryTool`]）。
+    allowed_databases: Option<Vec<String>>,
 }
 
 impl DbDmlTool {
-    pub fn new(catalog: Arc<DbCatalog>) -> Self {
-        Self { catalog }
+    pub fn new(catalog: Arc<DbCatalog>, allowed_databases: Option<Vec<String>>) -> Self {
+        Self {
+            catalog,
+            allowed_databases,
+        }
     }
 }
 
@@ -369,6 +386,12 @@ impl Tool for DbDmlTool {
         if name.is_empty() || sql.is_empty() {
             return Ok(ToolOutput::error("database and sql are required"));
         }
+        if let Some(allowed) = &self.allowed_databases
+            && !allowed.iter().any(|n| n == name) {
+                return Ok(ToolOutput::error(format!(
+                    "database `{name}` is not bound to this workspace (bound: {allowed:?})"
+                )));
+            }
         if classify(sql) == "read" {
             return Ok(ToolOutput::error(
                 "db_dml 用于变更语句；只读查询请用 db_query（免确认）",

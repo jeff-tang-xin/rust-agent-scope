@@ -75,6 +75,20 @@ pub struct WorkspaceConfig {
     /// （lead 之外；每个成员是独立子代理，用自己的人设与 provider）。
     #[serde(default)]
     pub members: Vec<String>,
+    /// 绑定的服务器档案名列表（[`ServerConfig::name`]）。
+    ///
+    /// 能力语义：ops 类别默认开放 remote_shell（空 = 不限全部服务器）；
+    /// collab 类别默认无远程能力，绑定非空才开放（且只能操作列表内的
+    /// 服务器）。ops 类别绑定非空时同样收窄为白名单。
+    #[serde(default)]
+    pub bound_servers: Vec<String>,
+    /// 绑定的数据库档案名列表（[`DatabaseServerConfig::name`]）。
+    ///
+    /// 能力语义：db 类别默认开放 db_query/db_dml（空 = 不限全部数据库）；
+    /// collab 类别默认无数据库能力，绑定非空才开放（且只能访问列表内的
+    /// 数据库）。db 类别绑定非空时同样收窄为白名单。
+    #[serde(default)]
+    pub bound_databases: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
 }
@@ -203,6 +217,9 @@ impl StudioConfig {
                     agent_id: agent_id.into(),
                     dir: dir.to_string_lossy().into_owned(),
                     members: Vec::new(),
+                    // 内置工作区不预绑定：ops/db 按类别默认开放，collab 无远程能力。
+                    bound_servers: Vec::new(),
+                    bound_databases: Vec::new(),
                     created_at: 0,
                 });
             }
@@ -240,6 +257,8 @@ pub const BUILTIN_DB_WS_ID: &str = "builtin-db";
 
 /// 内置默认智能体：一个开箱即用的全能型助手（预置默认值的普通智能体，
 /// 可改不可删；由 [`StudioConfig::ensure_default_agent`] 保证始终在列）。
+/// 方法论按智能体场景定制（工程 / 运维 / 数据库），不含黑板条目——
+/// 内置智能体的工具面里没有黑板工具。
 fn default_agent() -> AgentConfig {
     AgentConfig {
         id: DEFAULT_AGENT_ID.into(),
@@ -253,6 +272,13 @@ fn default_agent() -> AgentConfig {
             "- 先理解再动手：改动代码前先读相关文件，遵循既有风格，做最小必要修改；",
             "- 复杂任务先列计划（plan mode），执行后如实汇报做了什么、怎么验证的、还剩什么风险。",
             "不确定就说不确定，不编造事实。用中文与用户交流。",
+            "方法论：单智能体闭环——由你独立完成从理解到验证的全过程。",
+            "1. 先建立事实：读相关代码、确认现有结构与约定，不凭猜测动手；",
+            "2. 遵循既有风格：命名、分层、错误处理沿用项目现状，不引入个人偏好的新范式；",
+            "3. 外科手术式修改：只改必要的地方，不顺手重构无关代码；",
+            "4. 方案有取舍时先说明选项与理由，再按最优方案实现；",
+            "5. 改完必须自测（编译/运行/关键路径检查），确认可用再汇报；",
+            "6. 汇报格式：做了什么 / 关键改动 / 如何验证 / 遗留风险。",
         ]
         .join("\n"),
         // provider 留空：用户在设置页绑定模型 Provider 后即可对话（进入会话
@@ -277,6 +303,13 @@ fn default_ops_agent() -> AgentConfig {
             "- 用 web_fetch / web_search 查文档与排错资料；",
             "- 输出结论时给出关键证据（命令输出摘录），下一步建议明确可执行。",
             "谨慎对待破坏性操作（rm、systemctl stop、重启、改配置），执行前向用户说明影响。用中文与用户交流。",
+            "方法论：单智能体闭环——由你独立完成从了解到验证的全过程。",
+            "1. 先建立事实：先看服务器现状（系统版本、服务状态、资源占用、相关配置），不凭猜测动手；",
+            "2. 遵循现状：沿用服务器上已有的部署方式、配置风格与目录约定，不引入个人偏好的新范式；",
+            "3. 外科手术式变更：只动必须动的地方，不顺手重启/升级/修改无关服务；",
+            "4. 方案有取舍时先说明选项与风险（停机窗口、回滚方式），再按最优方案执行；",
+            "5. 变更后必须自测：核对命令输出与服务状态（systemctl status、日志、端口探活），确认可用再汇报；",
+            "6. 汇报格式：做了什么 / 关键命令与输出摘录 / 如何验证 / 遗留风险与回滚方式。",
         ]
         .join("\n"),
         provider: String::new(),
@@ -298,6 +331,13 @@ fn default_db_agent() -> AgentConfig {
             "- 先 db_query 摸清 schema 与数据分布，再提出变更方案，避免盲改；",
             "- 输出结论时给出关键数字与口径（schema、过滤条件、行数）。",
             "不确定就说不确定，不编造查询结果。用中文与用户交流。",
+            "方法论：单智能体闭环——由你独立完成从探查到验证的全过程。",
+            "1. 先建立事实：先 db_query 摸清 schema、索引与数据分布（行数、过滤条件命中率），不凭猜测动手；",
+            "2. 遵循既有约定：沿用库表的命名、字段口径与既有查询写法，不引入个人偏好的新范式；",
+            "3. 外科手术式变更：只改必须改的表与行，变更前先评估影响范围（预计行数、关联表），避免盲改；",
+            "4. 方案有取舍时先说明选项与风险（锁表、事务、回滚方式），再按最优方案执行；",
+            "5. 变更后必须自测：用 db_query 复查变更结果（行数、抽样核对），确认符合预期再汇报；",
+            "6. 汇报格式：做了什么 / 关键 SQL 与影响行数 / 如何验证 / 遗留风险与回滚方式。",
         ]
         .join("\n"),
         provider: String::new(),
@@ -398,6 +438,8 @@ mod tests {
             agent_id: DEFAULT_AGENT_ID.into(),
             dir: r"F:\java\my-project".into(),
             members: vec!["agent-b".into()],
+            bound_servers: vec!["prod-1".into()],
+            bound_databases: Vec::new(),
             created_at: 42,
         };
         let bytes = serde_json::to_vec(&ws).unwrap();
@@ -413,6 +455,8 @@ mod tests {
             agent_id: String::new(),
             dir: String::new(),
             members: Vec::new(),
+            bound_servers: Vec::new(),
+            bound_databases: Vec::new(),
             created_at: 0,
         }
         .kind_valid());

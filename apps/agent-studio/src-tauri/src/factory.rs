@@ -289,21 +289,12 @@ pub fn build_agent(
     register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
     match mode {
         StudioMode::Ops => {
-            // 远程运维工具面：remote_shell（ask 规则 → 每次确认）+ web 检索。
-            toolkit.register(Arc::new(RemoteShellTool::new(Arc::clone(
-                &resources.ssh_pool,
-            ))));
+            // 远程运维工具面：web 检索（remote_shell 在 match 后统一注册）。
             toolkit.register(Arc::new(WebFetchTool::new()));
             toolkit.register(Arc::new(WebSearchTool::new()));
         }
         StudioMode::Db => {
-            // 数据库工具面：db_query（只读免确认）+ db_dml（ask 规则 → 每次确认）。
-            toolkit.register(Arc::new(DbQueryTool::new(Arc::clone(
-                &resources.db_catalog,
-            ))));
-            toolkit.register(Arc::new(DbDmlTool::new(Arc::clone(
-                &resources.db_catalog,
-            ))));
+            // 数据库工具面：无类别特有工具（db_query/db_dml 在 match 后统一注册）。
         }
         StudioMode::Team => {
             // 任务工具（对齐 Java subagent/task 体系的工具面）。
@@ -351,6 +342,27 @@ pub fn build_agent(
             ));
         }
     }
+    // 远程能力统一注册（ops/db 的类别默认 + 各类别的绑定开放，一套语义）：
+    // - ops 类别默认开放 remote_shell；db 类别默认开放 db_query/db_dml；
+    // - 其余类别（collab）绑定非空才开放对应工具；
+    // - 绑定列表非空时一律收窄为白名单（工具内校验，越界即拒绝）。
+    if mode == StudioMode::Ops || !ws.bound_servers.is_empty() {
+        toolkit.register(Arc::new(RemoteShellTool::new(
+            Arc::clone(&resources.ssh_pool),
+            allowlist(&ws.bound_servers),
+        )));
+    }
+    if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
+        let allowed = allowlist(&ws.bound_databases);
+        toolkit.register(Arc::new(DbQueryTool::new(
+            Arc::clone(&resources.db_catalog),
+            allowed.clone(),
+        )));
+        toolkit.register(Arc::new(DbDmlTool::new(
+            Arc::clone(&resources.db_catalog),
+            allowed,
+        )));
+    }
 
     let mut builder = HarnessAgentBuilder::new()
         .name(&agent.name)
@@ -366,7 +378,7 @@ pub fn build_agent(
     // 危险工具默认走用户授权（AgentScope 权限引擎 ask 规则，会话级持久化）：
     // shell 执行与文件写入/编辑需用户批准后才会执行；目录穿越由 Sandboxed
     // 文件层硬拒（path escapes workspace root），不在此列。
-    builder = builder.permission_context(default_permission_context(mode));
+    builder = builder.permission_context(default_permission_context(mode, ws));
 
     if mode == StudioMode::Solo {
         // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
@@ -411,16 +423,27 @@ pub fn build_agent(
 /// 新会话的默认权限上下文：危险工具（shell 执行、文件写入/编辑）→ ask 行为，
 /// 由 AgentScope 权限引擎在执行前挂起等待用户确认（对齐 Java ask 规则语义）。
 /// 用户批准时可附带 allow 规则（「始终允许」），写进会话权限上下文后生效。
-fn default_permission_context(mode: StudioMode) -> PermissionContextState {
+fn default_permission_context(mode: StudioMode, ws: &WorkspaceConfig) -> PermissionContextState {
     // ask 工具集按工作区类别区分：
-    // - collab（solo/team）：shell 执行与文件写入/编辑；
+    // - collab（solo/team）：shell 执行与文件写入/编辑；按绑定开放远程能力时
+    //   追加对应 ask 规则（remote_shell / db_dml 每次确认，语义对齐 ops/db）；
     // - ops：remote_shell（远程命令每次确认）；
     // - db：db_dml（数据变更每次确认；db_query 只读免确认）。
-    let ask_tools: &[&str] = match mode {
-        StudioMode::Ops => &["remote_shell"],
-        StudioMode::Db => &["db_dml"],
-        StudioMode::Solo | StudioMode::Team => &["execute", "write_file", "edit_file"],
+    let mut ask_tools: Vec<&'static str> = match mode {
+        StudioMode::Ops => vec!["remote_shell"],
+        StudioMode::Db => vec!["db_dml"],
+        StudioMode::Solo | StudioMode::Team => {
+            let mut tools = vec!["execute", "write_file", "edit_file"];
+            if !ws.bound_servers.is_empty() {
+                tools.push("remote_shell");
+            }
+            if !ws.bound_databases.is_empty() {
+                tools.push("db_dml");
+            }
+            tools
+        }
     };
+    ask_tools.dedup();
     let mut context = PermissionContextState::default();
     for tool in ask_tools {
         context.add_ask_rule(PermissionRule {
@@ -431,6 +454,15 @@ fn default_permission_context(mode: StudioMode) -> PermissionContextState {
         });
     }
     context
+}
+
+/// 绑定列表 → 工具白名单：空 = 不限（`None`），非空 = 白名单（`Some`）。
+fn allowlist(bound: &[String]) -> Option<Vec<String>> {
+    if bound.is_empty() {
+        None
+    } else {
+        Some(bound.to_vec())
+    }
 }
 
 /// 系统提示：用户定义 + 模式职责说明（对齐 service 的 agent instructions 面）。

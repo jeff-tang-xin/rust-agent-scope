@@ -936,6 +936,25 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .ss-session.is-child .ss-dot { background: transparent; border: 1.5px solid var(--text-faint); width: 6px; height: 6px; }
 .ss-session.is-child .ss-dot.run { background: #2da44e; border-color: #2da44e; }
 .ss-session-state { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+/* session 行容器：主按钮 + 悬停浮现的重命名/删除操作 */
+.ss-session-row { display: flex; align-items: center; border-radius: 6px; }
+.ss-session-row .ss-session { flex: 1; min-width: 0; }
+.ss-session-row.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ss-session-row.is-child .ss-session { padding-left: 30px; font-size: 11px; color: var(--text-dim); }
+.ss-session-actions { display: none; flex-shrink: 0; }
+.ss-session-row:hover .ss-session-actions { display: inline-flex; }
+.ss-session-actions .icon-btn { padding: 2px 4px; font-size: 11px; }
+/* 内联重命名输入框 */
+.ss-rename {
+  width: 100%;
+  margin: 2px 8px 2px 18px;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
 .ss-empty { padding: 4px 18px; font-size: 11px; color: var(--text-dim); }
 .ss-new {
   margin: 2px 8px 0 18px;

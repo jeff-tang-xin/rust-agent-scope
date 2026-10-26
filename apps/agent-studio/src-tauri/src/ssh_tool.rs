@@ -270,11 +270,17 @@ impl SshPool {
 /// `remote_shell` 工具：在指定远程服务器上执行一条命令（ask 规则 → 每次确认）。
 pub struct RemoteShellTool {
     pool: Arc<SshPool>,
+    /// 允许操作的服务器档案名白名单；`None` = 不限（工作区未绑定列表时
+    /// 按类别默认开放）。`Some` 时调用参数 `server` 不在名单内即拒绝。
+    allowed_servers: Option<Vec<String>>,
 }
 
 impl RemoteShellTool {
-    pub fn new(pool: Arc<SshPool>) -> Self {
-        Self { pool }
+    pub fn new(pool: Arc<SshPool>, allowed_servers: Option<Vec<String>>) -> Self {
+        Self {
+            pool,
+            allowed_servers,
+        }
     }
 }
 
@@ -315,6 +321,12 @@ impl Tool for RemoteShellTool {
         if server.is_empty() || command.is_empty() {
             return Ok(ToolOutput::error("server and command are required"));
         }
+        if let Some(allowed) = &self.allowed_servers
+            && !allowed.iter().any(|name| name == &server) {
+                return Ok(ToolOutput::error(format!(
+                    "server `{server}` is not bound to this workspace (bound: {allowed:?})"
+                )));
+            }
         let conn = match self.pool.get(&server).await {
             Ok(c) => c,
             Err(e) => return Ok(ToolOutput::error(e)),

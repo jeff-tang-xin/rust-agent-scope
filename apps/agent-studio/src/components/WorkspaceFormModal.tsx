@@ -3,8 +3,15 @@
 // 协同类还可配置 team 运行方式的成员（引用已有智能体，lead 之外）。
 // 智能体定义（人设 / Provider）在设置页管理，这里只做「选谁 + 叫什么 + 在哪干活」。
 
-import { useState } from "react";
-import { api, type AgentConfig, type WorkspaceConfig, type WorkspaceKind } from "../api";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import {
+  api,
+  type AgentConfig,
+  type DatabaseServerConfig,
+  type ServerConfig,
+  type WorkspaceConfig,
+  type WorkspaceKind,
+} from "../api";
 import PasteButton from "./PasteButton";
 
 const KIND_LABEL: Record<WorkspaceKind, string> = {
@@ -15,12 +22,18 @@ const KIND_LABEL: Record<WorkspaceKind, string> = {
 
 export default function WorkspaceFormModal({
   agents,
+  servers,
+  databases,
   category,
   initial,
   onClose,
   onSaved,
 }: {
   agents: AgentConfig[];
+  /** 服务器档案（设置页管理；勾选绑定 → 工作区开放 remote_shell 能力）。 */
+  servers: ServerConfig[];
+  /** 数据库档案（设置页管理；勾选绑定 → 工作区开放 db_query/db_dml 能力）。 */
+  databases: DatabaseServerConfig[];
   /** 工作区类型（由所在页决定；编辑时取 initial.kind）。 */
   category: WorkspaceKind;
   /** 编辑时传现有工作区；新建传 null。 */
@@ -34,6 +47,10 @@ export default function WorkspaceFormModal({
   const [dir, setDir] = useState(initial?.dir ?? "");
   // team 成员（仅协同工作区）：引用已有智能体 id（lead 之外）。
   const [members, setMembers] = useState<string[]>(initial?.members ?? []);
+  // 绑定的服务器/数据库档案名（能力白名单：绑定 = 开放对应工具且只能操作
+  // 列表内的资源；协同工作区未绑定则无远程能力，ops/db 类别默认开放）。
+  const [boundServers, setBoundServers] = useState<string[]>(initial?.bound_servers ?? []);
+  const [boundDatabases, setBoundDatabases] = useState<string[]>(initial?.bound_databases ?? []);
   const [error, setError] = useState("");
 
   const editing = Boolean(initial?.id);
@@ -42,6 +59,15 @@ export default function WorkspaceFormModal({
   const toggleMember = (id: string) => {
     setMembers((prev) =>
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
+    );
+  };
+
+  const toggleBound = (
+    setter: Dispatch<SetStateAction<string[]>>,
+    name: string,
+  ) => {
+    setter((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
   };
 
@@ -54,6 +80,8 @@ export default function WorkspaceFormModal({
       agent_id: agentId,
       dir,
       members: kind === "collab" ? members.filter((m) => m !== agentId) : [],
+      bound_servers: boundServers,
+      bound_databases: boundDatabases,
       created_at: initial?.created_at ?? 0,
     };
     try {
@@ -144,6 +172,50 @@ export default function WorkspaceFormModal({
                 ))
             )}
           </>
+        )}
+
+        <label className="lbl">
+          绑定服务器（勾选后本工作区开放 remote_shell 能力，且只能操作勾选的服务器；
+          运维工作区不勾选 = 默认可操作全部）
+        </label>
+        {servers.length === 0 ? (
+          <div className="desc">暂无服务器档案——可先到 Settings 添加。</div>
+        ) : (
+          servers.map((s) => (
+            <label key={s.name} className="member-check">
+              <input
+                type="checkbox"
+                checked={boundServers.includes(s.name)}
+                onChange={() => toggleBound(setBoundServers, s.name)}
+              />
+              <span className="name">{s.name}</span>
+              <span className="desc">
+                {s.host}:{s.port}
+              </span>
+            </label>
+          ))
+        )}
+
+        <label className="lbl">
+          绑定数据库（勾选后本工作区开放 db_query / db_dml 能力，且只能访问勾选的库；
+          数据库工作区不勾选 = 默认可访问全部）
+        </label>
+        {databases.length === 0 ? (
+          <div className="desc">暂无数据库档案——可先到 Settings 添加。</div>
+        ) : (
+          databases.map((d) => (
+            <label key={d.name} className="member-check">
+              <input
+                type="checkbox"
+                checked={boundDatabases.includes(d.name)}
+                onChange={() => toggleBound(setBoundDatabases, d.name)}
+              />
+              <span className="name">{d.name}</span>
+              <span className="desc">
+                {d.db_type} · {d.database}
+              </span>
+            </label>
+          ))
         )}
 
         <div className="modal-actions">

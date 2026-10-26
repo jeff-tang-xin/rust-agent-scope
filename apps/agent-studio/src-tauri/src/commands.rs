@@ -79,6 +79,10 @@ pub struct SessionSummary {
     /// tool_context.spawn_registry，前端据此树形归属）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    /// 会话名：自定义名（title.txt）优先，否则自动取首条用户消息摘要；
+    /// 都没有（新会话未发消息）为 None，前端回退显示 session id。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// 全局应用状态。
@@ -1123,16 +1127,26 @@ pub fn list_sessions(
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let messages = std::fs::read(&state_path)
+        let state_json = std::fs::read(&state_path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        let messages = state_json
+            .as_ref()
             .and_then(|v| {
                 v.get("context")
                     .and_then(|c| c.as_array())
                     .map(|a| a.len())
             })
             .unwrap_or(0);
+        // 会话名：自定义 title.txt 优先；否则自动取首条用户消息摘要
+        // （让列表直接可读「这个 session 做了什么」）。
+        let title = std::fs::read_to_string(entry.path().join("title.txt"))
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .or_else(|| state_json.as_ref().and_then(first_user_text));
         out.push(SessionSummary {
+            title,
             parent_session_id: parent_of.get(&session_id).cloned(),
             session_id,
             messages,
@@ -1189,6 +1203,90 @@ pub async fn clear_session(
         .clear_context_for(Some(USER_ID), &session_id)
         .map_err(|e| e.to_string())?;
     handle.drop_session(&session_id).await;
+    Ok(())
+}
+
+/// 从 agent_state.json 提取首条用户消息文本摘要（≤40 字符）。
+/// 宽容解析：role 序列化为 lowercase（`user`），文本块为
+/// `{"type":"text","text":...}`（ContentBlock 的 serde tag）。
+fn first_user_text(state_json: &serde_json::Value) -> Option<String> {
+    let ctx = state_json.get("context")?.as_array()?;
+    for msg in ctx {
+        if msg.get("role").and_then(|r| r.as_str()) != Some("user") {
+            continue;
+        }
+        let blocks = match msg.get("content").and_then(|c| c.as_array()) {
+            Some(b) => b,
+            None => continue,
+        };
+        for block in blocks {
+            if block.get("type").and_then(|t| t.as_str()) == Some("text")
+                && let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        let summary: String = text.chars().take(40).collect();
+                        return Some(summary);
+                    }
+                }
+        }
+    }
+    None
+}
+
+/// 会话目录（布局对齐 JsonFileAgentStateStore：`<state-root>/<user>/<session>/`）。
+/// session_id 由前端生成（`<mode>-<uuid hex>`），这里按 safe_segment 的安全
+/// 字符集校验，防路径拼接越界（core 的 safe_segment 是私有函数，本地复刻规则）。
+fn session_dir(state: &AppState, workspace_id: &str, session_id: &str) -> Result<std::path::PathBuf, String> {
+    let valid = !session_id.is_empty()
+        && session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    if !valid {
+        return Err(format!("invalid session id: `{session_id}`"));
+    }
+    Ok(factory::workspace_dir(&state.data_dir, workspace_id)
+        .join("state")
+        .join(USER_ID)
+        .join(session_id))
+}
+
+/// 重命名会话（自定义名；空串 = 清除自定义名，回到自动摘要）。
+#[tauri::command]
+pub fn rename_session(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    session_id: String,
+    title: String,
+) -> Result<(), String> {
+    let dir = session_dir(&state, &workspace_id, &session_id)?;
+    let path = dir.join("title.txt");
+    let title = title.trim();
+    if title.is_empty() {
+        let _ = std::fs::remove_file(&path);
+    } else {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(&path, title).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 删除会话：运行中的 turn 先中止，清内存运行态，再删整个状态目录
+/// （agent_state.json + title.txt；不可逆，前端负责确认）。
+#[tauri::command]
+pub async fn delete_session(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    mode: String,
+    session_id: String,
+) -> Result<(), String> {
+    let handle = state.handle(&workspace_id, &mode)?;
+    let session = handle.session(&session_id).await;
+    session.interrupt().await;
+    handle.drop_session(&session_id).await;
+    let dir = session_dir(&state, &workspace_id, &session_id)?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -1318,6 +1416,8 @@ pub fn run() {
             list_sessions,
             get_history,
             clear_session,
+            rename_session,
+            delete_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

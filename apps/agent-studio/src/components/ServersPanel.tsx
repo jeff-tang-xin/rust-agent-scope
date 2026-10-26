@@ -16,7 +16,14 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
-export default function ServersPanel({ onCollapse }: { onCollapse: () => void }) {
+export default function ServersPanel({
+  onCollapse,
+  boundServers,
+}: {
+  onCollapse: () => void;
+  /** 工作区绑定的服务器白名单；非空时只显示绑定的（能力收窄的可视化）。 */
+  boundServers?: string[];
+}) {
   const [servers, setServers] = useState<ServerConfig[]>([]);
   const [connected, setConnected] = useState<Set<string>>(new Set());
   const [active, setActive] = useState(""); // 当前操作的服务器
@@ -25,7 +32,11 @@ export default function ServersPanel({ onCollapse }: { onCollapse: () => void })
 
   const reload = useCallback(async () => {
     try {
-      const list = await api.listServers();
+      const all = await api.listServers();
+      // 绑定白名单非空 → 只显示绑定的服务器（与工具面能力一致）。
+      const list = boundServers?.length
+        ? all.filter((s) => boundServers.includes(s.name))
+        : all;
       setServers(list);
       // 恢复连接状态显示（后端连接池仍在的保持绿点）。
       const statuses = await Promise.all(list.map((s) => api.sshStatus(s.name)));
@@ -33,7 +44,7 @@ export default function ServersPanel({ onCollapse }: { onCollapse: () => void })
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [boundServers]);
 
   useEffect(() => {
     void reload();

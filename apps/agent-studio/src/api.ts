@@ -42,6 +42,10 @@ export interface WorkspaceConfig {
   dir: string;
   /** 协同工作区 team 运行方式下的成员（智能体 id 列表，lead 之外）。 */
   members: string[];
+  /** 绑定的服务器档案名（能力白名单；空 = ops 类别默认开放全部）。 */
+  bound_servers: string[];
+  /** 绑定的数据库档案名（能力白名单；空 = db 类别默认开放全部）。 */
+  bound_databases: string[];
   created_at: number;
 }
 
@@ -132,6 +136,8 @@ export interface SessionSummary {
   updated_at: number;
   /** 派生本会话的父会话（spawn 子代理会话才有）。 */
   parent_session_id?: string;
+  /** 会话名：自定义名优先，否则首条用户消息摘要；缺省回退 session id。 */
+  title?: string;
 }
 
 /** 工作区文件条目（相对工作区根，/ 分隔）。 */
@@ -266,6 +272,10 @@ export const api = {
     invoke<HistoryItem[]>("get_history", { workspaceId, mode, sessionId }),
   clearSession: (workspaceId: string, mode: string, sessionId: string) =>
     invoke<void>("clear_session", { workspaceId, mode, sessionId }),
+  renameSession: (workspaceId: string, sessionId: string, title: string) =>
+    invoke<void>("rename_session", { workspaceId, sessionId, title }),
+  deleteSession: (workspaceId: string, mode: string, sessionId: string) =>
+    invoke<void>("delete_session", { workspaceId, mode, sessionId }),
 };
 
 // ---------- 事件订阅 ----------

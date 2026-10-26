@@ -84,18 +84,31 @@ function isWriteSql(sql: string): boolean {
   ].includes(head ?? "");
 }
 
-export default function DatabasesPanel({ onCollapse }: { onCollapse: () => void }) {
+export default function DatabasesPanel({
+  onCollapse,
+  boundDatabases,
+}: {
+  onCollapse: () => void;
+  /** 工作区绑定的数据库白名单；非空时只显示绑定的（能力收窄的可视化）。 */
+  boundDatabases?: string[];
+}) {
   const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
   const [active, setActive] = useState(""); // 当前展开的数据库
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
     try {
-      setDatabases(await api.listDatabases());
+      const all = await api.listDatabases();
+      // 绑定白名单非空 → 只显示绑定的数据库（与工具面能力一致）。
+      setDatabases(
+        boundDatabases?.length
+          ? all.filter((d) => boundDatabases.includes(d.name))
+          : all,
+      );
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [boundDatabases]);
 
   useEffect(() => {
     void reload();

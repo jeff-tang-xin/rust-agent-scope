@@ -14,6 +14,8 @@ import {
   onTurnFinished,
   onTurnStarted,
   type AgentConfig,
+  type DatabaseServerConfig,
+  type ServerConfig,
   type WorkspaceConfig,
   type WorkspaceKind,
 } from "./api";
@@ -39,6 +41,9 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("collab");
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceConfig[]>([]);
+  // 服务器/数据库档案（工作区表单的绑定选择；加载失败不阻塞主流程）。
+  const [servers, setServers] = useState<ServerConfig[]>([]);
+  const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -76,6 +81,9 @@ export default function App() {
     const [a, ws] = await Promise.all([api.listAgents(), api.listWorkspaces()]);
     setAgents(a);
     setWorkspaces(ws);
+    // 档案列表给工作区表单做绑定选择；失败不阻塞（表单里显示为空）。
+    api.listServers().then(setServers).catch(() => {});
+    api.listDatabases().then(setDatabases).catch(() => {});
     setLoaded(true);
   }, []);
 
@@ -209,6 +217,9 @@ export default function App() {
                 setSessionByWs((prev) => ({ ...prev, [wsId]: sid }))
               }
               onNewSession={newSession}
+              onDeleteSession={(wsId, sid) => {
+                void api.deleteSession(wsId, modes[wsId] ?? "solo", sid);
+              }}
               running={running}
               onEditWorkspace={(w) => setWsForm({ kind: "edit", initial: w })}
               onDeleteWorkspace={(w) => void removeWorkspace(w)}
@@ -242,6 +253,8 @@ export default function App() {
       {wsForm && (
         <WorkspaceFormModal
           agents={agents}
+          servers={servers}
+          databases={databases}
           category={wsForm.initial?.kind ?? (cat?.key ?? "collab")}
           initial={wsForm.initial ?? null}
           onClose={() => setWsForm(null)}

@@ -20,6 +20,7 @@ export default function SessionSidebar({
   onEditWorkspace,
   onDeleteWorkspace,
   onCreateWorkspace,
+  onDeleteSession,
 }: {
   workspaces: WorkspaceConfig[];
   selectedId: string;
@@ -33,8 +34,13 @@ export default function SessionSidebar({
   onEditWorkspace: (w: WorkspaceConfig) => void;
   onDeleteWorkspace: (w: WorkspaceConfig) => void;
   onCreateWorkspace: () => void;
+  /** 删除会话（App 层补 runtime mode；删除后本组件刷新列表）。 */
+  onDeleteSession: (wsId: string, sessionId: string) => void;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // 内联重命名：正在编辑的 session id + 输入框值（Tauri WebView 无 prompt）。
+  const [renaming, setRenaming] = useState("");
+  const [renameValue, setRenameValue] = useState("");
   const selected = workspaces.find((w) => w.id === selectedId);
 
   const load = useCallback(async () => {
@@ -52,6 +58,29 @@ export default function SessionSidebar({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const commitRename = async (wsId: string, sessionId: string) => {
+    const title = renameValue.trim();
+    setRenaming("");
+    try {
+      await api.renameSession(wsId, sessionId, title);
+      await load();
+    } catch {
+      /* 重命名失败静默（下次刷新可见原状） */
+    }
+  };
+
+  const removeSession = async (wsId: string, sessionId: string) => {
+    if (!window.confirm(`删除会话「${sessionId}」？对话历史将被清除，不可恢复。`)) return;
+    try {
+      await onDeleteSession(wsId, sessionId);
+      await load();
+      // 删的是当前会话 → 直接开新会话（App 层生成新 id 并切换）。
+      if (sessionByWs[wsId] === sessionId) onNewSession(wsId);
+    } catch {
+      /* 删除失败静默 */
+    }
+  };
 
   // turn 结束刷新 session 摘要（新会话落盘 / 消息数变化）。
   useEffect(() => {
@@ -122,19 +151,62 @@ export default function SessionSidebar({
                 const renderRow = (s: SessionSummary, child: boolean) => {
                   const isRunning = running.has(`${w.id}:${s.session_id}`);
                   const isCurrent = currentSession === s.session_id;
+                  if (renaming === s.session_id) {
+                    return (
+                      <div key={s.session_id} className="ss-session renaming">
+                        <input
+                          className="ss-rename"
+                          autoFocus
+                          value={renameValue}
+                          placeholder="会话名（留空 = 自动摘要）"
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void commitRename(w.id, s.session_id);
+                            if (e.key === "Escape") setRenaming("");
+                          }}
+                          onBlur={() => void commitRename(w.id, s.session_id)}
+                        />
+                      </div>
+                    );
+                  }
                   return (
-                    <button
+                    <div
                       key={s.session_id}
-                      className={`ss-session ${isCurrent ? "active" : ""} ${child ? "is-child" : ""}`}
-                      onClick={() => onSelectSession(w.id, s.session_id)}
-                      title={child ? `子代理会话（派生自 ${s.parent_session_id}）` : s.session_id}
+                      className={`ss-session-row ${isCurrent ? "active" : ""} ${child ? "is-child" : ""}`}
                     >
-                      <span className={`ss-dot ${isRunning ? "run" : ""}`} aria-hidden />
-                      <span className="ss-session-name">{s.session_id.slice(0, 12)}</span>
-                      <span className="ss-session-state">
-                        {isRunning ? "运行中" : child ? "子代理" : `${s.messages} 条`}
+                      <button
+                        className={`ss-session ${isCurrent ? "active" : ""}`}
+                        onClick={() => onSelectSession(w.id, s.session_id)}
+                        title={s.title ? `${s.title}\n（${s.session_id}）` : s.session_id}
+                      >
+                        <span className={`ss-dot ${isRunning ? "run" : ""}`} aria-hidden />
+                        <span className="ss-session-name">
+                          {s.title || s.session_id.slice(0, 12)}
+                        </span>
+                        <span className="ss-session-state">
+                          {isRunning ? "运行中" : child ? "子代理" : `${s.messages} 条`}
+                        </span>
+                      </button>
+                      <span className="ss-session-actions">
+                        <button
+                          className="icon-btn"
+                          title="重命名会话"
+                          onClick={() => {
+                            setRenaming(s.session_id);
+                            setRenameValue(s.title ?? "");
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="icon-btn danger"
+                          title="删除会话"
+                          onClick={() => void removeSession(w.id, s.session_id)}
+                        >
+                          🗑
+                        </button>
                       </span>
-                    </button>
+                    </div>
                   );
                 };
                 return topSessions.map((s) => (
