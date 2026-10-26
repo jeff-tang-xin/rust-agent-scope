@@ -3,7 +3,7 @@
 // 事件处理对齐 Java AgentSessionView.apply 的思路：增量 apply 事件维护视图，
 // AgentResult 为最终消息的权威来源，流式 delta 仅作过程展示。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
@@ -54,6 +54,39 @@ function Typewriter({ text, active }: { text: string; active: boolean }) {
       <Markdown remarkPlugins={[remarkGfm]}>{text.slice(0, shown)}</Markdown>
       {active && <span className="type-cursor" aria-hidden />}
     </>
+  );
+}
+
+/** 流式内容自动滚底容器：内框（max-height + overflow）里内容长高时
+ *  （打字机 reveal / delta 追加）保持滚动到底部；非流式（历史展开）
+ *  不干预——滚动控制权留给用户。 */
+function AutoScrollBody({
+  className,
+  active,
+  children,
+}: {
+  className: string;
+  active: boolean;
+  children: ReactNode;
+}) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    outer.scrollTop = outer.scrollHeight;
+    const ro = new ResizeObserver(() => {
+      outer.scrollTop = outer.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [active]);
+  return (
+    <div ref={outerRef} className={className}>
+      <div ref={innerRef}>{children}</div>
+    </div>
   );
 }
 
@@ -362,6 +395,9 @@ export default function Conversation({
   const streamRef = useRef<{ kind: "msg" | "thinking"; blockId: string; entryId: string } | null>(null);
   const toolRef = useRef<Map<string, string>>(new Map()); // callKey -> entry id
   const scrollRef = useRef<HTMLDivElement>(null);
+  const innerScrollRef = useRef<HTMLDivElement>(null);
+  // 用户是否停在底部附近（上滚查看历史时不强拉到底——可控性）。
+  const nearBottomRef = useRef(true);
 
   const upsert = useCallback((id: string, patch: (e: Entry) => Entry) => {
     setEntries((prev) => prev.map((e) => (e.id === id ? patch(e) : e)));
@@ -603,10 +639,24 @@ export default function Conversation({
     };
   }, [workspace.id, sessionId, upsert, finalizeStreams]);
 
-  // 自动滚底。
+  // 自动滚底：观察内容高度（打字机 reveal / 新条目都会长高），
+  // 仅当用户停在底部附近时跟随；上滚查看历史时不打扰。
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [entries]);
+    const outer = scrollRef.current;
+    const inner = innerScrollRef.current;
+    if (!outer || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (nearBottomRef.current) outer.scrollTop = outer.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, []);
+
+  // 切会话：重置为跟随底部。
+  useEffect(() => {
+    nearBottomRef.current = true;
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [sessionId]);
 
   // 选附件：FileReader 读 data URL → 拆出 base64（单文件上限 8MB，防 IPC 卡顿）。
   const pickFiles = async (files: FileList | null) => {
@@ -749,9 +799,9 @@ export default function Conversation({
             <span className="entry-caret">{open ? "▾" : "▸"}</span>
           </button>
           {open && (
-            <div className="entry-body thinking-text md">
+            <AutoScrollBody className="entry-body thinking-text md" active={e.streaming === true}>
               <Typewriter text={e.text} active={e.streaming === true} />
-            </div>
+            </AutoScrollBody>
           )}
         </div>
       );
@@ -786,10 +836,10 @@ export default function Conversation({
           <span className="entry-caret">{open ? "▾" : "▸"}</span>
         </button>
         {open && (
-          <div className="entry-body tool-body">
+          <AutoScrollBody className="entry-body tool-body" active={e.ok === undefined}>
             {e.args && <pre className="tool-io">{e.args}</pre>}
             {e.result !== undefined && <pre className="tool-io out">{e.result}</pre>}
-          </div>
+          </AutoScrollBody>
         )}
       </div>
     );
@@ -851,7 +901,16 @@ export default function Conversation({
       </div>
       {error && <div className="notice error" style={{ margin: "10px 20px 0" }}>{error}</div>}
       {notice && <div className="notice info" style={{ margin: "10px 20px 0" }}>{notice}</div>}
-      <div className="messages" ref={scrollRef}>
+      <div
+        className="messages"
+        ref={scrollRef}
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
+        <div className="messages-inner" ref={innerScrollRef}>
         {entries.length === 0 && (
           <div className="empty">
             <div>Start the conversation with {agent.name}</div>
@@ -883,6 +942,7 @@ export default function Conversation({
             </div>
           );
         })}
+        </div>
       </div>
       {attachments.length > 0 && (
         <div className="attach-chips">

@@ -105,7 +105,11 @@ export default function SessionSidebar({
             </span>
           </div>
           {w.id === selectedId && (
-            <div className="ss-sessions">
+            <>
+              <div className="ss-ws-path" title={w.dir.trim() || "默认工作区（~/.ox）"}>
+                {w.dir.trim() || "默认工作区（~/.ox）"}
+              </div>
+              <div className="ss-sessions">
               {sessionItems.map((s) => {
                 const isRunning = running.has(`${w.id}:${s.session_id}`);
                 const isCurrent = currentSession === s.session_id;
@@ -128,7 +132,8 @@ export default function SessionSidebar({
               <button className="ss-new" onClick={() => onNewSession(w.id)}>
                 + 新会话
               </button>
-            </div>
+              </div>
+            </>
           )}
         </div>
       ))}
