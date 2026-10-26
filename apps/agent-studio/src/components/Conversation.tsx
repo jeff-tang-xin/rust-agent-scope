@@ -15,6 +15,7 @@ import {
   type AgentEventPayload,
   type SessionSummary,
   type WorkspaceConfig,
+  type WorkspaceFileEntry,
 } from "../api";
 
 type Entry =
@@ -143,6 +144,99 @@ function entriesFromBlocks(
   return out;
 }
 
+/** 字节数 → 可读大小。 */
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 右侧文件面板：工作区根目录的文件列表（与 agent 文件工具同一锚定目录）。
+ *  点击文件预览文本；turn 结束自动刷新（agent 产出文件后列表跟随）。 */
+function FilePanel({ workspaceId }: { workspaceId: string }) {
+  const [files, setFiles] = useState<WorkspaceFileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setFiles(await api.listWorkspaceFiles(workspaceId));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const un = onTurnFinished((p) => {
+      if (p.workspace_id === workspaceId) void load();
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [workspaceId, load]);
+
+  const open = async (path: string) => {
+    try {
+      setError("");
+      setPreview({ path, content: await api.readWorkspaceFile(workspaceId, path) });
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  return (
+    <aside className="file-panel">
+      <div className="file-panel-head">
+        <span>文件</span>
+        <span className="spacer" />
+        <button className="icon-btn" title="刷新" onClick={() => void load()}>
+          ⟳
+        </button>
+      </div>
+      {error && <div className="file-panel-error">{error}</div>}
+      <div className="file-tree">
+        {loading && files.length === 0 && <div className="file-empty">加载中…</div>}
+        {!loading && files.length === 0 && <div className="file-empty">（空目录）</div>}
+        {files.map((f) => (
+          <button
+            key={f.path}
+            className={`file-row ${f.is_dir ? "is-dir" : ""}`}
+            style={{ paddingLeft: 8 + (f.path.split("/").length - 1) * 12 }}
+            title={f.path}
+            onClick={() => !f.is_dir && void open(f.path)}
+          >
+            <span className="file-icon">{f.is_dir ? "📁" : "📄"}</span>
+            <span className="file-name">{f.path.split("/").pop()}</span>
+            {!f.is_dir && f.size > 0 && <span className="file-size">{fmtSize(f.size)}</span>}
+          </button>
+        ))}
+      </div>
+      {preview && (
+        <div className="modal-mask" onClick={() => setPreview(null)}>
+          <div className="modal file-preview" onClick={(e) => e.stopPropagation()}>
+            <h2>{preview.path}</h2>
+            <pre>{preview.content}</pre>
+            <div className="modal-actions">
+              <button className="btn ghost" onClick={() => setPreview(null)}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+}
+
 export default function Conversation({
   workspace,
   agent,
@@ -172,11 +266,14 @@ export default function Conversation({
     Array<{ name: string; media_type: string; data_base64: string; preview?: string }>
   >([]);
   const [busy, setBusy] = useState(false);
+  // 拖拽附件进行中（容器高亮提示）。
+  const [dragActive, setDragActive] = useState(false);
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const streamRef = useRef<string | null>(null); // 当前流式 assistant entry id
-  const thinkRef = useRef<string | null>(null);
+  // 当前流式块（按 block_id 分组：同一块追加，块切换定格旧条目开新条目，
+  // 保证 思考→工具→思考→输出 按真实时间交错显示）。
+  const streamRef = useRef<{ kind: "msg" | "thinking"; blockId: string; entryId: string } | null>(null);
   const toolRef = useRef<Map<string, string>>(new Map()); // callKey -> entry id
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -185,14 +282,15 @@ export default function Conversation({
   }, []);
 
   // 收流：把流式中的 msg/thinking 条目置为完成（打字机停走、光标消失）。
-  // AGENT_RESULT / AGENT_END / turn 终态三处调用，中断也能可靠复位。
+  // 块切换 / 块结束 / 工具开始 / AGENT_RESULT / AGENT_END / turn 终态都会调用。
   const finalizeStreams = useCallback(() => {
-    const sid = streamRef.current;
-    const tid = thinkRef.current;
+    const cur = streamRef.current;
     streamRef.current = null;
-    thinkRef.current = null;
-    if (sid) upsert(sid, (e) => (e.kind === "msg" ? { ...e, streaming: false } : e));
-    if (tid) upsert(tid, (e) => (e.kind === "thinking" ? { ...e, streaming: false } : e));
+    if (cur) {
+      upsert(cur.entryId, (e) =>
+        e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
+      );
+    }
   }, [upsert]);
 
   const reloadSessions = useCallback(async () => {
@@ -213,7 +311,6 @@ export default function Conversation({
     let alive = true;
     setEntries([]);
     streamRef.current = null;
-    thinkRef.current = null;
     toolRef.current.clear();
     setBusy(false);
     api.getHistory(workspace.id, runtimeMode, sessionId).then((history) => {
@@ -261,85 +358,137 @@ export default function Conversation({
         case "TEXT_BLOCK_DELTA": {
           const delta = String(ev.delta ?? "");
           if (!delta) break;
-          if (!streamRef.current) {
+          const blockId = String(ev.block_id ?? "");
+          const cur = streamRef.current;
+          if (!cur || cur.kind !== "msg" || cur.blockId !== blockId) {
+            // 新文本块：先定格上一个流式块（保持时间交错），再开新条目。
+            finalizeStreams();
             const id = nextId();
-            streamRef.current = id;
+            streamRef.current = { kind: "msg", blockId, entryId: id };
             setEntries((prev) => [
               ...prev,
               { kind: "msg", role: "assistant", text: delta, ts: nowTime(), streaming: true, id },
             ]);
           } else {
-            const id = streamRef.current;
-            upsert(id, (e) => (e.kind === "msg" ? { ...e, text: e.text + delta } : e));
+            upsert(cur.entryId, (e) => (e.kind === "msg" ? { ...e, text: e.text + delta } : e));
           }
           break;
         }
         case "THINKING_BLOCK_DELTA": {
           const delta = String(ev.delta ?? "");
           if (!delta) break;
-          if (!thinkRef.current) {
+          const blockId = String(ev.block_id ?? "");
+          const cur = streamRef.current;
+          if (!cur || cur.kind !== "thinking" || cur.blockId !== blockId) {
+            // 新思考块：先定格上一个流式块，再开新条目（工具后的思考不再并入前面）。
+            finalizeStreams();
             const id = nextId();
-            thinkRef.current = id;
+            streamRef.current = { kind: "thinking", blockId, entryId: id };
             setEntries((prev) => [
               ...prev,
               { kind: "thinking", text: delta, ts: nowTime(), streaming: true, id },
             ]);
           } else {
-            const id = thinkRef.current;
-            upsert(id, (e) => (e.kind === "thinking" ? { ...e, text: e.text + delta } : e));
+            upsert(cur.entryId, (e) => (e.kind === "thinking" ? { ...e, text: e.text + delta } : e));
           }
           break;
         }
+        case "TEXT_BLOCK_END":
+        case "THINKING_BLOCK_END":
+          // 块结束：光标立刻消失（后续同类型新块会开新条目）。
+          finalizeStreams();
+          break;
         case "TOOL_CALL_START": {
-          const name = String(ev.name ?? ev.tool_name ?? "tool");
-          const args = shortJson(ev.arguments ?? ev.input ?? ev.args ?? "");
+          finalizeStreams(); // 工具前的文本/思考块定格（去掉打字光标）
+          // 后端事件字段：tool_call_name / tool_call_id（event.rs ToolCallStart）。
+          const name = String(ev.tool_call_name ?? ev.name ?? ev.tool_name ?? "tool");
           const id = nextId();
-          const callKey = String(ev.call_id ?? ev.id ?? `${name}-${id}`);
+          const callKey = String(ev.tool_call_id ?? ev.call_id ?? ev.id ?? `${name}-${id}`);
           toolRef.current.set(callKey, id);
           setEntries((prev) => [
             ...prev,
-            { kind: "tool", callId: callKey, name, args, ts: nowTime(), id },
+            { kind: "tool", callId: callKey, name, args: "", ts: nowTime(), id },
           ]);
           break;
         }
-        case "TOOL_RESULT_END": {
-          const callKey = String(ev.call_id ?? ev.id ?? "");
+        case "TOOL_CALL_DELTA": {
+          // 参数 JSON 分片累积（非流式执行时为一次完整序列化）。
+          const callKey = String(ev.tool_call_id ?? ev.call_id ?? "");
+          const chunk = String(ev.delta ?? "");
+          if (!callKey || !chunk) break;
           const entryId = toolRef.current.get(callKey);
-          const output = ev.output ?? ev.result ?? ev.content;
-          const text =
-            typeof output === "string" ? output : shortJson(output, 1200);
+          if (entryId) {
+            upsert(entryId, (e) => (e.kind === "tool" ? { ...e, args: e.args + chunk } : e));
+          }
+          break;
+        }
+        case "TOOL_CALL_END": {
+          // 参数齐了：尝试 pretty 一次（失败保持原样）。
+          const callKey = String(ev.tool_call_id ?? ev.call_id ?? "");
+          const entryId = toolRef.current.get(callKey);
+          if (entryId) {
+            upsert(entryId, (e) => {
+              if (e.kind !== "tool") return e;
+              let args = e.args;
+              try {
+                args = JSON.stringify(JSON.parse(e.args), null, 2);
+              } catch {
+                /* 非 JSON 保持原样 */
+              }
+              return { ...e, args };
+            });
+          }
+          break;
+        }
+        case "TOOL_RESULT_TEXT_DELTA": {
+          // 结果文本增量累积（ToolResultEnd 只带 state，内容走这里）。
+          const callKey = String(ev.tool_call_id ?? ev.call_id ?? "");
+          const chunk = String(ev.delta ?? "");
+          if (!callKey || !chunk) break;
+          const entryId = toolRef.current.get(callKey);
           if (entryId) {
             upsert(entryId, (e) =>
-              e.kind === "tool" ? { ...e, result: text, ok: ev.is_error !== true } : e,
+              e.kind === "tool" ? { ...e, result: (e.result ?? "") + chunk } : e,
             );
           }
           break;
         }
+        case "TOOL_RESULT_END": {
+          // 后端 ToolResultEnd 只带 state（Success/Error/…），内容已由
+          // TOOL_RESULT_TEXT_DELTA 累积；这里只定格成功/失败状态。
+          const callKey = String(ev.tool_call_id ?? ev.call_id ?? ev.id ?? "");
+          const entryId = toolRef.current.get(callKey);
+          const ok = /^success$/i.test(String(ev.state ?? "success"));
+          if (entryId) {
+            upsert(entryId, (e) => (e.kind === "tool" ? { ...e, ok } : e));
+          }
+          break;
+        }
         case "AGENT_RESULT": {
-          // 最终消息是权威来源：替换流式缓冲并结束流式态。
+          // 最终消息是权威来源：替换最后一个文本流块并结束流式态。
           const result = ev.result as { content?: unknown } | undefined;
           const text = extractText(result?.content);
-          const streamingId = streamRef.current;
-          const thinkId = thinkRef.current;
+          const cur = streamRef.current;
           streamRef.current = null;
-          thinkRef.current = null;
           if (text) {
-            if (streamingId) {
-              upsert(streamingId, (e) =>
-                e.kind === "msg" ? { ...e, text, streaming: false } : e,
-              );
+            if (cur && cur.kind === "msg") {
+              upsert(cur.entryId, (e) => (e.kind === "msg" ? { ...e, text, streaming: false } : e));
             } else {
+              if (cur) {
+                upsert(cur.entryId, (e) =>
+                  e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
+                );
+              }
               setEntries((prev) => [
                 ...prev,
                 { kind: "msg", role: "assistant", text, ts: nowTime(), id: nextId() },
               ]);
             }
-          } else if (streamingId) {
+          } else if (cur) {
             // 权威结果无文本（纯工具轮）：仅结束流式态
-            upsert(streamingId, (e) => (e.kind === "msg" ? { ...e, streaming: false } : e));
-          }
-          if (thinkId) {
-            upsert(thinkId, (e) => (e.kind === "thinking" ? { ...e, streaming: false } : e));
+            upsert(cur.entryId, (e) =>
+              e.kind === "msg" || e.kind === "thinking" ? { ...e, streaming: false } : e,
+            );
           }
           break;
         }
@@ -566,6 +715,21 @@ export default function Conversation({
 
   return (
     <div className="conversation">
+      <div
+        className={`conv-main ${dragActive ? "drag-active" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setDragActive(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragActive(false);
+          if (e.dataTransfer?.files?.length) void pickFiles(e.dataTransfer.files);
+        }}
+      >
       <div className="session-bar">
         <button className="btn ghost" onClick={onBack} title="返回工作区列表" disabled={busy}>
           ←
@@ -697,6 +861,14 @@ export default function Conversation({
               submit();
             }
           }}
+          onPaste={(e) => {
+            // 粘贴图片/文件 → 附件（文本粘贴不受影响，files 为空时不拦截）。
+            const files = e.clipboardData?.files;
+            if (files && files.length > 0) {
+              e.preventDefault();
+              void pickFiles(files);
+            }
+          }}
           placeholder={
             busy
               ? "Type to steer the running turn… (Enter to steer)"
@@ -721,6 +893,9 @@ export default function Conversation({
           Clear
         </button>
       </div>
+      {dragActive && <div className="drop-hint">松开以添加附件</div>}
+      </div>
+      <FilePanel workspaceId={workspace.id} />
     </div>
   );
 }

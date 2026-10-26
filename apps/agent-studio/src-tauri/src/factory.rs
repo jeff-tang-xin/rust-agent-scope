@@ -60,6 +60,16 @@ pub(crate) fn workspace_dir(data_dir: &Path, workspace_id: &str) -> PathBuf {
     data_dir.join("workspaces").join(workspace_id)
 }
 
+/// 工作区文件根（agent 文件工具的锚定目录；文件列表命令用同一解析，
+/// 保证面板看到的与 agent 干活的目录一致）。
+pub fn resolve_workspace_root(data_dir: &Path, ws: &WorkspaceConfig) -> PathBuf {
+    if ws.dir.trim().is_empty() {
+        workspace_dir(data_dir, &ws.id).join("workspace")
+    } else {
+        std::path::PathBuf::from(ws.dir.trim())
+    }
+}
+
 /// 构建 OpenAI 兼容模型。
 fn build_model(provider: &ModelProviderConfig) -> Result<Arc<dyn Model>, String> {
     let mut model = OpenAIChatModel::new(&provider.api_key, &provider.model);
@@ -158,11 +168,7 @@ pub fn build_agent(
     let dir = workspace_dir(data_dir, &ws.id);
     // 工作目录：配置指定绝对路径则用之（agent 直接在真实项目里干活），
     // 否则用默认目录。Sandboxed 模式把所有文件工具锚定在该根上。
-    let workspace_root = if ws.dir.trim().is_empty() {
-        dir.join("workspace")
-    } else {
-        std::path::PathBuf::from(ws.dir.trim())
-    };
+    let workspace_root = resolve_workspace_root(data_dir, ws);
     let workspace = build_workspace(&workspace_root)?;
     let state_store = build_state_store(&dir.join("state"))?;
 

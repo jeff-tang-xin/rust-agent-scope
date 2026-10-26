@@ -109,6 +109,13 @@ export interface SessionSummary {
   updated_at: number;
 }
 
+/** 工作区文件条目（相对工作区根，/ 分隔）。 */
+export interface WorkspaceFileEntry {
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
 export interface TurnStartedPayload {
   workspace_id: string;
   session_id: string;
@@ -175,6 +182,11 @@ export const api = {
 
   listSessions: (workspaceId: string) =>
     invoke<SessionSummary[]>("list_sessions", { workspaceId }),
+
+  listWorkspaceFiles: (workspaceId: string) =>
+    invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceId }),
+  readWorkspaceFile: (workspaceId: string, path: string) =>
+    invoke<string>("read_workspace_file", { workspaceId, path }),
 
   setPlanMode: (workspaceId: string, mode: string, sessionId: string, active: boolean) =>
     invoke<PlanStatus>("set_plan_mode", { workspaceId, mode, sessionId, active }),

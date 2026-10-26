@@ -232,6 +232,124 @@ pub fn list_database_kinds() -> &'static [crate::db_kind::DatabaseKind] {
     crate::db_kind::DATABASE_KINDS
 }
 
+// ---------- workspace files（会话右侧文件列表） ----------
+
+/// 文件条目：相对工作区根的路径（/ 分隔）+ 类型 + 大小。
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceFileEntry {
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+}
+
+/// 文件列表上限（条目数 / 递归深度），防大目录拖垮 IPC。
+const FILE_LIST_LIMIT: usize = 500;
+const FILE_LIST_DEPTH: usize = 4;
+
+/// 解析工作区文件根（与 build_agent 的锚定目录同一解析），不存在则创建。
+fn resolve_ws_root(state: &AppState, workspace_id: &str) -> Result<std::path::PathBuf, String> {
+    let config = state.snapshot();
+    let ws = config
+        .workspaces
+        .iter()
+        .find(|w| w.id == workspace_id)
+        .ok_or_else(|| format!("workspace `{}` not found", workspace_id))?;
+    let root = factory::resolve_workspace_root(&state.data_dir, ws);
+    if !root.exists() {
+        std::fs::create_dir_all(&root).map_err(|e| format!("create workspace dir failed: {e}"))?;
+    }
+    Ok(root)
+}
+
+/// 递归列目录：跳过隐藏条目与常见噪音目录，深度/条目数受限。
+fn walk_files(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    depth: usize,
+    out: &mut Vec<WorkspaceFileEntry>,
+) {
+    if depth > FILE_LIST_DEPTH || out.len() >= FILE_LIST_LIMIT {
+        return;
+    }
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return, // 无权限/已消失的目录静默跳过
+    };
+    let mut entries: Vec<_> = read.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let p = e.path();
+        let is_dir = p.is_dir();
+        if is_dir
+            && matches!(
+                name.as_str(),
+                "node_modules" | "target" | "dist" | "__pycache__" | ".studio-members"
+            )
+        {
+            continue;
+        }
+        let rel = p
+            .strip_prefix(root)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let size = if is_dir { 0 } else { e.metadata().map(|m| m.len()).unwrap_or(0) };
+        out.push(WorkspaceFileEntry { path: rel, is_dir, size });
+        if is_dir {
+            walk_files(root, &p, depth + 1, out);
+        }
+        if out.len() >= FILE_LIST_LIMIT {
+            return;
+        }
+    }
+}
+
+#[tauri::command]
+pub fn list_workspace_files(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<WorkspaceFileEntry>, String> {
+    let root = resolve_ws_root(&state, &workspace_id)?;
+    let mut out = Vec::new();
+    walk_files(&root, &root, 0, &mut out);
+    out.truncate(FILE_LIST_LIMIT);
+    Ok(out)
+}
+
+/// 读工作区文件文本（预览用；canonicalize 校验防目录穿越，512KB 上限）。
+#[tauri::command]
+pub fn read_workspace_file(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<String, String> {
+    let root = resolve_ws_root(&state, &workspace_id)?;
+    if path.trim().is_empty() {
+        return Err("path is empty".to_string());
+    }
+    let canon_root = root.canonicalize().map_err(|e| format!("resolve root failed: {e}"))?;
+    let target = root.join(&path);
+    let canon = target
+        .canonicalize()
+        .map_err(|e| format!("resolve path failed: {e}"))?;
+    if !canon.starts_with(&canon_root) {
+        return Err("path escapes workspace root".to_string());
+    }
+    if canon.is_dir() {
+        return Err("path is a directory".to_string());
+    }
+    let meta = std::fs::metadata(&canon).map_err(|e| e.to_string())?;
+    if meta.len() > 512 * 1024 {
+        return Err("file too large to preview (>512KB)".to_string());
+    }
+    let bytes = std::fs::read(&canon).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
 // ---------- agents ----------
 
 #[tauri::command]
@@ -903,6 +1021,8 @@ pub fn run() {
             save_database,
             delete_database,
             list_database_kinds,
+            list_workspace_files,
+            read_workspace_file,
             list_agents,
             create_agent,
             update_agent,
