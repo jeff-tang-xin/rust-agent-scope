@@ -14,14 +14,19 @@
 //! - 提交：压缩结果写回走 [`ReActAgent::save_agent_state_for`] 的 CAS——
 //!   并发变更时保存失败即放弃本次压缩（对齐 Java `canCommit` 语义）。
 //!
+//! 与 Java 一致的核心语义（续）：
+//! - 粒度：经 [`agentscope_core::agent::IterationHook`] 挂在每轮 ReAct 迭代边界
+//!   （reasoning 之前），与 Java 每轮 `onReasoning` 检查对齐；模型报上下文溢出时
+//!   以 forced 配置（trigger=1/keep=1/keepTokens=0）强制压缩并同轮重试一次
+//!   （对齐 Java `overflowRecovery`，溢出判定见
+//!   [`agentscope_core::agent::is_context_overflow_error`]）；
+//! - 轻量裁剪：摘要前先做非 LLM 的 `truncate_args`（旧消息超大工具参数截断）与
+//!   `prune_tool_results`（旧 tool-result 首尾预览替换），裁剪后未触发摘要也
+//!   会提交裁剪结果（对齐 Java `compactStandard` 的 Step 1a/1b 与 lightweight
+//!   result）。
+//!
 //! 与 Java 的有意差异（lib.rs 差异声明同步维护）：
-//! - Java 在每轮 ReAct 迭代的 `onReasoning` 钩子检查；Rust 中间件钩子均为同步，
-//!   压缩需要 await（flush + 摘要 LLM 调用），故挂在 [`HarnessAgent`] 的 turn
-//!   入口（`call`/`stream_events` 进 delegate 之前）——每 turn 检查一次；
-//! - Java 的 overflow 恢复（`overflowRecovery`，模型报上下文溢出后强制压缩重试）
-//!   依赖错误恢复钩子，Rust 中间件无此扩展点，未复刻；
-//! - `truncateArgs` / `pruneToolResults`（压缩前轻量裁剪）与
-//!   `ToolResultEvictionMiddleware` 未复刻；
+//! - `ToolResultEvictionMiddleware`（超大 tool-result 落盘为文件引用）未复刻；
 //! - 自定义 `ConversationCompactionStrategy` 未复刻（Java 侧也是可选扩展）。
 
 use std::sync::Arc;
@@ -168,6 +173,10 @@ pub struct CompactionConfig {
     pub summary_prompt: String,
     /// 压缩前是否先做记忆 flush。
     pub flush_before_compact: bool,
+    /// 摘要前的工具参数截断（Step 1a，对齐 Java `TruncateArgsConfig`；None = 关闭）。
+    pub truncate_args: Option<TruncateArgsConfig>,
+    /// 摘要前的 tool-result 剪枝（Step 1b，对齐 Java `PruneConfig`；None = 关闭）。
+    pub prune: Option<PruneConfig>,
 }
 
 impl Default for CompactionConfig {
@@ -183,6 +192,8 @@ impl Default for CompactionConfig {
             keep_tokens_ratio: 0.25,
             summary_prompt: DEFAULT_SUMMARY_PROMPT.to_string(),
             flush_before_compact: true,
+            truncate_args: Some(TruncateArgsConfig::default()),
+            prune: Some(PruneConfig::default()),
         }
     }
 }
@@ -198,6 +209,231 @@ pub fn is_synthetic(msg: &Msg) -> bool {
         .and_then(|m| m.get(SYNTHETIC))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// 轻量裁剪配置（对齐 Java `CompactionConfig.TruncateArgsConfig` / `PruneConfig`）
+// ---------------------------------------------------------------------------
+
+/// 工具参数截断配置（Step 1a；字段与默认值对齐 Java `TruncateArgsConfig`）。
+///
+/// 独立于摘要触发的更低阈值：达到触发条件后，keep 窗口之前的 ASSISTANT 消息里
+/// 超长的工具参数值被替换为「前 20 字符 + 截断标记」。
+#[derive(Debug, Clone)]
+pub struct TruncateArgsConfig {
+    /// 消息数触发阈值（0 = 不按条数触发）。
+    pub trigger_messages: usize,
+    /// token 触发阈值（0 = 不按 token 触发）。
+    pub trigger_tokens: usize,
+    /// 逐字保留的尾部消息条数（`keep_tokens` 为 0 时生效）。
+    pub keep_messages: usize,
+    /// 逐字保留的尾部 token 预算（> 0 时优先于条数）。
+    pub keep_tokens: usize,
+    /// 单个工具参数值的最大字符数。
+    pub max_arg_length: usize,
+    /// 截断后追加的标记文本。
+    pub truncation_text: String,
+}
+
+impl Default for TruncateArgsConfig {
+    fn default() -> Self {
+        Self {
+            trigger_messages: 25,
+            trigger_tokens: 40_000,
+            keep_messages: 20,
+            keep_tokens: 0,
+            max_arg_length: 2_000,
+            truncation_text: "...(argument truncated)".to_string(),
+        }
+    }
+}
+
+/// tool-result 剪枝配置（Step 1b；字段与默认值对齐 Java `PruneConfig`）。
+///
+/// 从尾部向前保护最近 `protect_tokens` 的工具输出；更早的超长结果替换为
+/// 首尾预览，可剪总量达到 `minimum_tokens` 才实际执行。
+#[derive(Debug, Clone)]
+pub struct PruneConfig {
+    /// 最近工具输出的保护 token 预算（永不剪枝）。
+    pub protect_tokens: usize,
+    /// 可剪 token 总量达到该值才执行剪枝。
+    pub minimum_tokens: usize,
+    /// 剪枝后保留的首尾预览字符数。
+    pub max_output_chars: usize,
+    /// 永不剪枝的工具名（如 read_file——剪掉会导致重读循环）。
+    pub excluded_tools: Vec<String>,
+}
+
+impl Default for PruneConfig {
+    fn default() -> Self {
+        Self {
+            protect_tokens: 40_000,
+            minimum_tokens: 20_000,
+            max_output_chars: 2_000,
+            excluded_tools: vec![
+                "read_file".to_string(),
+                "memory_search".to_string(),
+                "memory_get".to_string(),
+                "session_search".to_string(),
+            ],
+        }
+    }
+}
+
+/// 工具参数截断（Step 1a，对齐 Java `ConversationCompactor.truncateArgs`）。
+///
+/// 达到触发条件后，keep 窗口之前的 ASSISTANT 消息里超长的字符串参数值被
+/// 截断；无改动时原样返回。
+pub fn truncate_args(messages: &[Msg], config: &TruncateArgsConfig) -> Vec<Msg> {
+    let total_tokens = estimate_tokens(messages);
+    let triggered = (config.trigger_messages > 0 && messages.len() >= config.trigger_messages)
+        || (config.trigger_tokens > 0 && total_tokens >= config.trigger_tokens);
+    if !triggered {
+        return messages.to_vec();
+    }
+    let cutoff = if config.keep_tokens > 0 {
+        // token 预算 keep 窗口：从尾扫描（对齐 Java `determineTruncateCutoff`）
+        let mut kept = 0usize;
+        let mut cut = 0usize;
+        for i in (0..messages.len()).rev() {
+            let t = estimate_tokens(&messages[i..i + 1]);
+            if kept + t > config.keep_tokens {
+                cut = i + 1;
+                break;
+            }
+            kept += t;
+        }
+        cut
+    } else {
+        messages.len().saturating_sub(config.keep_messages)
+    };
+    let mut result = Vec::with_capacity(messages.len());
+    let mut changed = false;
+    for (i, msg) in messages.iter().enumerate() {
+        if i < cutoff && msg.role == Role::Assistant {
+            match truncate_tool_use_args(msg, config) {
+                Some(truncated) => {
+                    changed = true;
+                    result.push(truncated);
+                }
+                None => result.push(msg.clone()),
+            }
+        } else {
+            result.push(msg.clone());
+        }
+    }
+    if changed {
+        result
+    } else {
+        messages.to_vec()
+    }
+}
+
+/// 截断一条 ASSISTANT 消息里的超长工具参数值；无改动返回 `None`（对齐 Java
+/// `truncateToolUseArgs`：只处理字符串值，前 20 字符 + 截断标记）。
+fn truncate_tool_use_args(msg: &Msg, config: &TruncateArgsConfig) -> Option<Msg> {
+    let mut changed = false;
+    let mut blocks = msg.content.clone();
+    for block in blocks.iter_mut() {
+        if let ContentBlock::ToolUse { input, .. } = block {
+            if truncate_input_value(input, config) {
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return None;
+    }
+    let mut next = msg.clone();
+    next.content = blocks;
+    Some(next)
+}
+
+/// 就地截断 input 对象里的超长字符串值（对齐 Java `truncateToolUseBlock`：
+/// 只截顶层字符串值，非对象/嵌套结构不动）。
+fn truncate_input_value(input: &mut serde_json::Value, config: &TruncateArgsConfig) -> bool {
+    let serde_json::Value::Object(map) = input else {
+        return false;
+    };
+    let mut changed = false;
+    for value in map.values_mut() {
+        if let serde_json::Value::String(text) = value {
+            if text.chars().count() > config.max_arg_length {
+                let head: String = text.chars().take(20).collect();
+                *value = serde_json::Value::String(format!("{head}{}", config.truncation_text));
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// tool-result 剪枝（Step 1b，对齐 Java `ConversationCompactor.pruneToolResults`）。
+///
+/// 从尾部向前保护最近 `protect_tokens` 的工具输出；更早的超长结果替换为
+/// 首尾预览。可剪总量达到 `minimum_tokens` 才实际执行，否则原样返回。
+pub fn prune_tool_results(messages: &[Msg], config: &PruneConfig) -> Vec<Msg> {
+    let mut protected = 0usize;
+    let mut prunable = 0usize;
+    let mut to_prune: Vec<(usize, usize)> = Vec::new();
+    for mi in (0..messages.len()).rev() {
+        let msg = &messages[mi];
+        if msg.role != Role::Tool {
+            continue;
+        }
+        for bi in (0..msg.content.len()).rev() {
+            let ContentBlock::ToolResult { name, output, .. } = &msg.content[bi] else {
+                continue;
+            };
+            if config.excluded_tools.iter().any(|tool| tool == name) {
+                continue;
+            }
+            let text = extract_tool_result_text(output);
+            if text.trim().is_empty() {
+                continue;
+            }
+            // 只计这一块的 token（对齐 Java `msg.withContent(List.of(tr))` 的单块估算）
+            let mut single = msg.clone();
+            single.content = vec![msg.content[bi].clone()];
+            let tokens = estimate_tokens(&[single]);
+            if protected < config.protect_tokens {
+                protected += tokens;
+                continue;
+            }
+            if text.chars().count() > config.max_output_chars {
+                prunable += tokens;
+                to_prune.push((mi, bi));
+            }
+        }
+    }
+    if prunable < config.minimum_tokens || to_prune.is_empty() {
+        return messages.to_vec();
+    }
+    let mut result = messages.to_vec();
+    for (mi, bi) in to_prune {
+        let msg = &mut result[mi];
+        if let ContentBlock::ToolResult { output, .. } = &mut msg.content[bi] {
+            let text = extract_tool_result_text(output);
+            let preview = prune_preview_half(&text, config.max_output_chars);
+            *output = vec![ContentBlock::Text { text: preview }];
+        }
+    }
+    result
+}
+
+/// 首尾各半的剪枝预览（对齐 Java `buildPrunePreview`——注意与摘要渲染用的
+/// [`prune_preview`]（2/3 + 1/3）是两个不同用途的实现）。
+fn prune_preview_half(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    let half = max_chars / 2;
+    let head: String = text.chars().take(half).collect();
+    let tail: String = text.chars().skip(count - half).collect();
+    // count > max_chars 保证 removed > 0（Java 侧是 int 才需要显式判断）
+    let removed = count - head.chars().count() - tail.chars().count();
+    format!("{head}\n\n...({removed} chars pruned)...\n\n{tail}")
 }
 
 // ---------------------------------------------------------------------------
@@ -252,19 +488,31 @@ impl ConversationCompactor {
             base: config,
         };
 
-        let total_tokens = estimate_tokens(conversation);
-        if !should_compact(conversation, total_tokens, &effective) {
-            return Ok(None);
+        // Step 1a/1b：非 LLM 轻量裁剪（对齐 Java `compactStandard` 开头的
+        // pruneToolResults(truncateArgs(...))）；裁剪结果参与后续触发判断与切分。
+        let mut working: Vec<Msg> = conversation.to_vec();
+        if let Some(cfg) = &config.truncate_args {
+            working = truncate_args(&working, cfg);
+        }
+        if let Some(cfg) = &config.prune {
+            working = prune_tool_results(&working, cfg);
+        }
+        let lightweight = working != conversation;
+
+        let total_tokens = estimate_tokens(&working);
+        if !should_compact(&working, total_tokens, &effective) {
+            // 未触发摘要：裁剪有改动则提交裁剪结果（对齐 Java lightweight result）
+            return Ok(lightweight.then_some(working));
         }
 
-        let cutoff = determine_cutoff_index(conversation, total_tokens, &effective);
+        let cutoff = determine_cutoff_index(&working, total_tokens, &effective);
         if cutoff == 0 {
-            return Ok(None);
+            return Ok(lightweight.then_some(working));
         }
 
         // 旧摘要保留在摘要输入里（链式累积），但排除出 flush 输入避免重复抽取。
-        let summary_input = &conversation[..cutoff];
-        let tail = &conversation[cutoff..];
+        let summary_input = &working[..cutoff];
+        let tail = &working[cutoff..];
 
         if config.flush_before_compact {
             let flush_input = filter_summary_messages(summary_input);
@@ -542,29 +790,33 @@ fn filter_summary_messages(messages: &[Msg]) -> Vec<Msg> {
 }
 
 // ---------------------------------------------------------------------------
-// HarnessAgent 接线（对齐 Java CompactionMiddleware.prepare 的 prefix 分离 + 提交）
+// 迭代边界接线（对齐 Java CompactionMiddleware.onReasoning 每轮 prepare）
 // ---------------------------------------------------------------------------
 
-/// turn 入口的压缩检查：读 delegate 状态 → prefix/conversation 分离 → 触发则
-/// 压缩并 CAS 写回。任何失败都降级为「本次不压缩」，绝不阻断调用
-/// （对齐 Java `prepareCandidate` 的 onErrorResume → Optional.empty）。
-pub(crate) async fn maybe_compact_context(
-    delegate: &Arc<agentscope_core::agent::ReActAgent>,
+/// 迭代边界的压缩检查：直接读写本次调用的活状态（对话真相），不走管理性
+/// 访问——EventLog 模式下也可用。任何失败都降级为「本次不压缩」，绝不阻断
+/// 调用（对齐 Java `prepareCandidate` 的 onErrorResume → Optional.empty）。
+///
+/// `forced=true`（overflow 恢复，见
+/// [`agentscope_core::agent::is_context_overflow_error`]）时用最激进配置
+/// （trigger=1/keep=1/keepTokens=0，对齐 Java `overflowRecovery`）。
+pub(crate) async fn compact_in_state(
+    rc: &RuntimeContext,
     compactor: &ConversationCompactor,
     config: &CompactionConfig,
-    rc: &RuntimeContext,
+    state: &std::sync::Arc<std::sync::Mutex<agentscope_core::state::AgentState>>,
     window: usize,
-) -> Result<(), agentscope_core::Error> {
-    let session_id = rc.session_id().unwrap_or("default");
-    let user_id = rc.user_id();
-    let Ok(state) = delegate.agent_state_for(user_id, session_id) else {
-        return Ok(()); // EventLog 模式等：管理性访问不可用 → 跳过压缩
-    };
-    if state.context.is_empty() {
-        return Ok(());
-    }
-    let (prefix, conversation): (Vec<Msg>, Vec<Msg>) = state
+    forced: bool,
+) {
+    let snapshot: Vec<Msg> = state
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
         .context
+        .clone();
+    if snapshot.is_empty() {
+        return;
+    }
+    let (prefix, conversation): (Vec<Msg>, Vec<Msg>) = snapshot
         .iter()
         .cloned()
         .partition(|m| m.role == Role::System || is_synthetic(m));
@@ -574,21 +826,35 @@ pub(crate) async fn maybe_compact_context(
     } else {
         FALLBACK_TRIGGER_TOKENS
     };
-
-    match compactor.compact_if_needed(rc, &conversation, config, budget).await {
-        Ok(Some(compacted)) => {
-            let mut next = state.clone();
-            next.context = prefix.into_iter().chain(compacted).collect();
-            // CAS 写回：并发变更时保存失败即放弃（对齐 Java canCommit；静默降级）。
-            let _ = delegate.save_agent_state_for(user_id, session_id, &next);
+    let effective = if forced {
+        CompactionConfig {
+            trigger_messages: 1,
+            keep_messages: 1,
+            keep_tokens: Some(0),
+            ..config.clone()
         }
-        Ok(None) => {}
-        Err(_) => {
-            // 摘要模型失败等：降级为本次不压缩（对齐 Java prepareCandidate 的
-            // onErrorResume → Optional.empty），绝不阻断调用。
+    } else {
+        config.clone()
+    };
+
+    match compactor
+        .compact_if_needed(rc, &conversation, &effective, budget)
+        .await
+    {
+        Ok(Some(compacted)) => {
+            let mut guard = state.lock().unwrap_or_else(|error| error.into_inner());
+            // canCommit：仅当 context 未被并发改动（对齐 Java prepare 的 equals 检查）
+            if guard.context == snapshot {
+                let mut next = prefix;
+                next.extend(compacted);
+                guard.context = next;
+            }
+        }
+        _ => {
+            // 未触发 / 摘要模型失败等：降级为本次不压缩（对齐 Java
+            // prepareCandidate 的 onErrorResume → Optional.empty）。
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -854,5 +1120,237 @@ mod tests {
         assert_eq!(compacted[0].name, COMPACTION_SUMMARY_MSG_NAME);
         assert!(compacted[0].text().contains("Goal."));
         assert_eq!(model.requests().len(), 2, "flush + 摘要各一次模型调用");
+    }
+
+    // ---- Step 1a/1b：轻量裁剪（对齐 Java truncateArgs / pruneToolResults）----
+
+    fn assistant_with_long_arg(id: &str, chars: usize) -> Msg {
+        Msg {
+            id: format!("a-{id}"),
+            name: "assistant".into(),
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: format!("call_{id}"),
+                name: "read_file".into(),
+                input: json!({"path": "x".repeat(chars)}),
+                state: None,
+                content: None,
+            }],
+            metadata: None,
+            timestamp: None,
+            usage: None,
+            generate_reason: None,
+        }
+    }
+
+    fn tool_result_with_text(id: &str, name: &str, text: &str) -> Msg {
+        Msg {
+            id: format!("t-{id}"),
+            name: name.into(),
+            role: Role::Tool,
+            content: vec![ContentBlock::ToolResult {
+                id: format!("call_{id}"),
+                name: name.into(),
+                output: vec![ContentBlock::Text { text: text.into() }],
+                state: agentscope_core::message::ToolResultState::Success,
+                execution_details: None,
+            }],
+            metadata: None,
+            timestamp: None,
+            usage: None,
+            generate_reason: None,
+        }
+    }
+
+    #[test]
+    fn truncate_args_truncates_long_values_before_keep_window() {
+        // 5 条带超长参数的 ASSISTANT + 20 条 user = 25 条 → 触发（trigger_messages=25）
+        // keep_messages=20 → cutoff=5 → 前 5 条 ASSISTANT 的参数被截断
+        let mut messages: Vec<Msg> = (0..5)
+            .map(|i| assistant_with_long_arg(&i.to_string(), 3_000))
+            .collect();
+        messages.extend((0..20).map(|i| user_msg(&format!("m{i}"))));
+        let config = TruncateArgsConfig::default();
+        let result = truncate_args(&messages, &config);
+        assert_eq!(result.len(), 25);
+        for msg in result.iter().take(5) {
+            let ContentBlock::ToolUse { input, .. } = &msg.content[0] else {
+                panic!("expect tool use");
+            };
+            let path = input["path"].as_str().unwrap();
+            assert_eq!(path, format!("{}{}", "x".repeat(20), config.truncation_text));
+        }
+        // keep 窗口内的消息不动
+        for i in 5..25 {
+            assert_eq!(result[i], messages[i]);
+        }
+    }
+
+    #[test]
+    fn truncate_args_noop_below_trigger() {
+        let messages = vec![assistant_with_long_arg("0", 3_000), user_msg("hi")];
+        let config = TruncateArgsConfig::default();
+        let result = truncate_args(&messages, &config);
+        assert_eq!(result, messages);
+    }
+
+    #[test]
+    fn prune_tool_results_protects_recent_and_prunes_old() {
+        // 从尾向前保护最近 protect_tokens=100：尾两条（各 ~85 token）受保护，
+        // 第 1 条可剪（85 ≥ minimum 20）→ 替换为首尾预览
+        let big = "y".repeat(200);
+        let messages = vec![
+            tool_result_with_text("0", "search", &big),
+            tool_result_with_text("1", "search", &big),
+            tool_result_with_text("2", "search", &big),
+        ];
+        let config = PruneConfig {
+            protect_tokens: 150, // 单块 ~102 token：尾两条累计 204 超预算，仅尾两条受保护
+            minimum_tokens: 20,
+            max_output_chars: 100,
+            excluded_tools: vec![],
+        };
+        let result = prune_tool_results(&messages, &config);
+        assert_eq!(result.len(), 3);
+        let ContentBlock::ToolResult { output, .. } = &result[0].content[0] else {
+            panic!("expect tool result");
+        };
+        let preview = match output.as_slice() {
+            [ContentBlock::Text { text }] => text.clone(),
+            other => panic!("expect single text, got {other:?}"),
+        };
+        assert!(preview.contains("chars pruned"));
+        assert!(preview.starts_with('y') && preview.ends_with('y'));
+        // 受保护的尾两条原样
+        assert_eq!(result[1], messages[1]);
+        assert_eq!(result[2], messages[2]);
+    }
+
+    #[test]
+    fn prune_tool_results_skips_excluded_and_below_minimum() {
+        let big = "y".repeat(200);
+        // excluded 工具不剪
+        let excluded = vec![tool_result_with_text("0", "read_file", &big)];
+        let config = PruneConfig {
+            protect_tokens: 0,
+            minimum_tokens: 1,
+            max_output_chars: 100,
+            excluded_tools: vec!["read_file".into()],
+        };
+        assert_eq!(prune_tool_results(&excluded, &config), excluded);
+        // 可剪总量低于 minimum_tokens 不剪
+        let small = vec![tool_result_with_text("0", "search", &"y".repeat(30))];
+        let config2 = PruneConfig {
+            protect_tokens: 0,
+            minimum_tokens: 10_000,
+            max_output_chars: 10,
+            excluded_tools: vec![],
+        };
+        assert_eq!(prune_tool_results(&small, &config2), small);
+    }
+
+    #[tokio::test]
+    async fn compact_if_needed_submits_lightweight_prune_result() {
+        // 摘要阈值（50）不触发，但参数截断阈值（5）触发 → 只提交裁剪结果，
+        // 不调用摘要模型（对齐 Java lightweight result）
+        let model = MockModel::new(vec![]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            trigger_messages: 50,
+            flush_before_compact: false,
+            truncate_args: Some(TruncateArgsConfig {
+                trigger_messages: 5,
+                keep_messages: 2,
+                ..Default::default()
+            }),
+            prune: None,
+            ..Default::default()
+        };
+        let mut conversation: Vec<Msg> = (0..4)
+            .map(|i| assistant_with_long_arg(&i.to_string(), 3_000))
+            .collect();
+        conversation.extend([user_msg("m4"), user_msg("m5")]);
+        let rc = RuntimeContext::new();
+        let result = compactor
+            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .await
+            .unwrap()
+            .expect("lightweight prune result should be submitted");
+        assert_eq!(result.len(), 6);
+        for msg in result.iter().take(4) {
+            let ContentBlock::ToolUse { input, .. } = &msg.content[0] else {
+                panic!("expect tool use");
+            };
+            assert!(input["path"].as_str().unwrap().contains("argument truncated"));
+        }
+        assert!(model.requests().is_empty(), "lightweight 路径不应调用摘要模型");
+    }
+
+    // ---- compact_in_state：迭代边界接线（对齐 Java 每轮 onReasoning prepare）----
+
+    fn state_with(context: Vec<Msg>) -> std::sync::Arc<std::sync::Mutex<agentscope_core::state::AgentState>> {
+        std::sync::Arc::new(std::sync::Mutex::new(agentscope_core::state::AgentState {
+            context,
+            ..Default::default()
+        }))
+    }
+
+    #[tokio::test]
+    async fn compact_in_state_writes_back_on_trigger() {
+        let model = MockModel::new(vec![ChatResponse::from_text(
+            "## SESSION INTENT\nTest goal.",
+        )]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            trigger_messages: 4,
+            keep_tokens: Some(15),
+            flush_before_compact: false,
+            ..Default::default()
+        };
+        let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
+        let rc = RuntimeContext::new();
+        compact_in_state(&rc, &compactor, &config, &state, 100_000, false).await;
+        let guard = state.lock().unwrap();
+        assert_eq!(guard.context.len(), 2);
+        assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
+        assert_eq!(guard.context[1].text(), "message 5");
+    }
+
+    #[tokio::test]
+    async fn compact_in_state_forced_compacts_below_trigger() {
+        // forced=true（overflow 恢复）：即使低于常规触发阈值也强制压缩到 summary+1
+        let model = MockModel::new(vec![ChatResponse::from_text(
+            "## SESSION INTENT\nForced goal.",
+        )]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            trigger_messages: 50, // 常规阈值远未达到
+            flush_before_compact: false,
+            ..Default::default()
+        };
+        let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
+        let rc = RuntimeContext::new();
+        compact_in_state(&rc, &compactor, &config, &state, 100_000, true).await;
+        let guard = state.lock().unwrap();
+        assert_eq!(guard.context.len(), 2);
+        assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
+        assert!(guard.context[0].text().contains("Forced goal."));
+        assert_eq!(guard.context[1].text(), "message 5");
+    }
+
+    #[tokio::test]
+    async fn compact_in_state_noop_below_trigger_without_forced() {
+        let model = MockModel::new(vec![]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            trigger_messages: 50,
+            flush_before_compact: false,
+            ..Default::default()
+        };
+        let state = state_with(vec![user_msg("a"), user_msg("b")]);
+        let rc = RuntimeContext::new();
+        compact_in_state(&rc, &compactor, &config, &state, 100_000, false).await;
+        assert_eq!(state.lock().unwrap().context.len(), 2);
+        assert!(model.requests().is_empty());
     }
 }

@@ -11,10 +11,10 @@
 //! - `TaskRecord` 的时间字段用 epoch 毫秒整数（Java 是 ISO-8601 字符串）；
 //! - 子代理工厂直接产出 `Arc<ReActAgent>`（当前唯一 Agent 实现，不建 trait 抽象），
 //!   且不递归构建 `HarnessAgent`（workspace 上下文中间件未复刻，见 agent 模块文档）；
-//! - 上下文压缩挂在 turn 入口（`HarnessAgent::call`/`stream_events`）而非每轮 ReAct
-//!   迭代（中间件钩子全同步，压缩需 await）；overflow 恢复、压缩前轻量裁剪
-//!   （truncateArgs/pruneToolResults）、ToolResultEvictionMiddleware 与自定义
-//!   CompactionStrategy 未复刻（详见 compaction 模块文档）。
+//! - 上下文压缩经 `IterationHook` 挂在每轮 ReAct 迭代边界（对齐 Java 每轮
+//!   `onReasoning`），overflow 恢复（强制压缩 + 同轮重试）与压缩前轻量裁剪
+//!   （truncateArgs/pruneToolResults）已复刻；`ToolResultEvictionMiddleware`
+//!   与自定义 CompactionStrategy 未复刻（详见 compaction 模块文档）。
 
 pub mod agent;
 pub mod base_store;

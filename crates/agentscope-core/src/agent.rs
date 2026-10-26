@@ -5,6 +5,8 @@
 //! Rust 版保持同样的分层：本 crate 只做 ReAct 循环，工程化封装留待 harness crate。
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
@@ -47,6 +49,42 @@ pub trait Agent: Send + Sync {
 
 /// ReAct Agent：reasoning（模型推理）与 acting（工具执行）交替循环，
 /// 直到模型产出不含工具调用的最终回复。
+/// 迭代边界异步钩子（对应 Java `HarnessRuntimeMiddleware` 每轮 `onReasoning` 的
+/// 检查点，如 `CompactionMiddleware` 的上下文压缩）。
+///
+/// 中间件钩子是同步的，做不了需要 await 的检查（LLM 调用 / 持久化 IO）；需要
+/// 每轮迭代边界的异步逻辑时用本钩子。参数：
+/// - `&RuntimeContext`：本次调用的运行时身份（session/user）；
+/// - `&Arc<Mutex<AgentState>>`：本次调用的活状态（对话真相），可读可写；
+/// - `forced: bool`：`true` 表示模型刚报上下文溢出（见
+///   [`is_context_overflow_error`]），钩子应做最激进的压缩（对齐 Java
+///   `overflowRecovery` 的 triggerMessages=1/keepMessages=1/keepTokens=0）。
+///
+/// 返回 `Err` 会终止本次调用；best-effort 型钩子（如压缩）应自行降级返回 `Ok`。
+pub type IterationHook = Arc<
+    dyn for<'a> Fn(&'a RuntimeContext, &'a Arc<Mutex<AgentState>>, bool)
+        -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
+        + Send
+        + Sync,
+>;
+
+/// 判断错误是否为「上下文溢出」类（对齐 Java
+/// `CompactionMiddleware.isContextOverflowError` 的消息模式匹配）。
+pub fn is_context_overflow_error(error: &Error) -> bool {
+    let message = error.to_string().to_lowercase();
+    [
+        "context_length_exceeded",
+        "context length",
+        "maximum context",
+        "token limit",
+        "too many tokens",
+        "exceeds the model's maximum",
+        "reduce the length",
+    ]
+    .iter()
+    .any(|pattern| message.contains(pattern))
+}
+
 #[derive(Clone)]
 pub struct ReActAgent {
     name: String,
@@ -85,6 +123,8 @@ pub struct ReActAgent {
     /// 新会话的初始权限上下文（见 builder `permission_context`）。
     permission_context: Option<PermissionContextState>,
     max_iters: usize,
+    /// 迭代边界异步钩子（见 [`IterationHook`]；None = 无）。
+    iteration_hook: Option<IterationHook>,
 }
 
 // trait 对象字段（model/memory）不满足自动 derive 的 bound，手动实现 Debug
@@ -114,6 +154,7 @@ pub struct ReActAgentBuilder {
     /// 仅在会话状态首次创建时写入；已有会话以持久化状态为准。
     permission_context: Option<PermissionContextState>,
     max_iters: usize,
+    iteration_hook: Option<IterationHook>,
 }
 
 impl ReActAgent {
@@ -133,6 +174,7 @@ impl ReActAgent {
             permission: Arc::new(crate::permission::AllowAll),
             permission_context: None,
             max_iters: 10,
+            iteration_hook: None,
         }
     }
 
@@ -1028,7 +1070,28 @@ impl ReActAgent {
                 ctx.push(msg);
                 ctx.capture("steer_injected")?;
             }
-            let assistant = self.reasoning(ctx, streaming).await?;
+            // 迭代边界异步钩子（对应 Java 每轮 onReasoning 的检查点，如压缩）：
+            // 在 reasoning 之前执行；失败即终止调用（钩子自行决定是否降级）。
+            if let Some(hook) = &self.iteration_hook {
+                hook(&ctx.runtime, &ctx.state, false).await?;
+            }
+            let assistant = match self.reasoning(ctx, streaming).await {
+                Ok(msg) => msg,
+                Err(error) => {
+                    // 上下文溢出恢复（对应 Java CompactionMiddleware.overflowRecovery）：
+                    // 以 forced=true 调钩子做最激进压缩后，同轮重试一次 reasoning；
+                    // 仍失败（或无钩子/非溢出错误）则照常传播。
+                    let recoverable =
+                        self.iteration_hook.is_some() && is_context_overflow_error(&error);
+                    if !recoverable {
+                        return Err(error);
+                    }
+                    if let Some(hook) = &self.iteration_hook {
+                        hook(&ctx.runtime, &ctx.state, true).await?;
+                    }
+                    self.reasoning(ctx, streaming).await?
+                }
+            };
             if assistant.tool_uses().is_empty() {
                 // 空响应防御：模型偶发只产出 thinking、正文为空且无工具调用——
                 // 直接当最终回复会让回合「无疾而终」（前端无任何可见输出）。
@@ -1759,6 +1822,13 @@ impl ReActAgentBuilder {
         self
     }
 
+    /// 迭代边界异步钩子（见 [`IterationHook`]）：每轮 ReAct 迭代开始前、
+    /// reasoning 之前调用；模型报上下文溢出时以 `forced=true` 再调一次并重试本轮。
+    pub fn iteration_hook(mut self, hook: IterationHook) -> Self {
+        self.iteration_hook = Some(hook);
+        self
+    }
+
     /// ReAct 循环最大迭代次数（默认 10）。
     pub fn max_iters(mut self, max_iters: usize) -> Self {
         self.max_iters = max_iters;
@@ -1796,6 +1866,7 @@ impl ReActAgentBuilder {
             permission: self.permission,
             permission_context: self.permission_context,
             max_iters: self.max_iters,
+            iteration_hook: self.iteration_hook,
         })
     }
 }
@@ -3051,5 +3122,167 @@ mod tests {
         assert_eq!(history[1].role, crate::message::Role::Assistant);
         assert_eq!(history[2].role, crate::message::Role::User);
         assert_eq!(history[3].role, crate::message::Role::Assistant);
+    }
+
+    // ---- 迭代边界钩子与 overflow 恢复（对应 Java CompactionMiddleware）----
+
+    /// 第一次调用报上下文溢出，之后正常响应。
+    struct OverflowThenOkModel {
+        responses: Mutex<Vec<crate::model::ChatResponse>>,
+        failed_once: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait::async_trait]
+    impl Model for OverflowThenOkModel {
+        async fn call(&self, _request: ChatRequest) -> Result<crate::model::ChatResponse> {
+            use std::sync::atomic::Ordering;
+            if !self.failed_once.swap(true, Ordering::SeqCst) {
+                return Err(Error::Model(
+                    "This model's maximum context length is 4096 tokens. However, your messages resulted in 5000 tokens. Please reduce the length of the messages.".into(),
+                ));
+            }
+            self.responses
+                .lock()
+                .unwrap()
+                .pop()
+                .ok_or_else(|| Error::Model("no more mock responses".into()))
+        }
+    }
+
+    #[test]
+    fn overflow_error_patterns_match_java() {
+        assert!(is_context_overflow_error(&Error::Model(
+            "request failed: context_length_exceeded".into()
+        )));
+        assert!(is_context_overflow_error(&Error::Model(
+            "the context length of 8192 tokens has been exceeded".into()
+        )));
+        assert!(is_context_overflow_error(&Error::Model(
+            "maximum context size reached".into()
+        )));
+        assert!(is_context_overflow_error(&Error::Model(
+            "token limit reached for this model".into()
+        )));
+        assert!(is_context_overflow_error(&Error::Model(
+            "too many tokens in request".into()
+        )));
+        assert!(is_context_overflow_error(&Error::Model(
+            "input exceeds the model's maximum context".into()
+        )));
+        assert!(is_context_overflow_error(&Error::Model(
+            "please reduce the length of the messages".into()
+        )));
+        // 非溢出错误不命中
+        assert!(!is_context_overflow_error(&Error::Model("connection refused".into())));
+        assert!(!is_context_overflow_error(&Error::InvalidInput("bad input".into())));
+    }
+
+    #[tokio::test]
+    async fn iteration_hook_runs_before_each_reasoning() {
+        // 两轮迭代（tool call → final）：钩子应在每轮 reasoning 前各调一次，forced=false
+        let calls: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+        let calls_for_hook = Arc::clone(&calls);
+        let mut toolkit = Toolkit::new();
+        toolkit.register(Arc::new(AddTool));
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(MockModel {
+                responses: Mutex::new(vec![
+                    crate::model::ChatResponse::from_text("1 加 2 等于 3"),
+                    crate::model::ChatResponse {
+                        content: vec![
+                            ContentBlock::Text { text: "我来算一下".into() },
+                            ContentBlock::ToolUse {
+                                id: "call_1".into(),
+                                name: "add".into(),
+                                input: json!({"a": 1, "b": 2}),
+                                state: None,
+                                content: None,
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                ]),
+            }))
+            .toolkit(toolkit)
+            .memory(Arc::new(InMemoryMemory::new()))
+            .iteration_hook(Arc::new(move |_rc, _state, forced| {
+                calls_for_hook.lock().unwrap().push(forced);
+                Box::pin(async { Ok(()) })
+            }))
+            .build()
+            .unwrap();
+
+        let reply = agent.call(Msg::user("user", "1加2等于几？")).await.unwrap();
+        assert_eq!(reply.text(), "1 加 2 等于 3");
+        assert_eq!(*calls.lock().unwrap(), vec![false, false]);
+    }
+
+    #[tokio::test]
+    async fn overflow_recovery_forces_compact_and_retries() {
+        // 第一次 reasoning 报溢出 → 钩子以 forced=true 被调（模拟强制压缩：清空历史）
+        // → 同轮重试成功。
+        let forced_calls: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+        let forced_for_hook = Arc::clone(&forced_calls);
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(OverflowThenOkModel {
+                responses: Mutex::new(vec![crate::model::ChatResponse::from_text("恢复后的回答")]),
+                failed_once: std::sync::atomic::AtomicBool::new(false),
+            }))
+            .memory(Arc::new(InMemoryMemory::new()))
+            .iteration_hook(Arc::new(move |_rc, state, forced| {
+                forced_for_hook.lock().unwrap().push(forced);
+                if forced {
+                    // 模拟强制压缩：把对话真相清到只剩一条（真实实现是摘要替换）
+                    let mut guard = state.lock().unwrap();
+                    let keep = guard.context.last().cloned();
+                    guard.context.clear();
+                    if let Some(msg) = keep {
+                        guard.context.push(msg);
+                    }
+                }
+                Box::pin(async { Ok(()) })
+            }))
+            .build()
+            .unwrap();
+
+        let reply = agent.call(Msg::user("user", "你好")).await.unwrap();
+        assert_eq!(reply.text(), "恢复后的回答");
+        // 第一次迭代边界（false）+ 溢出恢复（true）
+        assert_eq!(*forced_calls.lock().unwrap(), vec![false, true]);
+        // 恢复成功：历史里有 user + 最终回复
+        let history = history(&agent);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].text(), "恢复后的回答");
+    }
+
+    #[tokio::test]
+    async fn non_overflow_error_propagates_without_hook_retry() {
+        // 非溢出错误：即使有钩子也不做 forced 恢复，错误照常传播
+        let calls: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+        let calls_for_hook = Arc::clone(&calls);
+        struct AlwaysErr;
+        #[async_trait::async_trait]
+        impl Model for AlwaysErr {
+            async fn call(&self, _request: ChatRequest) -> Result<crate::model::ChatResponse> {
+                Err(Error::Model("connection refused".into()))
+            }
+        }
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(AlwaysErr))
+            .memory(Arc::new(InMemoryMemory::new()))
+            .iteration_hook(Arc::new(move |_rc, _state, forced| {
+                calls_for_hook.lock().unwrap().push(forced);
+                Box::pin(async { Ok(()) })
+            }))
+            .build()
+            .unwrap();
+
+        let result = agent.call(Msg::user("user", "你好")).await;
+        assert!(result.is_err());
+        // 只有迭代边界的常规调用，没有 forced 恢复
+        assert_eq!(*calls.lock().unwrap(), vec![false]);
     }
 }
