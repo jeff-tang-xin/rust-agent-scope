@@ -301,6 +301,11 @@ starting work to see what other agents or earlier sessions already concluded, av
 duplicated effort and conflicting decisions. The blackboard is shared across sessions."
     }
 
+    // 纯读（.ox/blackboard.json），进只读免确认白名单（factory 按此动态收集）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn parameters(&self) -> serde_json::Value {
         json!({
             "type": "object",

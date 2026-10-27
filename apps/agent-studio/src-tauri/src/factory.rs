@@ -499,6 +499,9 @@ pub fn build_agent(
 /// 除外：其 check_permissions 恒 RequireApproval，审批走 HITL）。
 const DEVELOP_ALLOWLIST: &[&str] = &[
     "memory_save",
+    // 黑板登记：写 .ox/blackboard.json（非用户代码资产），协议要求「结论/风险
+    // 即时登记不攒收尾」——走 ask 会把即时性打断，与 memory_save 同语义免确认。
+    "blackboard_append",
     "agent_spawn",
     "agent_send",
     "plan_enter",
