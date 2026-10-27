@@ -81,7 +81,15 @@ export interface DatabaseServerConfig {
   database: string;
   username: string;
   password: string;
+  /** 外部 CLI 路径（可选）：填可执行文件或其目录；留空自动探索（PATH → 常见安装目录）。 */
+  cli_path: string;
   description: string;
+}
+
+/** 保存数据库档案的验证结果（CLI 驱动类型才有内容；不阻断保存）。 */
+export interface SaveDatabaseOutcome {
+  cli_resolved?: string;
+  cli_error?: string;
 }
 
 /** 驱动形态（后端 adjacently tagged：{"mode":"Cli","program":"psql"} | {"mode":"Bundled"}）。 */
@@ -217,9 +225,12 @@ export const api = {
 
   listDatabases: () => invoke<DatabaseServerConfig[]>("list_databases"),
   saveDatabase: (database: DatabaseServerConfig) =>
-    invoke<void>("save_database", { database }),
+    invoke<SaveDatabaseOutcome>("save_database", { database }),
   deleteDatabase: (name: string) => invoke<void>("delete_database", { name }),
   listDatabaseKinds: () => invoke<DatabaseKindInfo[]>("list_database_kinds"),
+  // CLI 探测（连接表单「探测」按钮）：Ok=解析到的完整路径，Err=提示。
+  probeDatabaseCli: (dbType: string, cliPath: string) =>
+    invoke<string>("probe_database_cli", { dbType, cliPath }),
 
   // SSH 服务器档案 + 连接 + SFTP 文件操作（ops 工作区服务器面板）。
   listServers: () => invoke<ServerConfig[]>("list_servers"),

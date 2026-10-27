@@ -133,6 +133,11 @@ pub struct DatabaseServerConfig {
     /// 密码（仅存本地配置文件，与 api_key 同策略；不进日志与事件）。
     #[serde(default)]
     pub password: String,
+    /// 外部 CLI 可执行文件路径（可选，仅 Cli 驱动类型生效）：CLI 不在 PATH
+    /// 时手动指定——填可执行文件完整路径直接用，填目录则拼接程序名
+    /// （Windows 补 .exe）；留空按 PATH 探测（类似游戏盒子指定游戏地址）。
+    #[serde(default)]
+    pub cli_path: String,
     #[serde(default)]
     pub description: String,
 }
@@ -563,6 +568,7 @@ mod tests {
             database: "orders".into(),
             username: "ro_user".into(),
             password: "secret".into(),
+            cli_path: r"D:\mysql\bin".into(),
             description: "生产库只读".into(),
         };
         let bytes = serde_json::to_vec(&db).unwrap();
@@ -570,11 +576,14 @@ mod tests {
         assert_eq!(back.name, "prod-mysql");
         assert_eq!(back.port, 3306);
         assert_eq!(back.password, "secret");
+        assert_eq!(back.cli_path, r"D:\mysql\bin");
 
         // sqlite：host 复用为文件路径，port/database 可空（serde default 兜底）。
         let raw = br#"{"name":"local","db_type":"sqlite","host":"C:\\data\\studio.db"}"#;
         let lite: DatabaseServerConfig = serde_json::from_slice(raw).unwrap();
         assert_eq!(lite.port, 0);
         assert!(lite.database.is_empty());
+        // 旧配置无 cli_path 键：serde default 兜底为空（按 PATH 探测）。
+        assert!(lite.cli_path.is_empty());
     }
 }

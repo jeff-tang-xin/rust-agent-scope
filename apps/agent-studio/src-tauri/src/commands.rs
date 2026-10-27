@@ -218,7 +218,7 @@ pub fn list_databases(state: State<'_, AppState>) -> Vec<DatabaseServerConfig> {
 pub fn save_database(
     state: State<'_, AppState>,
     database: DatabaseServerConfig,
-) -> Result<(), String> {
+) -> Result<SaveDatabaseOutcome, String> {
     let name = database.name.trim().to_string();
     if name.is_empty() {
         return Err("database name is empty".to_string());
@@ -231,11 +231,56 @@ pub fn save_database(
     }
     let mut database = database;
     database.name = name;
+    // CLI 驱动类型：保存后立即验证 CLI 可用性（自动探索 PATH 与常见安装
+    // 目录，或用档案指定的 cli_path）——只提示不阻断：用户可能先存档案
+    // 后装 CLI，或档案先建、机器稍后配好。
+    let outcome = match kind.cli_program() {
+        Some(program) => match crate::db_exec::probe_cli(
+            &database.db_type,
+            &database.cli_path,
+            program,
+        ) {
+            Ok(path) => SaveDatabaseOutcome {
+                cli_resolved: Some(path),
+                cli_error: None,
+            },
+            Err(e) => SaveDatabaseOutcome {
+                cli_resolved: None,
+                cli_error: Some(e),
+            },
+        },
+        None => SaveDatabaseOutcome {
+            cli_resolved: None,
+            cli_error: None,
+        },
+    };
     let mut config = state.snapshot();
     config.databases.retain(|d| d.name != database.name);
     config.databases.push(database.clone());
     state.db_catalog.replace_all(&config.databases);
-    state.persist(&config)
+    state.persist(&config).map(|_| outcome)
+}
+
+/// 保存数据库档案的验证结果（CLI 驱动类型才有内容；不阻断保存）。
+#[derive(serde::Serialize)]
+pub struct SaveDatabaseOutcome {
+    /// 自动探索/指定路径解析到的 CLI 完整路径。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_resolved: Option<String>,
+    /// 未找到时的提示（含已尝试的位置与下一步建议）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_error: Option<String>,
+}
+
+/// 手动触发 CLI 探测（前端「探测」按钮）：Ok=解析到的完整路径。
+#[tauri::command]
+pub fn probe_database_cli(db_type: String, cli_path: String) -> std::result::Result<String, String> {
+    let kind = crate::db_kind::DatabaseKind::find(&db_type)
+        .ok_or_else(|| format!("unknown db_type `{db_type}`"))?;
+    let program = kind
+        .cli_program()
+        .ok_or_else(|| "该数据库为内置驱动，无需外部 CLI".to_string())?;
+    crate::db_exec::probe_cli(&db_type, &cli_path, program)
 }
 
 #[tauri::command]
@@ -1906,6 +1951,7 @@ pub fn run() {
             save_database,
             delete_database,
             list_database_kinds,
+            probe_database_cli,
             list_servers,
             save_server,
             delete_server,

@@ -185,6 +185,156 @@ async fn execute_sqlite(
     .map_err(|e| format!("task failed: {e}"))?
 }
 
+/// Windows 下补全可执行文件后缀（其他平台原样）。
+fn exe_name(program: &str) -> String {
+    if cfg!(windows) && !program.ends_with(".exe") {
+        format!("{program}.exe")
+    } else {
+        program.to_string()
+    }
+}
+
+/// 按 PATH 环境变量逐目录探测可执行文件。
+fn find_in_path(program: &str) -> Option<std::path::PathBuf> {
+    let exe = exe_name(program);
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let cand = dir.join(&exe);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+/// 各数据库 CLI 的常见安装根目录（PATH 之外的兜底探索；Windows 为主——
+/// MySQL/PostgreSQL/SQL Server 装完不进 PATH 是常态）。
+fn common_cli_roots(db_type: &str) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if cfg!(windows) {
+        let pf = std::env::var("ProgramFiles")
+            .unwrap_or_else(|_| r"C:\Program Files".to_string());
+        match db_type {
+            // C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe
+            "mysql" => {
+                out.push(std::path::PathBuf::from(&pf).join("MySQL"));
+                out.push(std::path::PathBuf::from(r"C:\xampp\mysql\bin"));
+            }
+            // C:\Program Files\PostgreSQL\16\bin\psql.exe
+            "postgres" => out.push(std::path::PathBuf::from(&pf).join("PostgreSQL")),
+            // C:\Program Files\Microsoft SQL Server\MSSQL15.X\Tools\Binn\SQLCMD.EXE
+            "sqlserver" => {
+                out.push(std::path::PathBuf::from(&pf).join("Microsoft SQL Server"))
+            }
+            _ => {}
+        }
+    } else {
+        // Unix：PATH 通常已覆盖；补 homebrew 等常见位。
+        for d in ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"] {
+            out.push(std::path::PathBuf::from(d));
+        }
+    }
+    out
+}
+
+/// 在目录树下找名为 `exe` 的文件（深度受限；文件名比较忽略大小写——
+/// Windows 上 SQLCMD.EXE 常为大写）。同层先文件后子目录，子目录倒序
+/// （版本号大的优先，如 PostgreSQL\16 排在 15 前）。
+fn find_exe_under(dir: &std::path::Path, exe: &str, depth: usize) -> Option<std::path::PathBuf> {
+    if depth == 0 {
+        return None;
+    }
+    let rd = std::fs::read_dir(dir).ok()?;
+    let mut entries: Vec<std::fs::DirEntry> = rd.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in &entries {
+        let p = e.path();
+        if p.is_file() && e.file_name().eq_ignore_ascii_case(exe) {
+            return Some(p);
+        }
+    }
+    entries.reverse();
+    for e in &entries {
+        let p = e.path();
+        if p.is_dir() {
+            if let Some(f) = find_exe_under(&p, exe, depth - 1) {
+                return Some(f);
+            }
+        }
+    }
+    None
+}
+
+/// 自动探索 CLI：PATH → 常见安装目录。找到返回完整路径。
+fn auto_discover_cli(db_type: &str, program: &str) -> Option<std::path::PathBuf> {
+    if let Some(p) = find_in_path(program) {
+        return Some(p);
+    }
+    let exe = exe_name(program);
+    for root in common_cli_roots(db_type) {
+        if let Some(p) = find_exe_under(&root, &exe, 4) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// 探测并返回人类可读结果（Ok=完整路径，Err=带下一步建议的提示）。
+/// 供保存档案时的验证与前端「探测」按钮共用。
+pub fn probe_cli(
+    db_type: &str,
+    cli_path: &str,
+    program: &str,
+) -> std::result::Result<String, String> {
+    let spec = cli_path.trim();
+    if !spec.is_empty() {
+        let p = std::path::Path::new(spec);
+        if p.is_file() {
+            return Ok(spec.to_string());
+        }
+        if p.is_dir() {
+            let cand = p.join(exe_name(program));
+            if cand.is_file() {
+                return Ok(cand.to_string_lossy().into_owned());
+            }
+            return Err(format!(
+                "指定目录 `{spec}` 里没有 {program}（找 {}）",
+                exe_name(program)
+            ));
+        }
+        return Err(format!("指定的 CLI 路径 `{spec}` 不存在"));
+    }
+    if let Some(p) = auto_discover_cli(db_type, program) {
+        return Ok(p.to_string_lossy().into_owned());
+    }
+    Err(format!(
+        "未找到 {program}（已尝试 PATH 与常见安装目录）。请安装后重试，或在数据库档案里手动指定 CLI 路径"
+    ))
+}
+
+/// 解析执行时实际 spawn 的程序路径：档案显式指定的 `cli_path` 优先——
+/// 填可执行文件完整路径直接用，填目录则拼接程序名；指定了但不可用时
+/// 原样返回（spawn 报错带上该路径，用户可据此自查，不静默回退）。
+/// 未指定时走自动探索（PATH → 常见安装目录），都失败返回裸程序名。
+fn resolve_cli_program(db: &DatabaseServerConfig, program: &str) -> String {
+    let spec = db.cli_path.trim();
+    if !spec.is_empty() {
+        let p = std::path::Path::new(spec);
+        if p.is_file() {
+            return spec.to_string();
+        }
+        if p.is_dir() {
+            // 无条件拼接：即使程序不在，spawn 的报错也会带上完整拼接
+            // 路径（比拿目录路径去 spawn 的报错更可读）。
+            return p.join(exe_name(program)).to_string_lossy().into_owned();
+        }
+        return spec.to_string();
+    }
+    auto_discover_cli(&db.db_type, program)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| program.to_string())
+}
+
 /// 网络数据库：拼 CLI 命令执行（密码经环境变量/参数传递，仅本机进程可见）。
 async fn execute_cli(
     db: &DatabaseServerConfig,
@@ -193,7 +343,7 @@ async fn execute_cli(
     let (mut cmd, envs): (tokio::process::Command, Vec<(String, String)>) =
         match db.db_type.as_str() {
             "postgres" => {
-                let mut c = tokio::process::Command::new("psql");
+                let mut c = tokio::process::Command::new(resolve_cli_program(db, "psql"));
                 c.args([
                     "--csv",
                     "-h",
@@ -210,7 +360,7 @@ async fn execute_cli(
                 (c, vec![("PGPASSWORD".into(), db.password.clone())])
             }
             "mysql" => {
-                let mut c = tokio::process::Command::new("mysql");
+                let mut c = tokio::process::Command::new(resolve_cli_program(db, "mysql"));
                 c.args([
                     "--batch",
                     "-h",
@@ -227,7 +377,7 @@ async fn execute_cli(
                 (c, vec![])
             }
             "sqlserver" => {
-                let mut c = tokio::process::Command::new("sqlcmd");
+                let mut c = tokio::process::Command::new(resolve_cli_program(db, "sqlcmd"));
                 c.args([
                     "-S",
                     &format!("{},{}", db.host, db.port),
@@ -254,14 +404,20 @@ async fn execute_cli(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
+        if db.cli_path.trim().is_empty() {
             format!(
-                "启动 {} 失败（{}）：请确认已安装该 CLI 并加入 PATH",
-                db.db_type, e
+                "启动 {} 失败（{e}）：请确认已安装该 CLI 并加入 PATH，或在数据库档案里指定 CLI 路径",
+                db.db_type
             )
-        })?;
+        } else {
+            format!(
+                "启动 {} 失败（{e}）：档案指定的 CLI 路径 `{}` 不可用，请检查文件是否存在（可填目录或完整可执行文件路径）",
+                db.db_type,
+                db.cli_path.trim()
+            )
+        }
+    })?;
     let output = tokio::time::timeout(CLI_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| "执行超时（30s）".to_string())?
@@ -496,5 +652,106 @@ impl Tool for DbDmlTool {
             Ok(text) => Ok(ToolOutput::ok(text)),
             Err(e) => Ok(ToolOutput::error(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db_with_cli_path(cli_path: &str) -> DatabaseServerConfig {
+        DatabaseServerConfig {
+            name: "t".into(),
+            db_type: "mysql".into(),
+            host: "10.0.0.8".into(),
+            port: 3306,
+            database: "orders".into(),
+            username: "u".into(),
+            password: "p".into(),
+            cli_path: cli_path.into(),
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn cli_path_empty_falls_back_to_discovery() {
+        let got = resolve_cli_program(&db_with_cli_path(""), "mysql");
+        assert!(!got.is_empty());
+    }
+
+    #[test]
+    fn cli_path_file_used_directly() {
+        let dir = std::env::temp_dir().join(format!("ox-cli-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("my-mysql.exe");
+        std::fs::write(&file, b"").unwrap();
+        let got = resolve_cli_program(&db_with_cli_path(file.to_str().unwrap()), "mysql");
+        assert_eq!(got, file.to_str().unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cli_path_dir_joins_program_name() {
+        let dir = std::env::temp_dir().join(format!("ox-cli-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let got = resolve_cli_program(&db_with_cli_path(dir.to_str().unwrap()), "mysql");
+        assert_eq!(std::path::Path::new(&got), &dir.join(exe_name("mysql")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cli_path_missing_returned_as_is_for_spawn_error() {
+        let got = resolve_cli_program(&db_with_cli_path(r"X:\no\such\dir"), "mysql");
+        assert_eq!(got, r"X:\no\such\dir");
+    }
+
+    #[test]
+    fn find_exe_under_locates_nested_binary() {
+        // MySQL Server 式目录树：<root>\MySQL Server 8.0\bin\mysql.exe
+        let root = std::env::temp_dir().join(format!("ox-probe-{}", std::process::id()));
+        let bin = root.join("MySQL Server 8.0").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join(if cfg!(windows) { "mysql.exe" } else { "mysql" });
+        std::fs::write(&exe, b"").unwrap();
+        let got = find_exe_under(&root, &exe_name("mysql"), 4);
+        assert_eq!(got.as_deref(), Some(exe.as_path()));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn find_exe_under_is_case_insensitive_on_file_name() {
+        let root = std::env::temp_dir().join(format!("ox-probe-ci-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let exe = root.join(if cfg!(windows) { "MYSQL.EXE" } else { "mysql" });
+        std::fs::write(&exe, b"").unwrap();
+        let got = find_exe_under(&root, &exe_name("mysql"), 2);
+        assert_eq!(got.as_deref(), Some(exe.as_path()));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn probe_explicit_file_and_dir() {
+        let dir = std::env::temp_dir().join(format!("ox-probe-exp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // 文件：直接用
+        let file = dir.join("my-mysql.exe");
+        std::fs::write(&file, b"").unwrap();
+        assert_eq!(
+            probe_cli("mysql", file.to_str().unwrap(), "mysql").unwrap(),
+            file.to_str().unwrap()
+        );
+        // 目录：拼接程序名（目录里需真的有该程序）
+        std::fs::write(dir.join(exe_name("mysql")), b"").unwrap();
+        assert_eq!(
+            probe_cli("mysql", dir.to_str().unwrap(), "mysql").unwrap(),
+            dir.join(exe_name("mysql")).to_string_lossy()
+        );
+        // 目录里没有目标程序：报错带程序名
+        let err = probe_cli("psql", dir.to_str().unwrap(), "psql").unwrap_err();
+        assert!(err.contains("psql"), "err: {err}");
+        // 路径不存在：报错带路径
+        let err = probe_cli("mysql", r"X:\no\such", "mysql").unwrap_err();
+        assert!(err.contains("不存在"), "err: {err}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

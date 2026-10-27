@@ -28,6 +28,7 @@ function emptyDatabase(): DatabaseServerConfig {
     database: "",
     username: "",
     password: "",
+    cli_path: "",
     description: "",
   };
 }
@@ -103,12 +104,31 @@ export default function SettingsPage({
   const saveDatabase = async () => {
     if (!dbDraft) return;
     try {
-      await api.saveDatabase(dbDraft);
+      // 保存后立即验证 CLI 可用性（后端自动探索或用指定路径）——只提示
+      // 不阻断：档案先存着，CLI 可以稍后装/再指定。
+      const outcome = await api.saveDatabase(dbDraft);
       setDbDraft(null);
       await load();
-      flash(`数据库 ${dbDraft.name} 已保存`);
+      if (outcome.cli_resolved) {
+        flash(`数据库 ${dbDraft.name} 已保存，CLI 就绪：${outcome.cli_resolved}`);
+      } else if (outcome.cli_error) {
+        fail(outcome.cli_error);
+      } else {
+        flash(`数据库 ${dbDraft.name} 已保存`);
+      }
     } catch (e) {
       fail(e);
+    }
+  };
+
+  // 连接表单「探测」按钮：即时验证 CLI 自动探索/指定路径的结果。
+  const probeDbCli = async () => {
+    if (!dbDraft) return;
+    try {
+      const path = await api.probeDatabaseCli(dbDraft.db_type, dbDraft.cli_path);
+      flash(`CLI 已找到：${path}`);
+    } catch (e) {
+      fail(String(e));
     }
   };
 
@@ -307,6 +327,11 @@ export default function SettingsPage({
                   {d.description ? ` · ${d.description}` : ""}
                 </span>
                 <span className="badge">{d.password ? "密码已设" : "无密码"}</span>
+                {k?.driver.mode === "Cli" && d.cli_path.trim() && (
+                  <span className="badge" title={d.cli_path}>
+                    CLI 已指定
+                  </span>
+                )}
                 <button className="btn ghost" onClick={() => setDbDraft(d)}>
                   Edit
                 </button>
@@ -359,7 +384,7 @@ export default function SettingsPage({
                       <div className="desc" style={{ margin: "4px 0 0" }}>
                         {kind.driver.mode === "Bundled"
                           ? "驱动：内置（rusqlite，无外部依赖）"
-                          : `驱动：外部客户端 ${kind.driver.program}（需已在 PATH，应用不内置驱动）`}
+                          : `驱动：外部客户端 ${kind.driver.program}（自动探索 PATH 与常见安装目录，也可在下方指定路径）`}
                       </div>
                     );
                   })()}
@@ -430,6 +455,28 @@ export default function SettingsPage({
                 value={dbDraft.password}
                 onChange={(e) => setDbDraft({ ...dbDraft, password: e.target.value })}
               />
+              {dbKind?.driver.mode === "Cli" && (
+                <>
+                  <div className="lbl-row">
+                    <label className="lbl">
+                      CLI 路径（可选，留空自动探索 PATH 与常见安装目录）
+                    </label>
+                    <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, cli_path: t })} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      className="field"
+                      style={{ flex: 1 }}
+                      value={dbDraft.cli_path}
+                      placeholder={`如 D:\\mysql\\bin\\mysql.exe 或 D:\\mysql\\bin`}
+                      onChange={(e) => setDbDraft({ ...dbDraft, cli_path: e.target.value })}
+                    />
+                    <button className="btn ghost" onClick={() => void probeDbCli()}>
+                      探测
+                    </button>
+                  </div>
+                </>
+              )}
               <div className="lbl-row">
                 <label className="lbl">Description</label>
                 <PasteButton onPaste={(t) => setDbDraft({ ...dbDraft, description: t })} />
