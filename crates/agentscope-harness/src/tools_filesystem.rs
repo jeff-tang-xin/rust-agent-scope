@@ -517,7 +517,9 @@ impl Tool for WriteFileTool {
     fn description(&self) -> &str {
         "Create a new file with the given full content (parent directories are created). \
          Fails if the path already exists — read_file the existing file and use edit_file \
-         to change it instead of overwriting."
+         to change it instead of overwriting. Never create or modify system data files \
+         (MEMORY.md, memory/*, blackboard.json, anything under .ox/) — those are \
+         system-anchored; use memory_save / blackboard_append instead."
     }
 
     fn parameters(&self) -> Value {
@@ -562,7 +564,8 @@ impl Tool for EditFileTool {
 
     fn description(&self) -> &str {
         "Perform exact string replacement in a file. The old_string must be unique unless \
-         replace_all is true."
+         replace_all is true. Never edit system data files (MEMORY.md, memory/*, \
+         blackboard.json, anything under .ox/) — use memory_save / blackboard_append instead."
     }
 
     fn parameters(&self) -> Value {

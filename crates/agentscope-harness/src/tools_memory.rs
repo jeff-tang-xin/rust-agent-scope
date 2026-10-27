@@ -56,10 +56,11 @@ impl Tool for MemorySaveTool {
     }
 
     fn description(&self) -> &str {
-        "Save information to long-term memory. Use ONLY when the user explicitly \
-         asks to remember something, or states a durable preference/decision about \
-         the project or workflow. Never save intermediate steps, tool outputs, \
-         session-specific details, or content the user did not ask to persist. \
+        "Save information to long-term memory. This is the ONLY channel that writes \
+         memory files (system-anchored paths; do NOT use write_file/edit_file for memory). \
+         Use ONLY when the user explicitly asks to remember something, or states a durable \
+         preference/decision about the project or workflow. Never save intermediate steps, \
+         tool outputs, session-specific details, or content the user did not ask to persist. \
          Content should be markdown bullet points."
     }
 

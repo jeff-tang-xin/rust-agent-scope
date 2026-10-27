@@ -53,6 +53,15 @@ export default function SessionSidebar({
   // 内联重命名：正在编辑的 session id + 输入框值（Tauri WebView 无 prompt）。
   const [renaming, setRenaming] = useState("");
   const [renameValue, setRenameValue] = useState("");
+  // 收窄：折叠成窄条只留展开按钮（localStorage 记忆，跨会话保持）。
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("ss-collapsed") === "1",
+  );
+  const toggleCollapsed = () =>
+    setCollapsed((prev) => {
+      localStorage.setItem("ss-collapsed", prev ? "0" : "1");
+      return !prev;
+    });
   const selected = workspaces.find((w) => w.id === selectedId);
 
   const load = useCallback(async () => {
@@ -113,9 +122,33 @@ export default function SessionSidebar({
   const childrenOf = (parentId: string) =>
     sessionItems.filter((s) => s.parent_session_id === parentId);
 
+  if (collapsed) {
+    return (
+      <aside className="session-sidebar collapsed">
+        <button
+          className="icon-btn ss-collapse-btn"
+          title="展开工作区栏"
+          onClick={toggleCollapsed}
+        >
+          »
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="session-sidebar">
-      <div className="ss-head">工作区</div>
+      <div className="ss-head">
+        <span>工作区</span>
+        <span className="spacer" />
+        <button
+          className="icon-btn"
+          title="收窄工作区栏"
+          onClick={toggleCollapsed}
+        >
+          «
+        </button>
+      </div>
       {workspaces.map((w) => (
         <div key={w.id}>
           <div

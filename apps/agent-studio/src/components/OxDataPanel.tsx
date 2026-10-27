@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type BlackboardEntry, type MemoryFileEntry } from "../api";
+import DataViewerModal from "./DataViewerModal";
 
 const KINDS = ["note", "finding", "risk", "conclusion"] as const;
 
@@ -86,6 +87,7 @@ function BlackboardTab({
   const [entries, setEntries] = useState<BlackboardEntry[] | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<BlackboardEntry | null>(null);
+  const [viewing, setViewing] = useState<BlackboardEntry | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -147,9 +149,34 @@ function BlackboardTab({
               ✕
             </button>
           </div>
-          <div className="ox-entry-content">{e.content}</div>
+          <div
+            className="ox-entry-content"
+            title="点击查看全文"
+            onClick={() => setViewing(e)}
+          >
+            {e.content}
+          </div>
         </div>
       ))}
+      {viewing && (
+        <DataViewerModal
+          title={`黑板条目 #${viewing.id}${viewing.author ? ` · ${viewing.author}` : ""}`}
+          content={viewing.content}
+          mode="markdown"
+          editable
+          onSave={async (content) => {
+            try {
+              await api.blackboardUpdate(workspaceId, viewing.id, viewing.type, content);
+              onToast?.("info", `已更新 #${viewing.id}`);
+              setViewing(null);
+              void load();
+            } catch (err) {
+              setError(String(err));
+            }
+          }}
+          onClose={() => setViewing(null)}
+        />
+      )}
       {editing && (
         <EditEntryModal
           entry={editing}
@@ -222,8 +249,7 @@ function MemoryTab({
 }) {
   const [files, setFiles] = useState<MemoryFileEntry[] | null>(null);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [viewing, setViewing] = useState<{ path: string; content: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -236,30 +262,24 @@ function MemoryTab({
 
   useEffect(() => {
     setFiles(null);
-    setEditing(null);
-    setDirty(false);
+    setViewing(null);
     void load();
   }, [load]);
 
   const open = async (path: string) => {
     try {
       setError("");
-      setContent0(await api.memoryReadFile(workspaceId, path));
+      setViewing({ path, content: await api.memoryReadFile(workspaceId, path) });
     } catch (e) {
       setError(String(e));
     }
   };
-  const setContent0 = (content: string) => {
-    setEditing((prev) => ({ path: prev?.path ?? "", content }));
-    setDirty(false);
-  };
 
-  const save = async () => {
-    if (!editing) return;
+  const save = async (path: string, content: string) => {
     try {
-      await api.memorySaveFile(workspaceId, editing.path, editing.content);
-      onToast?.("info", `已保存 ${editing.path}`);
-      setDirty(false);
+      await api.memorySaveFile(workspaceId, path, content);
+      onToast?.("info", `已保存 ${path}`);
+      setViewing({ path, content });
       void load();
     } catch (e) {
       setError(String(e));
@@ -271,7 +291,7 @@ function MemoryTab({
     try {
       await api.memoryDeleteFile(workspaceId, path);
       onToast?.("info", `已删除 ${path}`);
-      setEditing(null);
+      setViewing((prev) => (prev?.path === path ? null : prev));
       void load();
     } catch (e) {
       setError(String(e));
@@ -288,7 +308,7 @@ function MemoryTab({
       {files?.map((f) => (
         <div
           key={f.path}
-          className={`ox-mem-file ${editing?.path === f.path ? "active" : ""}`}
+          className={`ox-mem-file ${viewing?.path === f.path ? "active" : ""}`}
           onClick={() => void open(f.path)}
         >
           <span className="ox-mem-path">{f.path}</span>
@@ -308,27 +328,14 @@ function MemoryTab({
           </button>
         </div>
       ))}
-      {editing && (
-        <div className="ox-mem-editor">
-          <div className="ox-mem-editor-head">
-            <span>{editing.path}{dirty ? " *" : ""}</span>
-            <span className="spacer" />
-            <button className="btn" disabled={!dirty} onClick={() => void save()}>
-              保存
-            </button>
-            <button className="btn ghost" onClick={() => setEditing(null)}>
-              关闭
-            </button>
-          </div>
-          <textarea
-            className="ox-edit-content"
-            value={editing.content}
-            onChange={(e) => {
-              setEditing({ ...editing, content: e.target.value });
-              setDirty(true);
-            }}
-          />
-        </div>
+      {viewing && (
+        <DataViewerModal
+          title={viewing.path}
+          content={viewing.content}
+          editable
+          onSave={(content) => save(viewing.path, content)}
+          onClose={() => setViewing(null)}
+        />
       )}
     </div>
   );

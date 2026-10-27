@@ -10,6 +10,7 @@ import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, typ
 import ServersPanel from "./ServersPanel";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
+import DataViewerModal from "./DataViewerModal";
 
 type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean; actor?: string }
@@ -382,17 +383,11 @@ function FilePanel({
         />
       </div>
       {preview && (
-        <div className="modal-mask" onClick={() => setPreview(null)}>
-          <div className="modal file-preview" onClick={(e) => e.stopPropagation()}>
-            <h2>{preview.path}</h2>
-            <pre>{preview.content}</pre>
-            <div className="modal-actions">
-              <button className="btn ghost" onClick={() => setPreview(null)}>
-                关闭
-              </button>
-            </div>
-          </div>
-        </div>
+        <DataViewerModal
+          title={preview.path}
+          content={preview.content}
+          onClose={() => setPreview(null)}
+        />
       )}
     </aside>
   );

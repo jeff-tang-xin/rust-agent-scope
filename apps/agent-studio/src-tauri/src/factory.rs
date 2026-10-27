@@ -675,14 +675,14 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     };
     prompt.push_str("\n\n");
     prompt.push_str(&role_note);
-    // .ox 数据规范：运行时产物与业务代码分离。记忆与计划文件已由系统
-    // 强制锚定 .ox/（工具沙箱），这里约束的是模型自由写文件的去向。
+    // .ox 数据规范：.ox/ 是系统数据区（记忆/黑板/会话/计划，路径系统锚定），
+    // 模型自由写文件不得进入；业务代码之外的非业务文件放用户指定位置或系统临时目录。
     prompt.push_str(
         "\n\nWorkspace data convention: the project root holds business code only. \
-         Memory and plan files are system-anchored under `.ox/` (do not recreate \
-         them elsewhere). Any other non-business file you write (notes, summaries, \
-         reports, scratch files) must also live under `.ox/`. Only write outside \
-         `.ox/` when the user asked for that exact file.",
+         `.ox/` is the system data area (memory, blackboard, sessions, plans — paths are \
+         system-anchored). NEVER write there with write_file/edit_file; use the dedicated \
+         tools (memory_save / blackboard_append / plan_write) instead. Scratch files go to \
+         the system temp directory or a user-specified location, not `.ox/`.",
     );
     prompt
 }
