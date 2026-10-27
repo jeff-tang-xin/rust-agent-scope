@@ -56,8 +56,22 @@ export default function App() {
   // 当前选中的工作区（切类别时自动落到该类第一个）。
   const [selectedId, setSelectedId] = useState("");
   // 每个工作区独立的运行方式（solo/team）与当前 session——多项目互不干扰。
-  const [modes, setModes] = useState<Record<string, "solo" | "team">>({});
-  const [sessionByWs, setSessionByWs] = useState<Record<string, string>>({});
+  // 上次会话/运行方式按工作区记忆（localStorage）：刷新后回到原会话，
+  // 而不是回落到固定 defaultSession（"main"）——那会显示另一个会话的历史，
+  // 造成「刷新后和点击会话看到的不一样」。
+  const [modes, setModes] = useState<Record<string, "solo" | "team">>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("studio-modes") ?? "{}");
+    } catch {
+      return {};
+    }
+  });  const [sessionByWs, setSessionByWs] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("studio-sessions") ?? "{}");
+    } catch {
+      return {};
+    }
+  });
   // 运行中的 "workspaceId:sessionId"（全局事件监听维护，左栏显示状态）。
   const [running, setRunning] = useState<Set<string>>(new Set());
   // 工作区表单（新建/编辑）。
@@ -96,6 +110,16 @@ export default function App() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // 会话/运行方式记忆落 localStorage（任何变更即写回；解析失败静默降级为内存态）。
+  useEffect(() => {
+    try {
+      localStorage.setItem("studio-modes", JSON.stringify(modes));
+      localStorage.setItem("studio-sessions", JSON.stringify(sessionByWs));
+    } catch {
+      // 存储不可用（隐私模式等）：仅失去刷新恢复能力，不影响功能。
+    }
+  }, [modes, sessionByWs]);
 
   // 全局运行状态：任何事件到达即标记 (workspace, session) 在跑，turn 终态移除。
   // keep-alive 下切走的事件也到达这里，左栏状态始终准确。

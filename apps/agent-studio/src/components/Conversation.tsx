@@ -28,7 +28,11 @@ const nowTime = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
 /** 历史时间戳（ISO-8601）→ HH:MM:SS；非 ISO 原样返回。 */
 function fmtTime(ts?: string): string | undefined {
   if (!ts) return undefined;
-  return /^\d{4}-\d{2}-\d{2}T/.test(ts) ? ts.slice(11, 19) : ts;
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(ts)) return ts;
+  // 消息时间戳是 UTC ISO 串：转本地时区显示（与流式 nowTime 同源），
+  // 否则比本地时间慢 8 小时（UTC+8），用户看到的是「对不上钟」的时间。
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? ts.slice(11, 19) : d.toLocaleTimeString("zh-CN", { hour12: false });
 }
 
 /** 打字机：流式期间按帧渐进显示（自适应步长追平积压），结束后整段显示。 */
@@ -187,7 +191,8 @@ function entriesFromBlocks(
         // 同一调用的结果：回填到 tool_use 条目（合并为一张卡）。
         hit.result = text || shortJson(output, 600);
         hit.ok = ok;
-        return out;
+      // 回填后继续处理后续块（原 return 会丢弃同消息剩余 tool_result，
+      // 对应 tool_use 条目被误标「未完成」）。
       }
       out.push({
         kind: "tool",
@@ -1278,7 +1283,7 @@ export default function Conversation({
             </div>
           </div>
         )}
-        {entries.map((e) => {
+        {entries.map((e, idx) => {
           // 时间线行：左侧节点圆点 + 时间标签，右侧原条目渲染。
           const rowKind =
             e.kind === "msg"
@@ -1286,11 +1291,14 @@ export default function Conversation({
               : e.kind === "image" || e.kind === "file"
                 ? "user"
                 : e.kind;
+          // 历史回放中同一条消息展开的多个条目共享消息时间戳：
+          // 连续相同时间只在首条显示，避免「同一秒」逐行堆叠。
+          const showTime = e.ts && e.ts !== entries[idx - 1]?.ts;
           return (
             <div key={e.id} className={`tl-row tl-${rowKind}`}>
               <span className="tl-dot" aria-hidden />
               <div className="tl-body">
-                {e.ts ? <div className="tl-time">{e.ts}</div> : null}
+                {showTime ? <div className="tl-time">{e.ts}</div> : null}
                 {renderEntry(e)}
               </div>
             </div>
