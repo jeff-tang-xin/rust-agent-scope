@@ -866,6 +866,22 @@ export default function Conversation({
               e.kind === "tool" ? { ...e, result: (e.result ?? "") + chunk } : e,
             );
           }
+          // 恢复路径的工具开始执行没有新的 TOOL_CALL_START：结果增量到达
+          // 即从确认卡移除对应项（显式批准/同类自动放行的调用不再留在待
+          // 确认列表，全部清完卡片消失）。无变化时返回原引用避免重渲染。
+          setEntries((prev) => {
+            let changed = false;
+            const next = prev
+              .map((e) => {
+                if (e.kind !== "confirm") return e;
+                const rest = e.calls.filter((c) => String(c.id ?? "") !== callKey);
+                if (rest.length === e.calls.length) return e;
+                changed = true;
+                return rest.length > 0 ? { ...e, calls: rest } : null;
+              })
+              .filter((x): x is Entry => x !== null);
+            return changed ? next : prev;
+          });
           break;
         }
         case "TOOL_RESULT_END": {
@@ -1227,6 +1243,28 @@ export default function Conversation({
     }
   };
 
+  // 批量裁决：一次处理确认卡里的全部挂起调用（全部批准/全部拒绝）。
+  // 并行同批工具（如多个 edit_file）逐个点太繁琐；后端另有「批准一个、
+  // 同批同名自动放行」兜底，这里提供显式的一次性批量入口。
+  const resolveConfirmBulk = async (
+    entryId: string,
+    calls: Record<string, unknown>[],
+    confirmed: boolean,
+  ) => {
+    setEntries((prev) => prev.filter((e) => e.id !== entryId));
+    const results: ConfirmResultPayload[] = calls.map((call) => ({
+      confirmed,
+      tool_call: call,
+    }));
+    setBusySafe(true);
+    try {
+      await api.sendConfirm(workspace.id, runtimeMode, sessionId, results);
+    } catch (err) {
+      setBusySafe(false);
+      setError(String(err));
+    }
+  };
+
   // steer：turn 运行中补充指令（agent 在下一个 step 边界注入上下文，当步生效）。
   // 后端对「无运行中 turn」的 steer 会拒绝（防残留消息混入后续输入或触发
   // 自动续轮）——因此先调后端、成功才落本地条目；被拒且 turn 已结束时
@@ -1452,6 +1490,22 @@ export default function Conversation({
             <span className="status ask">待确认</span>
           </div>
           <div className="entry-body confirm-body">
+            {e.calls.length > 1 && (
+              <div className="confirm-actions confirm-bulk">
+                <button
+                  className="btn primary"
+                  onClick={() => void resolveConfirmBulk(e.id, e.calls, true)}
+                >
+                  全部批准（{e.calls.length} 项）
+                </button>
+                <button
+                  className="btn danger"
+                  onClick={() => void resolveConfirmBulk(e.id, e.calls, false)}
+                >
+                  全部拒绝
+                </button>
+              </div>
+            )}
             {e.calls.map((call, idx) => {
               const name = String(call.name ?? "tool");
               const input = JSON.stringify(call.input ?? {}, null, 2);

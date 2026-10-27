@@ -1460,6 +1460,41 @@ impl ReActAgent {
                 .await?;
             }
         }
+        // 同类自动通过：用户批准了某工具的一次调用，同批次仍挂起的同名工具
+        // 调用一并放行——同一批次的权限语义相同（如并行发出的多个 edit_file），
+        // 逐个确认只会逼用户连点 N 次「批准」、且每次恢复一轮。拒绝不受影响
+        // （仍逐个生效）；不同名工具（如混在批里的 delete_file）不自动放行。
+        if !approved.is_empty() {
+            let approved_names: Vec<String> = approved.iter().map(|c| c.name.clone()).collect();
+            let mut auto: Vec<ToolCallSpec> = Vec::new();
+            {
+                let mut state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+                for msg in state.context.iter_mut() {
+                    for block in msg.content.iter_mut() {
+                        if let ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input,
+                            state: block_state,
+                            ..
+                        } = block
+                        {
+                            if matches!(block_state, Some(ToolCallState::Asking))
+                                && approved_names.contains(name)
+                            {
+                                *block_state = Some(ToolCallState::Allowed);
+                                auto.push(ToolCallSpec {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            approved.extend(auto);
+        }
         for call in approved {
             self.execute_tool(
                 ctx,
@@ -2279,6 +2314,20 @@ mod tests {
         }
     }
 
+    /// 全部要求确认（HITL 挂起）
+    struct AskAll;
+
+    #[async_trait::async_trait]
+    impl crate::permission::PermissionChecker for AskAll {
+        async fn check(
+            &self,
+            _tool_name: &str,
+            _input: &Value,
+        ) -> crate::permission::PermissionDecision {
+            crate::permission::PermissionDecision::RequireApproval
+        }
+    }
+
     /// 捕获每次请求消息的模型
     struct CapturingModel {
         seen: Arc<Mutex<Vec<Vec<Msg>>>>,
@@ -2516,6 +2565,88 @@ mod tests {
             matches!(history[2].content[0],
                 ContentBlock::ToolResult { ref output, state: ToolResultState::Denied, .. }
                 if output.iter().any(|b| matches!(b, ContentBlock::Text { text } if text.contains("denied"))))
+        );
+    }
+
+    #[tokio::test]
+    async fn approving_one_call_auto_approves_same_tool_in_batch() {
+        // 同批同名工具（如并行发出的多个 edit_file）：批准一个，其余自动放行
+        // 执行——同一批次权限语义相同，逐个确认只会逼用户连点 N 次「批准」。
+        let mut toolkit = Toolkit::new();
+        toolkit.register(Arc::new(AddTool));
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(MockModel {
+                responses: Mutex::new(vec![
+                    crate::model::ChatResponse::from_text("好的，都执行完了"),
+                    crate::model::ChatResponse {
+                        content: vec![
+                            ContentBlock::ToolUse {
+                                id: "call_1".into(),
+                                name: "add".into(),
+                                input: json!({"a": 1, "b": 2}),
+                                state: None,
+                                content: None,
+                            },
+                            ContentBlock::ToolUse {
+                                id: "call_2".into(),
+                                name: "add".into(),
+                                input: json!({"a": 3, "b": 4}),
+                                state: None,
+                                content: None,
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                ]),
+            }))
+            .toolkit(toolkit)
+            .memory(Arc::new(InMemoryMemory::new()))
+            .permission(Arc::new(AskAll))
+            .build()
+            .unwrap();
+
+        // 第一轮：两个调用全部挂起（PermissionAsking 返回，等用户确认）
+        let reply = agent.call(Msg::user("user", "1加2 和 3加4")).await.unwrap();
+        assert_eq!(reply.text(), "");
+
+        // 确认答复：只显式批准 call_1 → call_2 同名自动通过
+        let confirm = crate::event::ConfirmResult {
+            confirmed: true,
+            tool_call: ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "add".into(),
+                input: json!({"a": 1, "b": 2}),
+                state: None,
+                content: None,
+            },
+            rules: None,
+            reason: None,
+        };
+        let confirm_msg = Msg::new(Role::User, "user", Vec::new()).with_metadata(
+            serde_json::json!({
+                (crate::message::metadata_keys::CONFIRM_RESULTS):
+                    serde_json::to_value(vec![confirm]).unwrap(),
+            }),
+        );
+        let reply2 = agent.call(confirm_msg).await.unwrap();
+        assert_eq!(reply2.text(), "好的，都执行完了");
+
+        // 两个调用都有 success 结果（call_2 被自动放行，不是 denied/缺失）
+        let history = history(&agent);
+        let states: Vec<ToolResultState> = history
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult { state, .. } => Some(state.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(states.len(), 2, "两个调用都应有结果: {:?}", states);
+        assert!(
+            states.iter().all(|s| *s == ToolResultState::Success),
+            "全部 success（call_2 自动放行）: {:?}",
+            states
         );
     }
 

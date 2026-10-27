@@ -1398,6 +1398,7 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 }
 .confirm-actions { display: flex; gap: 8px; }
 .confirm-actions .btn { padding: 3px 12px; font-size: 12px; }
+.confirm-bulk { border-bottom: 1px solid var(--border-light); padding-bottom: 10px; }
 
 /* ---------- 服务器面板（ops）与数据库面板（db） ---------- */
 .server-list { display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow-y: auto; }
