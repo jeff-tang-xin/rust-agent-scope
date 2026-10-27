@@ -711,11 +711,16 @@ export default function Conversation({
       const ev = payload.event;
       switch (ev?.type) {
         case "CONTEXT_COMPACTION_START":
-          // 压缩要调一次辅助 LLM，可能耗时数秒：indicator 提示「压缩中」，
-          // 避免长时间无输出被误判为卡死。
+          // 压缩要调一次辅助 LLM，可能耗时数分钟：indicator 提示「压缩中」
+          // 并给出预期，避免长时间无输出被误判为卡死。
           setEntries((prev) => [
             ...prev,
-            { kind: "indicator", text: "正在压缩上下文…", ts: nowTime(), id: nextId() },
+            {
+              kind: "indicator",
+              text: "正在压缩上下文，预计需要几分钟，请稍等…",
+              ts: nowTime(),
+              id: nextId(),
+            },
           ]);
           break;
         case "CONTEXT_COMPACTION_END":
