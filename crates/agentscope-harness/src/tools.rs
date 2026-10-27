@@ -712,6 +712,12 @@ impl Tool for TaskCancelTool {
         Self::NAME
     }
 
+    /// 取消后台任务可重跑、非破坏性：免确认白名单依据（对齐 Java
+    /// ALWAYS_ALLOWED 的 task_output/task_list 同族开发辅助语义）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Cancel a running background task. Use to stop a task that is no longer needed. \
 Has no effect on already-completed tasks."
@@ -933,6 +939,11 @@ impl WaitAsyncResultsTool {
 impl Tool for WaitAsyncResultsTool {
     fn name(&self) -> &str {
         Self::NAME
+    }
+
+    /// 纯等待聚合，无任何副作用：免确认白名单依据。
+    fn is_read_only(&self) -> bool {
+        true
     }
 
     fn description(&self) -> &str {

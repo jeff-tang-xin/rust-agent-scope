@@ -457,6 +457,20 @@ pub fn build_agent(
 ///   等非编辑类工具不弹授权）；
 /// - 永久授权：用户在确认弹窗选「永久允许」时写入 `<workspace_dir>/permissions.json`，
 ///   装配时读回合并（source: "user"），跨会话生效。
+///
+/// 低风险开发操作白名单（免确认）：有写语义但面向开发辅助流程、不触碰
+/// 用户代码资产——记忆保存（.ox 内）、子代理派发/续聊、plan 流程工具。
+/// 对齐 Java PlanModeMiddleware.ALWAYS_ALLOWED 的开发辅助语义（plan_exit
+/// 除外：其 check_permissions 恒 RequireApproval，审批走 HITL）。
+const DEVELOP_ALLOWLIST: &[&str] = &[
+    "memory_save",
+    "agent_spawn",
+    "agent_send",
+    "plan_enter",
+    "plan_write",
+    "team_delegate",
+];
+
 fn default_permission_context(
     read_only_tools: &[String],
     mode: StudioMode,
@@ -487,10 +501,18 @@ fn default_permission_context(
     let mut context = PermissionContextState::default();
     // 只读工具免确认：名单由调用方在 toolkit move 前按 `Tool::is_read_only()`
     // 收集，新只读工具无需改这里。
-    for name in read_only_tools {
-        if !ask_tools.contains(&name.as_str()) {
+    // 另追加低风险开发操作（有写语义但面向开发辅助、非用户代码资产）：
+    // 记忆保存、子代理派发/续聊、plan 流程（plan_exit 除外——工具自裁决
+    // RequireApproval，对齐 Java PlanModeTools.planExit）。编辑/写文件/shell/
+    // 远程/数据变更仍走 ask。
+    for name in read_only_tools
+        .iter()
+        .map(String::as_str)
+        .chain(DEVELOP_ALLOWLIST.iter().copied())
+    {
+        if !ask_tools.contains(&name) {
             context.add_allow_rule(PermissionRule {
-                tool_name: name.clone(),
+                tool_name: name.to_string(),
                 rule_content: None,
                 behavior: PermissionBehavior::Allow,
                 source: "project".to_string(),
@@ -692,5 +714,11 @@ mod tests {
         assert!(context.allow_rules.contains_key("grep_files"));
         assert!(!context.allow_rules.contains_key("execute"));
         assert!(context.ask_rules.contains_key("execute"));
+        // 低风险开发操作免确认（DEVELOP_ALLOWLIST），编辑/写/shell 仍 ask。
+        assert!(context.allow_rules.contains_key("memory_save"));
+        assert!(context.allow_rules.contains_key("agent_spawn"));
+        assert!(context.allow_rules.contains_key("plan_write"));
+        // plan_exit 不进白名单：工具自裁决 RequireApproval（审批走 HITL）。
+        assert!(!context.allow_rules.contains_key("plan_exit"));
     }
 }
