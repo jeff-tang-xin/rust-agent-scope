@@ -62,11 +62,20 @@ pub trait Agent: Send + Sync {
 ///
 /// 返回 `Err` 会终止本次调用；best-effort 型钩子（如压缩）应自行降级返回 `Ok`。
 pub type IterationHook = Arc<
-    dyn for<'a> Fn(&'a RuntimeContext, &'a Arc<Mutex<AgentState>>, bool)
+    dyn for<'a> Fn(
+            &'a RuntimeContext,
+            &'a Arc<Mutex<AgentState>>,
+            bool,
+            Option<&'a EventSink>,
+        )
         -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
         + Send
         + Sync,
 >;
+
+/// 事件发送端（钩子等扩展点向调用方事件流注入事件的通道）。
+/// 无事件流的调用（`call()`）传 `None`，钩子自行跳过事件上报。
+pub type EventSink = tokio::sync::mpsc::Sender<AgentEvent>;
 
 /// 判断错误是否为「上下文溢出」类（对齐 Java
 /// `CompactionMiddleware.isContextOverflowError` 的消息模式匹配）。
@@ -181,7 +190,9 @@ impl ReActAgent {
 }
 
 /// 事件出口封装：`None` 时静默丢弃（非流式 `call()` 无事件流）。
-struct EventSink(Option<mpsc::Sender<AgentEvent>>);
+/// （与 [`EventSink`] 的区别：这是 run 内部的出口封装，EventSink 是对外
+/// pub 的发送端别名，供 IterationHook 等扩展点注入事件。）
+struct EventOut(Option<mpsc::Sender<AgentEvent>>);
 
 /// 一次执行的运行上下文：reply_id 贯穿本次执行的所有事件
 /// （对齐 Java：一次 streamEvents() 调用产生一个 replyId），
@@ -189,7 +200,7 @@ struct EventSink(Option<mpsc::Sender<AgentEvent>>);
 struct RunContext {
     reply_id: String,
     runtime: RuntimeContext,
-    events: EventSink,
+    events: EventOut,
     /// 本次调用的事件过滤器（由中间件在调用开始时新建，对齐 Java 在 `Flux.defer`
     /// 内建状态的做法）。锁只在过滤期间持有，发送事件时已释放。
     filters: Mutex<Vec<Box<dyn EventFilter>>>,
@@ -218,7 +229,7 @@ impl RunContext {
         Self {
             reply_id: runtime.reply_id().to_string(),
             runtime,
-            events: EventSink(events),
+            events: EventOut(events),
             filters: Mutex::new(filters),
             state,
             recorder,
@@ -1073,7 +1084,7 @@ impl ReActAgent {
             // 迭代边界异步钩子（对应 Java 每轮 onReasoning 的检查点，如压缩）：
             // 在 reasoning 之前执行；失败即终止调用（钩子自行决定是否降级）。
             if let Some(hook) = &self.iteration_hook {
-                hook(&ctx.runtime, &ctx.state, false).await?;
+                hook(&ctx.runtime, &ctx.state, false, ctx.events.0.as_ref()).await?;
             }
             let assistant = match self.reasoning(ctx, streaming).await {
                 Ok(msg) => msg,
@@ -1087,7 +1098,7 @@ impl ReActAgent {
                         return Err(error);
                     }
                     if let Some(hook) = &self.iteration_hook {
-                        hook(&ctx.runtime, &ctx.state, true).await?;
+                        hook(&ctx.runtime, &ctx.state, true, ctx.events.0.as_ref()).await?;
                     }
                     self.reasoning(ctx, streaming).await?
                 }
@@ -1667,8 +1678,12 @@ impl Agent for ReActAgent {
     }
 
     async fn stream_events(&self, msg: Msg) -> Result<mpsc::Receiver<AgentEvent>> {
-        self.stream_events_with_context(RuntimeContext::new(), msg)
-            .await
+        // 执行句柄在此丢弃（detach）：trait 面只承诺事件流；需要中断能力的
+        // 调用方走 [`ReActAgent::stream_events_with_context`] 拿句柄。
+        let (rx, _task) = self
+            .stream_events_with_context(RuntimeContext::new(), msg)
+            .await?;
+        Ok(rx)
     }
 }
 
@@ -1679,18 +1694,23 @@ impl ReActAgent {
     }
 
     /// 带运行时上下文执行并推送事件流。
+    ///
+    /// 返回事件接收端与执行 task 的句柄：执行在独立 task 里跑，调用方若要
+    /// 中断（stop/删除会话），必须 abort **这个句柄**——只杀消费端会留下
+    /// 继续跑的执行 task（LLM 调用/工具执行/状态写入全继续），表现为
+    /// 「停了还在后台跑」。
     pub async fn stream_events_with_context(
         &self,
         runtime: RuntimeContext,
         msg: Msg,
-    ) -> Result<mpsc::Receiver<AgentEvent>> {
+    ) -> Result<(mpsc::Receiver<AgentEvent>, tokio::task::JoinHandle<()>)> {
         let (tx, rx) = mpsc::channel::<AgentEvent>(32);
         let this = self.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             // 出错时仅关闭 channel：错误语义由 call() 承担，事件流只负责过程呈现
             let _ = this.run(runtime, vec![msg], Some(tx), true, None).await;
         });
-        Ok(rx)
+        Ok((rx, task))
     }
 
     /// 消费一条收件箱命令并驱动执行（对应 Java harness 把 `SessionExecution`
@@ -2407,7 +2427,7 @@ mod tests {
         .unwrap();
 
         let runtime = RuntimeContext::new().with_session_id("session-7");
-        let mut rx = agent
+        let (mut rx, _task) = agent
             .stream_events_with_context(runtime, Msg::user("user", "hi"))
             .await
             .unwrap();
@@ -3208,7 +3228,7 @@ mod tests {
             }))
             .toolkit(toolkit)
             .memory(Arc::new(InMemoryMemory::new()))
-            .iteration_hook(Arc::new(move |_rc, _state, forced| {
+            .iteration_hook(Arc::new(move |_rc, _state, forced, _sink| {
                 calls_for_hook.lock().unwrap().push(forced);
                 Box::pin(async { Ok(()) })
             }))
@@ -3233,7 +3253,7 @@ mod tests {
                 failed_once: std::sync::atomic::AtomicBool::new(false),
             }))
             .memory(Arc::new(InMemoryMemory::new()))
-            .iteration_hook(Arc::new(move |_rc, state, forced| {
+            .iteration_hook(Arc::new(move |_rc, state, forced, _sink| {
                 forced_for_hook.lock().unwrap().push(forced);
                 if forced {
                     // 模拟强制压缩：把对话真相清到只剩一条（真实实现是摘要替换）
@@ -3275,7 +3295,7 @@ mod tests {
             .name("assistant")
             .model(Arc::new(AlwaysErr))
             .memory(Arc::new(InMemoryMemory::new()))
-            .iteration_hook(Arc::new(move |_rc, _state, forced| {
+            .iteration_hook(Arc::new(move |_rc, _state, forced, _sink| {
                 calls_for_hook.lock().unwrap().push(forced);
                 Box::pin(async { Ok(()) })
             }))

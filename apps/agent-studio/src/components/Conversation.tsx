@@ -565,6 +565,18 @@ export default function Conversation({
       setEntries(restored);
     });
     api.getPlanStatus(workspace.id, runtimeMode, sessionId).then((s) => alive && setPlanActive(s.active));
+    // 刷新恢复：该会话的 turn 若仍在后端运行，恢复 busy——事件监听是全局
+    // 的，后续事件照常到达本组件，无需重启 turn。
+    api
+      .listRunningTurns()
+      .then((runs) => {
+        if (!alive) return;
+        const still = runs.some(
+          (r) => r.workspace_id === workspace.id && r.session_id === sessionId,
+        );
+        if (still) setBusySafe(true);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -579,6 +591,26 @@ export default function Conversation({
       if (!applies(payload)) return;
       const ev = payload.event;
       switch (ev?.type) {
+        case "CONTEXT_COMPACTION_START":
+          // 压缩要调一次辅助 LLM，可能耗时数秒：indicator 提示「压缩中」，
+          // 避免长时间无输出被误判为卡死。
+          setEntries((prev) => [
+            ...prev,
+            { kind: "indicator", text: "compacting context…", ts: nowTime(), id: nextId() },
+          ]);
+          break;
+        case "CONTEXT_COMPACTION_END":
+          setEntries((prev) => [
+            ...prev.filter((e) => e.kind !== "indicator"),
+            {
+              kind: "msg",
+              role: "system",
+              text: `上下文已压缩${ev.detail ? `：${String(ev.detail)}` : ""}`,
+              ts: nowTime(),
+              id: nextId(),
+            },
+          ]);
+          break;
         case "MODEL_CALL_START":
           setEntries((prev) => [
             ...prev,

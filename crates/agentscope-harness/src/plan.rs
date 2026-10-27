@@ -70,6 +70,11 @@ impl PlanModeManager {
     /// 退出计划模式（回到 BUILD，幂等）：仅清标志，保留 `current_plan_file` 供参考。
     pub fn exit(&self, state: &mut AgentState) {
         state.plan_mode_context.plan_active = false;
+        // 清掉计划文件路径：Java 的 exit 保留 currentPlanFile 供 BUILD 态
+        // 提示（BUILD_MODE_PLAN_HINT）引用；studio 产品语义下用户不要
+        // 「已退出 plan 模式还看到 plan 提示」的残留——计划内容已在对话
+        // 上下文里，这里清掉让系统提示回归干净（与 Java 的有意差异）。
+        state.plan_mode_context.current_plan_file = None;
     }
 
     /// 当前会话关联的计划文件路径（未记录时返回默认路径）。

@@ -769,6 +769,9 @@ pub async fn send_message(
     let turn_guard = session
         .try_begin_turn()
         .map_err(|_| "a turn is already running in this session".to_string())?;
+    // 新链开始：清掉上一链可能残留的中断标志（interrupt 后链已死、标志
+    // 未被收尾检查消费的场景），避免误杀本次 turn。
+    session.clear_interrupted();
 
     let text = merge_with_pending(handle.agent.delegate(), &session_id, &message);
     // 消息构造：文本块 + 附件块（图片走 Image，其余走 Data；对齐 Java 多模态块）。
@@ -814,7 +817,7 @@ pub async fn send_message(
     // 整条链（含续轮）的注入标志一致。
     let plan_active = handle.agent.is_plan_mode_active(Some(USER_ID), &session_id);
 
-    let join = tokio::spawn(turn_chain(
+    tokio::spawn(turn_chain(
         app.clone(),
         agent,
         Arc::clone(&session),
@@ -827,7 +830,8 @@ pub async fn send_message(
         turn_id.clone(),
         user_msg,
     ));
-    session.track(join.abort_handle()).await;
+    // 执行 task 的句柄由 turn_chain 内部登记（track 的是 run task 而非本
+    // turn_chain task），interrupt 才能真正停掉执行。
 
     Ok(TurnInfo {
         turn_id,
@@ -891,11 +895,17 @@ async fn turn_chain(
         let rc = RuntimeContext::new()
             .with_user_id(USER_ID)
             .with_session_id(&session_id);
+        // 执行 task 句柄登记进 SessionHandle：interrupt abort 的是它（事件
+        // 发送端 drop → 下面的 recv 循环自然退出），而不是本 turn_chain task
+        // ——abort 本 task 会留下继续跑的执行 task（LLM/工具/状态写入全继续）。
         let mut rx = match agent
             .stream_events_with_context(rc, msg.clone())
             .await
         {
-            Ok(rx) => rx,
+            Ok((rx, task)) => {
+                session.track(task).await;
+                rx
+            }
             Err(e) => {
                 let _ = app.emit(
                     "turn-finished",
@@ -922,6 +932,23 @@ async fn turn_chain(
             let _ = app.emit("agent-event", envelope);
         }
         session.untrack().await;
+
+        // 被中断：emit interrupted 终态后直接返回，不结算、不续轮。
+        // （中断可能发生在 recv 中——执行 task 被 abort；也可能发生在续轮
+        // 间隙——标志已置位，这里统一拦住。interrupt_turn 命令不再补发。）
+        if session.take_interrupted() {
+            let _ = app.emit(
+                "turn-finished",
+                TurnFinished {
+                    workspace_id,
+                    session_id,
+                    turn_id,
+                    outcome: "interrupted",
+                    error: None,
+                },
+            );
+            return;
+        }
 
         // 结算：还有未消费的 steer（循环退出后才到达的）→ 自动续轮
         // （对齐 Java settleSession 语义；步边界已消费的不在这里）。
@@ -1033,11 +1060,12 @@ pub async fn steer_turn(
 
 /// 中断运行中的 turn（≈ SessionTurnRunner.interrupt）。
 ///
-/// abort 杀掉的是整个 turn 链 task（含未开始的续轮），task 内的终态 emit
-/// 不会执行，这里补发 `turn-finished(interrupted)` 让前端可靠复位 busy。
+/// abort 的是 agent 执行 task（run()）：事件发送端 drop → turn_chain 的事件
+/// 循环自然退出，由它统一 emit `turn-finished(interrupted)` 并跳过结算/续轮
+/// （中断标志在 SessionHandle，续轮间隙的中断同样被拦住）。
 #[tauri::command]
 pub async fn interrupt_turn(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
     workspace_id: String,
     mode: String,
@@ -1045,23 +1073,15 @@ pub async fn interrupt_turn(
 ) -> Result<bool, String> {
     let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
-    let interrupted = session.interrupt().await;
-    if interrupted {
-        // 中断后丢弃未消费的 steer：用户已主动终止，残留的转向消息
-        // 不应混进后续输入或触发自动续轮。
-        handle.agent.delegate().clear_steers(&session_id);
-        let _ = app.emit(
-            "turn-finished",
-            TurnFinished {
-                workspace_id,
-                session_id,
-                turn_id: String::new(),
-                outcome: "interrupted",
-                error: None,
-            },
-        );
+    let task = session.interrupt().await;
+    // 中断后丢弃未消费的 steer：用户已主动终止，残留的转向消息
+    // 不应混进后续输入或触发自动续轮。
+    handle.agent.delegate().clear_steers(&session_id);
+    let had = task.is_some();
+    if let Some(task) = task {
+        task.abort();
     }
-    Ok(interrupted)
+    Ok(had)
 }
 
 // ---------- plan mode ----------
@@ -1254,6 +1274,9 @@ pub async fn clear_session(
     session_id: String,
 ) -> Result<(), String> {
     let handle = state.handle(&workspace_id, &mode)?;
+    // 运行中的 turn 先停掉（abort 执行 task 并等死透），否则清空的上下文
+    // 会被继续跑的 turn 重新写回。
+    stop_session_turn(&handle, &session_id).await;
     handle
         .agent
         .delegate()
@@ -1262,6 +1285,16 @@ pub async fn clear_session(
     handle.agent.delegate().clear_steers(&session_id);
     handle.drop_session(&session_id).await;
     Ok(())
+}
+
+/// 停掉一个会话的运行中 turn：abort 执行 task 并等它死透（删除/清空会话
+/// 前调用，避免与后续的目录/状态操作竞态）。
+async fn stop_session_turn(handle: &Arc<AgentHandle>, session_id: &str) {
+    let session = handle.session(session_id).await;
+    if let Some(task) = session.interrupt().await {
+        task.abort();
+        let _ = task.await;
+    }
 }
 
 /// 从 agent_state.json 提取首条用户消息文本摘要（≤40 字符）。
@@ -1352,8 +1385,9 @@ pub async fn delete_session(
         .map(|(_, h)| Arc::clone(h))
         .collect();
     for handle in &affected {
-        let session = handle.session(&session_id).await;
-        session.interrupt().await;
+        // 先停 turn（abort 执行 task 并等死透）：否则继续跑的 turn 会把
+        // 状态重新落盘（「删了又复活」），事件也会继续涌向已删除的会话。
+        stop_session_turn(handle, &session_id).await;
         handle.agent.delegate().clear_steers(&session_id);
         handle.drop_session(&session_id).await;
     }
@@ -1362,6 +1396,42 @@ pub async fn delete_session(
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 运行中 turn 的描述（前端刷新后恢复 busy/running 状态用）。
+#[derive(Debug, Clone, Serialize)]
+pub struct RunningTurn {
+    pub workspace_id: String,
+    pub mode: String,
+    pub session_id: String,
+}
+
+/// 列出所有运行中的 turn。事件监听是全局的，页面刷新丢的只是内存里的
+/// busy/running 状态——前端加载时按此恢复，运行中的 turn 无需重启。
+#[tauri::command]
+pub async fn list_running_turns(state: State<'_, AppState>) -> Result<Vec<RunningTurn>, String> {
+    let handles: Vec<(String, Arc<AgentHandle>)> = state
+        .handles
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|(k, h)| (k.clone(), Arc::clone(h)))
+        .collect();
+    let mut out = Vec::new();
+    for (key, handle) in handles {
+        // 缓存 key = "{workspace_id}:{mode}"（见 AppState::handle）。
+        let Some((workspace_id, mode)) = key.rsplit_once(':') else {
+            continue;
+        };
+        for session_id in handle.running_session_ids().await {
+            out.push(RunningTurn {
+                workspace_id: workspace_id.to_string(),
+                mode: mode.to_string(),
+                session_id,
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// 成员会话 id 判定：`team-<成员名>`（成员名 sanitize 后非 12 位 hex、
@@ -1507,6 +1577,7 @@ pub fn run() {
             clear_session,
             rename_session,
             delete_session,
+            list_running_turns,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

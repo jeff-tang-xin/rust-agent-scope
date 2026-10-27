@@ -341,13 +341,19 @@ impl HarnessAgent {
     }
 
     /// 流式调用：返回事件接收端（会话 id 缺省规则同 [`HarnessAgent::call`]）。
+    /// 执行句柄在此丢弃（detach）；需要中断能力的调用方直接用
+    /// `delegate().stream_events_with_context` 拿句柄。
     pub async fn stream_events(
         &self,
         runtime: RuntimeContext,
         msg: Msg,
     ) -> Result<mpsc::Receiver<agentscope_core::event::AgentEvent>, agentscope_core::Error> {
         let runtime = self.ensure_session_defaults(runtime);
-        self.delegate.stream_events_with_context(runtime, msg).await
+        let (rx, _task) = self
+            .delegate
+            .stream_events_with_context(runtime, msg)
+            .await?;
+        Ok(rx)
     }
 
     /// 会话 id 缺省：`RuntimeContext.session_id` > builder 的 `default_session_id` >
@@ -813,12 +819,20 @@ impl HarnessAgentBuilder {
                 let hook: IterationHook = {
                     let compactor = Arc::clone(&compactor);
                     let config = config.clone();
-                    Arc::new(move |rc, state, forced| {
+                    Arc::new(move |rc, state, forced, sink| {
                         let compactor = Arc::clone(&compactor);
                         let config = config.clone();
                         Box::pin(async move {
-                            compact_in_state(rc, &compactor, &config, state, compaction_window, forced)
-                                .await;
+                            compact_in_state(
+                                rc,
+                                &compactor,
+                                &config,
+                                state,
+                                compaction_window,
+                                forced,
+                                sink,
+                            )
+                            .await;
                             Ok(())
                         })
                     })

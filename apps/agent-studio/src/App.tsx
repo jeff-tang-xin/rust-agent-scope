@@ -104,6 +104,14 @@ export default function App() {
     // 档案列表给工作区表单做绑定选择；失败不阻塞（表单里显示为空）。
     api.listServers().then(setServers).catch(() => {});
     api.listDatabases().then(setDatabases).catch(() => {});
+    // 刷新恢复：事件监听是全局的，丢的只是内存 running 集合——按后端
+    // 运行态重建，运行中的 turn 无需重启。
+    api
+      .listRunningTurns()
+      .then((runs) =>
+        setRunning(new Set(runs.map((r) => `${r.workspace_id}:${r.session_id}`))),
+      )
+      .catch(() => {});
     setLoaded(true);
   }, []);
 

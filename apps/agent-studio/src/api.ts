@@ -154,6 +154,13 @@ export interface TurnStartedPayload {
   reason: "steer";
 }
 
+/** 运行中 turn 的描述（list_running_turns；刷新后恢复 busy/running 用）。 */
+export interface RunningTurnInfo {
+  workspace_id: string;
+  mode: string;
+  session_id: string;
+}
+
 // ---------- 事件（AgentEvent JSON：{type: SCREAMING_SNAKE_CASE, ...}） ----------
 
 export interface AgentEventPayload {
@@ -284,6 +291,10 @@ export const api = {
     invoke<void>("rename_session", { workspaceId, sessionId, title }),
   deleteSession: (workspaceId: string, mode: string, sessionId: string) =>
     invoke<void>("delete_session", { workspaceId, mode, sessionId }),
+
+  // 运行中 turn 查询（页面刷新后恢复 busy/running：事件监听是全局的，
+  // 丢的只是内存状态）。
+  listRunningTurns: () => invoke<RunningTurnInfo[]>("list_running_turns"),
 };
 
 // ---------- 事件订阅 ----------

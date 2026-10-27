@@ -9,13 +9,14 @@
 //!
 //! Rust 翻译：
 //! - `SessionHandle`：per-session turn 锁（`tokio::sync::Mutex`，try_lock 拒绝
-//!   并发 turn）+ 运行中 turn 的 AbortHandle（interrupt 语义）；
+//!   并发 turn）+ 运行中 turn 的执行 task 句柄与中断标志（interrupt 语义）；
 //! - `AgentHandle`：agent + 成员表 + 会话表（懒建，对齐 AgentSession 的创建时机）；
 //! - `TurnInfo`：turn 描述 DTO（对齐 Task record 的最小面）；
 //! - 事件投影：AgentEvent 直接 serde 序列化进信封 emit（Rust 侧事件已自带
 //!   类型标签，无需 Java 的 Map 投影中间层）。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use agentscope_harness::HarnessAgent;
@@ -39,8 +40,15 @@ pub struct TurnInfo {
 pub struct SessionHandle {
     /// turn 互斥（同一会话串行 turn；try_lock 失败即拒绝，前端提示等待）。
     turn_lock: Arc<AsyncMutex<()>>,
-    /// 运行中 turn 的中止句柄（interrupt 语义；turn 结束时清空）。
-    running: AsyncMutex<Option<tokio::task::AbortHandle>>,
+    /// 运行中 turn 的 agent 执行 task（`run()` 的 JoinHandle）。interrupt abort
+    /// 它让事件发送端 drop → turn_chain 的事件循环自然收尾；只 abort
+    /// turn_chain 反而会留下继续跑的执行 task（LLM 调用/工具执行/状态写入
+    /// 全继续），表现为「停了还在后台跑」。
+    running: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
+    /// 中断标志：turn_chain 收尾检查（emit interrupted 终态、不续轮）。
+    /// 与 running 分开——续轮间隙（untrack 后、结算前）的中断也要拦住下一轮；
+    /// 新 turn 链开始时由 send_message 清零。
+    interrupted: AtomicBool,
 }
 
 impl SessionHandle {
@@ -57,25 +65,36 @@ impl SessionHandle {
         self.running.lock().await.is_some()
     }
 
-    /// 中断当前 turn（对齐 `AgentSession.interrupt`）。返回是否有运行中 turn。
-    pub async fn interrupt(&self) -> bool {
-        let mut guard = self.running.lock().await;
-        if let Some(handle) = guard.take() {
-            handle.abort();
-            true
-        } else {
-            false
-        }
+    /// 中断当前 turn（对齐 `AgentSession.interrupt`）：置位中断标志并取走
+    /// 执行 task 句柄。返回句柄供调用方决定等待语义——`abort()` 即可
+    /// （interrupt 命令），`abort().await` 等死透（删除会话，避免与目录
+    /// 删除竞态）。无运行中 task 时返回 `None`（标志仍置位，续轮间隙的
+    /// 中断由 turn_chain 收尾检查拦住）。
+    pub async fn interrupt(&self) -> Option<tokio::task::JoinHandle<()>> {
+        self.interrupted.store(true, Ordering::SeqCst);
+        self.running.lock().await.take()
     }
 
-    /// 记录运行中 turn 的中止句柄。
-    pub async fn track(&self, handle: tokio::task::AbortHandle) {
+    /// 记录运行中 turn 的执行 task 句柄。
+    pub async fn track(&self, handle: tokio::task::JoinHandle<()>) {
         *self.running.lock().await = Some(handle);
     }
 
-    /// turn 结束后清空中止句柄（幂等）。
+    /// turn 结束后清空执行 task 句柄（幂等）。
     pub async fn untrack(&self) {
         *self.running.lock().await = None;
+    }
+
+    /// 取走中断标志（检查并清零）：turn_chain 收尾时调用，`true` 表示本次
+    /// turn 链被中断——emit interrupted 终态后直接返回，不再续轮。
+    pub fn take_interrupted(&self) -> bool {
+        self.interrupted.swap(false, Ordering::SeqCst)
+    }
+
+    /// 清除中断标志：新 turn 链开始（send_message 拿到 turn 锁）时调用，
+    /// 防止上一链残留的标志误杀新链。
+    pub fn clear_interrupted(&self) {
+        self.interrupted.store(false, Ordering::SeqCst);
     }
 }
 
@@ -102,6 +121,7 @@ impl AgentHandle {
                 Arc::new(SessionHandle {
                     turn_lock: Arc::new(AsyncMutex::new(())),
                     running: AsyncMutex::new(None),
+                    interrupted: AtomicBool::new(false),
                 })
             })
             .clone()
@@ -111,5 +131,17 @@ impl AgentHandle {
     /// 这里只清内存中的 turn 状态）。
     pub async fn drop_session(&self, session_id: &str) {
         self.sessions.lock().await.remove(session_id);
+    }
+
+    /// 当前有运行中 turn 的会话 id 列表（前端刷新后恢复 busy/running 用）。
+    pub async fn running_session_ids(&self) -> Vec<String> {
+        let sessions = self.sessions.lock().await;
+        let mut out = Vec::new();
+        for (id, session) in sessions.iter() {
+            if session.is_running().await {
+                out.push(id.clone());
+            }
+        }
+        out
     }
 }

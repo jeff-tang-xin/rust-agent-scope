@@ -196,6 +196,18 @@ pub enum AgentEventKind {
         tool_results: Vec<ContentBlock>,
     },
 
+    // ---------- 上下文压缩 ----------
+    /// 上下文压缩开始（迭代边界钩子确定要压缩时触发；摘要由模型生成，
+    /// 可能耗时数秒——前端据此显示「压缩中」状态，避免误判为卡死）。
+    ContextCompactionStart { reply_id: String },
+    /// 上下文压缩结束（写回成功后触发；`detail` 描述压缩结果，
+    /// 如「57 条消息合并为 1 条摘要」。失败降级时不发 End）。
+    ContextCompactionEnd {
+        reply_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+
     // ---------- 控制流 ----------
     /// 中间件 / Hook 请求停止（携带停止原因，供恢复流程使用）。
     RequestStop {
@@ -266,6 +278,8 @@ pub enum AgentEventType {
     SubagentExposed,
     HintBlock,
     AllToolsDenied,
+    ContextCompactionStart,
+    ContextCompactionEnd,
     Custom,
 }
 
@@ -313,6 +327,10 @@ impl AgentEvent {
             AgentEventKind::ToolResultDataDelta { .. } => AgentEventType::ToolResultDataDelta,
             AgentEventKind::ToolResultEnd { .. } => AgentEventType::ToolResultEnd,
             AgentEventKind::HintBlock { .. } => AgentEventType::HintBlock,
+            AgentEventKind::ContextCompactionStart { .. } => {
+                AgentEventType::ContextCompactionStart
+            }
+            AgentEventKind::ContextCompactionEnd { .. } => AgentEventType::ContextCompactionEnd,
             AgentEventKind::ExceedMaxIters { .. } => AgentEventType::ExceedMaxIters,
             AgentEventKind::RequireUserConfirm { .. } => AgentEventType::RequireUserConfirm,
             AgentEventKind::RequireExternalExecution { .. } => {

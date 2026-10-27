@@ -56,9 +56,11 @@ impl Tool for MemorySaveTool {
     }
 
     fn description(&self) -> &str {
-        "Save important information to long-term memory. Use this to persist \
-         facts, decisions, preferences, or context that should be remembered \
-         across conversations. Content should be markdown bullet points."
+        "Save information to long-term memory. Use ONLY when the user explicitly \
+         asks to remember something, or states a durable preference/decision about \
+         the project or workflow. Never save intermediate steps, tool outputs, \
+         session-specific details, or content the user did not ask to persist. \
+         Content should be markdown bullet points."
     }
 
     fn parameters(&self) -> Value {

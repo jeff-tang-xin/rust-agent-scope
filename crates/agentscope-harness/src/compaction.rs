@@ -458,6 +458,19 @@ impl ConversationCompactor {
         Self { model, flush }
     }
 
+    /// 向事件流上报压缩事件（无事件流的调用静默跳过；发送失败仅关闭通道，
+    /// 不影响压缩本身）。
+    async fn notify(
+        sink: Option<&agentscope_core::agent::EventSink>,
+        kind: agentscope_core::event::AgentEventKind,
+    ) {
+        if let Some(sink) = sink {
+            let _ = sink
+                .send(agentscope_core::event::AgentEvent::new(kind))
+                .await;
+        }
+    }
+
     /// 压缩入口：未触发或压缩失败返回 `None`（调用方保持原状）。
     ///
     /// `conversation` 是已剥离 prefix 的对话消息；`budget` 是本次调用的会话
@@ -468,6 +481,7 @@ impl ConversationCompactor {
         conversation: &[Msg],
         config: &CompactionConfig,
         budget: usize,
+        sink: Option<&agentscope_core::agent::EventSink>,
     ) -> Result<Option<Vec<Msg>>, agentscope_core::Error> {
         if conversation.is_empty() {
             return Ok(None);
@@ -514,6 +528,16 @@ impl ConversationCompactor {
         let summary_input = &working[..cutoff];
         let tail = &working[cutoff..];
 
+        // 压缩开始事件：摘要要调一次辅助 LLM，可能耗时数秒——前端据此显示
+        // 「压缩中」，避免长时间无输出被误判为卡死。
+        Self::notify(
+            sink,
+            agentscope_core::event::AgentEventKind::ContextCompactionStart {
+                reply_id: rc.reply_id().to_string(),
+            },
+        )
+        .await;
+
         if config.flush_before_compact {
             let flush_input = filter_summary_messages(summary_input);
             // best-effort：flush 失败不阻断压缩（对齐 Java onErrorResume → Mono.empty；
@@ -526,6 +550,17 @@ impl ConversationCompactor {
         let mut compacted = Vec::with_capacity(tail.len() + 1);
         compacted.push(summary_msg);
         compacted.extend_from_slice(tail);
+        Self::notify(
+            sink,
+            agentscope_core::event::AgentEventKind::ContextCompactionEnd {
+                reply_id: rc.reply_id().to_string(),
+                detail: Some(format!(
+                    "{} 条消息合并为 1 条摘要",
+                    summary_input.len()
+                )),
+            },
+        )
+        .await;
         Ok(Some(compacted))
     }
 
@@ -807,6 +842,7 @@ pub(crate) async fn compact_in_state(
     state: &std::sync::Arc<std::sync::Mutex<agentscope_core::state::AgentState>>,
     window: usize,
     forced: bool,
+    sink: Option<&agentscope_core::agent::EventSink>,
 ) {
     let snapshot: Vec<Msg> = state
         .lock()
@@ -838,7 +874,7 @@ pub(crate) async fn compact_in_state(
     };
 
     match compactor
-        .compact_if_needed(rc, &conversation, &effective, budget)
+        .compact_if_needed(rc, &conversation, &effective, budget, sink)
         .await
     {
         Ok(Some(compacted)) => {
@@ -1020,7 +1056,7 @@ mod tests {
         let conversation: Vec<Msg> = (0..6).map(|i| user_msg(&format!("message {i}"))).collect();
         let rc = RuntimeContext::new();
         let compacted = compactor
-            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
             .await
             .unwrap()
             .expect("threshold reached, should compact");
@@ -1050,7 +1086,7 @@ mod tests {
         let conversation = vec![user_msg("a"), user_msg("b")];
         let rc = RuntimeContext::new();
         let result = compactor
-            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -1070,7 +1106,7 @@ mod tests {
         let conversation = vec![user_msg("a"), user_msg("b")];
         let rc = RuntimeContext::new();
         let result = compactor
-            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
             .await;
         assert!(result.is_err(), "空摘要响应应报错（调用方降级为不压缩）");
     }
@@ -1089,7 +1125,7 @@ mod tests {
         let conversation: Vec<Msg> = (0..6).map(|i| user_msg(&format!("message {i}"))).collect();
         let rc = RuntimeContext::new();
         let result = compactor
-            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -1113,7 +1149,7 @@ mod tests {
         let conversation = vec![user_msg("a"), user_msg("b")];
         let rc = RuntimeContext::new();
         let compacted = compactor
-            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
             .await
             .unwrap()
             .expect("should compact");
@@ -1272,7 +1308,7 @@ mod tests {
         conversation.extend([user_msg("m4"), user_msg("m5")]);
         let rc = RuntimeContext::new();
         let result = compactor
-            .compact_if_needed(&rc, &conversation, &config, 100_000)
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
             .await
             .unwrap()
             .expect("lightweight prune result should be submitted");
@@ -1309,7 +1345,7 @@ mod tests {
         };
         let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
         let rc = RuntimeContext::new();
-        compact_in_state(&rc, &compactor, &config, &state, 100_000, false).await;
+        compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
         let guard = state.lock().unwrap();
         assert_eq!(guard.context.len(), 2);
         assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
@@ -1330,7 +1366,7 @@ mod tests {
         };
         let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
         let rc = RuntimeContext::new();
-        compact_in_state(&rc, &compactor, &config, &state, 100_000, true).await;
+        compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None).await;
         let guard = state.lock().unwrap();
         assert_eq!(guard.context.len(), 2);
         assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
@@ -1349,7 +1385,7 @@ mod tests {
         };
         let state = state_with(vec![user_msg("a"), user_msg("b")]);
         let rc = RuntimeContext::new();
-        compact_in_state(&rc, &compactor, &config, &state, 100_000, false).await;
+        compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
         assert_eq!(state.lock().unwrap().context.len(), 2);
         assert!(model.requests().is_empty());
     }

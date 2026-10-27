@@ -411,7 +411,11 @@ pub fn build_agent(
     if mode == StudioMode::Solo {
         // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
         // 能力，否则 enter_plan_mode 报 "plan mode is not enabled on this agent"。
-        builder = builder.enable_plan_mode();
+        // 计划文件系统强制锚定 .ox/plans/（.ox 数据规范：运行时产物不落
+        // 项目根；机制对齐 Java PlanModeManager 的可配置 planDir）。
+        builder = builder
+            .enable_plan_mode()
+            .plan_file_directory(".ox/plans");
     }
     if mode == StudioMode::Team {
         // 成员声明注册：SubagentsMiddleware 会把成员指引并入 leader 系统提示
@@ -623,12 +627,13 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     let role_note: String = match mode {
         StudioMode::Solo => {
             "You are working in solo mode: one assistant, one user, full file and memory \
-             tools in your workspace. When asked to plan first, write the plan into the \
-             plan file before executing.\n\nYou can spawn subagents that are clones of \
-             yourself (same instructions, model and tools) with the agent_spawn tool; \
-             they run in isolated sessions, so delegate self-contained subtasks with \
-             all the context they need, then verify and integrate their results. Use \
-             agent_send for follow-up messages and agent_list to check active ones."
+             tools in your workspace. Enter plan mode only when the user explicitly \
+             asks for a plan; otherwise execute directly.\n\nYou can spawn subagents \
+             that are clones of yourself (same instructions, model and tools) with the \
+             agent_spawn tool; they run in isolated sessions, so delegate self-contained \
+             subtasks with all the context they need, then verify and integrate their \
+             results. Use agent_send for follow-up messages and agent_list to check \
+             active ones."
                 .to_string()
         }
         StudioMode::Team => {
@@ -654,9 +659,14 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     };
     prompt.push_str("\n\n");
     prompt.push_str(&role_note);
-    // .ox 数据规范：非业务产出与业务代码分离（记忆工具已自动锚定 .ox/）。
+    // .ox 数据规范：运行时产物与业务代码分离。记忆与计划文件已由系统
+    // 强制锚定 .ox/（工具沙箱），这里约束的是模型自由写文件的去向。
     prompt.push_str(
-        "\n\nWorkspace data convention: keep the project root clean. All          non-business artifacts you produce (plans, task lists, notes,          summaries, reports, scratch files) must live under the `.ox/`          directory at the workspace root; memory tools are already rooted          there. Only business code and documents requested by the user go          elsewhere. Never create memory/ or MEMORY.md at the project root.",
+        "\n\nWorkspace data convention: the project root holds business code only. \
+         Memory and plan files are system-anchored under `.ox/` (do not recreate \
+         them elsewhere). Any other non-business file you write (notes, summaries, \
+         reports, scratch files) must also live under `.ox/`. Only write outside \
+         `.ox/` when the user asked for that exact file.",
     );
     prompt
 }

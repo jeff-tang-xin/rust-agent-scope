@@ -122,7 +122,9 @@ impl TeamDelegateTool {
 
         // 流式路径：消费成员事件流，逐事件打上成员来源后转发进父流；
         // AgentResult 携带成员最终答复（作为本工具的返回值）。
-        let mut rx = agent
+        // 执行句柄在此丢弃（detach）：父流关闭时转发循环 break，成员执行
+        // 随事件发送端失效自然收尾（既有语义，不在此处扩大中断传播面）。
+        let (mut rx, _run_task) = agent
             .delegate()
             .stream_events_with_context(rc, Msg::user("leader", task))
             .await?;
