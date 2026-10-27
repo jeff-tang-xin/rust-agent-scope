@@ -49,9 +49,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* zoom 补偿：body 上 zoom 会把 100vh/100% 渲染放大 zoom 倍，根元素按反比
-   声明高度，使 body 实际渲染高度恰好等于视口（否则底部 composer 被推出视口）。 */
-html { height: calc(100% / var(--app-zoom, 1)); }
+/* 界面缩放：zoom 设在根元素 html 上（App.tsx 写入 documentElement.style.zoom）。
+   根元素 zoom 等价浏览器原生缩放——ICB 随 zoom 缩放，100%/vh/fixed 全部自动
+   自洽，无需任何反比补偿。（旧方案 body zoom + html 反比补偿在 Chromium 128+
+   标准化 zoom 模型下失效，表现为视口底部露出 ~9% 空白。） */
+html { height: 100%; }
 body, #root { height: 100%; }
 
 body {
@@ -760,9 +762,7 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .modal-mask {
   position: fixed;
   inset: 0;
-  /* fixed 相对视口，同样被 zoom 放大——按反比收回，遮罩恰好盖满视口 */
-  width: calc(100% / var(--app-zoom, 1));
-  height: calc(100% / var(--app-zoom, 1));
+  /* 根元素 zoom 下 ICB 已随缩放，fixed+inset:0 自然铺满视口 */
   background: rgba(15, 17, 23, 0.45);
   display: flex;
   align-items: flex-start;
@@ -1002,13 +1002,57 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
   background: var(--bg-panel);
 }
 
-/* 收窄态：只留展开按钮的窄条 */
+/* 收窄态：只留展开按钮的窄条 + 会话小图标（点击直达切换） */
 .session-sidebar.collapsed {
   width: 36px;
   padding: 10px 4px;
   align-items: center;
 }
 .ss-collapse-btn { flex-shrink: 0; }
+.ss-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+}
+.ss-rail-item {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: visible;
+}
+.ss-rail-item:hover { border-color: var(--accent); color: var(--accent); }
+.ss-rail-item.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.ss-rail-run {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2da44e;
+  box-shadow: 0 0 4px #2da44e;
+}
 .ss-head .spacer { flex: 1; }
 .ss-head {
   font-size: 11px;
@@ -1276,8 +1320,7 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
   flex-direction: column;
   gap: 8px;
   z-index: 200;
-  /* zoom 环境下 fixed 相对视口放大——宽度不需要反比（内容自适应），
-     但定位基准一致即可；max-width 防长文本溢出 */
+  /* 根元素 zoom 下 80vw 等比正确；max-width 防长文本溢出 */
   max-width: min(420px, 80vw);
 }
 

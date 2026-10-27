@@ -1,10 +1,12 @@
-feat(studio): rebrand to Ox Agent Studio + max_iters defaults + Rust-style icon
+fix(ui): session rail icons when sidebar collapsed + root-element zoom
 
-- Rebrand: productName -> ox, window/browser/brand title -> "Ox Agent Studio"
-  (identifier kept unchanged to preserve user data directory)
-- Icons: replace default Tauri icon set with Rust-style mark
-  (dark rounded square + Rust-orange gear + white R), full suite:
-  png 32/128/256/512, multi-size ico, icns, UWP Square*/StoreLogo
-- max_iters: built-in agents (default/ops/db) now default to 80;
-  max_iters=0 falls back to 50 at assembly instead of harness default 10
-- Verified: cargo test 13 passed, tsc --noEmit clean
+- Collapsed sidebar rail now shows session mini-icons (first chars of
+  title) for the active workspace: click to switch, green dot badge for
+  running, highlight for current, tooltip with name/updated/messages
+- Move UI zoom from body to root element (html): the old combo
+  (body zoom + html inverse-height compensation) breaks under the
+  standardized CSS zoom model in Chromium 128+ (WebView2), leaving a
+  ~9% empty strip at the bottom of the viewport; root zoom is the
+  browser-native-scaling equivalent, so 100%/vh/fixed all self-align.
+  Dropped the html height and .modal-mask inverse compensations.
+- Verified: tsc --noEmit clean, vite build ok

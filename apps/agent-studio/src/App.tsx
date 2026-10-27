@@ -89,12 +89,11 @@ export default function App() {
   }, [theme]);
 
   // 界面缩放（设置页可调，localStorage 记忆；默认「标准」110%——
-  // 14px 基准在高分屏上偏小，取中档）。
+  // 14px 基准在高分屏上偏小，取中档）。zoom 设在根元素 html 上：
+  // 等价浏览器原生缩放，ICB 随缩放，100%/vh/fixed 自动自洽（见 styles.css）。
   useEffect(() => {
     const z = localStorage.getItem("studio-zoom") ?? "1.1";
-    document.body.style.zoom = z;
-    // 同步给 styles.css 的 html/.modal-mask 做视口反比补偿（见彼处注释）
-    document.documentElement.style.setProperty("--app-zoom", z);
+    document.documentElement.style.zoom = z;
   }, []);
 
   const reload = useCallback(async () => {

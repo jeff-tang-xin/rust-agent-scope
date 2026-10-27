@@ -132,6 +132,29 @@ export default function SessionSidebar({
         >
           »
         </button>
+        {/* 收起态：当前工作区的会话小图标（首字符方块），点击直达切换会话；
+            运行中带绿点角标，当前会话高亮。悬停看完整会话名。 */}
+        {selected && sessionItems.length > 0 && (
+          <div className="ss-rail">
+            {sessionItems.map((s) => {
+              const isRunning = running.has(`${selected.id}:${s.session_id}`);
+              const isCurrent = currentSession === s.session_id;
+              const label = (s.title || s.session_id).trim();
+              const meta = `${s.title || s.session_id} · ${isRunning ? "运行中" : relTime(s.updated_at) || `${s.messages} 条消息`}`;
+              return (
+                <button
+                  key={s.session_id}
+                  className={`ss-rail-item ${isCurrent ? "active" : ""}`}
+                  title={meta}
+                  onClick={() => onSelectSession(selected.id, s.session_id)}
+                >
+                  {label.slice(0, 2) || "·"}
+                  {isRunning && <span className="ss-rail-run" aria-hidden />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </aside>
     );
   }
