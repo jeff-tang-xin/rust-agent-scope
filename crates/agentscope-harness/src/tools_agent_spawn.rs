@@ -678,6 +678,11 @@ impl AgentListTool {
 
 #[async_trait::async_trait]
 impl Tool for AgentListTool {
+
+    /// 只读工具：权限模式检查（EXPLORE/ACCEPT_EDITS）与 studio 免确认白名单依据。
+    fn is_read_only(&self) -> bool {
+        true
+    }
     fn name(&self) -> &str {
         "agent_list"
     }

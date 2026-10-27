@@ -1426,6 +1426,8 @@ impl ReActAgent {
                 // Rust 侧引擎每次从状态快照构造，写状态即对后续裁决生效）
                 if let Some(rules) = result.rules {
                     let mut state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+                    // add_allow_rule 自带「移除同工具 ask」语义（用户显式授权
+                    // 覆盖项目 ask 配置，否则「始终允许」对 ask 工具永不生效）。
                     for rule in rules {
                         state.permission_context.add_allow_rule(rule);
                     }

@@ -461,6 +461,11 @@ impl Tool for ReadFileTool {
         "read_file"
     }
 
+    /// 只读工具：权限模式检查（EXPLORE/ACCEPT_EDITS）与 studio 免确认白名单依据。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Read file content with line numbers. Supports pagination via offset and limit."
     }
@@ -619,6 +624,11 @@ impl Tool for GrepFilesTool {
         "grep_files"
     }
 
+    /// 只读工具：权限模式检查（EXPLORE/ACCEPT_EDITS）与 studio 免确认白名单依据。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Search file contents for a literal text pattern. Returns at most 100 matches by \
          default to keep tool output bounded."
@@ -678,6 +688,11 @@ pub struct GlobFilesTool {
 impl Tool for GlobFilesTool {
     fn name(&self) -> &str {
         "glob_files"
+    }
+
+    /// 只读工具：权限模式检查（EXPLORE/ACCEPT_EDITS）与 studio 免确认白名单依据。
+    fn is_read_only(&self) -> bool {
+        true
     }
 
     fn description(&self) -> &str {
@@ -746,6 +761,11 @@ pub struct ListFilesTool {
 impl Tool for ListFilesTool {
     fn name(&self) -> &str {
         "list_files"
+    }
+
+    /// 只读工具：权限模式检查（EXPLORE/ACCEPT_EDITS）与 studio 免确认白名单依据。
+    fn is_read_only(&self) -> bool {
+        true
     }
 
     fn description(&self) -> &str {

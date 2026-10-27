@@ -265,7 +265,11 @@ impl PermissionContextState {
     }
 
     /// 追加一条 allow 规则。
+    ///
+    /// 同时移除同工具的 ask 规则：裁决序 ask 先于 allow，不移除的话用户
+    /// 显式授权（「始终允许」/永久允许）对 ask 工具永不生效。
     pub fn add_allow_rule(&mut self, rule: PermissionRule) {
+        self.ask_rules.remove(&rule.tool_name);
         self.allow_rules
             .entry(rule.tool_name.clone())
             .or_default()
@@ -468,6 +472,34 @@ mod tests {
             serde_json::to_string(&state).unwrap(),
             "{\"mode\":\"default\"}"
         );
+    }
+
+    #[test]
+    fn allow_rule_overrides_ask_rule() {
+        let mut state = PermissionContextState::default();
+        state.add_ask_rule(PermissionRule {
+            tool_name: "echo".into(),
+            rule_content: None,
+            behavior: PermissionBehavior::Ask,
+            source: "project".into(),
+        });
+        // 用户显式授权：同工具 ask 被移除，allow 生效。
+        state.add_allow_rule(PermissionRule {
+            tool_name: "echo".into(),
+            rule_content: None,
+            behavior: PermissionBehavior::Allow,
+            source: "user".into(),
+        });
+        assert!(state.ask_rules.is_empty());
+        let engine = PermissionEngine::new(state);
+        let tool = EchoTool {
+            read_only: false,
+            self_decision: None,
+        };
+        let decision = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(engine.check(Some(&tool), "add", &serde_json::json!({})));
+        assert!(matches!(decision, PermissionDecision::Allow));
     }
 
     #[test]

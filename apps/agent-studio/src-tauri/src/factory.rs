@@ -380,6 +380,12 @@ pub fn build_agent(
         toolkit.register(Arc::new(AgentListTool::new(core)));
     }
 
+    // 只读工具名单：toolkit move 进 builder 前收集（权限白名单依据）。
+    let read_only_tools: Vec<String> = toolkit
+        .tool_names()
+        .into_iter()
+        .filter(|name| toolkit.get(name).is_some_and(|tool| tool.is_read_only()))
+        .collect();
     let mut builder = HarnessAgentBuilder::new()
         .name(&agent.name)
         .sys_prompt(sys_prompt_for(agent, mode))
@@ -394,7 +400,13 @@ pub fn build_agent(
     // 危险工具默认走用户授权（AgentScope 权限引擎 ask 规则，会话级持久化）：
     // shell 执行与文件写入/编辑需用户批准后才会执行；目录穿越由 Sandboxed
     // 文件层硬拒（path escapes workspace root），不在此列。
-    builder = builder.permission_context(default_permission_context(mode, ws));
+    builder = builder.permission_context(default_permission_context(
+        &read_only_tools,
+        mode,
+        ws,
+        data_dir,
+        &ws.id,
+    ));
 
     if mode == StudioMode::Solo {
         // plan/free 切换仅 solo 运行方式提供（产品语义）。必须显式启用 plan
@@ -439,7 +451,19 @@ pub fn build_agent(
 /// 新会话的默认权限上下文：危险工具（shell 执行、文件写入/编辑）→ ask 行为，
 /// 由 AgentScope 权限引擎在执行前挂起等待用户确认（对齐 Java ask 规则语义）。
 /// 用户批准时可附带 allow 规则（「始终允许」），写进会话权限上下文后生效。
-fn default_permission_context(mode: StudioMode, ws: &WorkspaceConfig) -> PermissionContextState {
+///
+/// 免确认白名单（allow 规则；ask 工具不进白名单，不会被误放）：
+/// - 只读工具：按 `Tool::is_read_only()` 从 toolkit 动态收集（查询/读取/记忆
+///   等非编辑类工具不弹授权）；
+/// - 永久授权：用户在确认弹窗选「永久允许」时写入 `<workspace_dir>/permissions.json`，
+///   装配时读回合并（source: "user"），跨会话生效。
+fn default_permission_context(
+    read_only_tools: &[String],
+    mode: StudioMode,
+    ws: &WorkspaceConfig,
+    data_dir: &Path,
+    workspace_id: &str,
+) -> PermissionContextState {
     // ask 工具集按工作区类别区分：
     // - collab（solo/team）：shell 执行与文件写入/编辑；按绑定开放远程能力时
     //   追加对应 ask 规则（remote_shell / db_dml 每次确认，语义对齐 ops/db）；
@@ -461,6 +485,29 @@ fn default_permission_context(mode: StudioMode, ws: &WorkspaceConfig) -> Permiss
     };
     ask_tools.dedup();
     let mut context = PermissionContextState::default();
+    // 只读工具免确认：名单由调用方在 toolkit move 前按 `Tool::is_read_only()`
+    // 收集，新只读工具无需改这里。
+    for name in read_only_tools {
+        if !ask_tools.contains(&name.as_str()) {
+            context.add_allow_rule(PermissionRule {
+                tool_name: name.clone(),
+                rule_content: None,
+                behavior: PermissionBehavior::Allow,
+                source: "project".to_string(),
+            });
+        }
+    }
+    // 用户永久授权（跨会话）：覆盖同工具的 ask 配置（add_allow_rule 自带
+    // 移除同工具 ask 的语义，用户显式意愿优先）。
+    for tool_name in load_permanent_permissions(data_dir, workspace_id) {
+        ask_tools.retain(|ask| ask != &tool_name);
+        context.add_allow_rule(PermissionRule {
+            tool_name,
+            rule_content: None,
+            behavior: PermissionBehavior::Allow,
+            source: "user".to_string(),
+        });
+    }
     for tool in ask_tools {
         context.add_ask_rule(PermissionRule {
             tool_name: tool.to_string(),
@@ -470,6 +517,68 @@ fn default_permission_context(mode: StudioMode, ws: &WorkspaceConfig) -> Permiss
         });
     }
     context
+}
+
+
+/// 永久授权存储：`<workspace_dir>/permissions.json`（运行时数据，随工作区隔离）。
+fn permissions_file(data_dir: &Path, workspace_id: &str) -> PathBuf {
+    workspace_dir(data_dir, workspace_id).join("permissions.json")
+}
+
+/// 读永久授权工具名单；文件缺失/损坏按空处理（不阻断装配）。
+pub(crate) fn load_permanent_permissions(data_dir: &Path, workspace_id: &str) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(permissions_file(data_dir, workspace_id)) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<PermanentPermissions>(&text)
+        .map(|stored| stored.allowed_tools)
+        .unwrap_or_default()
+}
+
+/// 永久授权持久化结构（`{"allowed_tools": [...]}`，按工具名整工具授权）。
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub(crate) struct PermanentPermissions {
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+}
+
+/// 保存永久授权（追加去重）；已装配 agent 的缓存由调用方失效。
+pub(crate) fn save_permanent_permission(
+    data_dir: &Path,
+    workspace_id: &str,
+    tool_name: &str,
+) -> Result<(), String> {
+    let mut stored = PermanentPermissions {
+        allowed_tools: load_permanent_permissions(data_dir, workspace_id),
+    };
+    if !stored.allowed_tools.iter().any(|t| t == tool_name) {
+        stored.allowed_tools.push(tool_name.to_string());
+    }
+    let path = permissions_file(data_dir, workspace_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(&stored).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())
+}
+
+/// 删除永久授权（撤销「永久允许」；名单清空则移除文件）。
+pub(crate) fn delete_permanent_permission(
+    data_dir: &Path,
+    workspace_id: &str,
+    tool_name: &str,
+) -> Result<(), String> {
+    let mut stored = PermanentPermissions {
+        allowed_tools: load_permanent_permissions(data_dir, workspace_id),
+    };
+    stored.allowed_tools.retain(|t| t != tool_name);
+    let path = permissions_file(data_dir, workspace_id);
+    if stored.allowed_tools.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    let text = serde_json::to_string_pretty(&stored).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
 /// 绑定列表 → 工具白名单：空 = 不限（`None`），非空 = 白名单（`Some`）。
@@ -528,4 +637,60 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
         "\n\nWorkspace data convention: keep the project root clean. All          non-business artifacts you produce (plans, task lists, notes,          summaries, reports, scratch files) must live under the `.ox/`          directory at the workspace root; memory tools are already rooted          there. Only business code and documents requested by the user go          elsewhere. Never create memory/ or MEMORY.md at the project root.",
     );
     prompt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permanent_permissions_roundtrip_and_delete() {
+        let dir = std::env::temp_dir().join(format!("perm_test_{}", std::process::id()));
+        let ws = "ws_roundtrip";
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(load_permanent_permissions(&dir, ws).is_empty());
+        save_permanent_permission(&dir, ws, "execute").unwrap();
+        save_permanent_permission(&dir, ws, "execute").unwrap(); // 去重
+        save_permanent_permission(&dir, ws, "remote_shell").unwrap();
+        let mut got = load_permanent_permissions(&dir, ws);
+        got.sort();
+        assert_eq!(got, vec!["execute".to_string(), "remote_shell".to_string()]);
+
+        delete_permanent_permission(&dir, ws, "execute").unwrap();
+        assert_eq!(load_permanent_permissions(&dir, ws), vec!["remote_shell".to_string()]);
+        delete_permanent_permission(&dir, ws, "remote_shell").unwrap();
+        // 名单清空后文件移除，回到空。
+        assert!(load_permanent_permissions(&dir, ws).is_empty());
+        assert!(!permissions_file(&dir, ws).exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_context_ask_tools_not_in_readonly_allowlist() {
+        // ask 工具即使被误标只读也不进白名单（ask 优先级保护）。
+        let read_only = vec!["grep_files".to_string(), "execute".to_string()];
+        let ws = WorkspaceConfig {
+            id: "ws_t".into(),
+            name: "t".into(),
+            kind: "collab".into(),
+            agent_id: "a".into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec![],
+            bound_databases: vec![],
+            created_at: 0,
+        };
+        let context = default_permission_context(
+            &read_only,
+            StudioMode::Solo,
+            &ws,
+            std::path::Path::new("nonexistent-dir"),
+            "ws_t",
+        );
+        assert!(context.allow_rules.contains_key("grep_files"));
+        assert!(!context.allow_rules.contains_key("execute"));
+        assert!(context.ask_rules.contains_key("execute"));
+    }
 }

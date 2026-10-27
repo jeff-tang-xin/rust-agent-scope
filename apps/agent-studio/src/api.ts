@@ -250,6 +250,14 @@ export const api = {
       message: "",
       confirmResults,
     }),
+  // 永久授权（「永久允许」）：跨会话工具 allow 名单，装配时合并进权限上下文。
+  savePermanentPermission: (workspaceId: string, toolName: string) =>
+    invoke<void>("save_permanent_permission", { workspaceId, toolName }),
+  deletePermanentPermission: (workspaceId: string, toolName: string) =>
+    invoke<void>("delete_permanent_permission", { workspaceId, toolName }),
+  listPermanentPermissions: (workspaceId: string) =>
+    invoke<string[]>("list_permanent_permissions", { workspaceId }),
+
   steerTurn: (workspaceId: string, mode: string, sessionId: string, message: string) =>
     invoke<boolean>("steer_turn", { workspaceId, mode, sessionId, message }),
   interruptTurn: (workspaceId: string, mode: string, sessionId: string) =>

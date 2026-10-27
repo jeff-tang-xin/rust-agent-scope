@@ -572,6 +572,36 @@ fn validate_workspace(config: &StudioConfig, ws: &WorkspaceConfig) -> Result<(),
     validate_members(config, ws)
 }
 
+/// 永久授权（「永久允许」）：跨会话的工具 allow 名单，存
+/// `<workspace_dir>/permissions.json`，装配时由 factory 合并进权限上下文。
+#[tauri::command]
+pub fn save_permanent_permission(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    tool_name: String,
+) -> Result<(), String> {
+    factory::save_permanent_permission(&state.data_dir, &workspace_id, &tool_name)
+}
+
+/// 撤销永久授权（下次装配生效；已装配实例的会话内规则不受影响）。
+#[tauri::command]
+pub fn delete_permanent_permission(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    tool_name: String,
+) -> Result<(), String> {
+    factory::delete_permanent_permission(&state.data_dir, &workspace_id, &tool_name)
+}
+
+/// 列出永久授权工具（设置面板/调试用）。
+#[tauri::command]
+pub fn list_permanent_permissions(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<String>, String> {
+    Ok(factory::load_permanent_permissions(&state.data_dir, &workspace_id))
+}
+
 #[tauri::command]
 pub fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceConfig>, String> {
     Ok(state.snapshot().workspaces)
@@ -1453,6 +1483,9 @@ pub fn run() {
             update_agent,
             delete_agent,
             list_workspaces,
+            save_permanent_permission,
+            delete_permanent_permission,
+            list_permanent_permissions,
             create_workspace,
             update_workspace,
             delete_workspace,

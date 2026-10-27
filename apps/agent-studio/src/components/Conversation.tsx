@@ -929,7 +929,7 @@ export default function Conversation({
     entryId: string,
     call: Record<string, unknown>,
     confirmed: boolean,
-    always: boolean,
+    scope: "once" | "session" | "always",
   ) => {
     // 从卡片移除该调用（全部裁决完卡片自然消失）。
     setEntries((prev) =>
@@ -941,14 +941,15 @@ export default function Conversation({
         })
         .filter((x): x is Entry => x !== null),
     );
+    const toolName = String(call.name ?? "");
     const result: ConfirmResultPayload = {
       confirmed,
       tool_call: call,
-      ...(always
+      ...(scope !== "once"
         ? {
             rules: [
               {
-                tool_name: String(call.name ?? ""),
+                tool_name: toolName,
                 behavior: "allow",
                 source: "user",
               },
@@ -956,6 +957,15 @@ export default function Conversation({
           }
         : {}),
     };
+    // 永久允许：先落盘（跨会话生效）；失败不阻断本次批准（会话内规则仍随
+    // confirm 结果写入）。
+    if (scope === "always" && confirmed && toolName) {
+      try {
+        await api.savePermanentPermission(workspace.id, toolName);
+      } catch (err) {
+        console.error("save permanent permission failed:", err);
+      }
+    }
     setBusy(true);
     try {
       await api.sendConfirm(workspace.id, runtimeMode, sessionId, [result]);
@@ -1117,20 +1127,27 @@ export default function Conversation({
                   <div className="confirm-actions">
                     <button
                       className="btn primary"
-                      onClick={() => void resolveConfirm(e.id, call, true, false)}
+                      onClick={() => void resolveConfirm(e.id, call, true, "once")}
                     >
                       批准
                     </button>
                     <button
                       className="btn ghost"
-                      title="批准并始终允许该工具（写入会话权限规则）"
-                      onClick={() => void resolveConfirm(e.id, call, true, true)}
+                      title="批准并在本会话内始终允许该工具"
+                      onClick={() => void resolveConfirm(e.id, call, true, "session")}
                     >
-                      始终允许
+                      本会话允许
+                    </button>
+                    <button
+                      className="btn ghost"
+                      title="批准并永久允许该工具（跨会话生效）"
+                      onClick={() => void resolveConfirm(e.id, call, true, "always")}
+                    >
+                      永久允许
                     </button>
                     <button
                       className="btn danger"
-                      onClick={() => void resolveConfirm(e.id, call, false, false)}
+                      onClick={() => void resolveConfirm(e.id, call, false, "once")}
                     >
                       拒绝
                     </button>
