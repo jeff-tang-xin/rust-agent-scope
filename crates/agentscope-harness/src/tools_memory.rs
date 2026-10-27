@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::workspace::constants::MEMORY_DIR;
+
 use serde_json::{json, Value};
 
 use agentscope_core::tool::{Tool, ToolOutput};
@@ -86,7 +88,7 @@ impl Tool for MemorySaveTool {
         }
         let rc = RuntimeContext::new();
         let today = crate::memory::today_iso_date();
-        let daily_rel_path = format!("memory/{today}.md");
+        let daily_rel_path = format!("{MEMORY_DIR}/{today}.md");
         let daily_entry = format!("\n## Memory Save — {}\n{content}\n", now_instant());
 
         if let Err(error) = self

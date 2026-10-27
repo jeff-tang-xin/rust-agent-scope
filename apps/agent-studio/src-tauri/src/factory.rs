@@ -314,7 +314,7 @@ pub fn build_agent(
     let members: MemberRegistry = Arc::new(members);
 
     let mut toolkit = Toolkit::new();
-    register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
+    register_base_tools(&mut toolkit, &workspace, memory_workspace.clone())?;
     // 任务仓储：collab 模式用工作区持久化仓储（任务记录与结果落工作区，
     // 进程重启后 task_list/task_output 仍能恢复历史任务——修复纯内存仓储
     // 导致的后台任务句柄丢失）。同一装配单元内 task 工具、spawn core 与
@@ -423,6 +423,9 @@ pub fn build_agent(
         .model(build_model(provider)?)
         .toolkit(toolkit)
         .workspace_manager(Arc::clone(&workspace))
+        // compaction flush/consolidation 与 memory_save 同锚 .ox 记忆工作区：
+        // 否则压缩时的记忆抽取会把 memory/ 台账写到项目根（曾污染用户仓库）。
+        .with_memory_workspace(memory_workspace)
         .state_store(state_store)
         .default_session_id("main");
     if agent.max_iters > 0 {
@@ -509,7 +512,6 @@ const DEVELOP_ALLOWLIST: &[&str] = &[
     "blackboard_append",
     "agent_spawn",
     "agent_send",
-    "plan_enter",
     "plan_write",
     "team_delegate",
 ];

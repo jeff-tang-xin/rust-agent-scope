@@ -130,7 +130,6 @@ impl Default for PlanModeManager {
 /// plan 模式下始终放行的工具（对齐 Java `ALWAYS_ALLOWED`：plan 自身三件套 +
 /// todo + 子代理/任务工具——它们是计划与投递语义的一部分，无副作用）。
 const PLAN_ALWAYS_ALLOWED: &[&str] = &[
-    "plan_enter",
     "plan_write",
     "plan_exit",
     "todo_write",
@@ -308,7 +307,11 @@ path is NOT approval evidence by itself — read it and execute it step by step.
         let Some((active, plan_file)) = self.plan_status(ctx.reply_id()) else {
             return input;
         };
-        let mode = if active { "PLAN" } else { "BUILD" };
+        let mode = if active {
+            "ACTIVE (PLAN — read-only design phase; code changes are blocked)"
+        } else {
+            "OFF (execution mode — plan_write is unavailable; do not call plan tools)"
+        };
         let mut sb = String::from("<RUNTIME_STATE>\n");
         sb.push_str(&format!("Plan mode: {mode}\n"));
         match &plan_file {
@@ -460,7 +463,7 @@ mod tests {
             ReasoningInput { messages: vec![], options: GenerateOptions::default() },
         );
         let last = ri.messages.last().unwrap().text();
-        assert!(last.contains("Plan mode: PLAN"), "{last}");
+        assert!(last.contains("Plan mode: ACTIVE"), "{last}");
 
         // BUILD 态（exit 后）：不再拦截，状态消息切 BUILD。
         manager.exit(&mut state.lock().unwrap());
@@ -477,7 +480,7 @@ mod tests {
             &ctx,
             ReasoningInput { messages: vec![], options: GenerateOptions::default() },
         );
-        assert!(ri.messages.last().unwrap().text().contains("Plan mode: BUILD"));
+        assert!(ri.messages.last().unwrap().text().contains("Plan mode: OFF"));
     }
 
     #[tokio::test]

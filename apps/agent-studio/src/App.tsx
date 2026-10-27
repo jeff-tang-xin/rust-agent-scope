@@ -87,6 +87,16 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("studio-theme", theme);
   }, [theme]);
+  // 主题跟随系统：仅在用户从未手动切换过（localStorage 无记录）时生效，
+  // 手动选择后尊重用户选择。
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem("studio-theme")) setTheme(e.matches ? "dark" : "light");
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // 界面缩放（设置页可调，localStorage 记忆；默认「标准」110%——
   // 14px 基准在高分屏上偏小，取中档）。zoom 设在根元素 html 上：
@@ -243,18 +253,25 @@ export default function App() {
       <header className="topbar">
         <span className="brand">Ox Agent Studio</span>
         <nav className="topbar-nav">
-          {CATS.map((c) => (
-            <button
-              key={c.key}
-              className={`nav-item ${tab === c.key ? "active" : ""}`}
-              onClick={() => setTab(c.key)}
-            >
-              {c.label}
-              <span className="mode-tag">
-                {workspaces.filter((w) => w.kind === c.key).length}
-              </span>
-            </button>
-          ))}
+          {CATS.map((c) => {
+            // 该类别下是否有运行中的 turn（跨工作区聚合，切走也能看到）。
+            const catRunning = workspaces.some(
+              (w) => w.kind === c.key && [...running].some((k) => k.startsWith(`${w.id}:`)),
+            );
+            return (
+              <button
+                key={c.key}
+                className={`nav-item ${tab === c.key ? "active" : ""}`}
+                onClick={() => setTab(c.key)}
+              >
+                {c.label}
+                <span className="mode-tag">
+                  {workspaces.filter((w) => w.kind === c.key).length}
+                </span>
+                {catRunning && <span className="running-dot" title="有运行中的任务" />}
+              </button>
+            );
+          })}
           <button
             className={`nav-item ${tab === "settings" ? "active" : ""}`}
             onClick={() => setTab("settings")}

@@ -37,6 +37,7 @@ agentscope-harness = { path = "../../../crates/agentscope-harness" }
 russh = { version = "0.46", features = ["flate2"] }
 russh-sftp = "2"
 tauri-plugin-dialog = "2.8.3"
+tauri-plugin-notification = "2"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

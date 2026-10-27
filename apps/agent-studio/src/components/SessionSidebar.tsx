@@ -52,6 +52,8 @@ export default function SessionSidebar({
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   // 内联重命名：正在编辑的 session id + 输入框值（Tauri WebView 无 prompt）。
   const [renaming, setRenaming] = useState("");
+  // 会话搜索（Ctrl+K 聚焦）：按标题/会话 ID 子串过滤当前列表。
+  const [query, setQuery] = useState("");
   const [renameValue, setRenameValue] = useState("");
   // 收窄：折叠成窄条只留展开按钮（localStorage 记忆，跨会话保持）。
   const [collapsed, setCollapsed] = useState(
@@ -114,13 +116,22 @@ export default function SessionSidebar({
       ? [{ session_id: currentSession, messages: 0, updated_at: 0 }, ...sessions]
       : sessions;
 
+  // 搜索过滤：标题或会话 ID 含关键字（大小写不敏感）；空串不过滤。
+  const q = query.trim().toLowerCase();
+  const visible: SessionSummary[] = q
+    ? sessionItems.filter(
+        (s) =>
+          (s.title ?? "").toLowerCase().includes(q) || s.session_id.toLowerCase().includes(q),
+      )
+    : sessionItems;
+
   // 树形归属：spawn 子代理会话（parent_session_id 指向父）缩进挂在父下；
   // 父不在列表（已清上下文）的子会话按顶层显示，不丢。
-  const topSessions = sessionItems.filter(
-    (s) => !s.parent_session_id || !sessionItems.some((p) => p.session_id === s.parent_session_id),
+  const topSessions = visible.filter(
+    (s) => !s.parent_session_id || !visible.some((p) => p.session_id === s.parent_session_id),
   );
   const childrenOf = (parentId: string) =>
-    sessionItems.filter((s) => s.parent_session_id === parentId);
+    visible.filter((s) => s.parent_session_id === parentId);
 
   if (collapsed) {
     return (
@@ -171,6 +182,19 @@ export default function SessionSidebar({
         >
           «
         </button>
+      </div>
+      <div className="ss-search">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索会话…（Ctrl+K）"
+          data-ss-search
+        />
+        {query && (
+          <button className="icon-btn" title="清除" onClick={() => setQuery("")}>
+            ×
+          </button>
+        )}
       </div>
       {workspaces.map((w) => (
         <div key={w.id}>

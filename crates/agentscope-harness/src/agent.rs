@@ -36,7 +36,7 @@ use crate::compaction::{compact_in_state, CompactionConfig, ConversationCompacto
 use agentscope_core::agent::IterationHook;
 use crate::memory::MemoryFlushManager;
 use crate::plan::{PlanModeManager, PlanModeMiddleware};
-use crate::tools::{PlanEnterTool, PlanExitTool, PlanWriteTool};
+use crate::tools::{PlanExitTool, PlanWriteTool};
 use crate::subagent::{
     AgentSpecLoader, DefaultAgentManager, SubagentDeclaration, SubagentEntry,
     SubagentFactory, WorkspaceMode,
@@ -526,6 +526,9 @@ pub struct HarnessAgentBuilder {
     /// 上下文压缩配置（默认开启，对齐 Java `CompactionConfig.builder().build()`；
     /// `disable_compaction` 置 None）。
     compaction_config: Option<CompactionConfig>,
+    /// 记忆工作区（flush/consolidation 的落盘根）：`None` 用主工作区。
+    /// studio 把它锚到 `<项目>/.ox`，与 memory_save 工具同根——记忆不落项目根。
+    memory_workspace: Option<Arc<WorkspaceManager>>,
 }
 
 impl HarnessAgentBuilder {
@@ -554,6 +557,7 @@ impl HarnessAgentBuilder {
             model_resolver: None,
             permission_context: None,
             compaction_config: Some(CompactionConfig::default()),
+            memory_workspace: None,
         }
     }
 
@@ -666,6 +670,13 @@ impl HarnessAgentBuilder {
     }
 
     /// 启用计划模式。
+    /// 记忆工作区（flush/consolidation 落盘根；`None` 用主工作区）。
+    /// studio 锚到 `<项目>/.ox`，与 memory_save 工具同根。
+    pub fn with_memory_workspace(mut self, ws: Arc<WorkspaceManager>) -> Self {
+        self.memory_workspace = Some(ws);
+        self
+    }
+
     pub fn enable_plan_mode(mut self) -> Self {
         self.enable_plan_mode = true;
         self
@@ -798,7 +809,10 @@ impl HarnessAgentBuilder {
                 Some(dir) => PlanModeManager::with_dir(dir),
                 None => PlanModeManager::new(),
             });
-            toolkit.register(Arc::new(PlanEnterTool::new(Arc::clone(&manager))));
+            // plan_enter 不注册：plan 模式由用户在宿主 UI 开关（set_plan_mode），
+            // 模型无权自行进入——否则模型看到 plan 工具就自进 plan（曾导致
+            // 「用户没开 plan 但 AI 一直认为自己在 plan 里」）。plan_write 供
+            // 用户开启后的写计划用，plan_exit 供模型完成规划后退出（ask 审批）。
             toolkit.register(Arc::new(PlanWriteTool::new(
                 Arc::clone(&manager),
                 Arc::clone(&workspace_manager),
@@ -825,7 +839,11 @@ impl HarnessAgentBuilder {
         let iteration_hook = match self.compaction_config {
             Some(config) => {
                 let flush = Arc::new(MemoryFlushManager::new(
-                    Arc::clone(&workspace_manager),
+                    Arc::clone(
+                        self.memory_workspace
+                            .as_ref()
+                            .unwrap_or(&workspace_manager),
+                    ),
                     Arc::clone(&compaction_model),
                 ));
                 let compactor = Arc::new(ConversationCompactor::new(compaction_model, flush));

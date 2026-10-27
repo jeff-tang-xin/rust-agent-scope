@@ -1310,7 +1310,8 @@ a short goal statement, the ordered implementation steps, and the verification s
             let state = state_handle.lock().unwrap_or_else(|e| e.into_inner());
             if !self.manager.is_plan_active(Some(&state)) {
                 return Ok(ToolOutput::error(
-                    "Not in plan mode. Call plan_enter first.",
+                    "Plan mode is OFF — it is controlled by the user in the UI, not by tools. \
+Do not call plan_enter (it does not exist). Present your plan directly in the reply instead.",
                 ));
             }
             self.manager.plan_file_path(Some(&state))
@@ -2424,7 +2425,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(output.state, ToolResultState::Error);
-        assert!(output.content.contains("Not in plan mode"));
+        assert!(output.content.contains("Plan mode is OFF"));
     }
 
     #[tokio::test]
@@ -2439,7 +2440,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(output.state, ToolResultState::Error);
-        assert!(output.content.contains("Not in plan mode"));
+        assert!(output.content.contains("Plan mode is OFF"));
     }
 
     #[tokio::test]

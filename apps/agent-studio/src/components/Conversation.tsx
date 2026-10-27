@@ -3,7 +3,9 @@
 // 事件处理对齐 Java AgentSessionView.apply 的思路：增量 apply 事件维护视图，
 // AgentResult 为最终消息的权威来源，流式 delta 仅作过程展示。
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
@@ -37,34 +39,55 @@ function fmtTime(ts?: string): string | undefined {
   return isNaN(d.getTime()) ? ts.slice(11, 19) : d.toLocaleTimeString("zh-CN", { hour12: false });
 }
 
-/** 打字机：流式期间按帧渐进显示（自适应步长追平积压），结束后整段显示。 */
-function Typewriter({ text, active }: { text: string; active: boolean }) {
+/** 打字机：流式期间按帧渐进显示（自适应步长追平积压），结束后整段显示。 */function Typewriter({ text, active }: { text: string; active: boolean }) {
   const [shown, setShown] = useState(() => (active ? 0 : text.length));
-  useEffect(() => {
-    if (!active) {
-      setShown(text.length);
-      return;
-    }
-    let raf = 0;
-    const tick = () => {
-      setShown((prev) => {
-        if (prev >= text.length) return prev;
-        // 积压越多 reveal 越快：保持打字节奏又不掉队
-        const step = Math.max(1, Math.ceil((text.length - prev) / 15));
-        return Math.min(text.length, prev + step);
-      });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [text, active]);
+  // 性能取舍：逐字 reveal 需要每帧对全文 slice 后重新走 remarkGfm 解析，
+  // 长回答时 CPU 随文本长度线性上涨（流式 delta 本身已是渐进到达，
+  // 视觉上仍是流式）。这里去掉 raf 逐字循环，直接渲染当前文本。
+  void shown;
+  void setShown;
   return (
     <>
-      <Markdown remarkPlugins={[remarkGfm]}>{text.slice(0, shown)}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
       {active && <span className="type-cursor" aria-hidden />}
     </>
   );
 }
+
+/** memo 化的 Markdown 渲染：text 不变时跳过 remarkGfm 重解析。
+ *  父级（entries 数组）任何 setState 都会重渲染消息列表，历史条目
+ *  文本稳定——memo 掉后长会话的滚动/流式渲染成本大幅下降。
+ *  pre 覆盖：代码块右上角加复制按钮（从子节点提取纯文本）。 */
+const markdownComponents = {
+  pre: ({ children }: { children?: ReactNode }) => (
+    <div className="code-wrap">
+      <button
+        className="code-copy"
+        title="复制代码"
+        onClick={(ev) => {
+          const wrap = ev.currentTarget.parentElement;
+          const text = wrap?.querySelector("pre")?.textContent ?? "";
+          void copyText(text);
+          ev.currentTarget.textContent = "已复制";
+          setTimeout(() => {
+            const btn = wrap?.querySelector<HTMLButtonElement>(".code-copy");
+            if (btn) btn.textContent = "复制";
+          }, 1200);
+        }}
+      >
+        复制
+      </button>
+      <pre>{children}</pre>
+    </div>
+  ),
+};
+const MemoMarkdown = memo(function MemoMarkdown({ text }: { text: string }) {
+  return (
+    <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {text}
+    </Markdown>
+  );
+});
 
 /** 流式内容自动滚底容器：内框（max-height + overflow）里内容长高时
  *  （打字机 reveal / delta 追加）保持滚动到底部；非流式（历史展开）
@@ -80,20 +103,31 @@ function AutoScrollBody({
 }) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  // 与消息主体同策略：用户上滚离底 >40px 即暂停跟随，滚回底部恢复。
+  const nearBottomRef = useRef(true);
   useEffect(() => {
     if (!active) return;
     const outer = outerRef.current;
     const inner = innerRef.current;
     if (!outer || !inner) return;
+    nearBottomRef.current = true;
     outer.scrollTop = outer.scrollHeight;
     const ro = new ResizeObserver(() => {
-      outer.scrollTop = outer.scrollHeight;
+      if (nearBottomRef.current) outer.scrollTop = outer.scrollHeight;
     });
     ro.observe(inner);
-    return () => ro.disconnect();
+    const onScroll = () => {
+      nearBottomRef.current =
+        outer.scrollHeight - outer.scrollTop - outer.clientHeight < 40;
+    };
+    outer.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      ro.disconnect();
+      outer.removeEventListener("scroll", onScroll);
+    };
   }, [active]);
   return (
-    <div ref={outerRef} className={className}>
+    <div ref={outerRef} className={className} onScroll={undefined}>
       <div ref={innerRef}>{children}</div>
     </div>
   );
@@ -393,6 +427,30 @@ function FilePanel({
   );
 }
 
+/** 原始错误串 → 可读文案（匹配不到的保持原样，不丢信息）。 */
+function humanizeError(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes("program not found"))
+    return "CLI 程序未找到：请确认已安装并加入 PATH";
+  if (m.includes("connection reset") || m.includes("connection refused") || m.includes("timed out") || m.includes("timeout"))
+    return "网络异常（连接被重置或超时）——请检查网络/代理后重试";
+  if (m.includes("unauthorized") || m.includes("401") || m.includes("api key"))
+    return "鉴权失败：API Key 缺失或无效，请在「智能体与模型」里检查配置";
+  if (m.includes("rate limit") || m.includes("429"))
+    return "触发模型限流（429）——稍等片刻后重试";
+  return msg;
+}
+
+/** 复制文本到剪贴板（Tauri 剪贴板插件优先，降级 web API）。 */
+async function copyText(text: string): Promise<void> {
+  try {
+    const mod = await import("@tauri-apps/plugin-clipboard-manager");
+    await mod.writeText(text);
+  } catch {
+    await navigator.clipboard.writeText(text);
+  }
+}
+
 export default function Conversation({
   workspace,
   agent,
@@ -453,6 +511,23 @@ export default function Conversation({
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // 图片灯箱（点击消息图片放大查看；Esc/点击遮罩关闭）。
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  // 「回到底部」悬浮钮：用户上滚离底 >80px 时出现（流式输出不打扰查看历史）。
+  const [showJump, setShowJump] = useState(false);
+  // 输入历史（↑ 召回）：仅记录成功发出的文本，会话内存态。
+  const inputHistoryRef = useRef<string[]>([]);
+  const historyIdxRef = useRef(-1);
+  // 草稿持久化：按 工作区+会话 隔离，切换会话不丢未发送内容。
+  const draftKey = `ox-draft:${workspace.id}:${runtimeMode}:${sessionId}`;
+  useEffect(() => {
+    setInput(localStorage.getItem(draftKey) ?? "");
+    historyIdxRef.current = -1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  useEffect(() => {
+    localStorage.setItem(draftKey, input);
+  }, [draftKey, input]);
 
   // 会话内错误/提示统一走全局 toast（右上角）：state 只作事件通道，
   // 变化即转发并清空——所有既有 setError/setNotice 调用点无需改动。
@@ -511,7 +586,49 @@ export default function Conversation({
     [upsert],
   );
 
+  // 流式 delta 微批：同一帧内的多条 delta 合并成一次 setEntries（rAF 对齐
+    // 显示刷新）。每条 delta 单独 setState 会让 React 每秒重渲染消息列表
+    // 几十次（长输出时 CPU 明显），合并后每帧至多一次。
+    const pendingDeltaRef = useRef<Map<string, string>>(new Map());
+    const deltaRafRef = useRef(0);
+    const flushDeltas = useCallback(() => {
+      if (deltaRafRef.current) {
+        cancelAnimationFrame(deltaRafRef.current);
+        deltaRafRef.current = 0;
+      }
+      const pending = pendingDeltaRef.current;
+      if (pending.size === 0) return;
+      pendingDeltaRef.current = new Map();
+      setEntries((prev) =>
+        prev.map((e) => {
+          const add = pending.get(e.id);
+          if (add === undefined) return e;
+          if (e.kind === "msg") return { ...e, text: e.text + add };
+          if (e.kind === "thinking") return { ...e, text: e.text + add };
+          return e;
+        }),
+      );
+    }, []);
+    const queueDelta = useCallback((entryId: string, delta: string) => {
+      pendingDeltaRef.current.set(entryId, (pendingDeltaRef.current.get(entryId) ?? "") + delta);
+      if (!deltaRafRef.current) {
+        deltaRafRef.current = requestAnimationFrame(() => {
+          deltaRafRef.current = 0;
+          flushDeltas();
+        });
+      }
+    }, [flushDeltas]);
+
+  // 卸载时取消未落帧的 delta 合并（防泄漏与卸后 setState）。
+  useEffect(
+    () => () => {
+      if (deltaRafRef.current) cancelAnimationFrame(deltaRafRef.current);
+    },
+    [],
+  );
+
   const finalizeStreams = useCallback(() => {
+    flushDeltas(); // 块结束前把未落帧的 delta 一并写入（否则尾部文本丢失）
     const cur = streamRef.current;
     streamRef.current = null;
     if (cur) {
@@ -526,7 +643,7 @@ export default function Conversation({
         return e;
       });
     }
-  }, [upsert]);
+  }, [upsert, flushDeltas]);
 
   // 初始加载：历史（块级回放）+ plan 状态 + 会话列表（重启后从 AgentState 恢复）。
   useEffect(() => {
@@ -594,7 +711,7 @@ export default function Conversation({
           // 避免长时间无输出被误判为卡死。
           setEntries((prev) => [
             ...prev,
-            { kind: "indicator", text: "compacting context…", ts: nowTime(), id: nextId() },
+            { kind: "indicator", text: "正在压缩上下文…", ts: nowTime(), id: nextId() },
           ]);
           break;
         case "CONTEXT_COMPACTION_END":
@@ -612,7 +729,7 @@ export default function Conversation({
         case "MODEL_CALL_START":
           setEntries((prev) => [
             ...prev,
-            { kind: "indicator", text: "thinking…", ts: nowTime(), id: nextId() },
+            { kind: "indicator", text: "思考中…", ts: nowTime(), id: nextId() },
           ]);
           break;
         case "MODEL_CALL_END":
@@ -641,7 +758,7 @@ export default function Conversation({
               },
             ]);
           } else {
-            upsert(cur.entryId, (e) => (e.kind === "msg" ? { ...e, text: e.text + delta } : e));
+            queueDelta(cur.entryId, delta);
           }
           break;
         }
@@ -668,7 +785,7 @@ export default function Conversation({
               },
             ]);
           } else {
-            upsert(cur.entryId, (e) => (e.kind === "thinking" ? { ...e, text: e.text + delta } : e));
+            queueDelta(cur.entryId, delta);
           }
           break;
         }
@@ -836,6 +953,19 @@ export default function Conversation({
         case "AGENT_END":
           finalizeStreams();
           break;
+        case "EXCEED_MAX_ITERS":
+          // 达到最大轮次上限：明确告知（此前静默停止，用户误以为卡死/坏了）。
+          finalizeStreams();
+          setEntries((prev) => [
+            ...prev.filter((e) => e.kind !== "indicator"),
+            {
+              kind: "indicator",
+              text: `已达最大轮次上限（${ev.current_iter ?? "?"}/${ev.max_iters ?? "?"}）——直接回复可继续，或在「智能体与模型」里调高轮次上限`,
+              ts: nowTime(),
+              id: nextId(),
+            },
+          ]);
+          break;
         default:
           break;
       }
@@ -858,7 +988,7 @@ export default function Conversation({
       setBusySafe(true);
       turnTextsRef.current = new Set(); // 新 turn：判重集合清零
       turnToolSeenRef.current = false;
-      setNotice("Continuing with your steering input…");
+      setNotice("已插入对话——智能体继续处理。");
       setTimeout(() => setNotice(""), 3000);
     });
 
@@ -914,6 +1044,36 @@ export default function Conversation({
     setAttachments((prev) => [...prev, ...next]);
   };
 
+  // 全局快捷键：Esc 关灯箱（其次停止运行）；Ctrl/Cmd+K 聚焦会话搜索。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (lightbox) {
+          setLightbox(null);
+          return;
+        }
+        if (busyRef.current) void interrupt();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>("input[data-ss-search]")?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightbox]);
+
+  // 发送失败恢复：把文本与附件放回输入区（否则用户重打一遍）。
+  const restoreDraft = (
+    text: string,
+    atts: Array<{ name: string; media_type: string; data_base64: string; preview?: string }>,
+  ) => {
+    setInput(text);
+    setAttachments(atts);
+  };
+
   const send = async () => {
     const text = input.trim();
     // busy 检查走同步 ref：state 在同一渲染周期内不更新，双击/回车+点击
@@ -921,6 +1081,8 @@ export default function Conversation({
     if ((!text && attachments.length === 0) || busyRef.current) return;
     setError("");
     setInput("");
+    inputHistoryRef.current.push(text);
+    historyIdxRef.current = -1;
     // 本地立即显示：文本 + 附件（图片缩略 / 文件 chip）。
     const local: Entry[] = [];
     if (text) local.push({ kind: "msg", role: "user", text, id: nextId() });
@@ -959,13 +1121,16 @@ export default function Conversation({
             return;
           } catch (e2) {
             setBusySafe(false);
+            restoreDraft(text, attachments);
             setError(String(e2));
           }
         }
         return;
       }
       setBusySafe(false);
-      setError(msg);
+      // 发送失败：恢复输入与附件（否则用户重打一遍），错误给可读文案。
+      restoreDraft(text, attachments);
+      setError(humanizeError(msg));
     }
   };
 
@@ -1107,12 +1272,60 @@ export default function Conversation({
     }
   };
 
+  // 导出会话为 Markdown（用户经系统保存对话框选路径；写盘走 Rust command）。
+  const exportMarkdown = async () => {
+    const lines: string[] = [
+      `# 会话导出 — ${agent.name}`,
+      "",
+      `- 工作区：${workspace.name}`,
+      `- 会话 ID：${sessionId}`,
+      `- 导出时间：${new Date().toLocaleString("zh-CN")}`,
+      "",
+      "---",
+      "",
+    ];
+    for (const e of entries) {
+      if (e.kind === "msg") {
+        lines.push(`## ${e.role === "user" ? "👤 用户" : e.role === "system" ? "⚙ 系统" : `✦ ${e.actor ?? agent.name}`}`, "", e.text, "");
+      } else if (e.kind === "thinking") {
+        lines.push(`<details><summary>💭 思考过程</summary>`, "", e.text, "", `</details>`, "");
+      } else if (e.kind === "tool") {
+        lines.push(
+          `> 🛠 **${e.name}** — ${e.ok === undefined ? "运行中" : e.ok ? "完成" : "出错"}${e.actor ? `（${e.actor}）` : ""}`,
+          "",
+        );
+      } else if (e.kind === "image") {
+        lines.push("> 🖼 [图片附件]", "");
+      } else if (e.kind === "file") {
+        lines.push(`> 📎 ${e.name}`, "");
+      } else if (e.kind === "indicator") {
+        lines.push(`> ℹ ${e.text}`, "");
+      } else if (e.kind === "confirm") {
+        lines.push(`> 🔐 工具授权请求（${e.calls.length} 项）`, "");
+      }
+    }
+    try {
+      const path = await save({
+        defaultPath: `session-${sessionId.slice(0, 8)}.md`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!path) return;
+      await invoke("write_export_file", { path, contents: lines.join("\n") });
+      onToast?.("info", "会话已导出");
+    } catch (e) {
+      setError(humanizeError(String(e)));
+    }
+  };
+
   const clear = async () => {
+    // 清空不可恢复：先确认（防手滑丢掉整个会话上下文）。
+    const ok = await onConfirm?.("清空会话", "将清空当前会话的全部上下文（不可恢复）。确定继续？");
+    if (!ok) return;
     try {
       await api.clearSession(workspace.id, runtimeMode, sessionId);
       setEntries([]);
     } catch (e) {
-      setError(String(e));
+      setError(humanizeError(String(e)));
     }
   };
 
@@ -1129,8 +1342,19 @@ export default function Conversation({
             <>
               <div className="msg-role">{e.actor ? `✦ ${e.actor}` : "✦ 回答"}</div>
               <div className="bubble md">
-                <Typewriter text={e.text} active={e.streaming === true} />
+                {e.streaming ? (
+                  <Typewriter text={e.text} active />
+                ) : (
+                  <MemoMarkdown text={e.text} />
+                )}
               </div>
+              {!e.streaming && e.text.trim() && (
+                <div className="msg-actions">
+                  <button title="复制全文" onClick={() => void copyText(e.text)}>
+                    复制
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <div className="bubble">{e.text}</div>
@@ -1147,7 +1371,7 @@ export default function Conversation({
             <span className="entry-icon">💭</span>
             <span className="entry-title">思考过程</span>
             {e.actor && <span className="actor-badge">{e.actor}</span>}
-            {e.streaming && <span className="status running">thinking…</span>}
+            {e.streaming && <span className="status running">思考中</span>}
             <span className="entry-caret">{open ? "▾" : "▸"}</span>
           </button>
           {open && (
@@ -1161,7 +1385,13 @@ export default function Conversation({
     if (e.kind === "image") {
       return (
         <div className="msg user">
-          <img className="msg-img" src={e.dataUrl} alt="attachment" />
+          <img
+            className="msg-img"
+            src={e.dataUrl}
+            alt="attachment"
+            onClick={() => setLightbox(e.dataUrl)}
+            title="点击查看大图"
+          />
         </div>
       );
     }
@@ -1236,14 +1466,36 @@ export default function Conversation({
           <span className="entry-title tool-name">{e.name}</span>
           {e.actor && <span className="actor-badge">{e.actor}</span>}
           <span className={`status ${e.ok === undefined ? "" : e.ok ? "ok" : "err"}`}>
-            {e.ok === undefined ? "running…" : e.ok ? "done" : "error"}
+            {e.ok === undefined ? "运行中" : e.ok ? "完成" : "出错"}
           </span>
           <span className="entry-caret">{open ? "▾" : "▸"}</span>
         </button>
         {open && (
           <AutoScrollBody className="entry-body tool-body" active={e.ok === undefined}>
-            {e.args && <pre className="tool-io">{prettyArgs(e.args)}</pre>}
-            {e.result !== undefined && <pre className="tool-io out">{e.result}</pre>}
+            {e.args && (
+              <div className="io-wrap">
+                <button
+                  className="io-copy"
+                  title="复制参数"
+                  onClick={() => void copyText(prettyArgs(e.args))}
+                >
+                  复制
+                </button>
+                <pre className="tool-io">{prettyArgs(e.args)}</pre>
+              </div>
+            )}
+            {e.result !== undefined && (
+              <div className="io-wrap">
+                <button
+                  className="io-copy"
+                  title="复制输出"
+                  onClick={() => void copyText(e.result ?? "")}
+                >
+                  复制
+                </button>
+                <pre className="tool-io out">{e.result}</pre>
+              </div>
+            )}
           </AutoScrollBody>
         )}
       </div>
@@ -1266,6 +1518,11 @@ export default function Conversation({
 
   return (
     <div className="conversation">
+      {lightbox && (
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="预览" />
+        </div>
+      )}
       <div
         className={`conv-main ${dragActive ? "drag-active" : ""}`}
         onDragOver={(e) => {
@@ -1303,10 +1560,20 @@ export default function Conversation({
           </div>
         )}
         <button className="btn ghost" onClick={newSession} disabled={busy}>
-          + New session
+          + 新会话
         </button>
         <span className="spacer" />
-        <span className="badge">{sessionId.slice(0, 8)}</span>
+        <button
+          className="btn ghost"
+          onClick={() => void exportMarkdown()}
+          disabled={entries.length === 0}
+          title="导出当前会话为 Markdown 文件"
+        >
+          导出
+        </button>
+        <span className="badge" title={`会话 ID：${sessionId}`}>
+          会话 {sessionId.slice(0, 8)}
+        </span>
       </div>
       
       
@@ -1316,7 +1583,9 @@ export default function Conversation({
         onScroll={() => {
           const el = scrollRef.current;
           if (!el) return;
-          nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+          nearBottomRef.current = gap < 80;
+          setShowJump(gap > 120);
         }}
       >
         <div className="messages-inner" ref={innerScrollRef}>
@@ -1365,6 +1634,18 @@ export default function Conversation({
           );
         })}
         </div>
+        {showJump && (
+          <button
+            className="jump-bottom"
+            onClick={() => {
+              const el = scrollRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+            }}
+            title="回到底部"
+          >
+            ↓ 回到底部
+          </button>
+        )}
       </div>
       {attachments.length > 0 && (
         <div className="attach-chips">
@@ -1388,6 +1669,18 @@ export default function Conversation({
             </span>
           ))}
         </div>
+      )}
+      {entries.some((e) => e.kind === "confirm") && (
+        <button
+          className="confirm-banner"
+          onClick={() => {
+            const el = document.querySelector(".entry-card.confirm-card");
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }}
+          title="点击定位到待确认的操作"
+        >
+          ⚠ 有待确认的操作（工具执行需要你的批准）——点击定位
+        </button>
       )}
       <div className="composer">
         {supportsPlan && (
@@ -1419,6 +1712,31 @@ export default function Conversation({
             // IME 组词期间（中文输入法确认候选词）的 Enter 不触发发送/插话：
             // 否则「确认组词的 Enter + 发送的 Enter」会把同一条消息提交两次。
             if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            // ↑/↓ 召回输入历史：仅在输入框为空（↑）或正在浏览历史时生效，
+            // 不干扰光标移动与多行编辑。
+            if (e.key === "ArrowUp" && !e.shiftKey) {
+              const hist = inputHistoryRef.current;
+              if ((e.currentTarget.value === "" || historyIdxRef.current >= 0) && hist.length > 0) {
+                e.preventDefault();
+                const idx = historyIdxRef.current < 0 ? hist.length - 1 : Math.max(0, historyIdxRef.current - 1);
+                historyIdxRef.current = idx;
+                setInput(hist[idx]);
+              }
+              return;
+            }
+            if (e.key === "ArrowDown" && !e.shiftKey && historyIdxRef.current >= 0) {
+              e.preventDefault();
+              const hist = inputHistoryRef.current;
+              const idx = historyIdxRef.current + 1;
+              if (idx >= hist.length) {
+                historyIdxRef.current = -1;
+                setInput("");
+              } else {
+                historyIdxRef.current = idx;
+                setInput(hist[idx]);
+              }
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();

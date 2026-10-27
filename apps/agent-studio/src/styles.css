@@ -53,7 +53,7 @@
    根元素 zoom 等价浏览器原生缩放——ICB 随 zoom 缩放，100%/vh/fixed 全部自动
    自洽，无需任何反比补偿。（旧方案 body zoom + html 反比补偿在 Chromium 128+
    标准化 zoom 模型下失效，表现为视口底部露出 ~9% 空白。） */
-html { height: 100%; }
+html { height: 100%; overflow: hidden; }
 body, #root { height: 100%; }
 
 body {
@@ -1053,6 +1053,151 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
   background: #2da44e;
   box-shadow: 0 0 4px #2da44e;
 }
+
+/* ---------- 交互强化批次 ---------- */
+
+/* 会话搜索（展开态侧栏头部下方） */
+.ss-search {
+  margin: 0 2px 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 12px;
+  width: 100%;
+}
+.ss-search:focus { outline: none; border-color: var(--accent); }
+
+/* 顶栏运行中脉冲点（类别下任一工作区在跑时显示） */
+.tab-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2da44e;
+  box-shadow: 0 0 5px #2da44e;
+  animation: tab-pulse 1.4s ease-in-out infinite;
+  flex: none;
+}
+@keyframes tab-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* 授权等待常驻横幅（composer 上方，滚走也可见） */
+.confirm-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--amber) 12%, var(--bg-panel));
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.confirm-banner .banner-icon { flex: none; }
+.confirm-banner .spacer { flex: 1; }
+.confirm-banner .banner-go { color: var(--amber); font-size: 12px; flex: none; }
+
+/* 「回到底部」悬浮钮（消息区右下，上滚后出现） */
+.jump-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: var(--shadow-overlay);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.jump-bottom:hover { color: var(--accent); border-color: var(--accent); }
+
+/* 代码块复制按钮（hover 浮现） */
+.md .code-wrap { position: relative; }
+.md .code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.md .code-wrap:hover .code-copy { opacity: 1; }
+.md .code-copy:hover { color: var(--accent); border-color: var(--accent); }
+
+/* 工具输出复制按钮 */
+.tool-io-wrap { position: relative; }
+.tool-io-wrap .tool-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tool-io-wrap:hover .tool-copy { opacity: 1; }
+.tool-io-wrap .tool-copy:hover { color: var(--accent); border-color: var(--accent); }
+
+/* 图片 lightbox */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 8px;
+  box-shadow: var(--shadow-overlay);
+}
+
+/* 消息气泡悬浮操作（复制全文） */
+.msg .msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg:hover .msg-actions { opacity: 1; }
+.msg-actions button {
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.msg-actions button:hover { color: var(--accent); border-color: var(--accent); }
 .ss-head .spacer { flex: 1; }
 .ss-head {
   font-size: 11px;
@@ -1667,4 +1812,43 @@ select:focus:not(:focus-visible) {
 
 .ox-mem-editor .ox-edit-content {
   min-height: 260px;
+}
+
+
+/* ---------- 顶部导航：运行中脉冲点 ---------- */
+.running-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--ok, #22c55e);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+
+/* ---------- 会话搜索框 ---------- */
+.ss-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ss-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input, transparent);
+  color: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.ss-search input:focus {
+  border-color: var(--accent, #6366f1);
 }

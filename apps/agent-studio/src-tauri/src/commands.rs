@@ -921,15 +921,112 @@ async fn turn_chain(
             }
         };
 
-        while let Some(event) = rx.recv().await {
-            let payload = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-            let envelope = EventEnvelope {
-                workspace_id: workspace_id.clone(),
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-                event: payload,
+        // delta 微批：TextBlockDelta/ThinkingBlockDelta 在 16ms 窗口内同块
+        // 合并成一条再 emit——长输出时每秒数百条 delta 逐条 IPC + 前端逐条
+        // setState 是主要渲染瓶颈；合并后 IPC 与前端重渲染都压到每帧一次。
+        const DELTA_WINDOW: std::time::Duration = std::time::Duration::from_millis(16);
+        let mut delta_buf: Option<(bool, String, String, String)> = None;
+        let mut delta_deadline: Option<std::time::Instant> = None;
+        macro_rules! flush_delta {
+            () => {
+                if let Some((is_text, reply_id, block_id, acc)) = delta_buf.take() {
+                    let kind = if is_text {
+                        agentscope_core::event::AgentEventKind::TextBlockDelta {
+                            reply_id,
+                            block_id,
+                            delta: acc,
+                        }
+                    } else {
+                        agentscope_core::event::AgentEventKind::ThinkingBlockDelta {
+                            reply_id,
+                            block_id,
+                            delta: acc,
+                        }
+                    };
+                    let payload = serde_json::to_value(&agentscope_core::event::AgentEvent::new(kind))
+                        .unwrap_or(serde_json::Value::Null);
+                    let envelope = EventEnvelope {
+                        workspace_id: workspace_id.clone(),
+                        session_id: session_id.clone(),
+                        turn_id: turn_id.clone(),
+                        event: payload,
+                    };
+                    let _ = app.emit("agent-event", envelope);
+                }
             };
-            let _ = app.emit("agent-event", envelope);
+        }
+        loop {
+            // 窗口到点：先 flush 再继续收（保证前端每 16ms 至少看到一次更新）。
+            let wait = match delta_deadline.take() {
+                Some(d) if delta_buf.is_some() => {
+                    let now = std::time::Instant::now();
+                    if now >= d {
+                        flush_delta!();
+                        None
+                    } else {
+                        delta_deadline = Some(d);
+                        Some(d - now)
+                    }
+                }
+                _ => None,
+            };
+            // rx 是 tauri::async_runtime::Receiver（无 recv_timeout），
+            // 用 tokio::time::timeout 包 recv() 实现窗口等待。
+            let recv_fut = rx.recv();
+            let event = match wait {
+                Some(d) => match tokio::time::timeout(d, recv_fut).await {
+                    Ok(Some(ev)) => ev,
+                    Ok(None) => {
+                        flush_delta!();
+                        break;
+                    }
+                    Err(_) => continue, // 窗口到点（上面已 flush）
+                },
+                None => match recv_fut.await {
+                    Some(ev) => ev,
+                    None => {
+                        flush_delta!();
+                        break;
+                    }
+                },
+            };
+            let delta_info = match &event.kind {
+                agentscope_core::event::AgentEventKind::TextBlockDelta { reply_id, block_id, delta } => {
+                    Some((true, reply_id.clone(), block_id.clone(), delta.clone()))
+                }
+                agentscope_core::event::AgentEventKind::ThinkingBlockDelta { reply_id, block_id, delta } => {
+                    Some((false, reply_id.clone(), block_id.clone(), delta.clone()))
+                }
+                _ => None,
+            };
+            match delta_info {
+                Some((is_text, reply_id, block_id, delta)) => {
+                    match &mut delta_buf {
+                        Some((t, r, b, acc)) if *t == is_text && *r == reply_id && *b == block_id => {
+                            acc.push_str(&delta);
+                        }
+                        _ => {
+                            flush_delta!();
+                            delta_buf = Some((is_text, reply_id, block_id, delta));
+                        }
+                    }
+                    delta_deadline.get_or_insert(std::time::Instant::now() + DELTA_WINDOW);
+                }
+                None => {
+                    flush_delta!();
+                    // 后台完成/等授权系统通知：仅主窗口非聚焦时发（聚焦时用户就在看，
+                    // 不打扰；keep-alive 多工作区场景靠它感知后台进度）。
+                    notify_if_background(&app, &event.kind);
+                    let payload = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                    let envelope = EventEnvelope {
+                        workspace_id: workspace_id.clone(),
+                        session_id: session_id.clone(),
+                        turn_id: turn_id.clone(),
+                        event: payload,
+                    };
+                    let _ = app.emit("agent-event", envelope);
+                }
+            }
         }
         session.untrack().await;
 
@@ -1164,6 +1261,51 @@ pub async fn get_plan_status(
     })
 }
 
+/// 后台事件系统通知：主窗口非聚焦时发（任务完成 / 等待授权）。
+/// 通知点击不导航（Tauri 通知无默认点击行为），仅提醒用户回来看。
+fn notify_if_background(
+    app: &AppHandle,
+    kind: &agentscope_core::event::AgentEventKind,
+) {
+    use tauri::Manager;
+    use tauri_plugin_notification::NotificationExt;
+    let focused = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(true);
+    if focused {
+        return;
+    }
+    let (title, body) = match kind {
+        agentscope_core::event::AgentEventKind::AgentEnd { .. } => {
+            ("任务完成", "智能体已完成本轮任务")
+        }
+        agentscope_core::event::AgentEventKind::RequireUserConfirm { .. } => {
+            ("等待授权", "有工具调用需要你确认后才能继续")
+        }
+        _ => return,
+    };
+    let _ = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
+}
+
+/// 会话导出写盘：前端经系统保存对话框拿到路径后调用（用户主动选择的
+/// 路径，写它即用户意图）。独立 command 免装 fs 插件全家桶。
+#[tauri::command]
+pub async fn write_export_file(path: String, contents: String) -> Result<(), String> {
+    // 只允许写 .md（导出语义），防被滥用成任意文件写。
+    if !path.to_lowercase().ends_with(".md") {
+        return Err("export only supports .md files".into());
+    }
+    tokio::fs::write(&path, contents.as_bytes())
+        .await
+        .map_err(|e| format!("write export file: {e}"))
+}
+
 // ---------- sessions ----------
 
 /// 列出某 agent 的已有会话（读 JsonFile 状态库目录布局
@@ -1313,6 +1455,9 @@ pub async fn clear_session(
         .clear_context_for(Some(USER_ID), &session_id)
         .map_err(|e| e.to_string())?;
     handle.agent.delegate().clear_steers(&session_id);
+    // plan 标志随会话状态持久化——清空会话即全新开始，plan_active 残留
+    // 会让新对话一上来就被 PlanModeMiddleware 拦截写操作（幂等，未激活时无副作用）。
+    let _ = handle.agent.exit_plan_mode(Some(USER_ID), &session_id);
     handle.drop_session(&session_id).await;
     Ok(())
 }
@@ -1723,6 +1868,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             use tauri::Manager;
@@ -1803,6 +1949,7 @@ pub fn run() {
             memory_read_file,
             memory_save_file,
             memory_delete_file,
+            write_export_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
