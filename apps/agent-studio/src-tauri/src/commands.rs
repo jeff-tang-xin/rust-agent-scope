@@ -1500,6 +1500,194 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
     Ok(())
 }
 
+// ===========================================================================
+// .ox 数据管理（用户面板）：共享黑板条目删改 + 记忆文件管理
+// ===========================================================================
+//
+// 黑板：模型侧只增不改（blackboard_append/read 工具），用户侧经本组命令
+// 删改——同一 JSON 文件（<工作区根>/.ox/blackboard.json），进程级全局锁
+// 串行化（见 harness blackboard 模块）。
+// 记忆：MEMORY.md 与 memory/YYYY-MM-DD.md 是 markdown 台账（无条目结构），
+// 面板做文件级管理（列出/读取/保存/删除），不做条目级拆分。
+
+use agentscope_harness::blackboard::BlackboardStore;
+
+/// 工作区黑板存储（与 factory 注册给模型的工具同一路径）。
+fn blackboard_store(state: &AppState, workspace_id: &str) -> Result<BlackboardStore, String> {
+    let root = resolve_ws_root(state, workspace_id)?;
+    Ok(BlackboardStore::new(root.join(".ox").join("blackboard.json")))
+}
+
+/// 校验记忆文件相对路径：仅允许 MEMORY.md 与 memory/*.md（防目录穿越）。
+fn validate_memory_rel_path(rel: &str) -> Result<String, String> {
+    let rel = rel.trim().replace('\\', "/");
+    if rel == "MEMORY.md" {
+        return Ok(rel);
+    }
+    let ok = rel.starts_with("memory/")
+        && !rel.contains("..")
+        && !rel.contains("//")
+        && rel.ends_with(".md")
+        && !rel["memory/".len()..].contains('/');
+    if ok {
+        Ok(rel)
+    } else {
+        Err("memory path must be MEMORY.md or memory/<name>.md".to_string())
+    }
+}
+
+/// 记忆工作区根（与 factory::build_memory_workspace 同一约定：<工作区根>/.ox）。
+fn memory_root(state: &AppState, workspace_id: &str) -> Result<std::path::PathBuf, String> {
+    let root = resolve_ws_root(state, workspace_id)?;
+    let dir = root.join(".ox");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create .ox dir failed: {e}"))?;
+    Ok(dir)
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct BlackboardEntryDto {
+    pub id: u64,
+    pub ts: i64,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub author: String,
+    pub content: String,
+}
+
+fn to_dto(e: agentscope_harness::blackboard::BlackboardEntry) -> BlackboardEntryDto {
+    BlackboardEntryDto { id: e.id, ts: e.ts, kind: e.kind, author: e.author, content: e.content }
+}
+
+/// 列出黑板条目（最新在前；limit 空 = 全量）。
+#[tauri::command]
+pub fn blackboard_list(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    limit: Option<i64>,
+) -> Result<Vec<BlackboardEntryDto>, String> {
+    let store = blackboard_store(&state, &workspace_id)?;
+    let limit = limit.filter(|l| *l > 0).map(|l| l as usize);
+    Ok(store.list(limit)?.into_iter().map(to_dto).collect())
+}
+
+/// 删除黑板条目（用户面板操作；模型侧无此能力）。
+#[tauri::command]
+pub fn blackboard_delete(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    id: u64,
+) -> Result<bool, String> {
+    blackboard_store(&state, &workspace_id)?.delete(id)
+}
+
+/// 修改黑板条目（kind/content 传 null = 保持不变）。
+#[tauri::command]
+pub fn blackboard_update(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    id: u64,
+    kind: Option<String>,
+    content: Option<String>,
+) -> Result<BlackboardEntryDto, String> {
+    Ok(to_dto(blackboard_store(&state, &workspace_id)?.update(id, kind.as_deref(), content.as_deref())?))
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct MemoryFileEntry {
+    pub path: String,
+    pub size: u64,
+    pub modified_ms: i64,
+}
+
+/// 列出记忆文件（MEMORY.md + memory/*.md；不存在返回空表）。
+#[tauri::command]
+pub fn memory_list_files(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<MemoryFileEntry>, String> {
+    let root = memory_root(&state, &workspace_id)?;
+    let mut out: Vec<MemoryFileEntry> = Vec::new();
+    let mut push = |rel: &str, abs: std::path::PathBuf| {
+        if let Ok(meta) = std::fs::metadata(&abs) {
+            if meta.is_file() {
+                out.push(MemoryFileEntry {
+                    path: rel.to_string(),
+                    size: meta.len(),
+                    modified_ms: meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0),
+                });
+            }
+        }
+    };
+    push("MEMORY.md", root.join("MEMORY.md"));
+    let daily = root.join("memory");
+    if let Ok(read) = std::fs::read_dir(&daily) {
+        let mut names: Vec<String> = read
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_file())
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .filter(|n| n.ends_with(".md"))
+            .collect();
+        names.sort();
+        for n in names {
+            push(&format!("memory/{n}"), daily.join(&n));
+        }
+    }
+    Ok(out)
+}
+
+/// 读记忆文件文本（路径白名单校验；512KB 上限）。
+#[tauri::command]
+pub fn memory_read_file(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<String, String> {
+    let rel = validate_memory_rel_path(&path)?;
+    let abs = memory_root(&state, &workspace_id)?.join(&rel);
+    let meta = std::fs::metadata(&abs).map_err(|e| format!("stat failed: {e}"))?;
+    if meta.len() > 512 * 1024 {
+        return Err("file too large (>512KB)".to_string());
+    }
+    std::fs::read_to_string(&abs).map_err(|e| format!("read failed: {e}"))
+}
+
+/// 保存记忆文件文本（编辑用；父目录自动创建）。
+#[tauri::command]
+pub fn memory_save_file(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let rel = validate_memory_rel_path(&path)?;
+    let abs = memory_root(&state, &workspace_id)?.join(&rel);
+    if let Some(parent) = abs.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create dir failed: {e}"))?;
+    }
+    std::fs::write(&abs, content).map_err(|e| format!("write failed: {e}"))
+}
+
+/// 删除记忆文件（MEMORY.md 删除后下次 memory_save 会重建）。
+#[tauri::command]
+pub fn memory_delete_file(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<(), String> {
+    let rel = validate_memory_rel_path(&path)?;
+    let abs = memory_root(&state, &workspace_id)?.join(&rel);
+    match std::fs::remove_file(&abs) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("delete failed: {e}")),
+    }
+}
+
 /// Builder 装配（lib.rs 调用）。
 pub fn run() {
     tauri::Builder::default()
@@ -1578,6 +1766,13 @@ pub fn run() {
             rename_session,
             delete_session,
             list_running_turns,
+            blackboard_list,
+            blackboard_delete,
+            blackboard_update,
+            memory_list_files,
+            memory_read_file,
+            memory_save_file,
+            memory_delete_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

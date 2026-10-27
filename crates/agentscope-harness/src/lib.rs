@@ -18,6 +18,7 @@
 
 pub mod agent;
 pub mod base_store;
+pub mod blackboard;
 pub mod compaction;
 pub mod coordination;
 pub mod filesystem;

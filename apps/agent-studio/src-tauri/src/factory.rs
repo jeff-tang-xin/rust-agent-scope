@@ -132,10 +132,21 @@ fn register_base_tools(
     ))));
     // 记忆工具锚定独立的 .ox 记忆工作区（<项目>/.ox/）：MEMORY.md 与
     // memory/ 台账不落项目根，非业务产出与业务代码分离（.ox 数据规范）。
-    let memory = MemoryToolSet::new(memory_workspace);
+    let memory = MemoryToolSet::new(memory_workspace.clone());
     toolkit.register(Arc::new(memory.memory_save));
     toolkit.register(Arc::new(memory.memory_get));
     toolkit.register(Arc::new(memory.memory_search));
+    // 共享黑板（工作区级、跨会话共享）：模型侧只增不改；用户侧经管理面板
+    // 删改（commands 直接操作同一 JSON 文件）。与记忆同锚 .ox/ 目录。
+    let bb_store = agentscope_harness::blackboard::BlackboardStore::new(
+        memory_workspace.root().join("blackboard.json"),
+    );
+    toolkit.register(Arc::new(
+        agentscope_harness::blackboard::BlackboardAppendTool::new(bb_store.clone()),
+    ));
+    toolkit.register(Arc::new(
+        agentscope_harness::blackboard::BlackboardReadTool::new(bb_store),
+    ));
     Ok(())
 }
 

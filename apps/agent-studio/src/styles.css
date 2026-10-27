@@ -1366,3 +1366,168 @@ select:focus:not(:focus-visible) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- .ox 数据面板（黑板报 + 记忆） ---------- */
+
+.file-panel-tabs {
+  width: 28px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.ox-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.ox-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.ox-tab.active {
+  background: var(--bg-hover, rgba(127, 127, 127, 0.15));
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ox-board,
+.ox-memory {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.ox-entry {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.ox-kind-conclusion { border-left-color: #4a90d9; }
+.ox-kind-finding { border-left-color: #52a352; }
+.ox-kind-risk { border-left-color: #d97a4a; }
+.ox-kind-note { border-left-color: #9a9a9a; }
+
+.ox-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.ox-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.ox-badge-conclusion { background: #4a90d9; }
+.ox-badge-finding { background: #52a352; }
+.ox-badge-risk { background: #d97a4a; }
+.ox-badge-note { background: #9a9a9a; }
+
+.ox-entry-id {
+  color: var(--text-dim);
+  font-family: monospace;
+}
+
+.ox-entry-author {
+  color: var(--text-dim);
+}
+
+.ox-entry-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ox-entry-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.ox-edit-kind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.ox-edit-kind select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.ox-edit-content {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg-panel);
+  color: var(--text);
+  resize: vertical;
+}
+
+.ox-mem-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ox-mem-file:hover,
+.ox-mem-file.active {
+  background: var(--bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+.ox-mem-path {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.ox-mem-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.ox-mem-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.ox-mem-editor .ox-edit-content {
+  min-height: 260px;
+}

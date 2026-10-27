@@ -9,6 +9,7 @@ import remarkGfm from "remark-gfm";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 import ServersPanel from "./ServersPanel";
 import DatabasesPanel from "./DatabasesPanel";
+import OxDataPanel from "./OxDataPanel";
 
 type Entry =
   | { kind: "msg"; id: string; role: "user" | "assistant" | "system"; text: string; ts?: string; streaming?: boolean; actor?: string }
@@ -452,6 +453,8 @@ export default function Conversation({
   const [dragActive, setDragActive] = useState(false);
   // 文件面板显隐（可收起成细条）。
   const [filesOpen, setFilesOpen] = useState(true);
+  // .ox 数据面板（黑板报 + 记忆）：与文件/服务器/数据库面板互斥展开。
+  const [oxOpen, setOxOpen] = useState(false);
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1458,14 +1461,35 @@ export default function Conversation({
         ) : (
           <FilePanel workspaceId={workspace.id} onCollapse={() => setFilesOpen(false)} />
         )
+      ) : oxOpen ? (
+        <OxDataPanel
+          workspaceId={workspace.id}
+          onCollapse={() => setOxOpen(false)}
+          onToast={onToast}
+        />
       ) : (
-        <button
-          className="file-panel-tab"
-          title={workspace.kind === "ops" ? "展开服务器面板" : workspace.kind === "db" ? "展开数据库面板" : "展开文件面板"}
-          onClick={() => setFilesOpen(true)}
-        >
-          {workspace.kind === "ops" ? "🖥" : workspace.kind === "db" ? "🗄" : "📁"}
-        </button>
+        <div className="file-panel-tabs">
+          <button
+            className="file-panel-tab"
+            title={workspace.kind === "ops" ? "展开服务器面板" : workspace.kind === "db" ? "展开数据库面板" : "展开文件面板"}
+            onClick={() => {
+              setFilesOpen(true);
+              setOxOpen(false);
+            }}
+          >
+            {workspace.kind === "ops" ? "🖥" : workspace.kind === "db" ? "🗄" : "📁"}
+          </button>
+          <button
+            className="file-panel-tab"
+            title="展开黑板报与记忆面板"
+            onClick={() => {
+              setOxOpen(true);
+              setFilesOpen(false);
+            }}
+          >
+            📋
+          </button>
+        </div>
       )}
     </div>
   );

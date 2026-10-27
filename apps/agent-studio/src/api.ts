@@ -51,6 +51,26 @@ export interface WorkspaceConfig {
 
 export const DEFAULT_AGENT_ID = "default-assistant";
 
+// ---------- .ox 数据（共享黑板 + 记忆；用户面板管理） ----------
+
+/** 黑板条目：工作区级、跨会话共享；模型侧只增不改，用户可删改。 */
+export interface BlackboardEntry {
+  id: number;
+  /** 登记时间（Unix 毫秒）。 */
+  ts: number;
+  /** note / finding / risk / conclusion。 */
+  type: string;
+  author: string;
+  content: string;
+}
+
+/** 记忆文件（MEMORY.md + memory/YYYY-MM-DD.md；markdown 台账，文件级管理）。 */
+export interface MemoryFileEntry {
+  path: string;
+  size: number;
+  modified_ms: number;
+}
+
 // ---------- 数据库服务器（设置页管理；db 工作区执行层按名字引用） ----------
 
 export interface DatabaseServerConfig {
@@ -295,6 +315,28 @@ export const api = {
   // 运行中 turn 查询（页面刷新后恢复 busy/running：事件监听是全局的，
   // 丢的只是内存状态）。
   listRunningTurns: () => invoke<RunningTurnInfo[]>("list_running_turns"),
+
+  // ---------- .ox 数据管理（黑板报 + 记忆，用户面板） ----------
+
+  blackboardList: (workspaceId: string, limit?: number) =>
+    invoke<BlackboardEntry[]>("blackboard_list", { workspaceId, limit: limit ?? null }),
+  blackboardDelete: (workspaceId: string, id: number) =>
+    invoke<boolean>("blackboard_delete", { workspaceId, id }),
+  blackboardUpdate: (workspaceId: string, id: number, kind?: string, content?: string) =>
+    invoke<BlackboardEntry>("blackboard_update", {
+      workspaceId,
+      id,
+      kind: kind ?? null,
+      content: content ?? null,
+    }),
+  memoryListFiles: (workspaceId: string) =>
+    invoke<MemoryFileEntry[]>("memory_list_files", { workspaceId }),
+  memoryReadFile: (workspaceId: string, path: string) =>
+    invoke<string>("memory_read_file", { workspaceId, path }),
+  memorySaveFile: (workspaceId: string, path: string, content: string) =>
+    invoke<void>("memory_save_file", { workspaceId, path, content }),
+  memoryDeleteFile: (workspaceId: string, path: string) =>
+    invoke<void>("memory_delete_file", { workspaceId, path }),
 };
 
 // ---------- 事件订阅 ----------
