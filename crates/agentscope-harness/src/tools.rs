@@ -83,22 +83,38 @@ pub trait ShellBackend: Send + Sync {
 /// 截断并置 `truncated`。
 pub struct LocalShellBackend {
     max_output_chars: usize,
+    /// 执行锚定目录（沙箱根）：设置后每次执行 `current_dir` 到该目录，
+    /// `working_directory` 相对路径在此之下解析（对齐 Java 沙箱 execute 语义）。
+    root: Option<std::path::PathBuf>,
 }
 
 impl LocalShellBackend {
     /// 本地后端的单次输出上限（字符）。
     pub const MAX_OUTPUT_CHARS: usize = 30_000;
 
-    /// 默认上限的后端。
+    /// 默认上限的后端（无锚定，继承进程 cwd；仅测试/工具内部使用）。
     pub fn new() -> Self {
         Self {
             max_output_chars: Self::MAX_OUTPUT_CHARS,
+            root: None,
         }
     }
 
     /// 自定义输出上限。
     pub fn with_max_output_chars(max_output_chars: usize) -> Self {
-        Self { max_output_chars }
+        Self {
+            max_output_chars,
+            root: None,
+        }
+    }
+
+    /// 锚定到指定根目录（生产装配用）：所有命令在该目录下执行，
+    /// 工具层已拒绝绝对路径 / `~` / `..` 的 working_directory，二者共同构成沙箱边界。
+    pub fn new_anchored(root: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            max_output_chars: Self::MAX_OUTPUT_CHARS,
+            root: Some(root.into()),
+        }
     }
 }
 
@@ -123,6 +139,9 @@ impl ShellBackend for LocalShellBackend {
             c
         };
         cmd.kill_on_drop(true);
+        if let Some(root) = &self.root {
+            cmd.current_dir(root);
+        }
 
         let result = tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output()).await;
         match result {
@@ -1971,6 +1990,20 @@ mod tests {
         let response = backend.execute(command, 10).await;
         assert_eq!(response.exit_code, Some(3));
         assert!(!response.is_success());
+    }
+
+    #[tokio::test]
+    async fn anchored_backend_executes_in_root() {
+        // 锚定后端：命令在 root 下执行——root 内放置标记文件，列目录应可见。
+        let root = std::env::temp_dir().join(format!("agentscope-anchor-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("marker.txt"), b"ok").unwrap();
+        let backend = LocalShellBackend::new_anchored(&root);
+        let command = if cfg!(windows) { "dir /b" } else { "ls" };
+        let response = backend.execute(command, 10).await;
+        assert!(response.is_success(), "output: {}", response.output);
+        assert!(response.output.contains("marker.txt"), "output: {}", response.output);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

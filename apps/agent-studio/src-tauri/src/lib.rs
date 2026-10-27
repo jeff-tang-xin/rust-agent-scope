@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod db_exec;
 mod db_kind;
+mod default_prompt;
 mod factory;
 mod session;
 mod ssh_tool;

@@ -516,6 +516,8 @@ pub struct HarnessAgentBuilder {
     default_session_id: Option<String>,
     enable_plan_mode: bool,
     plan_file_dir: Option<String>,
+    /// plan 态场景提示词（透传给 `PlanModeMiddleware::with_plan_prompt`）。
+    plan_prompt: Option<String>,
     middlewares: Vec<Arc<dyn Middleware>>,
     model_resolver: Option<ModelResolver>,
     /// 新会话的初始权限上下文（透传给 delegate ReActAgent，见
@@ -547,6 +549,7 @@ impl HarnessAgentBuilder {
             default_session_id: None,
             enable_plan_mode: false,
             plan_file_dir: None,
+            plan_prompt: None,
             middlewares: Vec::new(),
             model_resolver: None,
             permission_context: None,
@@ -671,6 +674,12 @@ impl HarnessAgentBuilder {
     /// 计划文件目录（工作区相对，缺省 `plans`）。
     pub fn plan_file_directory(mut self, dir: impl Into<String>) -> Self {
         self.plan_file_dir = Some(dir.into());
+        self
+    }
+
+    /// plan 态场景提示词（进入计划模式时注入系统提示，替换内置 banner）。
+    pub fn plan_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.plan_prompt = Some(prompt.into());
         self
     }
 
@@ -799,7 +808,11 @@ impl HarnessAgentBuilder {
             let is_read_only: Arc<dyn Fn(&str) -> bool + Send + Sync> = Arc::new(move |name| {
                 ro_toolkit.get(name).map(|t| t.is_read_only()).unwrap_or(false)
             });
-            plan_middleware = Some(Arc::new(PlanModeMiddleware::new(is_read_only, Vec::new())));
+            let mut plan_mw = PlanModeMiddleware::new(is_read_only, Vec::new());
+            if let Some(prompt) = &self.plan_prompt {
+                plan_mw = plan_mw.with_plan_prompt(prompt.clone());
+            }
+            plan_middleware = Some(Arc::new(plan_mw));
             Some(manager)
         } else {
             None

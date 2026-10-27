@@ -155,9 +155,20 @@ const PLAN_MAX_TRACKED_CALLS: usize = 64;
 ///
 /// 状态句柄经 `on_agent_state_ready` 登记（同 `TaskReminderMiddleware` 的
 /// remember/state_for 模式，按 reply_id 寻址）。
+/// plan 态默认 banner 正文（装配方未自定义 `plan_prompt` 时使用）。
+const DEFAULT_PLAN_BANNER: &str = "PLAN MODE ACTIVE: research and design only — \
+do not execute changes.
+- In each ACT step you MUST call a tool (read files, search, plan_write); do not \
+narrate an action without calling.
+- If required information is missing, ask the user instead of guessing.
+- Write the plan with plan_write, then present it for review.";
+
 pub struct PlanModeMiddleware {
     is_read_only: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     additional_allowed: Vec<String>,
+    /// 进入 plan 态时注入的场景提示词（装配方自定义，如 studio 的 solo:plan
+    /// 场景层；`None` = 内置默认 banner）。plan 文件行始终由中间件追加。
+    plan_prompt: Option<String>,
     state_handles: Mutex<Vec<(String, Arc<Mutex<AgentState>>)>>,
 }
 
@@ -172,8 +183,16 @@ impl PlanModeMiddleware {
         Self {
             is_read_only,
             additional_allowed,
+            plan_prompt: None,
             state_handles: Mutex::new(Vec::new()),
         }
+    }
+
+    /// 自定义 plan 态场景提示词（替换内置 banner 正文；`<plan-mode>` 包裹与
+    /// 计划文件行仍由中间件统一处理）。
+    pub fn with_plan_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.plan_prompt = Some(prompt.into());
+        self
     }
 
     /// 登记本次调用的状态句柄（同 reply_id 重复登记覆盖，超上限淘汰最旧）。
@@ -264,13 +283,11 @@ and design. Record the intended action in the plan file instead, or ask the user
             return current;
         };
         if active {
-            let mut banner = format!(
-                "{current}\n\n<plan-mode>\nPLAN MODE ACTIVE: research and design only — \
-do not execute changes.\n- In each ACT step you MUST call a tool (read files, search, \
-plan_write); do not narrate an action without calling.\n- If required information is \
-missing, ask the user instead of guessing.\n- Write the plan with plan_write, then \
-present it for review."
-            );
+            let body = self
+                .plan_prompt
+                .clone()
+                .unwrap_or_else(|| DEFAULT_PLAN_BANNER.to_string());
+            let mut banner = format!("{current}\n\n<plan-mode>\n{body}");
             if let Some(file) = plan_file {
                 banner.push_str(&format!("\n- Plan file: {file}"));
             }

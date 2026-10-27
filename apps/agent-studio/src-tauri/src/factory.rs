@@ -4,7 +4,7 @@
 //! 1. workspace（每 agent 独立，目录布局对齐 `WorkspaceConstants`）；
 //! 2. state store（JsonFile，会话状态跨重启持久）；
 //! 3. team 运行方式先建成员 agent（先有成员再有 team），再建 lead；
-//! 4. 工具面按模式分化（solo/team/ops/db），基础面 = filesystem 6 + memory 3；
+//! 4. 工具面按模式分化（solo/team/ops/db），基础面 = filesystem 6 + memory 3 + shell 1；
 //! 5. `HarnessAgent::builder()` 组装并 `build()`。
 
 use std::collections::HashMap;
@@ -28,8 +28,10 @@ use agentscope_harness::subagent::{
 use agentscope_harness::tools_agent_spawn::{
     AgentListTool, AgentSendTool, AgentSpawnCore, AgentSpawnTool,
 };
-use agentscope_harness::task::{InMemoryTaskRepository, TaskRepository};
-use agentscope_harness::tools::{WebFetchTool, WebSearchTool};
+use agentscope_harness::task::{InMemoryTaskRepository, TaskRepository, WorkspaceTaskRepository};
+use agentscope_harness::tools::{
+    LocalShellBackend, ShellExecuteTool, WebFetchTool, WebSearchTool,
+};
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
 use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::{LocalFilesystem, LocalFsMode, PathPolicy, WorkspaceManager};
@@ -122,6 +124,12 @@ fn register_base_tools(
     for tool in FilesystemToolSet::new(fs, None).all() {
         toolkit.register(tool);
     }
+    // 本地 shell 执行（对齐 Java ShellExecuteTool）：锚定工作区根——
+    // working_directory 相对路径在沙箱根下解析，绝对路径 / `~` / `..`
+    // 已在工具层拒绝；权限面默认 ask（每次执行需用户批准）。
+    toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
+        LocalShellBackend::new_anchored(workspace.root().to_path_buf()),
+    ))));
     // 记忆工具锚定独立的 .ox 记忆工作区（<项目>/.ox/）：MEMORY.md 与
     // memory/ 台账不落项目根，非业务产出与业务代码分离（.ox 数据规范）。
     let memory = MemoryToolSet::new(memory_workspace);
@@ -295,6 +303,18 @@ pub fn build_agent(
 
     let mut toolkit = Toolkit::new();
     register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
+    // 任务仓储：collab 模式用工作区持久化仓储（任务记录与结果落工作区，
+    // 进程重启后 task_list/task_output 仍能恢复历史任务——修复纯内存仓储
+    // 导致的后台任务句柄丢失）。同一装配单元内 task 工具、spawn core 与
+    // builder 必须共用同一实例：原先各自 new 的 InMemory 实例互不相通，
+    // task_output 查不到 spawn 写入的任务（not_found 的另一半根因）。
+    let task_repo: Arc<dyn TaskRepository> = match mode {
+        StudioMode::Solo | StudioMode::Team => Arc::new(WorkspaceTaskRepository::new(
+            Arc::clone(&workspace),
+            agent.id.clone(),
+        )),
+        StudioMode::Ops | StudioMode::Db => Arc::new(InMemoryTaskRepository::new()),
+    };
     match mode {
         StudioMode::Ops => {
             // 远程运维工具面：web 检索（remote_shell 在 match 后统一注册）。
@@ -306,7 +326,7 @@ pub fn build_agent(
         }
         StudioMode::Team => {
             // 任务工具（对齐 Java subagent/task 体系的工具面）。
-            let repo: Arc<dyn TaskRepository> = Arc::new(InMemoryTaskRepository::new());
+            let repo = Arc::clone(&task_repo);
             toolkit.register(Arc::new(
                 agentscope_harness::tools::TaskOutputTool::new(Arc::clone(&repo)),
             ));
@@ -325,7 +345,7 @@ pub fn build_agent(
         StudioMode::Solo => {
             // 任务工具（spawn 三件套在下方「远程能力统一注册」之后装配——
             // 分身要继承 lead 的完整工具面，必须等 shell/db 注册完成）。
-            let repo: Arc<dyn TaskRepository> = Arc::new(InMemoryTaskRepository::new());
+            let repo = Arc::clone(&task_repo);
             toolkit.register(Arc::new(
                 agentscope_harness::tools::TaskOutputTool::new(Arc::clone(&repo)),
             ));
@@ -373,8 +393,7 @@ pub fn build_agent(
             Arc::clone(&state_store),
             &toolkit,
         )?;
-        let repo: Arc<dyn TaskRepository> = Arc::new(InMemoryTaskRepository::new());
-        let core = AgentSpawnCore::new(manager, Arc::clone(&repo), 0);
+        let core = AgentSpawnCore::new(manager, Arc::clone(&task_repo), 0);
         toolkit.register(Arc::new(AgentSpawnTool::new(Arc::clone(&core))));
         toolkit.register(Arc::new(AgentSendTool::new(Arc::clone(&core))));
         toolkit.register(Arc::new(AgentListTool::new(core)));
@@ -415,7 +434,8 @@ pub fn build_agent(
         // 项目根；机制对齐 Java PlanModeManager 的可配置 planDir）。
         builder = builder
             .enable_plan_mode()
-            .plan_file_directory(".ox/plans");
+            .plan_file_directory(".ox/plans")
+            .plan_prompt(crate::default_prompt::SOLO_PLAN_PROMPT);
     }
     if mode == StudioMode::Team {
         // 成员声明注册：SubagentsMiddleware 会把成员指引并入 leader 系统提示
@@ -446,7 +466,7 @@ pub fn build_agent(
             });
         }
         // 任务仓储挂到 builder（task 工具与 harness 内部共用同一仓储）。
-        builder = builder.task_repository(Arc::new(InMemoryTaskRepository::new()) as Arc<dyn TaskRepository>);
+        builder = builder.task_repository(Arc::clone(&task_repo));
     }
     let agent = builder.build()?;
     Ok(BuiltAgent { agent })
@@ -616,34 +636,30 @@ fn allowlist(bound: &[String]) -> Option<Vec<String>> {
     }
 }
 
-/// 系统提示：用户定义 + 模式职责说明（对齐 service 的 agent instructions 面）。
+/// 系统提示：用户定义 + 内置基座/场景层（collab）或模式职责说明（ops/db）。
+///
+/// collab（solo/team）分层：description → 基座协议（[`default_prompt::BASE_PROMPT`]）
+/// → 用户自定义 sys_prompt → 场景层（solo 自由模式 / team 领队）→ .ox 数据规范。
+/// plan 场景层（[`default_prompt::SOLO_PLAN_PROMPT`]）不在此拼接——plan 由用户
+/// 手动开启，经 `PlanModeMiddleware` 在进入 plan 态时动态注入。
 fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     let mut prompt = String::new();
     if !agent.description.is_empty() {
         prompt.push_str(&agent.description);
         prompt.push_str("\n\n");
     }
-    prompt.push_str(agent.sys_prompt.trim());
     let role_note: String = match mode {
-        StudioMode::Solo => {
-            "You are working in solo mode: one assistant, one user, full file and memory \
-             tools in your workspace. Enter plan mode only when the user explicitly \
-             asks for a plan; otherwise execute directly.\n\nYou can spawn subagents \
-             that are clones of yourself (same instructions, model and tools) with the \
-             agent_spawn tool; they run in isolated sessions, so delegate self-contained \
-             subtasks with all the context they need, then verify and integrate their \
-             results. Use agent_send for follow-up messages and agent_list to check \
-             active ones."
-                .to_string()
-        }
-        StudioMode::Team => {
-            "You are the team lead. Delegate self-contained tasks to your members with \
-             the team_delegate tool, review their results, and synthesize the final \
-             answer for the user. Do the work yourself only when delegation is not \
-             warranted."
-                .to_string()
+        StudioMode::Solo | StudioMode::Team => {
+            prompt.push_str(crate::default_prompt::BASE_PROMPT.trim());
+            prompt.push_str("\n\n");
+            prompt.push_str(agent.sys_prompt.trim());
+            match mode {
+                StudioMode::Solo => crate::default_prompt::SOLO_FREE_PROMPT.to_string(),
+                _ => crate::default_prompt::TEAM_PROMPT.to_string(),
+            }
         }
         StudioMode::Ops => {
+            prompt.push_str(agent.sys_prompt.trim());
             "You are an operations engineer. You can run shell commands and fetch web \
              pages. Be precise and conservative: prefer read-only inspection before \
              mutating actions, and explain the impact of destructive commands before \
@@ -651,6 +667,7 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
                 .to_string()
         }
         StudioMode::Db => {
+            prompt.push_str(agent.sys_prompt.trim());
             "You are a database analyst. You can run read-only SQL (SELECT/WITH/EXPLAIN/\
              PRAGMA) against the workspace SQLite database via sql_query. Inspect the \
              schema first, then answer with evidence from actual query results."
