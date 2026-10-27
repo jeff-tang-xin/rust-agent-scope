@@ -39,6 +39,10 @@ function fmtTime(ts?: string): string | undefined {
   return isNaN(d.getTime()) ? ts.slice(11, 19) : d.toLocaleTimeString("zh-CN", { hour12: false });
 }
 
+/** 判重归一化：折叠空白差异——流式 delta 拼接文本与权威结果文本可能
+ *  差换行/空格（逐字精确比对会漏判，导致同一份回复渲染两条）。 */
+const normText = (t: string) => t.replace(/\s+/g, " ").trim();
+
 /** 打字机：流式期间按帧渐进显示（自适应步长追平积压），结束后整段显示。 */function Typewriter({ text, active }: { text: string; active: boolean }) {
   const [shown, setShown] = useState(() => (active ? 0 : text.length));
   // 性能取舍：逐字 reveal 需要每帧对全文 slice 后重新走 remarkGfm 解析，
@@ -635,7 +639,7 @@ export default function Conversation({
       upsert(cur.entryId, (e) => {
         if (e.kind === "msg") {
           if (e.role === "assistant" && e.text.trim()) {
-            turnTextsRef.current.add(e.text);
+            turnTextsRef.current.add(normText(e.text));
           }
           return { ...e, streaming: false };
         }
@@ -892,7 +896,7 @@ export default function Conversation({
           streamRef.current = null;
           if (text) {
             if (cur && cur.kind === "msg") {
-              turnTextsRef.current.add(text);
+              turnTextsRef.current.add(normText(text));
               upsert(cur.entryId, (e) => (e.kind === "msg" ? { ...e, text, streaming: false } : e));
             } else {
               if (cur) {
@@ -911,19 +915,50 @@ export default function Conversation({
               const fresh = blocks
                 .filter((b) => String(b?.type ?? "") === "text")
                 .map((b) => String(b?.text ?? ""))
-                .filter((t) => t.trim() && !seen.has(t));
+                .filter((t) => t.trim() && !seen.has(normText(t)));
               if (fresh.length > 0) {
-                fresh.forEach((t) => seen.add(t));
-                setEntries((prev) => [
-                  ...prev,
-                  {
-                    kind: "msg",
-                    role: "assistant",
-                    text: fresh.join("\n\n"),
-                    ts: nowTime(),
-                    id: nextId(),
-                  },
-                ]);
+                fresh.forEach((t) => seen.add(normText(t)));
+                setEntries((prev) => {
+                  let next = prev;
+                  for (const t of fresh) {
+                    const nt = normText(t);
+                    // 尾部最近的 assistant 条目 = 本 turn 刚定格的流式块。
+                    // 若与本条互为前缀（流式截断/空白差异），补全替换而非
+                    // 追加——否则同一份回复出现两条（截断的流式版 + 完整的
+                    // 权威版）。只看尾部条目：跨 turn 的相似回复是模型真实
+                    // 输出，不能吞。长度阈值防短文本误判。
+                    let idx = -1;
+                    for (let i = next.length - 1; i >= 0; i--) {
+                      const e = next[i];
+                      if (e.kind === "msg" && e.role === "assistant") {
+                        idx = i;
+                        break;
+                      }
+                    }
+                    const dup = (() => {
+                      if (idx < 0) return false;
+                      const e = next[idx];
+                      if (e.kind !== "msg") return false;
+                      const et = normText(e.text);
+                      if (et === nt) return true;
+                      const short = Math.min(et.length, nt.length);
+                      return short >= 20 && (et.startsWith(nt) || nt.startsWith(et));
+                    })();
+                    if (dup && idx >= 0) {
+                      next = next.map((x, i) =>
+                        i === idx && x.kind === "msg" && normText(x.text).length < nt.length
+                          ? { ...x, text: t, streaming: false }
+                          : x,
+                      );
+                      continue;
+                    }
+                    next = [
+                      ...next,
+                      { kind: "msg", role: "assistant", text: t, ts: nowTime(), id: nextId() },
+                    ];
+                  }
+                  return next;
+                });
               }
             }
           } else {
