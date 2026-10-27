@@ -30,6 +30,15 @@ pub struct ModelProviderConfig {
 /// **纯智能体定义**：人设 + Provider 绑定。不含工作区目录、类别、team
 /// 成员——那些都是工作区的属性（见 [`WorkspaceConfig`]）。一个智能体可被
 /// 任意多个工作区选用（不同项目）。
+///
+/// 默认推理步数：ReAct 循环 reasoning+acting 的最大轮数，耗尽即以
+/// MaxIterations 失败收尾。内置智能体统一 80（core 默认 10 对复杂工程
+/// 任务偏紧）；0 视为未配置，装配层兜底 [`FALLBACK_MAX_ITERS`]。
+pub const DEFAULT_MAX_ITERS: u32 = 80;
+
+/// `max_iters = 0`（未配置）时的装配兜底值。
+pub const FALLBACK_MAX_ITERS: u32 = 50;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     /// 稳定 id（uuid simple）。
@@ -43,7 +52,7 @@ pub struct AgentConfig {
     pub sys_prompt: String,
     /// 引用的 [`ModelProviderConfig::name`]。
     pub provider: String,
-    /// 最大推理迭代数（0 = harness 默认）。
+    /// 最大推理迭代数（0 = 装配层兜底 [`FALLBACK_MAX_ITERS`]）。
     #[serde(default)]
     pub max_iters: u32,
     #[serde(default)]
@@ -310,7 +319,7 @@ fn default_agent() -> AgentConfig {
         // provider 留空：用户在设置页绑定模型 Provider 后即可对话（进入会话
         // 时会得到明确指引）。
         provider: String::new(),
-        max_iters: 0,
+        max_iters: DEFAULT_MAX_ITERS,
         created_at: 0,
     }
 }
@@ -350,7 +359,7 @@ fn default_ops_agent() -> AgentConfig {
         ]
         .join("\n"),
         provider: String::new(),
-        max_iters: 0,
+        max_iters: DEFAULT_MAX_ITERS,
         created_at: 0,
     }
 }
@@ -388,7 +397,7 @@ fn default_db_agent() -> AgentConfig {
         ]
         .join("\n"),
         provider: String::new(),
-        max_iters: 0,
+        max_iters: DEFAULT_MAX_ITERS,
         created_at: 0,
     }
 }

@@ -15,6 +15,7 @@ use agentscope_core::model::Model;
 use agentscope_core::permission::{PermissionBehavior, PermissionContextState, PermissionRule};
 use agentscope_core::state::{AgentStateStore, JsonFileAgentStateStore};
 use agentscope_core::tool::Toolkit;
+use crate::config;
 use crate::db_exec::{DbCatalog, DbDmlTool, DbQueryTool};
 use crate::ssh_tool::{RemoteShellTool, SshPool};
 use agentscope_core::agent::ReActAgent;
@@ -426,6 +427,10 @@ pub fn build_agent(
         .default_session_id("main");
     if agent.max_iters > 0 {
         builder = builder.max_iters(agent.max_iters as usize);
+    } else {
+        // 0 = 未配置（含旧版本配置文件落盘的 0）→ 兜底 50：比 core 默认 10
+        // 宽松，但低于内置智能体显式配置的 80（DEFAULT_MAX_ITERS）。
+        builder = builder.max_iters(config::FALLBACK_MAX_ITERS as usize);
     }
     // 危险工具默认走用户授权（AgentScope 权限引擎 ask 规则，会话级持久化）：
     // shell 执行与文件写入/编辑需用户批准后才会执行；目录穿越由 Sandboxed

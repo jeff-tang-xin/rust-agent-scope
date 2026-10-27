@@ -242,7 +242,7 @@ export default function App() {
     <div className="app">
       {/* 顶部导航条：品牌 + 类别导航 + 主题切换（原左侧竖栏上移，四栏变三栏） */}
       <header className="topbar">
-        <span className="brand">AgentScope Studio</span>
+        <span className="brand">Ox Agent Studio</span>
         <nav className="topbar-nav">
           {CATS.map((c) => (
             <button
