@@ -742,6 +742,7 @@ mod tests {
         assert!(context.ask_rules.contains_key("execute"));
         // 低风险开发操作免确认（DEVELOP_ALLOWLIST），编辑/写/shell 仍 ask。
         assert!(context.allow_rules.contains_key("memory_save"));
+        assert!(context.allow_rules.contains_key("blackboard_append"));
         assert!(context.allow_rules.contains_key("agent_spawn"));
         assert!(context.allow_rules.contains_key("plan_write"));
         // plan_exit 不进白名单：工具自裁决 RequireApproval（审批走 HITL）。
