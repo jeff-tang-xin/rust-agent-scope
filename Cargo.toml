@@ -18,6 +18,7 @@ agentscope-model-openai = { path = "crates/agentscope-model-openai" }
 
 async-trait = "0.1"
 base64 = "0.22"
+encoding_rs = "0.8"
 futures-util = "0.3"
 regex = "1"
 reqwest = { version = "0.12", features = ["json", "stream"] }

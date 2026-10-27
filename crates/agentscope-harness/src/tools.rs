@@ -124,9 +124,24 @@ impl Default for LocalShellBackend {
     }
 }
 
+/// 解码子进程输出：UTF-8 严格解码优先（git/现代工具链输出 UTF-8）；
+/// 失败时 Windows 按 GBK 兜底（中文系统 cmd/PowerShell 5.x 输出 ANSI/GBK），
+/// 其余平台 lossy UTF-8。stdout 与 stderr 分开解码，避免混合编码互相污染。
+fn decode_process_output(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) if cfg!(windows) => {
+            let (cow, _, _) = encoding_rs::GBK.decode(bytes);
+            cow.into_owned()
+        }
+        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 #[async_trait::async_trait]
 impl ShellBackend for LocalShellBackend {
     async fn execute(&self, command: &str, timeout_secs: u64) -> ExecuteResponse {
+        use tokio::io::AsyncReadExt;
         use tokio::process::Command;
 
         let mut cmd = if cfg!(windows) {
@@ -138,37 +153,75 @@ impl ShellBackend for LocalShellBackend {
             c.arg("-c").arg(command);
             c
         };
-        cmd.kill_on_drop(true);
+        cmd.kill_on_drop(true)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         if let Some(root) = &self.root {
             cmd.current_dir(root);
         }
 
-        let result = tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output()).await;
-        match result {
-            Err(_) => ExecuteResponse {
-                output: String::new(),
-                exit_code: None,
-                truncated: false,
-            },
-            Ok(Err(_)) => ExecuteResponse {
-                output: String::new(),
-                exit_code: None,
-                truncated: false,
-            },
-            Ok(Ok(output)) => {
-                let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-                text.push_str(&String::from_utf8_lossy(&output.stderr));
-                let mut truncated = false;
-                if text.chars().count() > self.max_output_chars {
-                    text = text.chars().take(self.max_output_chars).collect();
-                    truncated = true;
-                }
-                ExecuteResponse {
-                    output: text,
-                    exit_code: output.status.code(),
-                    truncated,
-                }
+        // spawn + 独立任务收集管道：超时被杀时已产出的输出仍可回收
+        // （`timeout(cmd.output())` 会在掐断时连同已读输出一起丢弃）。
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                return ExecuteResponse {
+                    output: format!("命令启动失败：{e}"),
+                    exit_code: None,
+                    truncated: false,
+                };
             }
+        };
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stdout_pipe {
+                let _ = pipe.read_to_end(&mut buf).await;
+            }
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stderr_pipe {
+                let _ = pipe.read_to_end(&mut buf).await;
+            }
+            buf
+        });
+
+        let status = tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await;
+        let timed_out = status.is_err();
+        if timed_out {
+            // wait 的 future 被 drop 后 kill_on_drop 兜底终止；显式 kill 加速管道 EOF。
+            let _ = child.kill().await;
+        }
+        // 进程终止（或已死）后管道 EOF，收集任务必然结束。
+        let stdout_bytes = stdout_task.await.unwrap_or_default();
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
+
+        let mut text = decode_process_output(&stdout_bytes);
+        text.push_str(&decode_process_output(&stderr_bytes));
+        if timed_out {
+            text.push_str(&format!(
+                "\n[命令执行超时（{timeout_secs}s），进程已终止；以上为终止前已产出的部分输出。长命令可用 timeout 参数调大上限后重试。]"
+            ));
+        }
+        let mut truncated = false;
+        if text.chars().count() > self.max_output_chars {
+            text = text.chars().take(self.max_output_chars).collect();
+            truncated = true;
+        }
+        ExecuteResponse {
+            output: text,
+            exit_code: if timed_out {
+                None
+            } else {
+                match status {
+                    Ok(Ok(s)) => s.code(),
+                    _ => None,
+                }
+            },
+            truncated,
         }
     }
 }
@@ -213,7 +266,9 @@ impl Tool for ShellExecuteTool {
 
     fn description(&self) -> &str {
         "Execute a shell command. Use for git, npm, build, test, and other terminal operations. \
-Returns combined output and exit code. If a dedicated tool exists (e.g., read_file, write_file), \
+Returns combined output and exit code. On timeout the process is killed and the partial output \
+produced so far is returned with a timeout notice — retry with a larger `timeout` for long-running \
+commands (default 30s). If a dedicated tool exists (e.g., read_file, write_file), \
 you MUST use it instead of shell commands."
     }
 
@@ -2004,6 +2059,37 @@ mod tests {
         assert!(response.is_success(), "output: {}", response.output);
         assert!(response.output.contains("marker.txt"), "output: {}", response.output);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn timeout_returns_partial_output_with_notice() {
+        // 超时被杀：已产出的部分输出仍返回，并附超时提示（exit_code 为 None）。
+        let backend = LocalShellBackend::new();
+        let command = if cfg!(windows) {
+            // timeout.exe 在无控制台 stdin 下会立即报错退出，用 ping 充当 sleep。
+            "echo partial-line & ping -n 6 127.0.0.1 >nul"
+        } else {
+            "echo partial-line; sleep 5"
+        };
+        let response = backend.execute(command, 1).await;
+        assert_eq!(response.exit_code, None);
+        assert!(response.output.contains("partial-line"), "output: {}", response.output);
+        assert!(response.output.contains("超时"), "output: {}", response.output);
+    }
+
+    #[test]
+    fn decode_output_prefers_utf8_and_falls_back_to_gbk_on_windows() {
+        // UTF-8 字节：严格解码成功，原样返回。
+        assert_eq!(decode_process_output("中文ok".as_bytes()), "中文ok");
+        // GBK 字节（"中文" 的 GBK 编码 D6 D0 CE C4）：Windows 上解码回 "中文"。
+        let gbk_bytes = [0xD6u8, 0xD0, 0xCE, 0xC4];
+        let decoded = decode_process_output(&gbk_bytes);
+        if cfg!(windows) {
+            assert_eq!(decoded, "中文");
+        } else {
+            // 非 Windows 无 GBK 兜底：lossy 解码产生替换符，不 panic 即可。
+            assert!(decoded.contains('\u{FFFD}') || decoded.is_empty());
+        }
     }
 
     #[test]

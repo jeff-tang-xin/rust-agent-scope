@@ -84,6 +84,7 @@ version = "0.1.0"
 dependencies = [
  "agentscope-core",
  "async-trait",
+ "encoding_rs",
  "futures-util",
  "regex",
  "reqwest 0.12.28",
