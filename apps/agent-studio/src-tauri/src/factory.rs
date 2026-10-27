@@ -636,43 +636,28 @@ fn allowlist(bound: &[String]) -> Option<Vec<String>> {
     }
 }
 
-/// 系统提示：用户定义 + 内置基座/场景层（collab）或模式职责说明（ops/db）。
+/// 系统提示：description → 基座协议（[`default_prompt::BASE_PROMPT`]，四类
+/// 模式共用——文件/shell/记忆工具全模式注册，web/remote/db 等模式特有工具
+/// 在各场景层说明）→ 用户自定义 sys_prompt → 场景层（solo 自由 / team 领队 /
+/// ops 运维 / db 数据库；ops/db 无 team 与 plan 运行方式，场景层仅 free 语义）
+/// → .ox 数据规范。
 ///
-/// collab（solo/team）分层：description → 基座协议（[`default_prompt::BASE_PROMPT`]）
-/// → 用户自定义 sys_prompt → 场景层（solo 自由模式 / team 领队）→ .ox 数据规范。
-/// plan 场景层（[`default_prompt::SOLO_PLAN_PROMPT`]）不在此拼接——plan 由用户
-/// 手动开启，经 `PlanModeMiddleware` 在进入 plan 态时动态注入。
+/// plan 场景层（[`default_prompt::SOLO_PLAN_PROMPT`]）不在此拼接——plan 由
+/// 用户手动开启，经 `PlanModeMiddleware` 在进入 plan 态时动态注入。
 fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     let mut prompt = String::new();
     if !agent.description.is_empty() {
         prompt.push_str(&agent.description);
         prompt.push_str("\n\n");
     }
+    prompt.push_str(crate::default_prompt::BASE_PROMPT.trim());
+    prompt.push_str("\n\n");
+    prompt.push_str(agent.sys_prompt.trim());
     let role_note: String = match mode {
-        StudioMode::Solo | StudioMode::Team => {
-            prompt.push_str(crate::default_prompt::BASE_PROMPT.trim());
-            prompt.push_str("\n\n");
-            prompt.push_str(agent.sys_prompt.trim());
-            match mode {
-                StudioMode::Solo => crate::default_prompt::SOLO_FREE_PROMPT.to_string(),
-                _ => crate::default_prompt::TEAM_PROMPT.to_string(),
-            }
-        }
-        StudioMode::Ops => {
-            prompt.push_str(agent.sys_prompt.trim());
-            "You are an operations engineer. You can run shell commands and fetch web \
-             pages. Be precise and conservative: prefer read-only inspection before \
-             mutating actions, and explain the impact of destructive commands before \
-             running them."
-                .to_string()
-        }
-        StudioMode::Db => {
-            prompt.push_str(agent.sys_prompt.trim());
-            "You are a database analyst. You can run read-only SQL (SELECT/WITH/EXPLAIN/\
-             PRAGMA) against the workspace SQLite database via sql_query. Inspect the \
-             schema first, then answer with evidence from actual query results."
-                .to_string()
-        }
+        StudioMode::Solo => crate::default_prompt::SOLO_FREE_PROMPT.to_string(),
+        StudioMode::Team => crate::default_prompt::TEAM_PROMPT.to_string(),
+        StudioMode::Ops => crate::default_prompt::OPS_PROMPT.to_string(),
+        StudioMode::Db => crate::default_prompt::DB_PROMPT.to_string(),
     };
     prompt.push_str("\n\n");
     prompt.push_str(&role_note);

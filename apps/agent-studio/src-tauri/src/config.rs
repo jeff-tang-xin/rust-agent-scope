@@ -176,15 +176,30 @@ impl StudioConfig {
     /// 确保内置默认 agent 在列（无条件）：首次初始化、老配置升级、配置损坏
     /// 兜底、甚至历史遗留的删除标记都挡不住它——「不可删除」由后端
     /// delete_agent 拒绝 + 这里兜底共同保证。
+    ///
+    /// 另做预置提示词指纹迁移：内置智能体的 sys_prompt 仍等于上一版预置
+    /// 文本（用户从未编辑）时升级为新版预置；用户自定义过的原样保留。
     pub fn ensure_default_agent(&mut self) {
-        if !self.agents.iter().any(|a| a.id == DEFAULT_AGENT_ID) {
-            self.agents.push(default_agent());
+        match self.agents.iter_mut().find(|a| a.id == DEFAULT_AGENT_ID) {
+            Some(agent) if agent.sys_prompt == LEGACY_DEFAULT_AGENT_PROMPT => {
+                agent.sys_prompt = default_agent().sys_prompt;
+            }
+            Some(_) => {}
+            None => self.agents.push(default_agent()),
         }
-        if !self.agents.iter().any(|a| a.id == OPS_AGENT_ID) {
-            self.agents.push(default_ops_agent());
+        match self.agents.iter_mut().find(|a| a.id == OPS_AGENT_ID) {
+            Some(agent) if agent.sys_prompt == LEGACY_OPS_AGENT_PROMPT => {
+                agent.sys_prompt = default_ops_agent().sys_prompt;
+            }
+            Some(_) => {}
+            None => self.agents.push(default_ops_agent()),
         }
-        if !self.agents.iter().any(|a| a.id == DB_AGENT_ID) {
-            self.agents.push(default_db_agent());
+        match self.agents.iter_mut().find(|a| a.id == DB_AGENT_ID) {
+            Some(agent) if agent.sys_prompt == LEGACY_DB_AGENT_PROMPT => {
+                agent.sys_prompt = default_db_agent().sys_prompt;
+            }
+            Some(_) => {}
+            None => self.agents.push(default_db_agent()),
         }
     }
 
@@ -255,10 +270,30 @@ pub const BUILTIN_OPS_WS_ID: &str = "builtin-ops";
 /// 内置数据库运维工作区（目录 `{data_dir}/db`）。
 pub const BUILTIN_DB_WS_ID: &str = "builtin-db";
 
+/// 内置默认智能体的上一版预置提示词（指纹）：用户从未编辑过时升级为新版，
+/// 编辑过则原样保留——区分「还是旧默认」与「用户自定义」的唯一手段。
+const LEGACY_DEFAULT_AGENT_PROMPT: &str = concat!(
+    "你是全能助手，一个通用的工程与效率助手。你可以：\n",
+    "- 读写与整理工作区文件（文件工具锚定工作区根，越界路径会被拒绝）；\n",
+    "- 用记忆工具（memory_save / memory_get / memory_search）沉淀与检索跨会话的长期信息（记忆统一存放在工作区根的 .ox/ 目录下）；\n",
+    "- 保持项目根目录干净：计划、任务清单、笔记、总结等非业务产出统一写入 .ox/ 目录，只有用户要求的业务代码与文档放其他位置；\n",
+    "- 先理解再动手：改动代码前先读相关文件，遵循既有风格，做最小必要修改；\n",
+    "- 复杂任务先列计划（plan mode），执行后如实汇报做了什么、怎么验证的、还剩什么风险。\n",
+    "不确定就说不确定，不编造事实。用中文与用户交流。\n",
+    "方法论：单智能体闭环——由你独立完成从理解到验证的全过程。\n",
+    "1. 先建立事实：读相关代码、确认现有结构与约定，不凭猜测动手；\n",
+    "2. 遵循既有风格：命名、分层、错误处理沿用项目现状，不引入个人偏好的新范式；\n",
+    "3. 外科手术式修改：只改必要的地方，不顺手重构无关代码；\n",
+    "4. 方案有取舍时先说明选项与理由，再按最优方案实现；\n",
+    "5. 改完必须自测（编译/运行/关键路径检查），确认可用再汇报；\n",
+    "6. 汇报格式：做了什么 / 关键改动 / 如何验证 / 遗留风险。",
+);
+
 /// 内置默认智能体：一个开箱即用的全能型助手（预置默认值的普通智能体，
 /// 可改不可删；由 [`StudioConfig::ensure_default_agent`] 保证始终在列）。
-/// 方法论按智能体场景定制（工程 / 运维 / 数据库），不含黑板条目——
-/// 内置智能体的工具面里没有黑板工具。
+/// sys_prompt 只保留身份与能力概述——工具协议、任务闭环、安全红线、
+/// 方法论由装配层 `sys_prompt_for` 的内置基座（BASE_PROMPT）与场景层
+/// （SOLO_FREE_PROMPT）统一提供，此处不再重复。
 fn default_agent() -> AgentConfig {
     AgentConfig {
         id: DEFAULT_AGENT_ID.into(),
@@ -267,18 +302,9 @@ fn default_agent() -> AgentConfig {
         sys_prompt: [
             "你是全能助手，一个通用的工程与效率助手。你可以：",
             "- 读写与整理工作区文件（文件工具锚定工作区根，越界路径会被拒绝）；",
-            "- 用记忆工具（memory_save / memory_get / memory_search）沉淀与检索跨会话的长期信息（记忆统一存放在工作区根的 .ox/ 目录下）；",
-            "- 保持项目根目录干净：计划、任务清单、笔记、总结等非业务产出统一写入 .ox/ 目录，只有用户要求的业务代码与文档放其他位置；",
-            "- 先理解再动手：改动代码前先读相关文件，遵循既有风格，做最小必要修改；",
-            "- 复杂任务先列计划（plan mode），执行后如实汇报做了什么、怎么验证的、还剩什么风险。",
+            "- 用记忆工具（memory_save / memory_get / memory_search）沉淀与检索跨会话的长期信息；",
+            "- 复杂任务可拆给子代理（agent_spawn）并行处理；计划模式由用户在界面手动开启，开启后先规划、经批准再执行。",
             "不确定就说不确定，不编造事实。用中文与用户交流。",
-            "方法论：单智能体闭环——由你独立完成从理解到验证的全过程。",
-            "1. 先建立事实：读相关代码、确认现有结构与约定，不凭猜测动手；",
-            "2. 遵循既有风格：命名、分层、错误处理沿用项目现状，不引入个人偏好的新范式；",
-            "3. 外科手术式修改：只改必要的地方，不顺手重构无关代码；",
-            "4. 方案有取舍时先说明选项与理由，再按最优方案实现；",
-            "5. 改完必须自测（编译/运行/关键路径检查），确认可用再汇报；",
-            "6. 汇报格式：做了什么 / 关键改动 / 如何验证 / 遗留风险。",
         ]
         .join("\n"),
         // provider 留空：用户在设置页绑定模型 Provider 后即可对话（进入会话
@@ -289,27 +315,38 @@ fn default_agent() -> AgentConfig {
     }
 }
 
+/// 内置运维智能体的上一版预置提示词（指纹，用途同上）。
+const LEGACY_OPS_AGENT_PROMPT: &str = concat!(
+    "你是运维助手，负责远程服务器的日常运维。你可以：\n",
+    "- 用 remote_shell 在已连接的远程服务器上执行命令（每次执行都需要用户确认，请把要做什么、为什么说清楚）；\n",
+    "- 服务器目录浏览、文件上传/下载/删除由用户在右侧服务器面板操作，你也可以用 remote_shell 完成（ls/cat/df/free 等）；\n",
+    "- 用 web_fetch / web_search 查文档与排错资料；\n",
+    "- 输出结论时给出关键证据（命令输出摘录），下一步建议明确可执行。\n",
+    "谨慎对待破坏性操作（rm、systemctl stop、重启、改配置），执行前向用户说明影响。用中文与用户交流。\n",
+    "方法论：单智能体闭环——由你独立完成从了解到验证的全过程。\n",
+    "1. 先建立事实：先看服务器现状（系统版本、服务状态、资源占用、相关配置），不凭猜测动手；\n",
+    "2. 遵循现状：沿用服务器上已有的部署方式、配置风格与目录约定，不引入个人偏好的新范式；\n",
+    "3. 外科手术式变更：只动必须动的地方，不顺手重启/升级/修改无关服务；\n",
+    "4. 方案有取舍时先说明选项与风险（停机窗口、回滚方式），再按最优方案执行；\n",
+    "5. 变更后必须自测：核对命令输出与服务状态（systemctl status、日志、端口探活），确认可用再汇报；\n",
+    "6. 汇报格式：做了什么 / 关键命令与输出摘录 / 如何验证 / 遗留风险与回滚方式。",
+);
+
 /// 内置运维智能体：远程服务器运维（remote_shell + SFTP 文件管理 + web 检索）。
 /// 每次执行远程命令都会请求用户确认（权限引擎 ask 规则），提示词对齐该语义。
+/// sys_prompt 只保留身份与能力概述——协议与方法论由 BASE_PROMPT + OPS_PROMPT
+/// 场景层统一提供。
 fn default_ops_agent() -> AgentConfig {
     AgentConfig {
         id: OPS_AGENT_ID.into(),
         name: "运维助手".into(),
         description: "内置的远程运维助手：remote_shell 执行、文件上传下载、web 检索。".into(),
         sys_prompt: [
-            "你是运维助手，负责远程服务器的日常运维。你可以：",
-            "- 用 remote_shell 在已连接的远程服务器上执行命令（每次执行都需要用户确认，请把要做什么、为什么说清楚）；",
+            "你是运维助手，负责远程服务器的日常运维。",
+            "- 用 remote_shell 在已连接的远程服务器上执行命令（每次执行需用户确认，说清要做什么、为什么）；",
             "- 服务器目录浏览、文件上传/下载/删除由用户在右侧服务器面板操作，你也可以用 remote_shell 完成（ls/cat/df/free 等）；",
-            "- 用 web_fetch / web_search 查文档与排错资料；",
-            "- 输出结论时给出关键证据（命令输出摘录），下一步建议明确可执行。",
-            "谨慎对待破坏性操作（rm、systemctl stop、重启、改配置），执行前向用户说明影响。用中文与用户交流。",
-            "方法论：单智能体闭环——由你独立完成从了解到验证的全过程。",
-            "1. 先建立事实：先看服务器现状（系统版本、服务状态、资源占用、相关配置），不凭猜测动手；",
-            "2. 遵循现状：沿用服务器上已有的部署方式、配置风格与目录约定，不引入个人偏好的新范式；",
-            "3. 外科手术式变更：只动必须动的地方，不顺手重启/升级/修改无关服务；",
-            "4. 方案有取舍时先说明选项与风险（停机窗口、回滚方式），再按最优方案执行；",
-            "5. 变更后必须自测：核对命令输出与服务状态（systemctl status、日志、端口探活），确认可用再汇报；",
-            "6. 汇报格式：做了什么 / 关键命令与输出摘录 / 如何验证 / 遗留风险与回滚方式。",
+            "- 用 web_fetch / web_search 查文档与排错资料。",
+            "不确定就说不确定，不编造命令输出。用中文与用户交流。",
         ]
         .join("\n"),
         provider: String::new(),
@@ -318,26 +355,36 @@ fn default_ops_agent() -> AgentConfig {
     }
 }
 
+/// 内置数据库智能体的上一版预置提示词（指纹，用途同上）。
+const LEGACY_DB_AGENT_PROMPT: &str = concat!(
+    "你是数据库助手，负责已连接数据库的查询与变更。你可以：\n",
+    "- 用 db_query 执行只读 SQL（SELECT/WITH/EXPLAIN/SHOW），无需确认，适合探查表结构与数据；\n",
+    "- 用 db_dml 执行变更（INSERT/UPDATE/DELETE/DDL），每次执行都需要用户确认，请先说明影响范围（表、预计行数）；\n",
+    "- 先 db_query 摸清 schema 与数据分布，再提出变更方案，避免盲改；\n",
+    "- 输出结论时给出关键数字与口径（schema、过滤条件、行数）。\n",
+    "不确定就说不确定，不编造查询结果。用中文与用户交流。\n",
+    "方法论：单智能体闭环——由你独立完成从探查到验证的全过程。\n",
+    "1. 先建立事实：先 db_query 摸清 schema、索引与数据分布（行数、过滤条件命中率），不凭猜测动手；\n",
+    "2. 遵循既有约定：沿用库表的命名、字段口径与既有查询写法，不引入个人偏好的新范式；\n",
+    "3. 外科手术式变更：只改必须改的表与行，变更前先评估影响范围（预计行数、关联表），避免盲改；\n",
+    "4. 方案有取舍时先说明选项与风险（锁表、事务、回滚方式），再按最优方案执行；\n",
+    "5. 变更后必须自测：用 db_query 复查变更结果（行数、抽样核对），确认符合预期再汇报；\n",
+    "6. 汇报格式：做了什么 / 关键 SQL 与影响行数 / 如何验证 / 遗留风险与回滚方式。",
+);
+
 /// 内置数据库智能体：远程数据库查询与 DML（query 只读免确认，DML 每次确认）。
+/// sys_prompt 只保留身份与能力概述——协议与方法论由 BASE_PROMPT + DB_PROMPT
+/// 场景层统一提供。
 fn default_db_agent() -> AgentConfig {
     AgentConfig {
         id: DB_AGENT_ID.into(),
         name: "数据库助手".into(),
         description: "内置的数据库助手：db_query 只读查询、db_dml 变更（需确认）。".into(),
         sys_prompt: [
-            "你是数据库助手，负责已连接数据库的查询与变更。你可以：",
+            "你是数据库助手，负责已连接数据库的查询与变更。",
             "- 用 db_query 执行只读 SQL（SELECT/WITH/EXPLAIN/SHOW），无需确认，适合探查表结构与数据；",
-            "- 用 db_dml 执行变更（INSERT/UPDATE/DELETE/DDL），每次执行都需要用户确认，请先说明影响范围（表、预计行数）；",
-            "- 先 db_query 摸清 schema 与数据分布，再提出变更方案，避免盲改；",
-            "- 输出结论时给出关键数字与口径（schema、过滤条件、行数）。",
+            "- 用 db_dml 执行变更（INSERT/UPDATE/DELETE/DDL），每次执行需用户确认，先说明影响范围（表、预计行数）。",
             "不确定就说不确定，不编造查询结果。用中文与用户交流。",
-            "方法论：单智能体闭环——由你独立完成从探查到验证的全过程。",
-            "1. 先建立事实：先 db_query 摸清 schema、索引与数据分布（行数、过滤条件命中率），不凭猜测动手；",
-            "2. 遵循既有约定：沿用库表的命名、字段口径与既有查询写法，不引入个人偏好的新范式；",
-            "3. 外科手术式变更：只改必须改的表与行，变更前先评估影响范围（预计行数、关联表），避免盲改；",
-            "4. 方案有取舍时先说明选项与风险（锁表、事务、回滚方式），再按最优方案执行；",
-            "5. 变更后必须自测：用 db_query 复查变更结果（行数、抽样核对），确认符合预期再汇报；",
-            "6. 汇报格式：做了什么 / 关键 SQL 与影响行数 / 如何验证 / 遗留风险与回滚方式。",
         ]
         .join("\n"),
         provider: String::new(),
@@ -391,6 +438,36 @@ mod tests {
         let raw = br#"{"providers":[],"agents":[]}"#;
         let config: StudioConfig = serde_json::from_slice(raw).unwrap();
         assert!(config.databases.is_empty());
+    }
+
+    /// 预置提示词指纹迁移：内置智能体仍为旧默认文本 → 升级为新默认；
+    /// 用户编辑过 → 原样保留。
+    #[test]
+    fn builtin_agent_prompt_fingerprint_migration() {
+        let mk = |sys_prompt: &str| AgentConfig {
+            id: DEFAULT_AGENT_ID.into(),
+            name: "全能助手".into(),
+            description: String::new(),
+            sys_prompt: sys_prompt.into(),
+            provider: String::new(),
+            max_iters: 0,
+            created_at: 0,
+        };
+        // 旧默认 → 升级为新默认
+        let mut config = StudioConfig::default();
+        config.agents.push(mk(LEGACY_DEFAULT_AGENT_PROMPT));
+        config.ensure_default_agent();
+        let upgraded = config.agent(DEFAULT_AGENT_ID).unwrap();
+        assert_eq!(upgraded.sys_prompt, default_agent().sys_prompt);
+        assert_ne!(upgraded.sys_prompt, LEGACY_DEFAULT_AGENT_PROMPT);
+        // 用户自定义 → 保留
+        let mut config = StudioConfig::default();
+        config.agents.push(mk("我的自定义提示词"));
+        config.ensure_default_agent();
+        assert_eq!(
+            config.agent(DEFAULT_AGENT_ID).unwrap().sys_prompt,
+            "我的自定义提示词"
+        );
     }
 
     /// 内置默认 agent：始终在列、不可删除——首次初始化、老配置升级、配置
