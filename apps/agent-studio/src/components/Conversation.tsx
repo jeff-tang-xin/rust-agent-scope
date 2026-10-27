@@ -438,6 +438,16 @@ export default function Conversation({
     Array<{ name: string; media_type: string; data_base64: string; preview?: string }>
   >([]);
   const [busy, setBusy] = useState(false);
+  // busy 的同步镜像：React setState 是异步批处理，同一渲染周期内连续两次
+  // send()/steer() 读到的 busy 都是旧值（false），防抖失效——快速双击发送
+  // 会把同一条消息发两遍（第二遍被后端 turn 互斥拒绝后降级 steer 入队，
+  // 结算续轮再跑一遍）。入口检查走 ref（同步），写入走 setBusySafe 保持
+  // ref 与 state 一致。
+  const busyRef = useRef(false);
+  const setBusySafe = (v: boolean) => {
+    busyRef.current = v;
+    setBusy(v);
+  };
   // 拖拽附件进行中（容器高亮提示）。
   const [dragActive, setDragActive] = useState(false);
   // 文件面板显隐（可收起成细条）。
@@ -528,7 +538,7 @@ export default function Conversation({
     toolRef.current.clear();
     turnTextsRef.current = new Set();
     turnToolSeenRef.current = false;
-    setBusy(false);
+    setBusySafe(false);
     api.getHistory(workspace.id, runtimeMode, sessionId).then((history) => {
       if (!alive) return;
       const restored: Entry[] = [];
@@ -803,7 +813,7 @@ export default function Conversation({
 
     const un2 = onTurnFinished((payload) => {
       if (!applies(payload)) return;
-      setBusy(false);
+      setBusySafe(false);
       finalizeStreams(); // 中断/失败兜底：复位流式态，打字机停走
       turnTextsRef.current = new Set(); // turn 边界：判重集合清零
       turnToolSeenRef.current = false;
@@ -815,7 +825,7 @@ export default function Conversation({
     // steer 续轮：后端自动开启的新 turn（前端保持 busy、提示用户）。
     const un3 = onTurnStarted((payload) => {
       if (!applies(payload)) return;
-      setBusy(true);
+      setBusySafe(true);
       turnTextsRef.current = new Set(); // 新 turn：判重集合清零
       turnToolSeenRef.current = false;
       setNotice("Continuing with your steering input…");
@@ -876,7 +886,9 @@ export default function Conversation({
 
   const send = async () => {
     const text = input.trim();
-    if ((!text && attachments.length === 0) || busy) return;
+    // busy 检查走同步 ref：state 在同一渲染周期内不更新，双击/回车+点击
+    // 会连发两条（见 busyRef 注释）。
+    if ((!text && attachments.length === 0) || busyRef.current) return;
     setError("");
     setInput("");
     // 本地立即显示：文本 + 附件（图片缩略 / 文件 chip）。
@@ -896,7 +908,7 @@ export default function Conversation({
       data_base64,
     }));
     setAttachments([]);
-    setBusy(true);
+    setBusySafe(true);
     try {
       await api.sendMessage(workspace.id, runtimeMode, sessionId, text, payload);
     } catch (e) {
@@ -916,13 +928,13 @@ export default function Conversation({
             await api.sendMessage(workspace.id, runtimeMode, sessionId, text, payload);
             return;
           } catch (e2) {
-            setBusy(false);
+            setBusySafe(false);
             setError(String(e2));
           }
         }
         return;
       }
-      setBusy(false);
+      setBusySafe(false);
       setError(msg);
     }
   };
@@ -971,11 +983,11 @@ export default function Conversation({
         console.error("save permanent permission failed:", err);
       }
     }
-    setBusy(true);
+    setBusySafe(true);
     try {
       await api.sendConfirm(workspace.id, runtimeMode, sessionId, [result]);
     } catch (err) {
-      setBusy(false);
+      setBusySafe(false);
       setError(String(err));
     }
   };
@@ -986,7 +998,7 @@ export default function Conversation({
   // 自动转正常发送，消息不丢。
   const steer = async () => {
     const text = input.trim();
-    if (!text || !busy) return;
+    if (!text || !busyRef.current) return;
     setError("");
     try {
       await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
@@ -999,11 +1011,11 @@ export default function Conversation({
       if (msg.includes("no turn is running")) {
         // busy 失真（turn 恰好结束）：改走正常发送。
         setInput("");
-        setBusy(true);
+        setBusySafe(true);
         try {
           await api.sendMessage(workspace.id, runtimeMode, sessionId, text, []);
         } catch (e2) {
-          setBusy(false);
+          setBusySafe(false);
           setError(String(e2));
         }
         return;

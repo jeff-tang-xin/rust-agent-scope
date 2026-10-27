@@ -726,7 +726,15 @@ pub fn delete_agent(state: State<'_, AppState>, agent_id: String) -> Result<(), 
 /// 合并排队中的 steer 消息与本次输入（steer 文本在前——先说的先被看到）。
 fn merge_with_pending(agent: &agentscope_core::ReActAgent, session_id: &str, message: &str) -> String {
     // 上次运行残留的 steer（循环退出后才到达、没被步边界消费的）合并进本次输入。
-    let steers = agent.take_steers(session_id);
+    // 与本次输入同文本的残留直接丢弃：前端 busy 防抖失效窗口内「sendMessage
+    // 被拒 → 降级 steerTurn」会把同一条消息既当输入又留一份在队列里，合并
+    // 会变成同一句话跑两轮（has_duplicate_steer 只防队列内重复，防不住这个
+    // 跨通道组合）。
+    let steers: Vec<Msg> = agent
+        .take_steers(session_id)
+        .into_iter()
+        .filter(|m| message.is_empty() || m.text() != message)
+        .collect();
     if steers.is_empty() {
         return message.to_string();
     }
