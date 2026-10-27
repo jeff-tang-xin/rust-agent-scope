@@ -285,8 +285,14 @@ export const api = {
   listPermanentPermissions: (workspaceId: string) =>
     invoke<string[]>("list_permanent_permissions", { workspaceId }),
 
-  steerTurn: (workspaceId: string, mode: string, sessionId: string, message: string) =>
-    invoke<boolean>("steer_turn", { workspaceId, mode, sessionId, message }),
+  steerTurn: (
+    workspaceId: string,
+    mode: string,
+    sessionId: string,
+    message: string,
+    attachments?: AttachmentInput[],
+  ) =>
+    invoke<boolean>("steer_turn", { workspaceId, mode, sessionId, message, attachments }),
   interruptTurn: (workspaceId: string, mode: string, sessionId: string) =>
     invoke<boolean>("interrupt_turn", { workspaceId, mode, sessionId }),
 

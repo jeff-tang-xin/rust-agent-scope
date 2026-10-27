@@ -1036,8 +1036,10 @@ pub async fn steer_turn(
     mode: String,
     session_id: String,
     message: String,
+    // 插入消息可携带附件（图片 → Image 块，其他文件 → Data 块），与 send_message 同构。
+    attachments: Option<Vec<AttachmentInput>>,
 ) -> Result<bool, String> {
-    if message.trim().is_empty() {
+    if message.trim().is_empty() && attachments.as_deref().unwrap_or(&[]).is_empty() {
         return Err("steer message is empty".to_string());
     }
     let handle = state.handle(&workspace_id, &mode)?;
@@ -1048,12 +1050,40 @@ pub async fn steer_turn(
     if !session.is_running().await {
         return Err("no turn is running in this session".to_string());
     }
+    // 消息构造：文本块 + 附件块（对齐 send_message：图片走 Image，其余走 Data）。
+    let mut blocks: Vec<ContentBlock> = Vec::new();
+    if !message.trim().is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: message.clone(),
+        });
+    }
+    for att in attachments.unwrap_or_default() {
+        let is_image = att.media_type.starts_with("image/");
+        let source = Source::Base64 {
+            media_type: att.media_type,
+            data: att.data_base64,
+        };
+        if is_image {
+            blocks.push(ContentBlock::Image {
+                source,
+                min_pixels: None,
+                max_pixels: None,
+            });
+        } else {
+            blocks.push(ContentBlock::Data {
+                source,
+                name: Some(att.name),
+            });
+        }
+    }
     // 同一条 steer 重复入队没有价值：IME 连击等极端竞态下前端防重可能
     // 失效，模型会把重复指令当两轮各处理一遍。队列已有相同内容时静默
     // 忽略（对前端表现为成功，条目只显示一条、模型只处理一遍）。
+    // 纯附件（无文本）不去重：空串文本会让两条不同附件的插入被误判重复。
     let delegate = handle.agent.delegate();
-    if !delegate.has_duplicate_steer(&session_id, &message) {
-        delegate.push_steer(&session_id, Msg::user("user", message));
+    let text_key = message.trim().to_string();
+    if text_key.is_empty() || !delegate.has_duplicate_steer(&session_id, &text_key) {
+        delegate.push_steer(&session_id, Msg::new(Role::User, "user", blocks));
     }
     Ok(true)
 }
@@ -1074,7 +1104,7 @@ pub async fn interrupt_turn(
     let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
     let task = session.interrupt().await;
-    // 中断后丢弃未消费的 steer：用户已主动终止，残留的转向消息
+    // 中断后丢弃未消费的 steer：用户已主动终止，残留的插入消息
     // 不应混进后续输入或触发自动续轮。
     handle.agent.delegate().clear_steers(&session_id);
     let had = task.is_some();

@@ -944,12 +944,12 @@ export default function Conversation({
     } catch (e) {
       const msg = String(e);
       // turn 互斥撞锁（steer 续轮的 turn-finished→turn-started 间隙前端 busy
-      // 短暂失真等场景）：后端确实在跑 → 纯文本消息降级为 steer 排队，
-      // turn 结算时自动消费；带附件时无法走 steer，提示稍后重发。
-      if (msg.includes("already running") && payload.length === 0) {
+      // 短暂失真等场景）：后端确实在跑 → 消息（含附件）降级为插入排队，
+      // turn 结算时自动消费。
+      if (msg.includes("already running")) {
         try {
-          await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
-          setNotice("Turn is still running — your message was queued as steering input.");
+          await api.steerTurn(workspace.id, runtimeMode, sessionId, text, payload);
+          setNotice("智能体仍在运行——消息已插入对话，下一步生效。");
           setTimeout(() => setNotice(""), 4000);
         } catch {
           // steer 也被拒（后端守卫：turn 恰好已结束）→ 重试正常发送，
@@ -1028,22 +1028,40 @@ export default function Conversation({
   // 自动转正常发送，消息不丢。
   const steer = async () => {
     const text = input.trim();
-    if (!text || !busyRef.current) return;
+    if ((!text && attachments.length === 0) || !busyRef.current) return;
     setError("");
+    // 本地立即显示：文本 + 附件（图片缩略 / 文件 chip），与 send 同构。
+    const local: Entry[] = [];
+    if (text) local.push({ kind: "msg", role: "user", text, id: nextId() });
+    for (const a of attachments) {
+      local.push(
+        a.preview
+          ? { kind: "image", dataUrl: a.preview, id: nextId() }
+          : { kind: "file", name: a.name, id: nextId() },
+      );
+    }
+    const payload = attachments.map(({ name, media_type, data_base64 }) => ({
+      name,
+      media_type,
+      data_base64,
+    }));
     try {
-      await api.steerTurn(workspace.id, runtimeMode, sessionId, text);
+      await api.steerTurn(workspace.id, runtimeMode, sessionId, text, payload);
       setInput("");
-      setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
-      setNotice("Steering — the agent will pick it up at the next step.");
+      setAttachments([]);
+      setEntries((prev) => [...prev, ...local]);
+      setNotice("已插入对话——智能体下一步会看到。");
       setTimeout(() => setNotice(""), 3000);
     } catch (e) {
       const msg = String(e);
       if (msg.includes("no turn is running")) {
         // busy 失真（turn 恰好结束）：改走正常发送。
         setInput("");
+        setAttachments([]);
+        setEntries((prev) => [...prev, ...local]);
         setBusySafe(true);
         try {
-          await api.sendMessage(workspace.id, runtimeMode, sessionId, text, []);
+          await api.sendMessage(workspace.id, runtimeMode, sessionId, text, payload);
         } catch (e2) {
           setBusySafe(false);
           setError(String(e2));
@@ -1054,7 +1072,7 @@ export default function Conversation({
     }
   };
 
-  // Enter 发送；busy 时 Enter 转为 steer（运行中也能打字补充指令）。
+  // Enter 发送；busy 时 Enter 转为插入（运行中也能打字，消息插入对话下一步生效）。
   // 在途防重：IPC 往返未完成前忽略再次提交（见 submittingRef 注释）。
   const submit = () => {
     if (submittingRef.current) return;
@@ -1416,13 +1434,17 @@ export default function Conversation({
           }}
           placeholder={
             busy
-              ? "运行中也可输入补充指令…（Enter 转向，下一步生效）"
+              ? "运行中输入将插入对话，下一步生效（Enter 插入）"
               : "输入消息…（Enter 发送，Shift+Enter 换行）"
           }
         />
         {busy ? (
-          <button className="btn warn" onClick={() => void steer()} disabled={!input.trim()}>
-            转向
+          <button
+            className="btn warn"
+            onClick={() => void steer()}
+            disabled={!input.trim() && attachments.length === 0}
+          >
+            插入
           </button>
         ) : (
           <button className="btn" onClick={() => void send()} disabled={!input.trim()}>
