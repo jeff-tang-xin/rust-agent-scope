@@ -147,6 +147,12 @@ impl ShellBackend for LocalShellBackend {
         let mut cmd = if cfg!(windows) {
             let mut c = Command::new("cmd");
             c.arg("/C").arg(command);
+            // CREATE_NO_WINDOW：桌面应用里执行 shell 不弹 cmd 黑窗（每次
+            // 工具调用闪一个窗口，体验极差）。
+            #[cfg(windows)]
+            {
+                c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
             c
         } else {
             let mut c = Command::new("sh");

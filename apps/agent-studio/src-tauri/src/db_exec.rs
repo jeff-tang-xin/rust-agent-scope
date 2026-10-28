@@ -355,6 +355,9 @@ async fn execute_cli(
         match db.db_type.as_str() {
             "postgres" => {
                 let mut c = tokio::process::Command::new(resolve_cli_program(db, "psql"));
+        // CREATE_NO_WINDOW：桌面应用里执行 CLI 不弹控制台窗口。
+        #[cfg(windows)]
+        c.creation_flags(0x0800_0000);
                 c.args([
                     "--csv",
                     "-h",
@@ -380,6 +383,9 @@ async fn execute_cli(
             }
             "mysql" => {
                 let mut c = tokio::process::Command::new(resolve_cli_program(db, "mysql"));
+        // CREATE_NO_WINDOW：桌面应用里执行 CLI 不弹控制台窗口。
+        #[cfg(windows)]
+        c.creation_flags(0x0800_0000);
                 c.args([
                     "--batch",
                     // 输出按该字符集编码（不设时 Windows 下跟平台，中文系统
@@ -400,6 +406,9 @@ async fn execute_cli(
             }
             "sqlserver" => {
                 let mut c = tokio::process::Command::new(resolve_cli_program(db, "sqlcmd"));
+        // CREATE_NO_WINDOW：桌面应用里执行 CLI 不弹控制台窗口。
+        #[cfg(windows)]
+        c.creation_flags(0x0800_0000);
                 c.args([
                     "-S",
                     &format!("{},{}", db.host, db.port),
