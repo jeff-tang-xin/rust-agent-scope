@@ -1537,9 +1537,12 @@ pub async fn get_history(
         .delegate()
         .agent_state_for(Some(USER_ID), &session_id)
         .map_err(|e| e.to_string())?;
+    // 压缩摘要消息（compaction 注入给模型的上下文衔接指令）不进历史视图：
+    // 它是内部实现细节，整段英文+summary 全文对用户是噪音。
     Ok(agent_state
         .context
         .iter()
+        .filter(|msg| msg.name != agentscope_harness::memory::COMPACTION_SUMMARY_MSG_NAME)
         .map(|msg| HistoryItem {
             role: format!("{:?}", msg.role).to_lowercase(),
             text: msg.text(),
