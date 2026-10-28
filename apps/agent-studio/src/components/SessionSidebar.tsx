@@ -195,6 +195,9 @@ export default function SessionSidebar({
           </button>
         )}
       </div>
+      <button className="ss-create" onClick={onCreateWorkspace}>
+        + 新建工作区
+      </button>
       {workspaces.map((w) => (
         <div key={w.id}>
           <div
@@ -313,9 +316,6 @@ export default function SessionSidebar({
           )}
         </div>
       ))}
-      <button className="ss-create" onClick={onCreateWorkspace}>
-        + 新建工作区
-      </button>
       </div>
       {/* 右缘竖条：整条可点收窄（把手常驻，好点好找） */}
       <button

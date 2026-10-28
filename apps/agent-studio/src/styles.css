@@ -1416,7 +1416,8 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 }
 .ss-new:hover { color: var(--accent); border-color: var(--accent); }
 .ss-create {
-  margin-top: auto;
+  /* 搜索框正下方、列表上方（不再沉底） */
+  margin: 0 0 6px;
   padding: 7px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);
