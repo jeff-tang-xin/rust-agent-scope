@@ -1353,6 +1353,77 @@ pub async fn write_export_file(path: String, contents: String) -> Result<(), Str
 
 // ---------- sessions ----------
 
+/// 会话与连接的绑定（db 工作区绑数据库、ops 工作区绑服务器）。
+/// 存 `<session-dir>/binding.json`，面板跟随会话切换显示对应连接。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionBinding {
+    /// db 工作区：该会话绑定的数据库档案名。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+    /// ops 工作区：该会话绑定的服务器档案名。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+}
+
+/// 会话目录（校验 session_id 防路径穿越；与 list_sessions 的目录布局一致）。
+fn session_binding_path(
+    state: &State<'_, AppState>,
+    workspace_id: &str,
+    session_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    if session_id.is_empty()
+        || !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("invalid session id".to_string());
+    }
+    Ok(factory::workspace_dir(&state.data_dir, workspace_id)
+        .join("state")
+        .join(USER_ID)
+        .join(session_id)
+        .join("binding.json"))
+}
+
+#[tauri::command]
+pub fn get_session_binding(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    session_id: String,
+) -> SessionBinding {
+    session_binding_path(&state, &workspace_id, &session_id)
+        .ok()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// 绑定/解绑（kind = "database" | "server"；name = None 解除该类绑定）。
+#[tauri::command]
+pub fn set_session_binding(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    session_id: String,
+    kind: String,
+    name: Option<String>,
+) -> Result<(), String> {
+    let path = session_binding_path(&state, &workspace_id, &session_id)?;
+    let mut binding: SessionBinding = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    match kind.as_str() {
+        "database" => binding.database = name.filter(|n| !n.trim().is_empty()),
+        "server" => binding.server = name.filter(|n| !n.trim().is_empty()),
+        other => return Err(format!("unknown binding kind `{other}`")),
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let bytes = serde_json::to_vec_pretty(&binding).map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())
+}
+
 /// 列出某 agent 的已有会话（读 JsonFile 状态库目录布局
 /// `<state-root>/<user>/<session>/agent_state.json`；对齐 service 的会话发现）。
 #[tauri::command]
@@ -1952,6 +2023,8 @@ pub fn run() {
             delete_database,
             list_database_kinds,
             probe_database_cli,
+            get_session_binding,
+            set_session_binding,
             list_servers,
             save_server,
             delete_server,

@@ -92,6 +92,12 @@ export interface SaveDatabaseOutcome {
   cli_error?: string;
 }
 
+/** 会话与连接的绑定（存会话目录 binding.json；面板跟随会话切换）。 */
+export interface SessionBinding {
+  database?: string;
+  server?: string;
+}
+
 /** 驱动形态（后端 adjacently tagged：{"mode":"Cli","program":"psql"} | {"mode":"Bundled"}）。 */
 export interface DatabaseDriverInfo {
   mode: "Cli" | "Bundled";
@@ -231,6 +237,17 @@ export const api = {
   // CLI 探测（连接表单「探测」按钮）：Ok=解析到的完整路径，Err=提示。
   probeDatabaseCli: (dbType: string, cliPath: string) =>
     invoke<string>("probe_database_cli", { dbType, cliPath }),
+
+  // 会话与连接的绑定（db 工作区绑数据库、ops 工作区绑服务器；面板跟随会话）。
+  getSessionBinding: (workspaceId: string, sessionId: string) =>
+    invoke<SessionBinding>("get_session_binding", { workspaceId, sessionId }),
+  setSessionBinding: (
+    workspaceId: string,
+    sessionId: string,
+    kind: "database" | "server",
+    name: string | null,
+  ) =>
+    invoke<void>("set_session_binding", { workspaceId, sessionId, kind, name }),
 
   // SSH 服务器档案 + 连接 + SFTP 文件操作（ops 工作区服务器面板）。
   listServers: () => invoke<ServerConfig[]>("list_servers"),

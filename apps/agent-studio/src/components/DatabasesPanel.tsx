@@ -87,31 +87,40 @@ function isWriteSql(sql: string): boolean {
 export default function DatabasesPanel({
   onCollapse,
   boundDatabases,
+  sessionBinding,
+  onBindDatabase,
   onConfirm,
 }: {
   onCollapse: () => void;
   /** 工作区绑定的数据库白名单；非空时只显示绑定的（能力收窄的可视化）。 */
   boundDatabases?: string[];
+  /** 当前会话绑定的数据库；非空时列表只显示它（面板跟随会话）。 */
+  sessionBinding?: string | null;
+  /** 切换会话绑定（后端写 binding.json；null = 恢复显示全部）。 */
+  onBindDatabase?: (name: string | null) => void;
   /** 全局确认弹窗（App 层渲染，替代 window.confirm）。 */
   onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
+  const [allNames, setAllNames] = useState<string[]>([]); // 绑定下拉选项（白名单内全量）
   const [active, setActive] = useState(""); // 当前展开的数据库
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
     try {
       const all = await api.listDatabases();
-      // 绑定白名单非空 → 只显示绑定的数据库（与工具面能力一致）。
+      // 两级过滤：工作区白名单（能力收窄）→ 会话绑定（面板跟随会话）。
+      const whitelisted = boundDatabases?.length
+        ? all.filter((d) => boundDatabases.includes(d.name))
+        : all;
+      setAllNames(whitelisted.map((d) => d.name));
       setDatabases(
-        boundDatabases?.length
-          ? all.filter((d) => boundDatabases.includes(d.name))
-          : all,
+        sessionBinding ? whitelisted.filter((d) => d.name === sessionBinding) : whitelisted,
       );
     } catch (e) {
       setError(String(e));
     }
-  }, [boundDatabases]);
+  }, [boundDatabases, sessionBinding]);
 
   useEffect(() => {
     void reload();
@@ -122,6 +131,22 @@ export default function DatabasesPanel({
       <div className="file-panel-head">
         <span>数据库</span>
         <span className="spacer" />
+        {allNames.length > 1 && onBindDatabase && (
+          <select
+            className="field"
+            style={{ width: "auto", padding: "2px 6px", fontSize: 12 }}
+            value={sessionBinding ?? ""}
+            title="本会话绑定的数据库（面板与查询跟随；选「全部」恢复）"
+            onChange={(e) => onBindDatabase(e.target.value || null)}
+          >
+            <option value="">全部</option>
+            {allNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        )}
         <button className="icon-btn" title="刷新" onClick={() => void reload()}>
           ⟳
         </button>

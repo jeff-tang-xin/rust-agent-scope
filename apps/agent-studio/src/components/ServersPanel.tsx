@@ -19,15 +19,22 @@ function fmtSize(n: number): string {
 export default function ServersPanel({
   onCollapse,
   boundServers,
+  sessionBinding,
+  onBindServer,
   onConfirm,
 }: {
   onCollapse: () => void;
   /** 工作区绑定的服务器白名单；非空时只显示绑定的（能力收窄的可视化）。 */
   boundServers?: string[];
+  /** 当前会话绑定的服务器；非空时列表只显示它（面板跟随会话）。 */
+  sessionBinding?: string | null;
+  /** 切换会话绑定（后端写 binding.json；null = 恢复显示全部）。 */
+  onBindServer?: (name: string | null) => void;
   /** 全局确认弹窗（App 层渲染，替代 window.confirm）。 */
   onConfirm?: (title: string, message: string) => Promise<boolean>;
 }) {
   const [servers, setServers] = useState<ServerConfig[]>([]);
+  const [allNames, setAllNames] = useState<string[]>([]); // 绑定下拉选项（白名单内全量）
   const [connected, setConnected] = useState<Set<string>>(new Set());
   const [active, setActive] = useState(""); // 当前操作的服务器
   const [error, setError] = useState("");
@@ -36,10 +43,14 @@ export default function ServersPanel({
   const reload = useCallback(async () => {
     try {
       const all = await api.listServers();
-      // 绑定白名单非空 → 只显示绑定的服务器（与工具面能力一致）。
-      const list = boundServers?.length
+      // 两级过滤：工作区白名单（能力收窄）→ 会话绑定（面板跟随会话）。
+      const whitelisted = boundServers?.length
         ? all.filter((s) => boundServers.includes(s.name))
         : all;
+      setAllNames(whitelisted.map((s) => s.name));
+      const list = sessionBinding
+        ? whitelisted.filter((s) => s.name === sessionBinding)
+        : whitelisted;
       setServers(list);
       // 恢复连接状态显示（后端连接池仍在的保持绿点）。
       const statuses = await Promise.all(list.map((s) => api.sshStatus(s.name)));
@@ -47,7 +58,7 @@ export default function ServersPanel({
     } catch (e) {
       setError(String(e));
     }
-  }, [boundServers]);
+  }, [boundServers, sessionBinding]);
 
   useEffect(() => {
     void reload();
@@ -85,6 +96,22 @@ export default function ServersPanel({
       <div className="file-panel-head">
         <span>服务器</span>
         <span className="spacer" />
+        {allNames.length > 1 && onBindServer && (
+          <select
+            className="field"
+            style={{ width: "auto", padding: "2px 6px", fontSize: 12 }}
+            value={sessionBinding ?? ""}
+            title="本会话绑定的服务器（面板跟随；选「全部」恢复）"
+            onChange={(e) => onBindServer(e.target.value || null)}
+          >
+            <option value="">全部</option>
+            {allNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        )}
         <button className="icon-btn" title="刷新" onClick={() => void reload()}>
           ⟳
         </button>

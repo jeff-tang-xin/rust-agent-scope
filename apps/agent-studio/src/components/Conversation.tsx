@@ -8,7 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
+import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type SessionBinding, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 import ServersPanel from "./ServersPanel";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
@@ -532,6 +532,28 @@ export default function Conversation({
   useEffect(() => {
     localStorage.setItem(draftKey, input);
   }, [draftKey, input]);
+
+  // 会话与连接的绑定（db 工作区绑数据库、ops 工作区绑服务器）：面板跟随
+  // 会话切换显示对应连接。绑定存后端会话目录，跨重启保留。
+  const [binding, setBinding] = useState<SessionBinding>({});
+  useEffect(() => {
+    let alive = true;
+    api
+      .getSessionBinding(workspace.id, sessionId)
+      .then((b) => alive && setBinding(b ?? {}))
+      .catch(() => alive && setBinding({}));
+    return () => {
+      alive = false;
+    };
+  }, [workspace.id, sessionId]);
+  const bindConnection = async (kind: "database" | "server", name: string | null) => {
+    setBinding((prev) => ({ ...prev, [kind]: name ?? undefined }));
+    try {
+      await api.setSessionBinding(workspace.id, sessionId, kind, name);
+    } catch (e) {
+      onToast?.("error", String(e));
+    }
+  };
 
   // 会话内错误/提示统一走全局 toast（右上角）：state 只作事件通道，
   // 变化即转发并清空——所有既有 setError/setNotice 调用点无需改动。
@@ -1879,12 +1901,16 @@ export default function Conversation({
           <ServersPanel
             onCollapse={() => setFilesOpen(false)}
             boundServers={workspace.bound_servers}
+            sessionBinding={binding.server ?? null}
+            onBindServer={(name) => void bindConnection("server", name)}
             onConfirm={onConfirm}
           />
         ) : workspace.kind === "db" ? (
           <DatabasesPanel
             onCollapse={() => setFilesOpen(false)}
             boundDatabases={workspace.bound_databases}
+            sessionBinding={binding.database ?? null}
+            onBindDatabase={(name) => void bindConnection("database", name)}
             onConfirm={onConfirm}
           />
         ) : (
