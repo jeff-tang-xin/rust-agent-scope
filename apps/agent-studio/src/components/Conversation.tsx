@@ -1689,9 +1689,9 @@ export default function Conversation({
         {open && (
           <AutoScrollBody className="entry-body tool-body" active={e.ok === undefined}>
             {e.args && (
-              <div className="io-wrap">
+              <div className="tool-io-wrap">
                 <button
-                  className="io-copy"
+                  className="tool-copy"
                   title="复制参数"
                   onClick={() => void copyText(prettyArgs(e.args))}
                 >
@@ -1701,9 +1701,9 @@ export default function Conversation({
               </div>
             )}
             {e.result !== undefined && (
-              <div className="io-wrap">
+              <div className="tool-io-wrap">
                 <button
-                  className="io-copy"
+                  className="tool-copy"
                   title="复制输出"
                   onClick={() => void copyText(e.result ?? "")}
                 >

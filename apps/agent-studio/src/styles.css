@@ -234,7 +234,7 @@ body {
 
 /* ---------- DataViewerModal（黑板/记忆/文件预览共用弹层） ---------- */
 
-.dvm { width: 760px; display: flex; flex-direction: column; }
+.dvm { width: 100%; display: flex; flex-direction: column; min-height: 0; }
 .dvm-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .dvm-head h2 {
   margin: 0;
@@ -246,7 +246,8 @@ body {
 }
 .dvm-head .spacer { flex: 1; }
 .dvm .dvm-code {
-  max-height: 62vh;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -259,8 +260,8 @@ body {
   margin: 0;
 }
 .dvm .dvm-edit {
-  min-height: 46vh;
-  max-height: 62vh;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -273,7 +274,8 @@ body {
 }
 /* markdown 渲染态（记忆台账 / 黑板条目） */
 .dvm .dvm-md {
-  max-height: 62vh;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1226,8 +1228,8 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
   position: absolute;
   top: 4px;
   right: 4px;
-  padding: 1px 7px;
-  font-size: 11px;
+  padding: 3px 12px;
+  font-size: 12px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-raised);
@@ -1457,11 +1459,11 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .tool-card { border-left: 3px solid var(--accent); }
 .tool-io {
   margin: 0 0 6px;
-  padding: 6px 8px;
+  padding: 7px 10px;
   background: var(--bg);
   border-radius: var(--radius);
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
@@ -1605,6 +1607,31 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 /* ---------- 确认弹窗（替换 window.confirm，风格统一） ---------- */
 
 .confirm-modal { width: 420px; }
+
+/* ---------- 抽屉：右侧全高滑出（文件/数据查看——比居中弹窗能看更多） ---------- */
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 23, 0.45);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 100;
+}
+.drawer {
+  width: min(880px, 88vw);
+  height: 100%;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-overlay);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in 0.2s ease-out;
+}
+@keyframes drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
 
 .confirm-title { font-size: 14.5px; font-weight: 600; margin-bottom: 8px; }
 

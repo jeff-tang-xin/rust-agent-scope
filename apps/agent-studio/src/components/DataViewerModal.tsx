@@ -70,8 +70,8 @@ export default function DataViewerModal({
   };
 
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal file-preview dvm" onClick={(e) => e.stopPropagation()}>
+    <div className="drawer-mask" onClick={onClose}>
+      <div className="drawer dvm" onClick={(e) => e.stopPropagation()}>
         <div className="dvm-head">
           <h2 title={title}>{title}</h2>
           <span className="spacer" />
