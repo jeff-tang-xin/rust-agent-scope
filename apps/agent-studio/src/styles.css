@@ -1103,6 +1103,24 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .confirm-banner .banner-go { color: var(--amber); font-size: 12px; flex: none; }
 
 /* 「回到底部」悬浮钮（消息区右下，上滚后出现） */
+.actor-more {
+  margin: 4px 0 4px 28px;
+  padding: 3px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.actor-more:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.elapsed {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
 .messages-wrap {
   /* 悬浮钮的定位父级：没有它 absolute 会冒泡到应用根部，
      bottom:14px 落在输入区行上压住「清空」按钮 */

@@ -3,7 +3,16 @@
 // 事件处理对齐 Java AgentSessionView.apply 的思路：增量 apply 事件维护视图，
 // AgentResult 为最终消息的权威来源，流式 delta 仅作过程展示。
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
@@ -20,7 +29,7 @@ type Entry =
   | { kind: "thinking"; id: string; text: string; ts?: string; streaming?: boolean; open?: boolean; actor?: string }
   | { kind: "image"; id: string; dataUrl: string; ts?: string }
   | { kind: "file"; id: string; name: string; ts?: string }
-  | { kind: "indicator"; id: string; text: string; ts?: string }
+  | { kind: "indicator"; id: string; text: string; ts?: string; since?: number }
   | { kind: "confirm"; id: string; calls: Array<Record<string, unknown>>; ts?: string };
 
 let entrySeq = 0;
@@ -455,6 +464,18 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
+// 「思考中…」计时：模型首 token 延迟（大上下文 prefill / 推理模型服务端
+// 思考）可达数十秒——秒数实时跳动让等待可感知，避免误判卡死。
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.max(0, Math.round((now - since) / 1000));
+  return <span className="elapsed"> · {s}s</span>;
+}
+
 export default function Conversation({
   workspace,
   agent,
@@ -519,6 +540,10 @@ export default function Conversation({
   const [lightbox, setLightbox] = useState<string | null>(null);
   // 「回到底部」悬浮钮：用户上滚离底 >80px 时出现（流式输出不打扰查看历史）。
   const [showJump, setShowJump] = useState(false);
+  // 子 agent 条目折叠：已展开的连续 actor 段（key = 段首条目 id）。
+  const [expandedActorGroups, setExpandedActorGroups] = useState<Set<string>>(
+    new Set(),
+  );
   // 输入历史（↑ 召回）：仅记录成功发出的文本，会话内存态。
   const inputHistoryRef = useRef<string[]>([]);
   const historyIdxRef = useRef(-1);
@@ -532,6 +557,38 @@ export default function Conversation({
   useEffect(() => {
     localStorage.setItem(draftKey, input);
   }, [draftKey, input]);
+
+  // 子 agent 条目折叠预处理：连续 actor 段默认只显示前 3 条，其余收进
+  // 「展开更多」——子 agent 一次任务动辄几十个工具卡，把主时间线撑得没法看。
+  // 流式中的条目始终显示（折叠会藏掉正在发生的动作）。
+  const actorFold = useMemo(() => {
+    const hiddenByGroup = new Map<string, string>();
+    const moreByAfterId = new Map<string, { key: string; count: number }>();
+    let key = "";
+    let count = 0;
+    let thirdId = "";
+    const flush = () => {
+      if (key && count > 3) moreByAfterId.set(thirdId, { key, count: count - 3 });
+      key = "";
+      count = 0;
+      thirdId = "";
+    };
+    for (const e of entries) {
+      // image/file 等条目没有 actor/streaming 字段（union 分支差异）。
+      const actor = "actor" in e ? e.actor : undefined;
+      const streaming = "streaming" in e ? e.streaming : false;
+      if (actor) {
+        if (!key) key = e.id;
+        count += 1;
+        if (count === 3) thirdId = e.id;
+        if (count > 3 && !streaming) hiddenByGroup.set(e.id, key);
+      } else {
+        flush();
+      }
+    }
+    flush();
+    return { hiddenByGroup, moreByAfterId };
+  }, [entries]);
 
   // 会话与连接的绑定（db 工作区绑数据库、ops 工作区绑服务器）：面板跟随
   // 会话切换显示对应连接。绑定存后端会话目录，跨重启保留。
@@ -742,6 +799,7 @@ export default function Conversation({
               text: "正在压缩上下文，预计需要几分钟，请稍等…",
               ts: nowTime(),
               id: nextId(),
+              since: Date.now(),
             },
           ]);
           break;
@@ -760,7 +818,13 @@ export default function Conversation({
         case "MODEL_CALL_START":
           setEntries((prev) => [
             ...prev,
-            { kind: "indicator", text: "思考中…", ts: nowTime(), id: nextId() },
+            {
+              kind: "indicator",
+              text: "思考中…",
+              ts: nowTime(),
+              id: nextId(),
+              since: Date.now(),
+            },
           ]);
           break;
         case "MODEL_CALL_END":
@@ -1578,7 +1642,12 @@ export default function Conversation({
       );
     }
     if (e.kind === "indicator") {
-      return <div className="turn-indicator">{e.text}</div>;
+      return (
+        <div className="turn-indicator">
+          {e.text}
+          {e.since && <Elapsed since={e.since} />}
+        </div>
+      );
     }
     // 工具卡片：运行中默认展开（参数/输出实时可见），结束默认收起；点击头部切换。
     const open = e.open ?? e.ok === undefined;
@@ -1737,6 +1806,9 @@ export default function Conversation({
           </div>
         )}
         {entries.map((e, idx) => {
+          // 子 agent 折叠：段内第 4 条起隐藏，段尾挂「展开更多」。
+          const groupKey = actorFold.hiddenByGroup.get(e.id);
+          if (groupKey && !expandedActorGroups.has(groupKey)) return null;
           // 时间线行：左侧节点圆点 + 时间标签，右侧原条目渲染。
           const rowKind =
             e.kind === "msg"
@@ -1747,8 +1819,8 @@ export default function Conversation({
           // 历史回放中同一条消息展开的多个条目共享消息时间戳：
           // 连续相同时间只在首条显示，避免「同一秒」逐行堆叠。
           const showTime = e.ts && e.ts !== entries[idx - 1]?.ts;
-          return (
-            <div key={e.id} className={`tl-row tl-${rowKind}`}>
+          const row = (
+            <div className={`tl-row tl-${rowKind}`}>
               <span className="tl-dot" aria-hidden />
               <div className="tl-body">
                 {showTime ? <div className="tl-time">{e.ts}</div> : null}
@@ -1756,6 +1828,25 @@ export default function Conversation({
               </div>
             </div>
           );
+          const more = actorFold.moreByAfterId.get(e.id);
+          if (more && !expandedActorGroups.has(more.key)) {
+            return (
+              <Fragment key={e.id}>
+                {row}
+                <button
+                  className="actor-more"
+                  onClick={() =>
+                    setExpandedActorGroups(
+                      (prev) => new Set(prev).add(more.key),
+                    )
+                  }
+                >
+                  ↓ 展开子智能体的另外 {more.count} 条
+                </button>
+              </Fragment>
+            );
+          }
+          return <Fragment key={e.id}>{row}</Fragment>;
         })}
         </div>
         {showJump && (
