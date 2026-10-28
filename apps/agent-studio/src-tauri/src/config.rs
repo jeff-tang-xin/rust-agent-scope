@@ -23,6 +23,10 @@ pub struct ModelProviderConfig {
     pub api_key: String,
     /// 默认模型名（如 `deepseek-chat`、`qwen-plus`）。
     pub model: String,
+    /// 上下文窗口（token；0/缺省 = 未知）——压缩触发预算 = 窗口 − 20000；
+    /// 未配置时回落 160k fallback，条数阈值成为实际触发器。
+    #[serde(default)]
+    pub context_window: usize,
 }
 
 /// Agent 定义（≈ Managed Agent 定义的最小面）。

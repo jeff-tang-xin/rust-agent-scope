@@ -182,7 +182,11 @@ pub struct CompactionConfig {
 impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
-            trigger_messages: 50,
+            // 200 条（≈100 次工具调用）：50 条对 agent 工作流过激——每次
+            // 工具调用产生 tool_use+tool_result 两条消息，一轮大任务就触发，
+            // 表现为「压缩太频繁」。主防线是 token 阈值（窗口−reserved），
+            // 条数只是窗口未知模型（fallback 160k）的兜底。
+            trigger_messages: 200,
             trigger_tokens: 0,
             reserved: 20_000,
             keep_messages: 20,

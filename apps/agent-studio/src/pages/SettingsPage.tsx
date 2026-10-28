@@ -16,7 +16,13 @@ import AgentFormModal from "../components/AgentFormModal";
 import PasteButton from "../components/PasteButton";
 
 function emptyProvider(): ModelProviderConfig {
-  return { name: "", base_url: "https://api.openai.com/v1", api_key: "", model: "" };
+  return {
+    name: "",
+    base_url: "https://api.openai.com/v1",
+    api_key: "",
+    model: "",
+    context_window: 0,
+  };
 }
 
 function emptyDatabase(): DatabaseServerConfig {
@@ -277,6 +283,22 @@ export default function SettingsPage({
                 className="field"
                 value={providerDraft.base_url}
                 onChange={(e) => setProviderDraft({ ...providerDraft, base_url: e.target.value })}
+              />
+              <div className="lbl-row">
+                <label className="lbl">上下文窗口（token，留空 = 未知；压缩预算 = 窗口 − 20000）</label>
+              </div>
+              <input
+                className="field"
+                type="number"
+                min={0}
+                placeholder="如 128000（deepseek 128k / qwen 131072）——不填则压缩只按消息条数兜底"
+                value={providerDraft.context_window || ""}
+                onChange={(e) =>
+                  setProviderDraft({
+                    ...providerDraft,
+                    context_window: Number(e.target.value) || 0,
+                  })
+                }
               />
               <div className="lbl-row">
                 <label className="lbl">API Key（仅存本地配置文件）</label>

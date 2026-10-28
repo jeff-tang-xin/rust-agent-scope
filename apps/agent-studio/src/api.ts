@@ -15,6 +15,8 @@ export interface ModelProviderConfig {
   base_url: string;
   api_key: string;
   model: string;
+  /** 上下文窗口（token；0/缺省 = 未知）——压缩触发预算的依据。 */
+  context_window?: number;
 }
 
 /** 智能体定义：纯人设 + Provider 绑定（无类别/目录/成员——那些归工作区）。 */

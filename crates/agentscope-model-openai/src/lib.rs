@@ -38,6 +38,8 @@ pub struct OpenAIChatModel {
     model: String,
     temperature: Option<f64>,
     max_tokens: Option<u32>,
+    /// 上下文窗口（token；0 = 未知）——压缩预算按「窗口 − reserved」计算。
+    context_window: usize,
     client: Client,
     /// 消息与参数的格式化器（对应 Java `OpenAIChatFormatter`）。
     formatter: OpenAIChatFormatter,
@@ -52,6 +54,7 @@ impl OpenAIChatModel {
             model: model.into(),
             temperature: None,
             max_tokens: None,
+            context_window: 0,
             client: Client::new(),
             formatter: OpenAIChatFormatter::new(),
         }
@@ -60,6 +63,12 @@ impl OpenAIChatModel {
     /// 替换服务地址（用于 DashScope 兼容模式、DeepSeek、Ollama、vLLM 等）。
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// 设置上下文窗口（token；0 = 未知）——压缩触发预算的依据。
+    pub fn with_context_window(mut self, tokens: usize) -> Self {
+        self.context_window = tokens;
         self
     }
 
@@ -236,6 +245,10 @@ pub struct OpenAIUsage {
 
 #[async_trait]
 impl Model for OpenAIChatModel {
+    fn context_window_size(&self) -> usize {
+        self.context_window
+    }
+
     async fn call(&self, request: ChatRequest) -> Result<ChatResponse> {
         let body = self.build_request(&request, false)?;
 
@@ -576,6 +589,17 @@ async fn pump_sse(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn context_window_defaults_unknown_and_is_settable() {
+        assert_eq!(OpenAIChatModel::new("k", "m").context_window_size(), 0);
+        assert_eq!(
+            OpenAIChatModel::new("k", "m")
+                .with_context_window(128_000)
+                .context_window_size(),
+            128_000
+        );
+    }
+
     use super::*;
 
     /// 流式工具调用分片按 index 聚合：首片带 id/name，后续片只有 arguments 增量。

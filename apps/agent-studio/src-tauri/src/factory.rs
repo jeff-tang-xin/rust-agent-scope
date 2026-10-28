@@ -122,6 +122,9 @@ fn build_model(provider: &ModelProviderConfig) -> Result<Arc<dyn Model>, String>
     if !provider.base_url.is_empty() {
         model = model.with_base_url(&provider.base_url);
     }
+    if provider.context_window > 0 {
+        model = model.with_context_window(provider.context_window);
+    }
     Ok(Arc::new(model))
 }
 
