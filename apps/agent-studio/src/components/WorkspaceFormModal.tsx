@@ -54,6 +54,10 @@ export default function WorkspaceFormModal({
   const [error, setError] = useState("");
   // 保存中：按钮禁用防重复提交（后端写配置文件非原子瞬间）。
   const [saving, setSaving] = useState(false);
+  // 用户是否手动改过 Name/Workspace：改过则不再自动预填（db 工作区
+  // 勾选数据库时按连接名自动填，用户手动调整优先）。
+  const [nameTouched, setNameTouched] = useState(false);
+  const [dirTouched, setDirTouched] = useState(false);
 
   const editing = Boolean(initial?.id);
   const agent = agents.find((a) => a.id === agentId);
@@ -71,6 +75,19 @@ export default function WorkspaceFormModal({
     setter((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
+  };
+
+  // db 工作区：勾选数据库后自动预填 Name/Workspace（用第一个勾选的连接
+  // 名；目录约定 ~/.ox/db/<连接名>，后端展开 ~）。用户手动改过的不覆盖。
+  const toggleBoundDatabase = (name: string) => {
+    const next = boundDatabases.includes(name)
+      ? boundDatabases.filter((n) => n !== name)
+      : [...boundDatabases, name];
+    setBoundDatabases(next);
+    if (editing || next.length === 0) return;
+    const first = next[0];
+    if (!nameTouched) setName(first);
+    if (!dirTouched) setDir(`~/.ox/db/${first}`);
   };
 
   const save = async () => {
@@ -147,8 +164,11 @@ export default function WorkspaceFormModal({
         <input
           className="field"
           value={name}
-          placeholder="如 my-project"
-          onChange={(e) => setName(e.target.value)}
+          placeholder="如 my-project（db 工作区勾选数据库后自动填连接名）"
+          onChange={(e) => {
+            setNameTouched(true);
+            setName(e.target.value);
+          }}
         />
 
         <div className="lbl-row">
@@ -157,9 +177,12 @@ export default function WorkspaceFormModal({
         </div>
         <input
           className="field"
-          placeholder="如 F:\java\my-project —— 智能体的文件工具将锚定该目录"
+          placeholder="如 F:\java\my-project 或 ~/.ox/db/my —— 智能体的文件工具将锚定该目录"
           value={dir}
-          onChange={(e) => setDir(e.target.value)}
+          onChange={(e) => {
+            setDirTouched(true);
+            setDir(e.target.value);
+          }}
         />
 
         {kind === "collab" && (
@@ -227,7 +250,7 @@ export default function WorkspaceFormModal({
                 <input
                   type="checkbox"
                   checked={boundDatabases.includes(d.name)}
-                  onChange={() => toggleBound(setBoundDatabases, d.name)}
+                  onChange={() => toggleBoundDatabase(d.name)}
                 />
                 <span className="name">{d.name}</span>
                 <span className="desc">

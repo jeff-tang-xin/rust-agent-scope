@@ -82,13 +82,37 @@ pub(crate) fn workspace_dir(data_dir: &Path, workspace_id: &str) -> PathBuf {
     data_dir.join("workspaces").join(workspace_id)
 }
 
+/// 用户主目录（Windows USERPROFILE / unix HOME）。
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+}
+
+/// 展开 `~` 前缀为用户主目录（如 `~/.ox/db/my`）；其余原样。
+/// 不展开时 `~` 会被 Sandboxed 工作区当成字面目录名在根下创建。
+fn expand_home(dir: &str) -> std::path::PathBuf {
+    let t = dir.trim();
+    if let Some(rest) = t.strip_prefix("~/").or_else(|| t.strip_prefix("~\\")) {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    if t == "~" {
+        if let Some(home) = home_dir() {
+            return home;
+        }
+    }
+    std::path::PathBuf::from(t)
+}
+
 /// 工作区文件根（agent 文件工具的锚定目录；文件列表命令用同一解析，
-/// 保证面板看到的与 agent 干活的目录一致）。
+/// 保证面板看到的与 agent 干活的目录一致）。支持 `~` 前缀。
 pub fn resolve_workspace_root(data_dir: &Path, ws: &WorkspaceConfig) -> PathBuf {
     if ws.dir.trim().is_empty() {
         workspace_dir(data_dir, &ws.id).join("workspace")
     } else {
-        std::path::PathBuf::from(ws.dir.trim())
+        expand_home(&ws.dir)
     }
 }
 
@@ -711,6 +735,21 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn expand_home_resolves_user_profile() {
+        // 主目录变量存在时 ~ 展开为主目录前缀（不再以字面 ~ 开头）
+        if std::env::var_os("USERPROFILE").is_some() || std::env::var_os("HOME").is_some() {
+            let p = expand_home("~/.ox/db/my");
+            assert!(!p.starts_with("~"), "got: {p:?}");
+            assert!(p.ends_with(".ox/db/my") || p.ends_with(".ox\\db\\my"), "got: {p:?}");
+        }
+        // 无 ~ 前缀原样
+        assert_eq!(
+            expand_home("F:\\java\\x"),
+            std::path::PathBuf::from("F:\\java\\x")
+        );
+    }
+
     use super::*;
 
     #[test]
