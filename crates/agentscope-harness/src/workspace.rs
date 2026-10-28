@@ -516,20 +516,32 @@ impl Filesystem for LocalFilesystem {
             return Ok(Vec::new());
         }
         let mut out = Vec::new();
+        // 遍历上限 + 提前终止：匹配数达搜索硬上限即停（此前全量搜完，
+        // 大仓库（target/node_modules 未跳过时数十万文件）表现为"卡死"）。
+        let mut visited = 0usize;
         let mut stack = vec![base.clone()];
-        while let Some(dir) = stack.pop() {
+        'outer: while let Some(dir) = stack.pop() {
             let mut entries = match tokio::fs::read_dir(&dir).await {
                 Ok(entries) => entries,
                 Err(_) => continue,
             };
             while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+                visited += 1;
+                if visited >= GLOB_WALK_LIMIT || out.len() >= crate::tools_filesystem::MAX_SEARCH_LIMIT {
+                    break 'outer;
+                }
                 let entry_path = entry.path();
                 let meta = match entry.metadata().await {
                     Ok(meta) => meta,
                     Err(_) => continue,
                 };
                 if meta.is_dir() {
-                    stack.push(entry_path);
+                    // 跳过依赖/构建产物目录（与 glob 同策略）：噪音大且拖慢
+                    // 遍历——此前 grep 不跳，rust 项目搜一次读遍 target/。
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !GLOB_SKIP_DIRS.contains(&name.as_str()) {
+                        stack.push(entry_path);
+                    }
                     continue;
                 }
                 if !meta.is_file() || meta.len() > self.max_grep_file_bytes {
@@ -560,6 +572,9 @@ impl Filesystem for LocalFilesystem {
                             line: index + 1,
                             text: line.to_string(),
                         });
+                        if out.len() >= crate::tools_filesystem::MAX_SEARCH_LIMIT {
+                            break 'outer;
+                        }
                     }
                 }
             }
@@ -1290,6 +1305,26 @@ mod tests {
         );
         fs.delete(&rc, "notes/moved.txt").await.unwrap();
         assert!(!fs.exists(&rc, "notes/moved.txt").await.unwrap());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[tokio::test]
+    async fn grep_skips_dependency_dirs_and_early_exits() {
+        let root = temp_workspace("grep-skip");
+        let fs = LocalFilesystem::new(&root, LocalFsMode::Rooted, PathPolicy::empty());
+        let rc = RuntimeContext::new();
+        // src 命中；target/node_modules 里的同名内容必须被跳过
+        fs.write(&rc, "src/main.rs", "let needle = 1;").await.unwrap();
+        fs.write(&rc, "target/debug/dep.rs", "needle here").await.unwrap();
+        fs.write(&rc, "node_modules/pkg/i.js", "needle too").await.unwrap();
+        let matches = fs.grep(&rc, "needle", None, None).await.unwrap();
+        assert_eq!(matches.len(), 1, "got: {matches:?}");
+        assert_eq!(matches[0].path, "src/main.rs");
+        // 显式 path 指到依赖目录：尊重用户意图仍搜索——跳过逻辑只作用于
+        // 递归遍历途中路过的依赖目录，不拦截显式指定
+        let in_target = fs.grep(&rc, "needle", Some("target"), None).await.unwrap();
+        assert_eq!(in_target.len(), 1, "got: {in_target:?}");
+        assert_eq!(in_target[0].path, "target/debug/dep.rs");
         std::fs::remove_dir_all(&root).ok();
     }
 

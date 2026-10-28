@@ -1700,6 +1700,7 @@ export default function Conversation({
       </div>
       
       
+      <div className="messages-wrap">
       <div
         className="messages"
         ref={scrollRef}
@@ -1769,6 +1770,7 @@ export default function Conversation({
             ↓ 回到底部
           </button>
         )}
+      </div>
       </div>
       {attachments.length > 0 && (
         <div className="attach-chips">
