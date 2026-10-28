@@ -182,6 +182,8 @@ export default function SettingsPage({
     }
   };
 
+  // 导航显隐开关的重渲染触发器（值本身在 localStorage，UI 只需刷新）。
+  const [navTick, setNavTick] = useState(0);
   // 当前编辑中的数据库类型描述符（字段启停/标签/驱动提示都按注册表元数据走）。
   const dbKind = dbDraft ? dbKinds.find((k) => k.id === dbDraft.db_type) : undefined;
 
@@ -220,6 +222,33 @@ export default function SettingsPage({
                 </button>
               );
             })}
+          </div>
+          <div className="desc" style={{ marginTop: 12 }}>
+            导航显示——隐藏不常用的菜单（本地记忆，立即生效）
+          </div>
+          <div key={navTick} style={{ display: "flex", gap: 16 }}>
+            {(
+              [
+                ["ox-nav:show-ops", "运维菜单"],
+                ["ox-nav:show-db", "数据库运维菜单"],
+              ] as const
+            ).map(([key, label]) => (
+              <label
+                key={key}
+                style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={localStorage.getItem(key) !== "0"}
+                  onChange={(e) => {
+                    localStorage.setItem(key, e.target.checked ? "1" : "0");
+                    setNavTick((t) => t + 1);
+                    window.dispatchEvent(new CustomEvent("ox-nav-change"));
+                  }}
+                />
+                {label}
+              </label>
+            ))}
           </div>
         </div>
 

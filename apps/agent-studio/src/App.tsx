@@ -55,6 +55,26 @@ export default function App() {
   } | null>(null);
   // 当前选中的工作区（切类别时自动落到该类第一个）。
   const [selectedId, setSelectedId] = useState("");
+  // 导航显隐配置（Settings 页「界面」可改，localStorage 持久 + CustomEvent 通知）。
+  const readNav = (key: string) => localStorage.getItem(key) !== "0";
+  const [showOps, setShowOps] = useState(() => readNav("ox-nav:show-ops"));
+  const [showDb, setShowDb] = useState(() => readNav("ox-nav:show-db"));
+  useEffect(() => {
+    const onNavChange = () => {
+      setShowOps(readNav("ox-nav:show-ops"));
+      setShowDb(readNav("ox-nav:show-db"));
+    };
+    window.addEventListener("ox-nav-change", onNavChange);
+    return () => window.removeEventListener("ox-nav-change", onNavChange);
+  }, []);
+  const cats = CATS.filter((c) =>
+    c.key === "ops" ? showOps : c.key === "db" ? showDb : true,
+  );
+  // 正在查看的类别被隐藏时回落到「协同」，避免停在不可达的 tab 上。
+  useEffect(() => {
+    if (tab !== "settings" && !cats.some((c) => c.key === tab)) setTab("collab");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOps, showDb]);
   // 每个工作区独立的运行方式（solo/team）与当前 session——多项目互不干扰。
   // 上次会话/运行方式按工作区记忆（localStorage）：刷新后回到原会话，
   // 而不是回落到固定 defaultSession（"main"）——那会显示另一个会话的历史，
@@ -253,7 +273,7 @@ export default function App() {
       <header className="topbar">
         <span className="brand">Ox Agent Studio</span>
         <nav className="topbar-nav">
-          {CATS.map((c) => {
+          {cats.map((c) => {
             // 该类别下是否有运行中的 turn（跨工作区聚合，切走也能看到）。
             const catRunning = workspaces.some(
               (w) => w.kind === c.key && [...running].some((k) => k.startsWith(`${w.id}:`)),
