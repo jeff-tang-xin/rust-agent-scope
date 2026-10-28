@@ -811,6 +811,10 @@ export default function Conversation({
 
     const un1 = onAgentEvent((payload: AgentEventPayload) => {
       if (!applies(payload)) return;
+      // 事件在流 = turn 在跑：busy 失真自愈。send/steer/sendConfirm 的失败
+      // 路径会盲目置 false，但后端 turn 并未停（如 steer 撞锁降级、确认调用
+      // 失败）——这里统一拉回真值；turn 真正结束时 TURN_FINISHED 会再置 false。
+      setBusySafe(true);
       const ev = payload.event;
       switch (ev?.type) {
         case "CONTEXT_COMPACTION_START":
