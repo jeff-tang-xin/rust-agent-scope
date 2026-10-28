@@ -1081,6 +1081,8 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 /* 收窄态：只留展开按钮的窄条 + 会话小图标（点击直达切换） */
 .session-sidebar.collapsed {
   width: 36px;
+  /* 覆盖两列布局：收窄态没有右缘竖条，恢复纵向堆叠（展开钮 + 会话小图标列） */
+  flex-direction: column;
   padding: 10px 4px;
   align-items: center;
 }
