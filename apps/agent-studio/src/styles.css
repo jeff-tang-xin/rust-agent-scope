@@ -1041,15 +1041,41 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .session-sidebar {
   width: 200px;
   flex-shrink: 0;
+  /* 两列：内容列（滚动）+ 右缘收窄竖条（全高常驻） */
+  display: flex;
+  flex-direction: row;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.ss-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 10px 8px;
-  border-right: 1px solid var(--border);
   overflow-y: auto;
   /* 长路径/长名一律截断，不出横向滚动条 */
   overflow-x: hidden;
-  background: var(--bg-panel);
+}
+/* 右缘竖条：整条可点收窄 */
+.ss-collapse-strip {
+  flex-shrink: 0;
+  width: 14px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ss-collapse-strip:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
 }
 
 /* 收窄态：只留展开按钮的窄条 + 会话小图标（点击直达切换） */
@@ -1280,6 +1306,9 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .msg-actions button:hover { color: var(--accent); border-color: var(--accent); }
 .ss-head .spacer { flex: 1; }
 .ss-head {
+  /* flex 让 spacer 生效：标题居左、收窄按钮归位右侧（否则按钮紧贴标题） */
+  display: flex;
+  align-items: center;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);

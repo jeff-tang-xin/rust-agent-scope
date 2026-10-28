@@ -178,16 +178,9 @@ export default function SessionSidebar({
 
   return (
     <aside className="session-sidebar" style={width ? { width } : undefined}>
+      <div className="ss-main">
       <div className="ss-head">
         <span>{categoryLabel}</span>
-        <span className="spacer" />
-        <button
-          className="icon-btn"
-          title="收窄工作区栏"
-          onClick={toggleCollapsed}
-        >
-          «
-        </button>
       </div>
       <div className="ss-search">
         <input
@@ -322,6 +315,15 @@ export default function SessionSidebar({
       ))}
       <button className="ss-create" onClick={onCreateWorkspace}>
         + 新建工作区
+      </button>
+      </div>
+      {/* 右缘竖条：整条可点收窄（把手常驻，好点好找） */}
+      <button
+        className="ss-collapse-strip"
+        title="收窄工作区栏"
+        onClick={toggleCollapsed}
+      >
+        ‹
       </button>
     </aside>
   );
