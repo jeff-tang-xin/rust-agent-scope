@@ -224,7 +224,7 @@ export default function SettingsPage({
             })}
           </div>
           <div className="desc" style={{ marginTop: 12 }}>
-            导航显示——隐藏不常用的菜单（本地记忆，立即生效）
+            导航显示——默认关闭，勾选后顶部导航才显示对应菜单（本地记忆，立即生效）
           </div>
           <div key={navTick} style={{ display: "flex", gap: 16 }}>
             {(
@@ -239,7 +239,7 @@ export default function SettingsPage({
               >
                 <input
                   type="checkbox"
-                  checked={localStorage.getItem(key) !== "0"}
+                  checked={localStorage.getItem(key) === "1"}
                   onChange={(e) => {
                     localStorage.setItem(key, e.target.checked ? "1" : "0");
                     setNavTick((t) => t + 1);

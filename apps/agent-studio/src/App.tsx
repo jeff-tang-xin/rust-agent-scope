@@ -55,8 +55,9 @@ export default function App() {
   } | null>(null);
   // 当前选中的工作区（切类别时自动落到该类第一个）。
   const [selectedId, setSelectedId] = useState("");
-  // 导航显隐配置（Settings 页「界面」可改，localStorage 持久 + CustomEvent 通知）。
-  const readNav = (key: string) => localStorage.getItem(key) !== "0";
+  // 导航显隐配置（Settings 页「界面」可改，localStorage 持久 + CustomEvent 通知；
+  // 默认关闭——显式开启才显示，不用 db/ops 的用户不被无关菜单干扰）。
+  const readNav = (key: string) => localStorage.getItem(key) === "1";
   const [showOps, setShowOps] = useState(() => readNav("ox-nav:show-ops"));
   const [showDb, setShowDb] = useState(() => readNav("ox-nav:show-db"));
   useEffect(() => {
