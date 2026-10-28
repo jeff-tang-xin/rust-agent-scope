@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agentscope_core::error::Result;
-use agentscope_core::tool::{Tool, ToolOutput};
+use agentscope_core::tool::{Tool, ToolContext, ToolOutput};
 use serde_json::{json, Value};
 
 use crate::config::DatabaseServerConfig;
@@ -335,6 +335,17 @@ fn resolve_cli_program(db: &DatabaseServerConfig, program: &str) -> String {
         .unwrap_or_else(|| program.to_string())
 }
 
+/// 子进程输出解码：UTF-8 优先，失败按 GBK 兜底——Windows 下 CLI 默认输出
+/// OEM/ANSI 代码页（中文系统为 GBK）；上方已通过参数/环境变量让各 CLI 输出
+/// UTF-8，此处兜底参数不生效的旧版 CLI。
+fn decode_output(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    let (s, _enc, _had_errors) = encoding_rs::GBK.decode(bytes);
+    s.into_owned()
+}
+
 /// 网络数据库：拼 CLI 命令执行（密码经环境变量/参数传递，仅本机进程可见）。
 async fn execute_cli(
     db: &DatabaseServerConfig,
@@ -357,12 +368,23 @@ async fn execute_cli(
                     "-c",
                     sql,
                 ]);
-                (c, vec![("PGPASSWORD".into(), db.password.clone())])
+                (
+                    c,
+                    vec![
+                        ("PGPASSWORD".into(), db.password.clone()),
+                        // Windows 下 psql 输出编码跟 client_encoding（默认跟
+                        // locale，中文系统为 GBK）——强制 UTF-8。
+                        ("PGCLIENTENCODING".into(), "UTF8".into()),
+                    ],
+                )
             }
             "mysql" => {
                 let mut c = tokio::process::Command::new(resolve_cli_program(db, "mysql"));
                 c.args([
                     "--batch",
+                    // 输出按该字符集编码（不设时 Windows 下跟平台，中文系统
+                    // 常为 GBK）——强制 UTF-8。
+                    "--default-character-set=utf8mb4",
                     "-h",
                     &db.host,
                     "-P",
@@ -392,6 +414,9 @@ async fn execute_cli(
                     "-s",
                     ",",
                     "-W",
+                    // 输出代码页 UTF-8（不设时默认 OEM，中文系统为 GBK）。
+                    "-f",
+                    "65001",
                 ]);
                 (c, vec![])
             }
@@ -423,8 +448,8 @@ async fn execute_cli(
         .map_err(|_| "执行超时（30s）".to_string())?
         .map_err(|e| format!("wait failed: {e}"))?;
 
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    let err = String::from_utf8_lossy(&output.stderr);
+    let mut text = decode_output(&output.stdout);
+    let err = decode_output(&output.stderr);
     if !err.trim().is_empty() {
         text.push_str(&format!("\n[stderr] {}", err.trim()));
     }
@@ -468,13 +493,45 @@ pub struct DbQueryTool {
     /// 允许访问的数据库档案名白名单；`None` = 不限（工作区未绑定列表时
     /// 按类别默认开放）。`Some` 时调用参数 `database` 不在名单内即拒绝。
     allowed_databases: Option<Vec<String>>,
+    /// 会话状态目录（`<workspace>/state/studio`）：执行时按 `ctx.session_id`
+    /// 读会话绑定（binding.json），把白名单收窄到会话绑定的那一个库。
+    workspace_state_dir: Option<std::path::PathBuf>,
 }
 
 impl DbQueryTool {
-    pub fn new(catalog: Arc<DbCatalog>, allowed_databases: Option<Vec<String>>) -> Self {
+    pub fn new(
+        catalog: Arc<DbCatalog>,
+        allowed_databases: Option<Vec<String>>,
+        workspace_state_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         Self {
             catalog,
             allowed_databases,
+            workspace_state_dir,
+        }
+    }
+
+    /// 会话绑定的数据库档案名（未绑定/读取失败 → None）。
+    fn session_binding(&self, session_id: &str) -> Option<String> {
+        let dir = self.workspace_state_dir.as_ref()?;
+        let bytes = std::fs::read(dir.join(session_id).join("binding.json")).ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        value
+            .get("database")?
+            .as_str()
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// 本次调用实际可用的库名单：工作区白名单 ∩ 会话绑定（绑定非空时收窄
+    /// 到绑定那一个；绑定不在白名单内 → 空名单 = 全部拒绝）。
+    fn effective_allowed(&self, session_id: Option<&str>) -> Option<Vec<String>> {
+        let bound = session_id.and_then(|sid| self.session_binding(sid));
+        match (self.allowed_databases.clone(), bound) {
+            (None, None) => None,
+            (None, Some(b)) => Some(vec![b]),
+            (Some(w), None) => Some(w),
+            (Some(w), Some(b)) => Some(if w.contains(&b) { vec![b] } else { vec![] }),
         }
     }
 }
@@ -532,6 +589,17 @@ impl Tool for DbQueryTool {
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
+        self.run(input, None).await
+    }
+
+    async fn call_with_context(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // 会话绑定收窄：agent loop 携带 session_id，按会话绑定的库收窄白名单。
+        self.run(input, Some(&ctx.session_id)).await
+    }
+}
+
+impl DbQueryTool {
+    async fn run(&self, input: Value, session_id: Option<&str>) -> Result<ToolOutput> {
         let name = input
             .get("database")
             .and_then(Value::as_str)
@@ -540,10 +608,16 @@ impl Tool for DbQueryTool {
         if name.is_empty() || sql.is_empty() {
             return Ok(ToolOutput::error("database and sql are required"));
         }
-        if let Some(allowed) = &self.allowed_databases
+        let allowed = self.effective_allowed(session_id);
+        if let Some(allowed) = &allowed
             && !allowed.iter().any(|n| n == name) {
+                if allowed.is_empty() {
+                    return Ok(ToolOutput::error(format!(
+                        "database `{name}` is not available in this session: the session is bound to a database outside the workspace allowlist"
+                    )));
+                }
                 return Ok(ToolOutput::error(format!(
-                    "database `{name}` is not bound to this workspace (bound: {allowed:?})"
+                    "database `{name}` is not bound to this session (allowed: {allowed:?})"
                 )));
             }
         if classify(sql) != "read" {
@@ -567,13 +641,43 @@ pub struct DbDmlTool {
     catalog: Arc<DbCatalog>,
     /// 允许访问的数据库档案名白名单（语义同 [`DbQueryTool`]）。
     allowed_databases: Option<Vec<String>>,
+    /// 会话状态目录（语义同 [`DbQueryTool`]）：按会话绑定收窄白名单。
+    workspace_state_dir: Option<std::path::PathBuf>,
 }
 
 impl DbDmlTool {
-    pub fn new(catalog: Arc<DbCatalog>, allowed_databases: Option<Vec<String>>) -> Self {
+    pub fn new(
+        catalog: Arc<DbCatalog>,
+        allowed_databases: Option<Vec<String>>,
+        workspace_state_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         Self {
             catalog,
             allowed_databases,
+            workspace_state_dir,
+        }
+    }
+
+    /// 会话绑定的数据库档案名（未绑定/读取失败 → None）。
+    fn session_binding(&self, session_id: &str) -> Option<String> {
+        let dir = self.workspace_state_dir.as_ref()?;
+        let bytes = std::fs::read(dir.join(session_id).join("binding.json")).ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        value
+            .get("database")?
+            .as_str()
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// 本次调用实际可用的库名单（语义同 [`DbQueryTool::effective_allowed`]）。
+    fn effective_allowed(&self, session_id: Option<&str>) -> Option<Vec<String>> {
+        let bound = session_id.and_then(|sid| self.session_binding(sid));
+        match (self.allowed_databases.clone(), bound) {
+            (None, None) => None,
+            (None, Some(b)) => Some(vec![b]),
+            (Some(w), None) => Some(w),
+            (Some(w), Some(b)) => Some(if w.contains(&b) { vec![b] } else { vec![] }),
         }
     }
 }
@@ -625,6 +729,17 @@ impl Tool for DbDmlTool {
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
+        self.run(input, None).await
+    }
+
+    async fn call_with_context(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // 会话绑定收窄：agent loop 携带 session_id，按会话绑定的库收窄白名单。
+        self.run(input, Some(&ctx.session_id)).await
+    }
+}
+
+impl DbDmlTool {
+    async fn run(&self, input: Value, session_id: Option<&str>) -> Result<ToolOutput> {
         let name = input
             .get("database")
             .and_then(Value::as_str)
@@ -633,10 +748,16 @@ impl Tool for DbDmlTool {
         if name.is_empty() || sql.is_empty() {
             return Ok(ToolOutput::error("database and sql are required"));
         }
-        if let Some(allowed) = &self.allowed_databases
+        let allowed = self.effective_allowed(session_id);
+        if let Some(allowed) = &allowed
             && !allowed.iter().any(|n| n == name) {
+                if allowed.is_empty() {
+                    return Ok(ToolOutput::error(format!(
+                        "database `{name}` is not available in this session: the session is bound to a database outside the workspace allowlist"
+                    )));
+                }
                 return Ok(ToolOutput::error(format!(
-                    "database `{name}` is not bound to this workspace (bound: {allowed:?})"
+                    "database `{name}` is not bound to this session (allowed: {allowed:?})"
                 )));
             }
         if classify(sql) == "read" {
@@ -727,6 +848,37 @@ mod tests {
         let got = find_exe_under(&root, &exe_name("mysql"), 2);
         assert_eq!(got.as_deref(), Some(exe.as_path()));
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn effective_allowed_narrows_by_session_binding() {
+        let dir = std::env::temp_dir().join(format!("ox-bind-{}", std::process::id()));
+        let sess = dir.join("sess1");
+        std::fs::create_dir_all(&sess).unwrap();
+        std::fs::write(sess.join("binding.json"), br#"{"database":"my"}"#).unwrap();
+        let tool = DbQueryTool::new(
+            Arc::new(DbCatalog::new()),
+            Some(vec!["my".into(), "platform".into()]),
+            Some(dir.clone()),
+        );
+        // 会话绑定 my → 白名单收窄到 my
+        assert_eq!(
+            tool.effective_allowed(Some("sess1")),
+            Some(vec!["my".into()])
+        );
+        // 无绑定/未知会话 → 工作区白名单原样
+        assert_eq!(
+            tool.effective_allowed(Some("nope")),
+            Some(vec!["my".into(), "platform".into()])
+        );
+        assert_eq!(
+            tool.effective_allowed(None),
+            Some(vec!["my".into(), "platform".into()])
+        );
+        // 绑定不在白名单内 → 空名单（全部拒绝）
+        std::fs::write(sess.join("binding.json"), br#"{"database":"other"}"#).unwrap();
+        assert_eq!(tool.effective_allowed(Some("sess1")), Some(Vec::<String>::new()));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

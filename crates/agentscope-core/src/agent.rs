@@ -1469,6 +1469,14 @@ impl ReActAgent {
             let mut auto: Vec<ToolCallSpec> = Vec::new();
             {
                 let mut state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+                // ask 配置的工具不参与同批放行：项目/用户配置的「每次确认」
+                // 语义优先于批量便利——如 db_dml 每条 DML 影响面不同，批准
+                // 一条不代表放行同批其余（显式逐条批准不受影响）。
+                let ask_guarded: Vec<String> = approved_names
+                    .iter()
+                    .filter(|n| state.permission_context.ask_rules.contains_key(*n))
+                    .cloned()
+                    .collect();
                 for msg in state.context.iter_mut() {
                     for block in msg.content.iter_mut() {
                         if let ContentBlock::ToolUse {
@@ -1481,6 +1489,7 @@ impl ReActAgent {
                         {
                             if matches!(block_state, Some(ToolCallState::Asking))
                                 && approved_names.contains(name)
+                                && !ask_guarded.contains(name)
                             {
                                 *block_state = Some(ToolCallState::Allowed);
                                 auto.push(ToolCallSpec {

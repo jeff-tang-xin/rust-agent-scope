@@ -25,7 +25,7 @@ use crate::ssh_tool::{self, SshPool};
 use crate::session::{AgentHandle, SessionHandle, TurnInfo};
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
-const USER_ID: &str = "studio";
+pub(crate) const USER_ID: &str = "studio";
 
 /// 事件信封：前端按 (workspaceId, sessionId, turnId) 归流，event 为 AgentEvent JSON。
 #[derive(Debug, Clone, Serialize)]

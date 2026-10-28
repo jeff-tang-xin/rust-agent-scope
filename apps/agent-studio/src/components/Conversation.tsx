@@ -1232,10 +1232,13 @@ export default function Conversation({
         .filter((x): x is Entry => x !== null),
     );
     const toolName = String(call.name ?? "");
+    // db_dml 永不授权升级：数据变更每条语句影响面不同，必须逐次确认——
+    // 「本会话允许/永久允许」对它一律降级为本次批准（后端写入口同样拒绝）。
+    const effectiveScope = toolName === "db_dml" ? "once" : scope;
     const result: ConfirmResultPayload = {
       confirmed,
       tool_call: call,
-      ...(scope !== "once"
+      ...(effectiveScope !== "once"
         ? {
             rules: [
               {
@@ -1249,7 +1252,7 @@ export default function Conversation({
     };
     // 永久允许：先落盘（跨会话生效）；失败不阻断本次批准（会话内规则仍随
     // confirm 结果写入）。
-    if (scope === "always" && confirmed && toolName) {
+    if (effectiveScope === "always" && confirmed && toolName) {
       try {
         await api.savePermanentPermission(workspace.id, toolName);
       } catch (err) {
@@ -1542,20 +1545,24 @@ export default function Conversation({
                     >
                       批准
                     </button>
-                    <button
-                      className="btn ghost"
-                      title="批准并在本会话内始终允许该工具"
-                      onClick={() => void resolveConfirm(e.id, call, true, "session")}
-                    >
-                      本会话允许
-                    </button>
-                    <button
-                      className="btn ghost"
-                      title="批准并永久允许该工具（跨会话生效）"
-                      onClick={() => void resolveConfirm(e.id, call, true, "always")}
-                    >
-                      永久允许
-                    </button>
+                    {name !== "db_dml" && (
+                      <button
+                        className="btn ghost"
+                        title="批准并在本会话内始终允许该工具"
+                        onClick={() => void resolveConfirm(e.id, call, true, "session")}
+                      >
+                        本会话允许
+                      </button>
+                    )}
+                    {name !== "db_dml" && (
+                      <button
+                        className="btn ghost"
+                        title="批准并永久允许该工具（跨会话生效）"
+                        onClick={() => void resolveConfirm(e.id, call, true, "always")}
+                      >
+                        永久允许
+                      </button>
+                    )}
                     <button
                       className="btn danger"
                       onClick={() => void resolveConfirm(e.id, call, false, "once")}

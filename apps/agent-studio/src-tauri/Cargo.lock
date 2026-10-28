@@ -51,6 +51,7 @@ dependencies = [
  "agentscope-harness",
  "agentscope-model-openai",
  "async-trait",
+ "encoding_rs",
  "rusqlite",
  "russh",
  "russh-sftp",

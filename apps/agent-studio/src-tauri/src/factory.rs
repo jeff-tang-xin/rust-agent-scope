@@ -7,6 +7,7 @@
 //! 4. 工具面按模式分化（solo/team/ops/db），基础面 = filesystem 6 + memory 3 + shell 1；
 //! 5. `HarnessAgent::builder()` 组装并 `build()`。
 
+use crate::commands::USER_ID;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -384,13 +385,19 @@ pub fn build_agent(
     }
     if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
         let allowed = allowlist(&ws.bound_databases);
+        // 会话状态目录：db 工具执行时按会话绑定（binding.json）收窄白名单。
+        let session_state_dir = Some(
+            workspace_dir(data_dir, &ws.id).join("state").join(USER_ID),
+        );
         toolkit.register(Arc::new(DbQueryTool::new(
             Arc::clone(&resources.db_catalog),
             allowed.clone(),
+            session_state_dir.clone(),
         )));
         toolkit.register(Arc::new(DbDmlTool::new(
             Arc::clone(&resources.db_catalog),
             allowed,
+            session_state_dir,
         )));
     }
 
@@ -566,7 +573,11 @@ fn default_permission_context(
     }
     // 用户永久授权（跨会话）：覆盖同工具的 ask 配置（add_allow_rule 自带
     // 移除同工具 ask 的语义，用户显式意愿优先）。
-    for tool_name in load_permanent_permissions(data_dir, workspace_id) {
+    // db_dml 永不永久授权：数据变更每条语句语义不同，必须逐次确认——
+    // 写入口已拒绝，这里再过滤一次（堵存量 permissions.json 里的旧记录）。
+    let mut permanent = load_permanent_permissions(data_dir, workspace_id);
+    permanent.retain(|t| t != "db_dml");
+    for tool_name in permanent {
         ask_tools.retain(|ask| ask != &tool_name);
         context.add_allow_rule(PermissionRule {
             tool_name,
@@ -615,6 +626,10 @@ pub(crate) fn save_permanent_permission(
     workspace_id: &str,
     tool_name: &str,
 ) -> Result<(), String> {
+    // db_dml 永不永久授权：数据变更必须逐次人工确认（每条语句影响面不同）。
+    if tool_name == "db_dml" {
+        return Err("数据变更（db_dml）不支持永久授权，每次执行都需确认".to_string());
+    }
     let mut stored = PermanentPermissions {
         allowed_tools: load_permanent_permissions(data_dir, workspace_id),
     };
