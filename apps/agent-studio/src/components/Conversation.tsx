@@ -335,6 +335,28 @@ function FilePanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
+  // 面板宽度（左缘拖拽调宽，localStorage 记忆；180–480px）。
+  const [fpWidth, setFpWidth] = useState(() => {
+    const v = Number(localStorage.getItem("ox-fp-width"));
+    return v >= 180 && v <= 480 ? v : 250;
+  });
+  const startFpResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = fpWidth;
+    const onMove = (ev: MouseEvent) => {
+      // 面板在右侧：向左拖 = 变宽。
+      const w = Math.min(480, Math.max(180, startW - (ev.clientX - startX)));
+      setFpWidth(w);
+      localStorage.setItem("ox-fp-width", String(w));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
   const expandedRef = useRef<Set<string>>(expanded);
   expandedRef.current = expanded;
 
@@ -406,9 +428,10 @@ function FilePanel({
   };
 
   return (
-    <aside className="file-panel">
+    <>
+      <div className="fp-resize" onMouseDown={startFpResize} aria-hidden />
+      <aside className="file-panel" style={{ width: fpWidth }}>
       <div className="file-panel-head">
-        <span>文件</span>
         <span className="spacer" />
         <button className="icon-btn" title="刷新" onClick={refresh}>
           ⟳
@@ -437,6 +460,7 @@ function FilePanel({
         />
       )}
     </aside>
+    </>
   );
 }
 
@@ -1900,8 +1924,13 @@ export default function Conversation({
       )}
       <div className="composer">
         {supportsPlan && (
-          <button className="btn ghost" onClick={togglePlan} disabled={busy}>
-            {planActive ? "退出计划模式" : "计划模式"}
+          <button
+            className={`btn ghost icon-only${planActive ? " plan-on" : ""}`}
+            onClick={togglePlan}
+            disabled={busy}
+            title={planActive ? "退出计划模式" : "计划模式"}
+          >
+            📋
           </button>
         )}
         {planActive && (
@@ -1974,24 +2003,34 @@ export default function Conversation({
         />
         {busy ? (
           <button
-            className="btn warn"
+            className="btn warn icon-only"
             onClick={() => void steer()}
             disabled={!input.trim() && attachments.length === 0}
+            title="插入对话（运行中排队，下一步生效）"
           >
-            插入
+            ⤵
           </button>
         ) : (
-          <button className="btn" onClick={() => void send()} disabled={!input.trim()}>
-            发送
+          <button
+            className="btn icon-only"
+            onClick={() => void send()}
+            disabled={!input.trim()}
+            title="发送（Enter）"
+          >
+            ➤
           </button>
         )}
         {busy && (
-          <button className="btn danger" onClick={interrupt}>
-            停止
+          <button className="btn danger icon-only" onClick={interrupt} title="停止运行">
+            ⏹
           </button>
         )}
-        <button className="btn ghost" onClick={clear} title="清空会话上下文（不可恢复）">
-          清空
+        <button
+          className="btn ghost icon-only"
+          onClick={clear}
+          title="清空会话上下文（不可恢复）"
+        >
+          🗑
         </button>
       </div>
       {dragActive && <div className="drop-hint">松开以添加附件</div>}

@@ -71,6 +71,27 @@ export default function App() {
   const cats = CATS.filter((c) =>
     c.key === "ops" ? showOps : c.key === "db" ? showDb : true,
   );
+  // 会话左栏宽度（右缘拖拽调宽，localStorage 记忆；160–420px）。
+  const [ssWidth, setSsWidth] = useState(() => {
+    const v = Number(localStorage.getItem("ox-ss-width"));
+    return v >= 160 && v <= 420 ? v : 200;
+  });
+  const startSsResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = ssWidth;
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(420, Math.max(160, startW + ev.clientX - startX));
+      setSsWidth(w);
+      localStorage.setItem("ox-ss-width", String(w));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
   // 正在查看的类别被隐藏时回落到「协同」，避免停在不可达的 tab 上。
   useEffect(() => {
     if (tab !== "settings" && !cats.some((c) => c.key === tab)) setTab("collab");
@@ -339,7 +360,10 @@ export default function App() {
               onEditWorkspace={(w) => setWsForm({ kind: "edit", initial: w })}
               onDeleteWorkspace={(w) => void removeWorkspace(w)}
               onCreateWorkspace={() => setWsForm({ kind: "new" })}
+              categoryLabel={cat?.label ?? "工作区"}
+              width={ssWidth}
             />
+            <div className="ss-resize" onMouseDown={startSsResize} aria-hidden />
             {/* keep-alive：所有工作区会话常挂，非当前隐藏（事件持续归流）。 */}
             {workspaces.map((w) => {
               const agent = agents.find((a) => a.id === w.agent_id);

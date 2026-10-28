@@ -33,6 +33,10 @@ export default function SessionSidebar({
   onDeleteWorkspace,
   onCreateWorkspace,
   onDeleteSession,
+  /** 顶部分类名（协同/运维/数据库运维）——替换无信息量的「工作区」标题。 */
+  categoryLabel,
+  /** 栏宽（App 层拖拽调宽持有）；collapsed 态忽略。 */
+  width,
 }: {
   workspaces: WorkspaceConfig[];
   selectedId: string;
@@ -48,6 +52,8 @@ export default function SessionSidebar({
   onCreateWorkspace: () => void;
   /** 删除会话（App 层补 runtime mode；删除后本组件刷新列表）。 */
   onDeleteSession: (wsId: string, sessionId: string) => void;
+  categoryLabel: string;
+  width?: number;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   // 内联重命名：正在编辑的 session id + 输入框值（Tauri WebView 无 prompt）。
@@ -171,9 +177,9 @@ export default function SessionSidebar({
   }
 
   return (
-    <aside className="session-sidebar">
+    <aside className="session-sidebar" style={width ? { width } : undefined}>
       <div className="ss-head">
-        <span>工作区</span>
+        <span>{categoryLabel}</span>
         <span className="spacer" />
         <button
           className="icon-btn"
