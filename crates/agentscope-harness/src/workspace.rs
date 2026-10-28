@@ -343,6 +343,10 @@ const GLOB_SKIP_DIRS: &[&str] = &[
     ".easyClaw",
     ".venv",
     "__pycache__",
+    // Java 生态：Gradle 缓存 / IDEA 编译输出 / Eclipse 元数据
+    ".gradle",
+    "out",
+    ".settings",
 ];
 
 /// 本地磁盘实现：以工作区根为界（对应 Java `LocalFilesystem`）。
