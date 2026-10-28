@@ -688,17 +688,18 @@ impl Filesystem for InMemoryFilesystem {
     ) -> Result<Vec<GrepMatch>, String> {
         let files = self.files.lock().map_err(|e| e.to_string())?;
         let base = path.map(Self::normalize_key).unwrap_or_default();
+        // 循环不变量提到外面：前缀串与 glob 正则各编译/分配一次
+        //（此前每文件一次 format! + 一次正则编译，2 万文件遍历时是大头）。
+        let base_prefix = if base.is_empty() { String::new() } else { format!("{base}/") };
+        let matcher = glob.map(crate::workspace::glob_to_regex).transpose()?;
         let mut out = Vec::new();
         for (file_path, bytes) in files.iter() {
-            if !base.is_empty()
-                && file_path != &base
-                && !file_path.starts_with(&format!("{base}/"))
-            {
+            if !base.is_empty() && file_path != &base && !file_path.starts_with(&base_prefix) {
                 continue;
             }
-            if let Some(glob_pattern) = glob {
+            if let Some(re) = &matcher {
                 let name = file_path.rsplit('/').next().unwrap_or(file_path);
-                if !crate::workspace::glob_match(glob_pattern, name) {
+                if !re.is_match(name) {
                     continue;
                 }
             }
@@ -733,6 +734,8 @@ impl Filesystem for InMemoryFilesystem {
                 format!("{key}/")
             }
         };
+        // 正则编译一次复用（此前每文件重编译一遍）。
+        let matcher = crate::workspace::glob_to_regex(pattern)?;
         let mut out = Vec::new();
         for (file_path, bytes) in files.iter() {
             let Some(relative) = file_path.strip_prefix(&prefix) else {
@@ -741,7 +744,7 @@ impl Filesystem for InMemoryFilesystem {
             // 文件名匹配（与旧语义一致：`*` 枚举全部、`*.md` 按名过滤；
             // `**/SKILL.md` 这类前缀模式对裸文件名同样成立——`**/` 匹配零段）。
             let name = relative.rsplit('/').next().unwrap_or(relative);
-            if !crate::workspace::glob_match(pattern, name) {
+            if !matcher.is_match(name) {
                 continue;
             }
             out.push(FileInfo {

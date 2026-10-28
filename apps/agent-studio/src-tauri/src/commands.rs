@@ -1544,7 +1544,7 @@ pub async fn get_history(
         .iter()
         .filter(|msg| msg.name != agentscope_harness::memory::COMPACTION_SUMMARY_MSG_NAME)
         .map(|msg| HistoryItem {
-            role: format!("{:?}", msg.role).to_lowercase(),
+            role: msg.role.as_str().to_string(),
             text: msg.text(),
             timestamp: msg.timestamp.clone(),
             blocks: msg

@@ -519,6 +519,8 @@ impl Filesystem for LocalFilesystem {
         if !base.exists() {
             return Ok(Vec::new());
         }
+        // glob 正则编译一次复用（此前每文件重编译一遍）。
+        let matcher = glob.map(glob_to_regex).transpose()?;
         let mut out = Vec::new();
         // 遍历上限 + 提前终止：匹配数达搜索硬上限即停（此前全量搜完，
         // 大仓库（target/node_modules 未跳过时数十万文件）表现为"卡死"）。
@@ -555,8 +557,8 @@ impl Filesystem for LocalFilesystem {
                     .file_name()
                     .to_string_lossy()
                     .to_string();
-                if let Some(glob_pattern) = glob {
-                    if !glob_match(glob_pattern, &name) {
+                if let Some(re) = &matcher {
+                    if !re.is_match(&name) {
                         continue;
                     }
                 }
@@ -763,7 +765,9 @@ pub(crate) fn glob_to_regex(pattern: &str) -> Result<regex::Regex, String> {
     regex::Regex::new(&re).map_err(|e| format!("invalid glob pattern `{pattern}`: {e}"))
 }
 
-/// glob 匹配（每次调用编译正则；调用方在循环里过滤时应先编译一次复用）。
+/// glob 匹配（每次调用编译正则——仅适合单次判断；循环过滤请用
+/// `glob_to_regex` 编译一次后复用 `is_match`）。
+#[cfg(test)]
 pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
     match glob_to_regex(pattern) {
         Ok(re) => re.is_match(name),

@@ -25,6 +25,24 @@ pub enum Role {
     Tool,
 }
 
+impl Role {
+    /// 小写规范名（序列化与历史视图统一用这个，避免 `format!("{:?}")` 再小写）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::Tool => "tool",
+        }
+    }
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// 多模态内容来源：URL 引用或 Base64 内联数据。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -366,7 +384,17 @@ impl Msg {
 
     /// 拼接消息中所有文本块，块间以换行连接（对齐 Java `getTextContent` 的 joining("\n")）。
     pub fn text(&self) -> String {
-        self.text_blocks().join("\n")
+        // 单次分配拼接（此前 text_blocks() 中间 Vec + join 再分配）。
+        let mut out = String::new();
+        for block in &self.content {
+            if let ContentBlock::Text { text } = block {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(text);
+            }
+        }
+        out
     }
 
     /// 取出所有文本块的文本（对应 Java 按 TextBlock 过滤）。
