@@ -1484,6 +1484,11 @@ pub fn list_sessions(
         if is_member_session_id(&session_id) {
             continue;
         }
+        // 子代理会话（agent_spawn 生成，id 固定 `sub-` 前缀）是内部实现细节，
+        // 不进用户会话列表——否则每次派发子代理列表就多一条「任务描述」条目。
+        if session_id.starts_with("sub-") {
+            continue;
+        }
         let state_path = entry.path().join("agent_state.json");
         let updated_at = state_path
             .metadata()
@@ -1608,10 +1613,13 @@ fn first_user_text(state_json: &serde_json::Value) -> Option<String> {
             if block.get("type").and_then(|t| t.as_str()) == Some("text")
                 && let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                     let text = text.trim();
-                    if !text.is_empty() {
-                        let summary: String = text.chars().take(40).collect();
-                        return Some(summary);
+                    // 系统注入（<system-reminder> 等）走 user 角色进上下文，
+                    // 不是用户输入，不能当会话标题。
+                    if text.is_empty() || text.starts_with('<') {
+                        continue;
                     }
+                    let summary: String = text.chars().take(40).collect();
+                    return Some(summary);
                 }
         }
     }
