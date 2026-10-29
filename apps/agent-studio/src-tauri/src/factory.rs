@@ -343,14 +343,35 @@ pub fn build_agent(
 
     let mut toolkit = Toolkit::new();
     register_base_tools(&mut toolkit, &workspace, memory_workspace.clone())?;
+    // 旧版任务记录锚在 workspace_root（用户项目根）下的 tasks/，违反 .ox
+    // 数据规范（非业务内容不散落项目根）——一次性迁入 .ox/tasks/。
+    // tmp 残留（原子写的 *.json.tmp.*）直接删；目录空了才移除。
+    let legacy_tasks = workspace_root.join("tasks");
+    if legacy_tasks.is_dir() {
+        let ox_tasks = memory_workspace.root().join("tasks");
+        std::fs::create_dir_all(&ox_tasks).ok();
+        if let Ok(entries) = std::fs::read_dir(&legacy_tasks) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().map(|x| x == "json").unwrap_or(false) {
+                    let _ = std::fs::rename(&p, ox_tasks.join(entry.file_name()));
+                } else {
+                    let _ = std::fs::remove_file(&p);
+                }
+            }
+        }
+        let _ = std::fs::remove_dir(&legacy_tasks);
+    }
     // 任务仓储：collab 模式用工作区持久化仓储（任务记录与结果落工作区，
     // 进程重启后 task_list/task_output 仍能恢复历史任务——修复纯内存仓储
     // 导致的后台任务句柄丢失）。同一装配单元内 task 工具、spawn core 与
     // builder 必须共用同一实例：原先各自 new 的 InMemory 实例互不相通，
     // task_output 查不到 spawn 写入的任务（not_found 的另一半根因）。
+    // 锚 .ox 数据根（memory_workspace 即 <workspace_root>/.ox）：任务记录
+    // 与记忆/黑板同规范，不落项目根。
     let task_repo: Arc<dyn TaskRepository> = match mode {
         StudioMode::Solo | StudioMode::Team => Arc::new(WorkspaceTaskRepository::new(
-            Arc::clone(&workspace),
+            Arc::clone(&memory_workspace),
             agent.id.clone(),
         )),
         StudioMode::Ops | StudioMode::Db => Arc::new(InMemoryTaskRepository::new()),
