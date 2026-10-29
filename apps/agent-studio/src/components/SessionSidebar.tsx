@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   onTurnFinished,
+  type ArchivedSession,
   type SessionSummary,
   type WorkspaceConfig,
 } from "../api";
@@ -33,6 +34,8 @@ export default function SessionSidebar({
   onDeleteWorkspace,
   onCreateWorkspace,
   onDeleteSession,
+  onArchiveSession,
+  onRestoreSession,
   /** 顶部分类名（协同/运维/数据库运维）——替换无信息量的「工作区」标题。 */
   categoryLabel,
   /** 栏宽（App 层拖拽调宽持有）；collapsed 态忽略。 */
@@ -52,6 +55,10 @@ export default function SessionSidebar({
   onCreateWorkspace: () => void;
   /** 删除会话（App 层补 runtime mode；删除后本组件刷新列表）。 */
   onDeleteSession: (wsId: string, sessionId: string) => void;
+  /** 归档会话（App 层补 runtime mode；归档后本组件刷新列表）。 */
+  onArchiveSession: (wsId: string, sessionId: string) => Promise<void>;
+  /** 还原会话（从归档箱恢复）。 */
+  onRestoreSession: (wsId: string, sessionId: string) => Promise<void>;
   categoryLabel: string;
   width?: number;
 }) {
@@ -61,6 +68,9 @@ export default function SessionSidebar({
   // 会话搜索（Ctrl+K 聚焦）：按标题/会话 ID 子串过滤当前列表。
   const [query, setQuery] = useState("");
   const [renameValue, setRenameValue] = useState("");
+  // 归档箱：已归档会话列表 + 展开开关（归档信息查询菜单）。
+  const [archived, setArchived] = useState<ArchivedSession[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
   // 收窄：折叠成窄条只留展开按钮（localStorage 记忆，跨会话保持）。
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("ss-collapsed") === "1",
@@ -75,12 +85,18 @@ export default function SessionSidebar({
   const load = useCallback(async () => {
     if (!selected) {
       setSessions([]);
+      setArchived([]);
       return;
     }
     try {
       setSessions(await api.listSessions(selected.id));
     } catch {
       /* 会话发现失败不阻塞左栏 */
+    }
+    try {
+      setArchived(await api.listArchivedSessions(selected.id));
+    } catch {
+      /* 归档列表拉取失败不阻塞左栏 */
     }
   }, [selected]);
 
@@ -102,6 +118,18 @@ export default function SessionSidebar({
   const removeSession = async (wsId: string, sessionId: string) => {
     // 确认弹窗在 App 层（统一 confirm + toast 反馈）；这里只负责触发与刷新。
     await onDeleteSession(wsId, sessionId);
+    await load();
+  };
+
+  // 归档会话：确认弹窗在 App 层；归档后从常规列表消失（数据留在原地）。
+  const archiveSession = async (wsId: string, sessionId: string) => {
+    await onArchiveSession(wsId, sessionId);
+    await load();
+  };
+
+  // 还原会话：从归档箱恢复到常规列表。
+  const restoreSession = async (wsId: string, sessionId: string) => {
+    await onRestoreSession(wsId, sessionId);
     await load();
   };
 
@@ -178,6 +206,7 @@ export default function SessionSidebar({
 
   return (
     <aside className="session-sidebar" style={width ? { width } : undefined}>
+      <div className="ss-body">
       <div className="ss-main">
       <div className="ss-head">
         <span>{categoryLabel}</span>
@@ -290,6 +319,13 @@ export default function SessionSidebar({
                           ✎
                         </button>
                         <button
+                          className="icon-btn"
+                          title="归档会话（从列表隐藏，可随时还原）"
+                          onClick={() => void archiveSession(w.id, s.session_id)}
+                        >
+                          🗄
+                        </button>
+                        <button
                           className="icon-btn danger"
                           title="删除会话"
                           onClick={() => void removeSession(w.id, s.session_id)}
@@ -311,11 +347,47 @@ export default function SessionSidebar({
               <button className="ss-new" onClick={() => onNewSession(w.id)}>
                 + 新会话
               </button>
+              {/* 归档信息查询菜单：展开已归档会话（标题/条数/归档时间）+ 还原 */}
+              <button
+                className={`ss-archive-toggle ${showArchive ? "active" : ""}`}
+                onClick={() => setShowArchive((v) => !v)}
+                title="归档箱：查看已归档会话并还原"
+              >
+                🗄 归档箱{archived.length > 0 ? ` (${archived.length})` : ""}
+              </button>
+              {showArchive && (
+                <div className="ss-archive-list">
+                  {archived.length === 0 && <div className="ss-empty">（暂无归档会话）</div>}
+                  {archived.map((a) => (
+                    <div key={a.session_id} className="ss-archive-row">
+                      <span
+                        className="ss-archive-name"
+                        title={`${a.title ?? a.session_id}\n（${a.session_id}）\n归档于 ${new Date(a.archived_at * 1000).toLocaleString("zh-CN", { hour12: false })}`}
+                      >
+                        {a.title || a.session_id.slice(0, 12)}
+                      </span>
+                      <span className="ss-archive-meta">
+                        {a.messages} 条 · {relTime(a.archived_at) || "已归档"}
+                      </span>
+                      <button
+                        className="icon-btn"
+                        title="还原会话"
+                        onClick={() => void restoreSession(w.id, a.session_id)}
+                      >
+                        ↩
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               </div>
             </>
           )}
         </div>
       ))}
+      </div>
+      {/* 版权信息（常驻左栏底部） */}
+      <div className="ss-copyright">power by xinl.tang</div>
       </div>
       {/* 右缘竖条：整条可点收窄（把手常驻，好点好找） */}
       <button

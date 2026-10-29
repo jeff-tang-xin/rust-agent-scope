@@ -48,9 +48,12 @@ export default function App() {
   // 全局 toast 栈（右上角，自动消失；error 停留更久且可手动关闭）。
   const [toasts, setToasts] = useState<{ id: number; kind: "info" | "error"; text: string }[]>([]);
   // 确认弹窗（替换 window.confirm）：promise resolve 挂在 state 上。
+  // actionLabel/danger 决定确认按钮文案与配色（删除=红，归档=普通）。
   const [confirmState, setConfirmState] = useState<{
     title: string;
     message: string;
+    actionLabel?: string;
+    danger?: boolean;
     resolve: (ok: boolean) => void;
   } | null>(null);
   // 当前选中的工作区（切类别时自动落到该类第一个）。
@@ -218,8 +221,20 @@ export default function App() {
   const fail = (msg: string) => toast("error", msg);
 
   /** 统一确认弹窗（替代 window.confirm）：resolve(true)=确认。 */
-  const confirm = (title: string, message: string) =>
-    new Promise<boolean>((resolve) => setConfirmState({ title, message, resolve }));
+  const confirm = (
+    title: string,
+    message: string,
+    opts?: { actionLabel?: string; danger?: boolean },
+  ) =>
+    new Promise<boolean>((resolve) =>
+      setConfirmState({
+        title,
+        message,
+        actionLabel: opts?.actionLabel,
+        danger: opts?.danger,
+        resolve,
+      }),
+    );
 
   // 确认弹窗的 Esc = 取消（桌面应用基本预期）。
   useEffect(() => {
@@ -284,6 +299,35 @@ export default function App() {
       // 删除后继续指向已删 id，下次发消息就把会话「复活」了。
       const current = sessionByWs[wsId] ?? defaultSession(modes[wsId] ?? "solo");
       if (current === sessionId) newSession(wsId);
+    } catch (e) {
+      fail(String(e));
+    }
+  };
+
+  /** 归档会话：确认 → 标记归档 → 反馈（数据留在原地，可从归档箱还原）。 */
+  const archiveSession = async (wsId: string, sessionId: string) => {
+    const ok = await confirm(
+      "归档会话",
+      `确定归档会话「${sessionId}」？\n正在运行的任务会先停止。会话将从列表中隐藏，数据保留，可在「归档箱」中还原。`,
+      { actionLabel: "归档", danger: false },
+    );
+    if (!ok) return;
+    try {
+      await api.archiveSession(wsId, modes[wsId] ?? "solo", sessionId);
+      flash("会话已归档");
+      // 归档当前会话：切到新会话（归档箱里可再还原回来）。
+      const current = sessionByWs[wsId] ?? defaultSession(modes[wsId] ?? "solo");
+      if (current === sessionId) newSession(wsId);
+    } catch (e) {
+      fail(String(e));
+    }
+  };
+
+  /** 还原会话：从归档箱恢复到常规列表。 */
+  const restoreSession = async (wsId: string, sessionId: string) => {
+    try {
+      await api.restoreSession(wsId, sessionId);
+      flash("会话已还原");
     } catch (e) {
       fail(String(e));
     }
@@ -356,6 +400,8 @@ export default function App() {
               }
               onNewSession={newSession}
               onDeleteSession={(wsId, sid) => void removeSession(wsId, sid)}
+              onArchiveSession={archiveSession}
+              onRestoreSession={restoreSession}
               running={running}
               onEditWorkspace={(w) => setWsForm({ kind: "edit", initial: w })}
               onDeleteWorkspace={(w) => void removeWorkspace(w)}
@@ -448,14 +494,14 @@ export default function App() {
                 取消
               </button>
               <button
-                className="btn danger solid"
+                className={confirmState.danger === false ? "btn" : "btn danger solid"}
                 autoFocus
                 onClick={() => {
                   confirmState.resolve(true);
                   setConfirmState(null);
                 }}
               >
-                删除
+                {confirmState.actionLabel ?? "删除"}
               </button>
             </div>
           </div>

@@ -176,6 +176,19 @@ export interface SessionSummary {
   title?: string;
 }
 
+/** 已归档会话（归档箱列表项）：数据仍在磁盘，只是从常规列表里隐藏。 */
+export interface ArchivedSession {
+  session_id: string;
+  /** 会话名：自定义名优先，否则首条用户消息摘要。 */
+  title?: string;
+  /** 消息条数。 */
+  messages: number;
+  /** 最后修改时间（unix 秒）。 */
+  updated_at: number;
+  /** 归档时间（unix 秒）。 */
+  archived_at: number;
+}
+
 /** 工作区文件条目（相对工作区根，/ 分隔）。 */
 export interface WorkspaceFileEntry {
   path: string;
@@ -328,6 +341,14 @@ export const api = {
 
   listSessions: (workspaceId: string) =>
     invoke<SessionSummary[]>("list_sessions", { workspaceId }),
+
+  // 会话归档：归档 = 从常规列表隐藏（数据留在原地，可还原）。
+  archiveSession: (workspaceId: string, mode: string, sessionId: string) =>
+    invoke<void>("archive_session", { workspaceId, mode, sessionId }),
+  restoreSession: (workspaceId: string, sessionId: string) =>
+    invoke<void>("restore_session", { workspaceId, sessionId }),
+  listArchivedSessions: (workspaceId: string) =>
+    invoke<ArchivedSession[]>("list_archived_sessions", { workspaceId }),
 
   listWorkspaceFiles: (workspaceId: string, path?: string) =>
     invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceId, path: path ?? null }),

@@ -152,6 +152,45 @@ pub struct SessionSummary {
     pub title: Option<String>,
 }
 
+/// 归档标记文件名（会话目录内）：存在即已归档。数据留在原地，可还原。
+///
+/// 刻意不用 `.json` 后缀：core 状态库按 `<key>.json` 存键值（agent_state.json 等），
+/// 同名空间可能被状态库读走。`.meta` 与同目录的 `title.txt`（app 侧元数据）
+/// 一样是 studio 自己的命名，不与状态库冲突。
+const ARCHIVE_MARKER: &str = "archived.meta";
+
+/// 归档标记内容（归档时刻的会话快照信息）。
+///
+/// 快照而非实时读：归档箱列表每次会话刷新都会拉取，实时解析
+/// `agent_state.json`（含完整上下文，可能很大）代价高——归档那一刻
+/// 的标题/条数已是稳定的归档信息。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveMeta {
+    /// 归档时间（unix 秒）。
+    pub archived_at: u64,
+    /// 归档时的消息条数。
+    #[serde(default)]
+    pub messages: usize,
+    /// 归档时的会话名（自定义名优先，否则首条用户消息摘要）。
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// 归档会话的查询结果（归档箱列表项）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ArchivedSession {
+    pub session_id: String,
+    /// 会话名（自定义名优先，否则首条用户消息摘要）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// 消息条数。
+    pub messages: usize,
+    /// 状态文件最后修改时间（unix 秒）。
+    pub updated_at: u64,
+    /// 归档时间（unix 秒）。
+    pub archived_at: u64,
+}
+
 /// 全局应用状态。
 pub struct AppState {
     pub config_store: ConfigStore,
@@ -1519,10 +1558,15 @@ pub fn list_sessions(
     let user_dir = factory::workspace_dir(&state.data_dir, &workspace_id)
         .join("state")
         .join(USER_ID);
+    Ok(scan_sessions(&user_dir))
+}
+
+/// 扫描用户会话目录，产出常规会话列表（已归档会话除外）。
+fn scan_sessions(user_dir: &std::path::Path) -> Vec<SessionSummary> {
     let mut out = Vec::new();
-    let entries = match std::fs::read_dir(&user_dir) {
+    let entries = match std::fs::read_dir(user_dir) {
         Ok(entries) => entries,
-        Err(_) => return Ok(out), // 还没有任何会话
+        Err(_) => return out, // 还没有任何会话
     };
     // 子会话归属：父会话 agent_state.json 的 tool_context.spawn_registry
     // 记录了它派生的子会话 id——先收集 child→parent 映射，再填进摘要。
@@ -1551,10 +1595,9 @@ pub fn list_sessions(
             }
         }
     }
-    let entries = std::fs::read_dir(&user_dir);
-    let entries = match entries {
+    let entries = match std::fs::read_dir(user_dir) {
         Ok(entries) => entries,
-        Err(_) => return Ok(out),
+        Err(_) => return out,
     };
     for entry in entries.flatten() {
         if !entry.path().is_dir() {
@@ -1572,32 +1615,11 @@ pub fn list_sessions(
         if session_id.starts_with("sub-") {
             continue;
         }
-        let state_path = entry.path().join("agent_state.json");
-        let updated_at = state_path
-            .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let state_json = std::fs::read(&state_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-        let messages = state_json
-            .as_ref()
-            .and_then(|v| {
-                v.get("context")
-                    .and_then(|c| c.as_array())
-                    .map(|a| a.len())
-            })
-            .unwrap_or(0);
-        // 会话名：自定义 title.txt 优先；否则自动取首条用户消息摘要
-        // （让列表直接可读「这个 session 做了什么」）。
-        let title = std::fs::read_to_string(entry.path().join("title.txt"))
-            .ok()
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .or_else(|| state_json.as_ref().and_then(first_user_text));
+        // 已归档会话不进常规列表（归档箱菜单单独查，见 list_archived_sessions）。
+        if is_archived(&entry.path()) {
+            continue;
+        }
+        let (title, messages, updated_at) = read_session_meta(&entry.path());
         out.push(SessionSummary {
             title,
             parent_session_id: parent_of.get(&session_id).cloned(),
@@ -1607,7 +1629,40 @@ pub fn list_sessions(
         });
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
-    Ok(out)
+    out
+}
+
+/// 读会话目录的摘要信息：(标题, 消息条数, 最后修改时间 unix 秒)。
+///
+/// 会话名：自定义 title.txt 优先；否则自动取首条用户消息摘要
+/// （让列表直接可读「这个 session 做了什么」）。list_sessions 与
+/// list_archived_sessions 共用同一套读法。
+fn read_session_meta(dir: &std::path::Path) -> (Option<String>, usize, u64) {
+    let state_path = dir.join("agent_state.json");
+    let updated_at = state_path
+        .metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let state_json = std::fs::read(&state_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let messages = state_json
+        .as_ref()
+        .and_then(|v| {
+            v.get("context")
+                .and_then(|c| c.as_array())
+                .map(|a| a.len())
+        })
+        .unwrap_or(0);
+    let title = std::fs::read_to_string(dir.join("title.txt"))
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .or_else(|| state_json.as_ref().and_then(first_user_text));
+    (title, messages, updated_at)
 }
 
 #[tauri::command]
@@ -1762,6 +1817,19 @@ pub async fn delete_session(
     // 跨 mode 清理：solo/team 是两个 handle 实例（缓存 key 含 mode），
     // 只清当前 mode 的话，另一 mode 内存里的运行态还在——若该会话正在
     // 那边跑 turn，结束后会重新落盘，表现为「删了又复活」。
+    quiesce_session(&state, &workspace_id, &session_id).await;
+    let dir = session_dir(&state, &workspace_id, &session_id)?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 停掉某工作区下所有 mode 的该会话运行中 turn，并清内存运行态。
+///
+/// 删除/归档共用：继续跑的 turn 会把状态重新落盘（删了又复活 / 归档后
+/// 状态又变），事件也会继续涌向已下架的会话。
+async fn quiesce_session(state: &State<'_, AppState>, workspace_id: &str, session_id: &str) {
     let prefix = format!("{workspace_id}:");
     let affected: Vec<Arc<AgentHandle>> = state
         .handles
@@ -1774,15 +1842,141 @@ pub async fn delete_session(
     for handle in &affected {
         // 先停 turn（abort 执行 task 并等死透）：否则继续跑的 turn 会把
         // 状态重新落盘（「删了又复活」），事件也会继续涌向已删除的会话。
-        stop_session_turn(handle, &session_id).await;
-        handle.agent.delegate().clear_steers(&session_id);
-        handle.drop_session(&session_id).await;
+        stop_session_turn(handle, session_id).await;
+        handle.agent.delegate().clear_steers(session_id);
+        handle.drop_session(session_id).await;
     }
-    let dir = session_dir(&state, &workspace_id, &session_id)?;
-    if dir.exists() {
-        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+}
+
+/// 归档标记文件路径（会话目录内）。
+fn archive_marker_path(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join(ARCHIVE_MARKER)
+}
+
+/// 会话是否已归档（存在归档标记文件）。
+fn is_archived(dir: &std::path::Path) -> bool {
+    archive_marker_path(dir).is_file()
+}
+
+/// 写归档标记（归档时刻的快照：归档时间/标题/条数）。
+fn write_archive_marker(dir: &std::path::Path) -> Result<(), String> {
+    let (title, messages, _) = read_session_meta(dir);
+    let meta = ArchiveMeta {
+        archived_at: unix_now(),
+        messages,
+        title,
+    };
+    let bytes = serde_json::to_vec_pretty(&meta).map_err(|e| e.to_string())?;
+    std::fs::write(archive_marker_path(dir), bytes).map_err(|e| e.to_string())
+}
+
+/// 删归档标记（还原会话）。
+fn remove_archive_marker(dir: &std::path::Path) -> Result<(), String> {
+    let marker = archive_marker_path(dir);
+    if marker.exists() {
+        std::fs::remove_file(&marker).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 归档会话：写归档标记文件（数据留在原地，可还原）。
+///
+/// 归档 ≠ 删除——会话数据与目录结构都不动，只在目录里放一个标记文件，
+/// `list_sessions` 据此把归档会话从常规列表里过滤掉（归档箱菜单单独查）。
+/// 运行中的 turn 先中止（否则归档期间状态还在变，归档信息不准）。
+#[tauri::command]
+pub async fn archive_session(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    mode: String,
+    session_id: String,
+) -> Result<(), String> {
+    // mode 参数保留（前端 invoke 签名兼容）；清理范围已覆盖所有 mode。
+    let _ = &mode;
+    app_log("INFO", &format!("归档会话 ws={workspace_id} session={session_id}"));
+    quiesce_session(&state, &workspace_id, &session_id).await;
+    let dir = session_dir(&state, &workspace_id, &session_id)?;
+    if !dir.is_dir() {
+        return Err("会话不存在".to_string());
+    }
+    write_archive_marker(&dir)
+}
+
+/// 还原会话：删掉归档标记文件，会话重新出现在常规列表里。
+#[tauri::command]
+pub fn restore_session(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    session_id: String,
+) -> Result<(), String> {
+    app_log("INFO", &format!("还原会话 ws={workspace_id} session={session_id}"));
+    let dir = session_dir(&state, &workspace_id, &session_id)?;
+    remove_archive_marker(&dir)
+}
+
+/// 列出已归档会话（归档箱菜单的数据源）。
+///
+/// 归档会话仍留在状态目录里，只是带着标记文件——这里按目录扫描 + 读标记
+/// 里的归档快照（不解析 agent_state.json：那是完整上下文，代价高）。
+#[tauri::command]
+pub fn list_archived_sessions(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<ArchivedSession>, String> {
+    let user_dir = factory::workspace_dir(&state.data_dir, &workspace_id)
+        .join("state")
+        .join(USER_ID);
+    Ok(scan_archived_sessions(&user_dir))
+}
+
+/// 扫描用户会话目录，收集带归档标记的会话（按归档时间倒序）。
+fn scan_archived_sessions(user_dir: &std::path::Path) -> Vec<ArchivedSession> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(user_dir) {
+        Ok(entries) => entries,
+        Err(_) => return out, // 还没有任何会话
+    };
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let session_id = entry.file_name().to_string_lossy().to_string();
+        // 与 list_sessions 同一套过滤：成员会话/子代理会话不是用户会话。
+        if is_member_session_id(&session_id) || session_id.starts_with("sub-") {
+            continue;
+        }
+        if !is_archived(&entry.path()) {
+            continue;
+        }
+        let meta: ArchiveMeta = std::fs::read(archive_marker_path(&entry.path()))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or(ArchiveMeta {
+                archived_at: 0,
+                messages: 0,
+                title: None,
+            });
+        // 状态文件 mtime = 最后活动时间（只 stat，不读内容）。
+        let updated_at = entry
+            .path()
+            .join("agent_state.json")
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        out.push(ArchivedSession {
+            session_id,
+            title: meta.title,
+            messages: meta.messages,
+            updated_at,
+            archived_at: meta.archived_at,
+        });
+    }
+    // 最近归档的排前面。
+    out.sort_by_key(|s| std::cmp::Reverse(s.archived_at));
+    out
 }
 
 /// 运行中 turn 的描述（前端刷新后恢复 busy/running 状态用）。
@@ -2164,6 +2358,9 @@ pub fn run() {
             clear_session,
             rename_session,
             delete_session,
+            archive_session,
+            restore_session,
+            list_archived_sessions,
             list_running_turns,
             blackboard_list,
             blackboard_delete,
@@ -2177,4 +2374,137 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 建一个会话目录（含 agent_state.json + title.txt）。
+    fn make_session(root: &std::path::Path, id: &str, title: &str, messages: usize) -> std::path::PathBuf {
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ctx: Vec<serde_json::Value> = (0..messages)
+            .map(|i| serde_json::json!({"role": "user", "content": [{"type": "text", "text": format!("m{i}")}]}))
+            .collect();
+        std::fs::write(
+            dir.join("agent_state.json"),
+            serde_json::to_vec(&serde_json::json!({"context": ctx})).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("title.txt"), title).unwrap();
+        dir
+    }
+
+    #[test]
+    fn archive_marker_roundtrip() {
+        let root = std::env::temp_dir().join(format!("ox-archive-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = make_session(&root, "s-1", "第一个会话", 3);
+        assert!(!is_archived(&dir));
+        assert!(scan_archived_sessions(&root).is_empty());
+
+        // 归档：写标记 → 被识别为已归档，且带快照信息。
+        write_archive_marker(&dir).unwrap();
+        assert!(is_archived(&dir));
+        let archived = scan_archived_sessions(&root);
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].session_id, "s-1");
+        assert_eq!(archived[0].title.as_deref(), Some("第一个会话"));
+        assert_eq!(archived[0].messages, 3);
+        assert!(archived[0].archived_at > 0);
+
+        // 还原：删标记 → 不再出现在归档箱。
+        remove_archive_marker(&dir).unwrap();
+        assert!(!is_archived(&dir));
+        assert!(scan_archived_sessions(&root).is_empty());
+        // 数据仍在原地（归档 ≠ 删除）。
+        assert!(dir.join("agent_state.json").is_file());
+        assert!(dir.join("title.txt").is_file());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn archived_session_leaves_normal_list_and_returns_after_restore() {
+        let root = std::env::temp_dir().join(format!("ox-archive-list-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let keep = make_session(&root, "s-keep", "保留", 1);
+        let arch = make_session(&root, "s-arch", "待归档", 4);
+        let _ = keep;
+
+        // 初始：两个都在常规列表里。
+        let ids: Vec<String> = scan_sessions(&root).into_iter().map(|s| s.session_id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"s-keep".to_string()));
+        assert!(ids.contains(&"s-arch".to_string()));
+
+        // 归档 → 从常规列表消失，进归档箱。
+        write_archive_marker(&arch).unwrap();
+        let ids: Vec<String> = scan_sessions(&root).into_iter().map(|s| s.session_id).collect();
+        assert_eq!(ids, vec!["s-keep".to_string()]);
+        let archived = scan_archived_sessions(&root);
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].session_id, "s-arch");
+        assert_eq!(archived[0].title.as_deref(), Some("待归档"));
+        assert_eq!(archived[0].messages, 4);
+
+        // 还原 → 回到常规列表，归档箱清空，数据仍在。
+        remove_archive_marker(&arch).unwrap();
+        let ids: Vec<String> = scan_sessions(&root).into_iter().map(|s| s.session_id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"s-arch".to_string()));
+        assert!(scan_archived_sessions(&root).is_empty());
+        assert!(arch.join("agent_state.json").is_file());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn archived_scan_skips_internal_sessions_and_sorts_by_time() {
+        let root = std::env::temp_dir().join(format!("ox-archive-sort-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let older = make_session(&root, "s-old", "旧", 1);
+        let newer = make_session(&root, "s-new", "新", 2);
+        // 内部会话：子代理（sub- 前缀）与成员会话（team-<名>）不进归档箱。
+        let _ = make_session(&root, "sub-abc", "子代理", 1);
+        let _ = make_session(&root, "team-alice", "成员", 1);
+
+        write_archive_marker(&older).unwrap();
+        // 手工改归档时间以固定排序（写标记用的是当前秒）。
+        let meta = ArchiveMeta {
+            archived_at: 100,
+            messages: 1,
+            title: Some("旧".into()),
+        };
+        std::fs::write(
+            archive_marker_path(&older),
+            serde_json::to_vec(&meta).unwrap(),
+        )
+        .unwrap();
+        let meta2 = ArchiveMeta {
+            archived_at: 200,
+            messages: 2,
+            title: Some("新".into()),
+        };
+        std::fs::write(
+            archive_marker_path(&newer),
+            serde_json::to_vec(&meta2).unwrap(),
+        )
+        .unwrap();
+        // 给内部会话也打标记——应当仍被过滤掉。
+        let sub = root.join("sub-abc");
+        write_archive_marker(&sub).unwrap();
+        let member = root.join("team-alice");
+        write_archive_marker(&member).unwrap();
+
+        let archived = scan_archived_sessions(&root);
+        assert_eq!(archived.len(), 2);
+        // 最近归档的排前面。
+        assert_eq!(archived[0].session_id, "s-new");
+        assert_eq!(archived[1].session_id, "s-old");
+        assert_eq!(archived[0].archived_at, 200);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
