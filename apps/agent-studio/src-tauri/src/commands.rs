@@ -16,6 +16,7 @@ use agentscope_core::message::{ContentBlock, Role, Source};
 use agentscope_core::{Msg, RuntimeContext};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::config::{AgentConfig, ConfigStore, DatabaseServerConfig, ModelProviderConfig, StudioConfig, WorkspaceConfig, WORKSPACE_KINDS};
 use crate::config::ServerConfig;
@@ -26,6 +27,72 @@ use crate::session::{AgentHandle, SessionHandle, TurnInfo};
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
 pub(crate) const USER_ID: &str = "studio";
+
+// ---------- 运行日志 ----------
+//
+// release 版 windows_subsystem="windows" 没有控制台，println 全部丢弃——
+// 这里是唯一的运行日志出口：~/.ox/logs/studio.log（append，超 5MB 轮转 .old）。
+
+static LOG_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Howard Hinnant 的 civil-from-days：epoch 天数 → (年, 月, 日)。无 chrono 依赖。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+fn format_log_ts(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    let millis = (ms % 1000) as u32;
+    let days = secs.div_euclid(86_400);
+    let sod = secs.rem_euclid(86_400);
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}.{millis:03}",
+        sod / 3600,
+        (sod % 3600) / 60,
+        sod % 60
+    )
+}
+
+/// 追加一行运行日志；LOG_DIR 未初始化（极早期 panic）时静默丢弃。
+pub(crate) fn app_log(level: &str, msg: &str) {
+    let Some(dir) = LOG_DIR.get() else { return };
+    let path = dir.join("studio.log");
+    // 超 5MB 轮转：studio.log → studio.old.log（保留上一轮，足够排查）。
+    if let Ok(meta) = std::fs::metadata(&path)
+        && meta.len() > 5 * 1024 * 1024
+    {
+        let _ = std::fs::rename(&path, dir.join("studio.old.log"));
+    }
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let line = format!("[{}] [{}] {}\n", format_log_ts(ms), level, msg);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// 打开日志目录（资源管理器）。
+#[tauri::command]
+pub fn open_log_dir(app: AppHandle) -> Result<(), String> {
+    let dir = LOG_DIR.get().ok_or("日志目录未初始化")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
 
 /// 事件信封：前端按 (workspaceId, sessionId, turnId) 归流，event 为 AgentEvent JSON。
 #[derive(Debug, Clone, Serialize)]
@@ -814,6 +881,10 @@ pub async fn send_message(
     let turn_guard = session
         .try_begin_turn()
         .map_err(|_| "a turn is already running in this session".to_string())?;
+    app_log(
+        "INFO",
+        &format!("turn 开始 ws={workspace_id} session={session_id} mode={mode}"),
+    );
     // 新链开始：清掉上一链可能残留的中断标志（interrupt 后链已死、标志
     // 未被收尾检查消费的场景），避免误杀本次 turn。
     session.clear_interrupted();
@@ -878,6 +949,7 @@ pub async fn send_message(
     // 执行 task 的句柄由 turn_chain 内部登记（track 的是 run task 而非本
     // turn_chain task），interrupt 才能真正停掉执行。
 
+    app_log("INFO", &format!("turn 已启动 turn_id={turn_id}"));
     Ok(TurnInfo {
         turn_id,
         session_id,
@@ -1184,6 +1256,10 @@ pub async fn steer_turn(
     if message.trim().is_empty() && attachments.as_deref().unwrap_or(&[]).is_empty() {
         return Err("steer message is empty".to_string());
     }
+    app_log(
+        "INFO",
+        &format!("插入消息 ws={workspace_id} session={session_id}（{} 字）", message.len()),
+    );
     let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
     // 守卫：无运行中 turn 时拒绝入队——否则消息会残留到队列里，被
@@ -1246,6 +1322,13 @@ pub async fn interrupt_turn(
     let handle = state.handle(&workspace_id, &mode)?;
     let session = handle.session(&session_id).await;
     let task = session.interrupt().await;
+    app_log(
+        "INFO",
+        &format!(
+            "中断 turn ws={workspace_id} session={session_id} hit={}",
+            task.is_some()
+        ),
+    );
     // 中断后丢弃未消费的 steer：用户已主动终止，残留的插入消息
     // 不应混进后续输入或触发自动续轮。
     handle.agent.delegate().clear_steers(&session_id);
@@ -1570,6 +1653,7 @@ pub async fn clear_session(
     session_id: String,
 ) -> Result<(), String> {
     let handle = state.handle(&workspace_id, &mode)?;
+    app_log("INFO", &format!("清空会话 ws={workspace_id} session={session_id}"));
     // 运行中的 turn 先停掉（abort 执行 task 并等死透），否则清空的上下文
     // 会被继续跑的 turn 重新写回。
     stop_session_turn(&handle, &session_id).await;
@@ -1674,6 +1758,7 @@ pub async fn delete_session(
 ) -> Result<(), String> {
     // mode 参数保留（前端 invoke 签名兼容）；清理范围已覆盖所有 mode。
     let _ = &mode;
+    app_log("WARN", &format!("删除会话 ws={workspace_id} session={session_id}"));
     // 跨 mode 清理：solo/team 是两个 handle 实例（缓存 key 含 mode），
     // 只清当前 mode 的话，另一 mode 内存里的运行态还在——若该会话正在
     // 那边跑 turn，结束后会重新落盘，表现为「删了又复活」。
@@ -2010,6 +2095,14 @@ pub fn run() {
             if let Ok(legacy) = app.path().app_data_dir() {
                 migrate_legacy_data(&legacy, &data_dir);
             }
+            // 运行日志：~/.ox/logs/（release 无控制台，文件是唯一出口）。
+            let log_dir = data_dir.join("logs");
+            std::fs::create_dir_all(&log_dir).ok();
+            let _ = LOG_DIR.set(log_dir);
+            app_log("INFO", "studio 启动");
+            std::panic::set_hook(Box::new(|info| {
+                app_log("PANIC", &format!("{info}"));
+            }));
             let config_dir = data_dir.join("config");
             let config_store = ConfigStore::new(&config_dir);
             let config = config_store.load_with_data_dir(Some(&data_dir));
@@ -2080,6 +2173,7 @@ pub fn run() {
             memory_save_file,
             memory_delete_file,
             write_export_file,
+            open_log_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

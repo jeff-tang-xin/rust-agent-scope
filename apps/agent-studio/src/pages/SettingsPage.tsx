@@ -250,6 +250,18 @@ export default function SettingsPage({
               </label>
             ))}
           </div>
+          <div className="desc" style={{ marginTop: 12 }}>
+            运行日志——后端运行记录（turn 启停/中断/清空/panic），排查问题用；
+            文件在 ~/.ox/logs/studio.log，超 5MB 自动轮转
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn ghost"
+              onClick={() => void api.openLogDir().catch((e) => alert(String(e)))}
+            >
+              打开日志目录
+            </button>
+          </div>
         </div>
 
         {/* ---------- Providers ---------- */}

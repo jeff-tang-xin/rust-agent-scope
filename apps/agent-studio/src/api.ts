@@ -352,6 +352,10 @@ export const api = {
   // 丢的只是内存状态）。
   listRunningTurns: () => invoke<RunningTurnInfo[]>("list_running_turns"),
 
+  // ---------- 运行日志 ----------
+
+  openLogDir: () => invoke<void>("open_log_dir"),
+
   // ---------- .ox 数据管理（黑板报 + 记忆，用户面板） ----------
 
   blackboardList: (workspaceId: string, limit?: number) =>
