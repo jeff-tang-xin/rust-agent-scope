@@ -71,13 +71,20 @@ impl SessionHandle {
     /// 删除竞态）。无运行中 task 时返回 `None`（标志仍置位，续轮间隙的
     /// 中断由 turn_chain 收尾检查拦住）。
     pub async fn interrupt(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let mut running = self.running.lock().await;
         self.interrupted.store(true, Ordering::SeqCst);
-        self.running.lock().await.take()
+        running.take()
     }
 
     /// 记录运行中 turn 的执行 task 句柄。
     pub async fn track(&self, handle: tokio::task::JoinHandle<()>) {
-        *self.running.lock().await = Some(handle);
+        let mut running = self.running.lock().await;
+        // interrupt 可能先于执行句柄登记到达，不能遗漏刚创建的任务。
+        if self.interrupted.load(Ordering::SeqCst) {
+            handle.abort();
+        } else {
+            *running = Some(handle);
+        }
     }
 
     /// turn 结束后清空执行 task 句柄（幂等）。

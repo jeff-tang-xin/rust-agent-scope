@@ -429,7 +429,8 @@ pub fn build_agent(
         toolkit.register(Arc::new(RemoteShellTool::new(
             Arc::clone(&resources.ssh_pool),
             allowlist(&ws.bound_servers),
-        ).with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))));
+        ).with_terminal_workspace((mode == StudioMode::Ops).then(|| ws.id.clone()))
+        .with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))));
     }
     if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
         let allowed = allowlist(&ws.bound_databases);

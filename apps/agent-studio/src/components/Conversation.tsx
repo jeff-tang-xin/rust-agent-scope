@@ -1152,6 +1152,14 @@ export default function Conversation({
       if (payload.outcome === "failed") {
         setError(payload.error ?? "turn failed");
       }
+      if (workspace.kind === "ops") {
+        setEntries((prev) => [...prev, {
+          kind: "indicator", id: nextId(),
+          text: payload.outcome === "interrupted" ? "本轮已中断（远端进程是否停止需另行确认）"
+            : payload.outcome === "failed" ? `本轮失败：${payload.error ?? "未知错误"}`
+            : prev.some((entry) => entry.kind === "confirm") ? "等待工具授权，并非执行中断" : "本轮已结束",
+        }]);
+      }
     });
 
     // steer 续轮：后端自动开启的新 turn（前端保持 busy、提示用户）。
@@ -2089,6 +2097,7 @@ export default function Conversation({
     }}
     lines={entries.flatMap<import("./terminalRouting").TerminalAgentLine>((entry) => {
       if (entry.kind === "msg") return [{ id: `${sessionId}:${entry.id}`, kind: entry.role === "user" ? "input" as const : "reply" as const, text: entry.text }];
+      if (entry.kind === "indicator") return [{ id: `${sessionId}:${entry.id}`, kind: "reply" as const, text: entry.text }];
       if (entry.kind === "thinking") return [{ id: `${sessionId}:${entry.id}`, kind: "thinking" as const, text: entry.text }];
       if (entry.kind === "tool") return [{ id: `${sessionId}:${entry.id}`, kind: "tool" as const, text: formatTerminalTool(entry.name, entry.args, entry.result) }];
       if (entry.kind === "confirm") return [{ id: `${sessionId}:${entry.id}`, kind: "confirm" as const, text: "操作需要确认，请检查下方的工具参数并批准或拒绝。" }];
@@ -2099,8 +2108,7 @@ export default function Conversation({
       setBusySafe(true);
       setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
       try {
-        await api.sendMessage(workspace.id, runtimeMode, sessionId,
-          `[当前服务器：${binding.server}。输入来自 AI 终端。危险操作先说明影响并请求工具审批；不要推测 PTY 的当前目录，涉及相对路径时先询问或明确绝对路径。]\n${text}`);
+        await api.sendMessage(workspace.id, runtimeMode, sessionId, text);
       } catch (e) { setBusySafe(false); throw e; }
     }}>
       {error && <div className="file-panel-error" role="alert">{error}</div>}

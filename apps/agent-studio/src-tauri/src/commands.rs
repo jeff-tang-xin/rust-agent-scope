@@ -491,7 +491,7 @@ pub async fn ssh_terminal_open(
     if ws.kind != "ops" || (!ws.bound_servers.is_empty() && !ws.bound_servers.contains(&name)) {
         return Err("服务器不在运维工作区授权范围内".into());
     }
-    state.ssh_pool.open_terminal(&name, cols, rows, output).await
+    state.ssh_pool.open_terminal(&workspace_id, &name, cols, rows, output).await
 }
 
 #[tauri::command]
@@ -1404,6 +1404,8 @@ pub async fn interrupt_turn(
     let had = task.is_some();
     if let Some(task) = task {
         task.abort();
+        // 返回前确认本地执行 future 已取消；不代表远端进程已被终止。
+        let _ = task.await;
     }
     Ok(had)
 }

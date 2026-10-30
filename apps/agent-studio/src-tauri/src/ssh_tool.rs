@@ -247,6 +247,7 @@ pub struct TerminalEvent {
 
 pub enum TerminalInput {
     Data(Vec<u8>),
+    Command(String, crate::terminal_capture::Reply),
     Resize(u32, u32),
     Close,
 }
@@ -256,6 +257,7 @@ pub enum TerminalInput {
 pub struct SshPool {
     sessions: Mutex<HashMap<String, Arc<SshConn>>>,
     terminals: Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<TerminalInput>>>>,
+    terminal_bindings: Arc<Mutex<HashMap<String, (String, String)>>>,
 }
 
 impl SshPool {
@@ -265,7 +267,7 @@ impl SshPool {
 
     /// 独立 PTY 通道；输入和窗口变化通过有界队列送入同一个任务。
     pub async fn open_terminal(
-        &self, server: &str, cols: u32, rows: u32,
+        &self, workspace: &str, server: &str, cols: u32, rows: u32,
         output: tauri::ipc::Channel<TerminalEvent>,
     ) -> std::result::Result<String, String> {
         let conn = self.get(server).await?;
@@ -276,23 +278,62 @@ impl SshPool {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         self.terminals.lock().await.insert(id.clone(), tx);
+        self.terminal_bindings.lock().await.insert(id.clone(), (workspace.to_string(), server.to_string()));
+        let bindings = self.terminal_bindings.clone();
         let terminals = self.terminals.clone();
         let task_id = id.clone();
         tokio::spawn(async move {
+            let token = uuid::Uuid::new_v4().simple().to_string();
+            let mut capture = crate::terminal_capture::Capture::new(&token);
+            // Only a plain Bash without an existing prompt hook is supported; never
+            // overwrite a user's hook. The OSC marker is consumed before display.
+            let setup = format!(" if [ -n \"$BASH_VERSION\" ] && [ -z \"$PROMPT_COMMAND\" ]; then PROMPT_COMMAND='printf \"\\033]777;{token};%s\\007\" \"$?\"'; fi\r");
+            let setup_ok = channel.data(setup.as_bytes()).await.is_ok();
+            let mut cancel_tick = tokio::time::interval(std::time::Duration::from_millis(100));
+            let mut deadline: Option<tokio::time::Instant> = None;
             loop {
+                if !setup_ok { break; }
                 tokio::select! {
+                    _ = cancel_tick.tick() => {
+                        if capture.cancel_if_abandoned() {
+                            deadline = None;
+                            // Best-effort foreground interruption, not a kill guarantee.
+                            if channel.data(&[3][..]).await.is_err() { break; }
+                        }
+                    }
                     input = rx.recv() => {
                         let result = match input {
-                            Some(TerminalInput::Data(data)) => channel.data(&data[..]).await,
+                            Some(TerminalInput::Command(command, reply)) => {
+                                if !capture.begin(reply) { continue; }
+                                deadline = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(120));
+                                let mut bytes = command.into_bytes();
+                                bytes.push(b'\r');
+                                channel.data(&bytes[..]).await
+                            }
+                            Some(TerminalInput::Data(data)) => {
+                                if !capture.input(&data) { continue; }
+                                channel.data(&data[..]).await
+                            },
                             Some(TerminalInput::Resize(cols, rows)) => channel.window_change(cols.clamp(1, 500), rows.clamp(1, 300), 0, 0).await,
                             Some(TerminalInput::Close) | None => break,
                         };
                         if result.is_err() { break; }
                     }
+                    _ = async {
+                        match deadline {
+                            Some(at) => tokio::time::sleep_until(at).await,
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => {
+                        capture.fail("等待命令完成超时；远端可能仍在执行，请检查终端，未自动杀进程");
+                        deadline = None;
+                    }
                     msg = channel.wait() => {
                         match msg {
                             Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                                if output.send(TerminalEvent { data: data.to_vec(), closed: false }).is_err() { break; }
+                                let visible = capture.feed(&data);
+                                if capture.ready { deadline = None; }
+                                if !visible.is_empty() && output.send(TerminalEvent { data: visible, closed: false }).is_err() { break; }
                             }
                             Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => break,
                             _ => {}
@@ -300,8 +341,10 @@ impl SshPool {
                     }
                 }
             }
+            capture.fail("终端连接已关闭，命令结果未知");
             let _ = channel.close().await;
             terminals.lock().await.remove(&task_id);
+            bindings.lock().await.remove(&task_id);
             let _ = output.send(TerminalEvent { data: vec![], closed: true });
         });
         Ok(id)
@@ -310,6 +353,23 @@ impl SshPool {
     pub async fn terminal_input(&self, id: &str, input: TerminalInput) -> std::result::Result<(), String> {
         let tx = self.terminals.lock().await.get(id).cloned().ok_or("终端已关闭")?;
         tx.send(input).await.map_err(|_| "终端已关闭".into())
+    }
+
+    async fn send_command(&self, workspace: &str, server: &str, command: &str) -> std::result::Result<(String, i32), String> {
+        let ids: Vec<_> = self.terminal_bindings.lock().await.iter()
+            .filter(|(_, (ws, name))| ws == workspace && name == server)
+            .map(|(id, _)| id.clone()).collect();
+        if ids.len() != 1 {
+            return Err("当前工作区必须恰好有一个该服务器的终端；请打开终端或关闭重复窗口，不会回退到独立 exec".into());
+        }
+        // A literal newline could produce several prompts; do not mistake the first
+        // for completion of the entire request. Interactive input belongs in SH.
+        if command.contains(['\r', '\n', '\0', '\x1b', '\x03']) {
+            return Err("Agent 命令须为单行且不含终端控制字符；多行/交互输入请切换 SH".into());
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.terminal_input(&ids[0], TerminalInput::Command(command.to_string(), tx)).await?;
+        rx.await.map_err(|_| "终端执行任务已关闭，结果未知".to_string())?
     }
 
     /// 取已连接会话；未连接报错（前端先 connect）。
@@ -370,6 +430,30 @@ mod terminal_tests {
         assert_eq!(ssh_client_config(false).preferred.key, normal.preferred.key);
     }
 
+    #[tokio::test]
+    async fn command_uses_bound_terminal_unchanged() {
+        let pool = SshPool::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        pool.terminals.lock().await.insert("pty".into(), tx);
+        pool.terminal_bindings.lock().await.insert("pty".into(), ("ws".into(), "srv".into()));
+        assert!(pool.send_command("other", "srv", "pwd").await.is_err());
+        let execute = pool.send_command("ws", "srv", "cd /tmp");
+        let receive = async {
+            match rx.recv().await.unwrap() {
+                TerminalInput::Command(command, reply) => {
+                    assert_eq!(command, "cd /tmp");
+                    reply.send(Ok(("result".into(), 0))).unwrap();
+                }
+                _ => panic!("expected terminal command"),
+            }
+        };
+        let (result, _) = tokio::join!(execute, receive);
+        assert_eq!(result.unwrap(), ("result".into(), 0));
+        assert!(pool.send_command("ws", "srv", "pwd\nls").await.is_err());
+        pool.terminal_bindings.lock().await.insert("duplicate".into(), ("ws".into(), "srv".into()));
+        assert!(pool.send_command("ws", "srv", "pwd").await.is_err());
+    }
+
     #[test]
     fn legacy_server_config_defaults_off_and_roundtrips() {
         let mut server: ServerConfig = serde_json::from_value(json!({"name":"test", "host":"localhost"})).unwrap();
@@ -402,6 +486,7 @@ pub struct RemoteShellTool {
     /// 按类别默认开放）。`Some` 时调用参数 `server` 不在名单内即拒绝。
     allowed_servers: Option<Vec<String>>,
     workspace_state_dir: Option<std::path::PathBuf>,
+    terminal_workspace: Option<String>,
 }
 
 impl RemoteShellTool {
@@ -410,7 +495,13 @@ impl RemoteShellTool {
             pool,
             allowed_servers,
             workspace_state_dir: None,
+            terminal_workspace: None,
         }
+    }
+
+    pub fn with_terminal_workspace(mut self, workspace: Option<String>) -> Self {
+        self.terminal_workspace = workspace;
+        self
     }
 
     pub fn with_session_dir(mut self, dir: std::path::PathBuf) -> Self {
@@ -426,9 +517,18 @@ impl Tool for RemoteShellTool {
     }
 
     fn description(&self) -> &str {
+        if self.terminal_workspace.is_some() {
+            return "Execute an approved single-line command unchanged in the existing workspace Bash terminal. Requires user confirmation. Returns captured terminal output (including command echo) and shell exit code when the prompt hook fires. Uses current shell directory and environment. MANDATORY: commands must be non-interactive, bounded, produce a finite result, and terminate by themselves. Never use continuous monitoring/following commands (tail -f/-F, journalctl -f, watch), interactive programs, infinite loops, background jobs, or unbounded streams. Use finite snapshots instead: tail -n 100 FILE, journalctl -n 100 --no-pager, top -b -n 1, vmstat 1 5, ping -c 4 HOST. Specify count/time limits where applicable; if bounded execution cannot be ensured, do not execute and ask the user. Do not change PROMPT_COMMAND. Timeout/disconnection means unknown completion, not success; inspect partial output and ask the user before retrying.";
+        }
         "Execute a single shell command on a connected remote server over SSH and \
          return its output and exit code. The server must be connected from the \
-         servers panel first. Every execution requires user confirmation."
+         servers panel first. Every execution requires user confirmation. Commands must be \
+         non-interactive, bounded, return finite output and terminate by themselves. Never use \
+         tail -f/-F, journalctl -f, watch, infinite loops, background jobs or unbounded streams. \
+         Use finite snapshots and explicit count/time limits instead. Each exec has independent \
+         shell state: do not assume a previous command's cwd or environment persists. Use explicit \
+         paths or combine dependent operations in one approved command. If bounded execution \
+         cannot be ensured, do not execute and ask the user."
     }
 
     fn parameters(&self) -> Value {
@@ -487,15 +587,14 @@ impl Tool for RemoteShellTool {
             Ok(c) => c,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
+        if let Some(workspace) = &self.terminal_workspace {
+            return match self.pool.send_command(workspace, &server, &command).await {
+                Ok((output, exit_code)) => Ok(ToolOutput::ok(json!({ "server": server, "exit_code": exit_code, "output": output }).to_string())),
+                Err(e) => Ok(ToolOutput::error(e)),
+            };
+        }
         match conn.exec(&command).await {
-            Ok(out) => Ok(ToolOutput::ok(
-                json!({
-                    "server": server,
-                    "exit_code": out.exit_code,
-                    "output": out.text,
-                })
-                .to_string(),
-            )),
+            Ok(out) => Ok(ToolOutput::ok(json!({ "server": server, "exit_code": out.exit_code, "output": out.text }).to_string())),
             Err(e) => Ok(ToolOutput::error(e)),
         }
     }
