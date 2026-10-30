@@ -19,7 +19,11 @@ export function routeTerminalInput(text: string): "pty" | "agent" {
   return "pty";
 }
 
-export interface TerminalAgentLine { id: string; text: string }
+export interface TerminalAgentLine {
+  id: string;
+  text: string;
+  kind?: "input" | "thinking" | "reply" | "tool" | "confirm";
+}
 // LLM / 工具文本不能作为 ANSI 控制序列写入终端（OSC52 等）。
 export function terminalPlainText(text: string): string {
   return text.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")

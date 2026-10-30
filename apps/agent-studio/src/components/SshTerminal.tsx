@@ -14,20 +14,11 @@ export default function SshTerminal({ workspaceId, server, agentMode, busy, line
   const modeRef = useRef(agentMode);
   modeRef.current = agentMode;
   const seen = useRef(new Map<string, string>());
-  const [draft, setDraft] = useState("");
+  const outputQueue = useRef<string[]>([]);
   const [sending, setSending] = useState(false);
+  const inputState = useRef({ busy: busy || sending, onAgentInput });
+  inputState.current = { busy: busy || sending, onAgentInput };
   const [live, setLive] = useState(false);
-  const submit = async () => {
-    const text = draft.trim();
-    if (!text || busy || sending || !live) return;
-    setSending(true);
-    try {
-      if (routeTerminalInput(text) === "pty") writeInput.current(`${text}\r`);
-      else await onAgentInput(text);
-      setDraft("");
-    } catch (e) { setStatus(String(e)); }
-    finally { setSending(false); }
-  };
   useEffect(() => {
     const term = terminal.current;
     if (!term) return;
@@ -35,7 +26,12 @@ export default function SshTerminal({ workspaceId, server, agentMode, busy, line
       const previous = seen.current.get(line.id) ?? "";
       if (line.text === previous) continue;
       const delta = line.text.startsWith(previous) ? line.text.slice(previous.length) : line.text;
-      term.write(`${previous && line.text.startsWith(previous) ? "" : "\r\n"}${terminalPlainText(delta).replace(/\n/g, "\r\n")}`);
+      const styles = { input: ["36", "输入"], thinking: ["90", "思考"], reply: ["32", "回复"], tool: ["34", "工具执行"], confirm: ["33", "待授权"] };
+      const [color, label] = styles[line.kind ?? "reply"];
+      const fresh = !previous || !line.text.startsWith(previous);
+      const text = terminalPlainText(delta).replace(/\n/g, "\r\n");
+      if (fresh) outputQueue.current.push(`\r\n\x1b[${color}m── ${label} ──\x1b[0m\r\n`);
+      for (const char of text.match(/\r\n|[^]/gu) ?? []) outputQueue.current.push(`\x1b[${color}m${char}\x1b[0m`);
       seen.current.set(line.id, line.text);
     }
   }, [lines, live]);
@@ -53,6 +49,11 @@ export default function SshTerminal({ workspaceId, server, agentMode, busy, line
     term.open(host.current);
     terminal.current = term;
     seen.current.clear();
+    outputQueue.current = [];
+    const typing = window.setInterval(() => {
+      const queue = outputQueue.current;
+      if (queue.length) term.write(queue.splice(0, Math.max(4, Math.ceil(queue.length / 30))).join(""));
+    }, 16);
     setLive(false);
     const resize = () => {
       if (!host.current?.clientWidth || !host.current.clientHeight) return;
@@ -79,8 +80,46 @@ export default function SshTerminal({ workspaceId, server, agentMode, busy, line
         }).catch((e) => { if (!disposed) setStatus(String(e)); });
       }
     };
+    let inputLine = "";
     const input = term.onData((data) => {
-      if (!modeRef.current || data === "\u0003") writeInput.current(data);
+      if (!modeRef.current) { writeInput.current(data); return; }
+      if (data === "\u0003") {
+        inputLine = "";
+        term.write("^C\r\n");
+        writeInput.current(data);
+        return;
+      }
+      // 输出过程中不接受新行编辑，避免流式内容覆盖尚未提交的输入。
+      if (inputState.current.busy || outputQueue.current.length) return;
+      if (data === "\r") {
+        const text = inputLine.trim();
+        if (!text || inputState.current.busy) return;
+        inputLine = "";
+        term.write("\r\n");
+        if (routeTerminalInput(text) === "pty") writeInput.current(`${text}\r`);
+        else {
+          setSending(true);
+          inputState.current.busy = true;
+          void inputState.current.onAgentInput(text)
+            .catch((e) => setStatus(String(e)))
+            .finally(() => { setSending(false); });
+        }
+        return;
+      }
+      if (data === "\u007f" || data === "\b") {
+        const chars = Array.from(inputLine);
+        if (chars.length) {
+          const last = chars.pop()!;
+          inputLine = chars.join("");
+          term.write(last.charCodeAt(0) > 255 ? "\b \b\b \b" : "\b \b");
+        }
+        return;
+      }
+      // 粘贴不执行换行；箭头等控制序列不转发给远端 shell。
+      if (data.startsWith("\u001b")) return;
+      const text = terminalPlainText(data).replace(/[\r\n\t]/g, " ");
+      inputLine += text;
+      term.write(text);
     });
     setStatus("连接中…");
     void invoke<string>("ssh_terminal_open", { workspaceId, name: server, cols: term.cols, rows: term.rows, output })
@@ -92,6 +131,8 @@ export default function SshTerminal({ workspaceId, server, agentMode, busy, line
     return () => {
       disposed = true;
       observer.disconnect();
+      window.clearInterval(typing);
+      outputQueue.current = [];
       input.dispose();
       term.dispose();
       if (id) void invoke("ssh_terminal_close", { id }).catch(() => {});
@@ -100,12 +141,6 @@ export default function SshTerminal({ workspaceId, server, agentMode, busy, line
   return <div className="ops-terminal">
     <div className="ops-terminal-status"><span>{status}</span><button className="btn ghost" onClick={() => setAttempt((n) => n + 1)}>重开终端</button></div>
     <div className="ops-terminal-host" ref={host} />
-    {agentMode && <form className="sh-in" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-      <span>👤</span><input aria-label="AI 终端输入" value={draft} onChange={(e) => setDraft(e.target.value)}
-        placeholder="普通命令直通 · 危险命令 / 自然语言交给 Agent" disabled={!live || sending}
-        onKeyDown={(e) => { if (e.key === "Enter" && e.nativeEvent.isComposing) e.preventDefault(); }} />
-      <button className="btn" disabled={!live || busy || sending || !draft.trim()}>执行</button>
-      <button type="button" className="btn ghost" onClick={() => writeInput.current("\u0003")}>Ctrl+C</button>
-    </form>}
+    {agentMode && <div className="sh-in"><span>AI 幕布 · 点击终端直接输入，Enter 提交 · 思考 / 回复 / 工具执行分区标记</span></div>}
   </div>;
 }

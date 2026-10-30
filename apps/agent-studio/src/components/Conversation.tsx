@@ -1649,15 +1649,6 @@ export default function Conversation({
                         本会话允许
                       </button>
                     )}
-                    {name !== "db_dml" && (
-                      <button
-                        className="btn ghost"
-                        title="批准并永久允许该工具（跨会话生效）"
-                        onClick={() => void resolveConfirm(e.id, call, true, "always")}
-                      >
-                        永久允许
-                      </button>
-                    )}
                     <button
                       className="btn danger"
                       onClick={() => void resolveConfirm(e.id, call, false, "once")}
@@ -2093,10 +2084,11 @@ export default function Conversation({
       await api.setSessionBinding(workspace.id, sessionId, "server", name);
       setBinding((prev) => ({ ...prev, server: name }));
     }}
-    lines={entries.flatMap((entry) => {
-      if (entry.kind === "msg") return [{ id: `${sessionId}:${entry.id}`, text: `${entry.role === "user" ? "👤" : "🤖"} ${entry.text}` }];
-      if (entry.kind === "tool") return [{ id: `${sessionId}:${entry.id}`, text: `⚙ ${entry.name} ${entry.args}\n${entry.result ?? "执行中…"}` }];
-      if (entry.kind === "confirm") return [{ id: `${sessionId}:${entry.id}`, text: "⚠ 操作需要确认，请检查下方的工具参数并批准或拒绝。" }];
+    lines={entries.flatMap<import("./terminalRouting").TerminalAgentLine>((entry) => {
+      if (entry.kind === "msg") return [{ id: `${sessionId}:${entry.id}`, kind: entry.role === "user" ? "input" as const : "reply" as const, text: entry.text }];
+      if (entry.kind === "thinking") return [{ id: `${sessionId}:${entry.id}`, kind: "thinking" as const, text: entry.text }];
+      if (entry.kind === "tool") return [{ id: `${sessionId}:${entry.id}`, kind: "tool" as const, text: `${entry.name} ${entry.args}\n${entry.result ?? "执行中…"}` }];
+      if (entry.kind === "confirm") return [{ id: `${sessionId}:${entry.id}`, kind: "confirm" as const, text: "操作需要确认，请检查下方的工具参数并批准或拒绝。" }];
       return [];
     })}
     onAgentInput={async (text) => {
