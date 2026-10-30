@@ -333,6 +333,7 @@ export default function App() {
     }
   };
 
+  const NavigationContainer = tab === "ops" ? "details" : "div";
   return (
     <div className="app">
       {/* 顶部导航条：品牌 + 类别导航 + 主题切换（原左侧竖栏上移，四栏变三栏） */}
@@ -390,7 +391,7 @@ export default function App() {
         ) : (
           /* 有工作区：会话视图（左栏 + keep-alive 会话 + 文件面板在会话内） */
           <div className={`workspace-layout ${tab === "ops" ? "ops-layout" : ""}`}>
-            <details className={`workspace-navigation ${tab === "ops" ? "ops-navigation" : ""}`} open={tab !== "ops" ? true : undefined}>
+            <NavigationContainer className={`workspace-navigation ${tab === "ops" ? "ops-navigation" : ""}`}>
               {tab === "ops" && <summary>工作区与 Agent 会话 · {activeWs?.name}</summary>}
             <SessionSidebar
               workspaces={inCat}
@@ -411,7 +412,7 @@ export default function App() {
               categoryLabel={cat?.label ?? "工作区"}
               width={ssWidth}
             />
-            </details>
+            </NavigationContainer>
             {tab !== "ops" && <div className="ss-resize" onMouseDown={startSsResize} aria-hidden />}
             {/* keep-alive：所有工作区会话常挂，非当前隐藏（事件持续归流）。 */}
             {workspaces.map((w) => {
