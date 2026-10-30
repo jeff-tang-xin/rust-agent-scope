@@ -260,10 +260,10 @@ export function RemoteTree({
   };
 
   const upload = async (dir: string) => {
-    const picked = await pickFile();
-    if (!picked) return;
     setError("");
     try {
+      const picked = await pickFile();
+      if (!picked) return;
       const name = picked.split(/[\\/]/).pop() ?? "upload.bin";
       const remote = `${dir.replace(/\/$/, "")}/${name}`;
       const entries = await api.sshListDir(server, dir);
@@ -278,10 +278,10 @@ export function RemoteTree({
   };
 
   const download = async (dir: string, name: string) => {
-    const picked = await pickSavePath(name);
-    if (!picked) return;
     setError("");
     try {
+      const picked = await pickSavePath(name);
+      if (!picked) return;
       const remote = `${dir.replace(/\/$/, "")}/${name}`;
       await api.sshDownload(server, remote, picked);
     } catch (e) {

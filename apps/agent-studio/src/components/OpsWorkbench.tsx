@@ -42,6 +42,7 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
   useEffect(() => {
     if (ready) setOpened((prev) => prev.includes(server) ? prev : [...prev, server]);
   }, [ready, mode, server]);
+  const needsApproval = lines.some((line) => line.kind === "confirm");
   return <div className="ops-workbench">
     <aside className="ops-servers">
       <div className="file-panel-head">服务器</div>
@@ -71,7 +72,10 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
         </div>)}
         {!ready && <div className="file-empty">选择服务器后打开交互式 Shell。</div>}
       </div>
-      <div className="ops-terminal-controls">{children}</div>
+      <div className="ops-terminal-controls" aria-live="polite">
+        {needsApproval && <div className="file-panel-head" role="status">有工具等待授权，请在下方批准或拒绝</div>}
+        {children}
+      </div>
     </section>
     <aside className="file-panel ops-files"><div className="file-panel-head">远程文件 · {server || "未连接"}</div>
       {ready ? <RemoteTree key={server} server={server} onConfirm={onConfirm} /> : <div className="file-empty">连接服务器后浏览、上传和下载文件。</div>}

@@ -1612,7 +1612,8 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .ops-terminal { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #111827; color: #e5e7eb; }
 .ops-terminal-status { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px; font-size: 12px; }
 .ops-terminal-host { flex: 1; min-height: 0; overflow: hidden; padding: 6px; }
-.ops-terminal-controls { max-height: 35vh; overflow: auto; background: #111827; color: #e5e7eb; }
+.ops-terminal-controls { flex-shrink: 0; max-height: 35vh; overflow: auto; background: #111827; color: #e5e7eb; }
+.ops-terminal-controls > .file-panel-head { position: sticky; top: 0; z-index: 1; background: #111827; color: #fbbf24; }
 .ops-terminal-controls:empty { display: none; }
 .ops-terminal .sh-in { flex-shrink: 0; padding: 8px; border-top: 1px solid #374151; }
 .ops-terminal .sh-in input { flex: 1; min-width: 0; background: transparent; color: #e5e7eb; }

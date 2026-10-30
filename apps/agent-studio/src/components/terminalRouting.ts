@@ -19,6 +19,28 @@ export function routeTerminalInput(text: string): "pty" | "agent" {
   return "pty";
 }
 
+// 只解码合法 JSON，不盲目替换反斜杠（会破坏命令和 Windows 路径）。
+export function formatTerminalTool(name: string, args: string, result?: string): string {
+  let command = args;
+  try {
+    const value = JSON.parse(args);
+    if (name === "remote_shell" && typeof value?.command === "string") command = value.command;
+    else command = JSON.stringify(value, null, 2);
+  } catch { /* 流式参数可能尚未形成完整 JSON。 */ }
+  let output = result ?? "执行中…";
+  if (result !== undefined) {
+    try {
+      const value = JSON.parse(result);
+      if (typeof value?.output === "string") {
+        output = value.output;
+        if (value.exit_code !== undefined) output += `\n[退出码：${value.exit_code}]`;
+      } else if (typeof value === "string") output = value;
+      else output = JSON.stringify(value, null, 2);
+    } catch { /* 普通文本原样显示。 */ }
+  }
+  return `${name}\n${command}\n${output}`;
+}
+
 export interface TerminalAgentLine {
   id: string;
   text: string;

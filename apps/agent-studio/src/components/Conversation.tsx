@@ -3,6 +3,7 @@
 // 事件处理对齐 Java AgentSessionView.apply 的思路：增量 apply 事件维护视图，
 // AgentResult 为最终消息的权威来源，流式 delta 仅作过程展示。
 
+import { formatTerminalTool } from "./terminalRouting";
 import {
   Fragment,
   memo,
@@ -1359,6 +1360,7 @@ export default function Conversation({
       await api.sendConfirm(workspace.id, runtimeMode, sessionId, [result]);
     } catch (err) {
       setBusySafe(false);
+      setEntries((prev) => [...prev, { kind: "confirm", id: nextId(), calls: [call] }]);
       setError(String(err));
     }
   };
@@ -1381,6 +1383,7 @@ export default function Conversation({
       await api.sendConfirm(workspace.id, runtimeMode, sessionId, results);
     } catch (err) {
       setBusySafe(false);
+      setEntries((prev) => [...prev, { kind: "confirm", id: nextId(), calls }]);
       setError(String(err));
     }
   };
@@ -2087,7 +2090,7 @@ export default function Conversation({
     lines={entries.flatMap<import("./terminalRouting").TerminalAgentLine>((entry) => {
       if (entry.kind === "msg") return [{ id: `${sessionId}:${entry.id}`, kind: entry.role === "user" ? "input" as const : "reply" as const, text: entry.text }];
       if (entry.kind === "thinking") return [{ id: `${sessionId}:${entry.id}`, kind: "thinking" as const, text: entry.text }];
-      if (entry.kind === "tool") return [{ id: `${sessionId}:${entry.id}`, kind: "tool" as const, text: `${entry.name} ${entry.args}\n${entry.result ?? "执行中…"}` }];
+      if (entry.kind === "tool") return [{ id: `${sessionId}:${entry.id}`, kind: "tool" as const, text: formatTerminalTool(entry.name, entry.args, entry.result) }];
       if (entry.kind === "confirm") return [{ id: `${sessionId}:${entry.id}`, kind: "confirm" as const, text: "操作需要确认，请检查下方的工具参数并批准或拒绝。" }];
       return [];
     })}
@@ -2100,6 +2103,7 @@ export default function Conversation({
           `[当前服务器：${binding.server}。输入来自 AI 终端。危险操作先说明影响并请求工具审批；不要推测 PTY 的当前目录，涉及相对路径时先询问或明确绝对路径。]\n${text}`);
       } catch (e) { setBusySafe(false); throw e; }
     }}>
+      {error && <div className="file-panel-error" role="alert">{error}</div>}
       {busy && <button className="btn danger" onClick={() => void interrupt()}>停止 Agent</button>}
       {entries.filter((entry) => entry.kind === "confirm").map((entry) => <div key={entry.id}>{renderEntry(entry)}</div>)}
     </OpsWorkbench>;
