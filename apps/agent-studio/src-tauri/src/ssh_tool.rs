@@ -23,12 +23,19 @@ const MAX_OUTPUT: usize = 16 * 1024;
 
 fn ssh_client_config(allow_legacy_rsa: bool) -> client::Config {
     let mut config = client::Config::default();
+    // 新版默认列表含旧 RSA；保持产品的显式 opt-in 约束。
+    config.preferred.key.to_mut().retain(|key| *key != russh::keys::Algorithm::Rsa { hash: None });
+    config.preferred.kex.to_mut().retain(|kex| *kex != russh::kex::DH_G1_SHA1 && *kex != russh::kex::DH_G14_SHA1 && *kex != russh::kex::DH_GEX_SHA1);
     if allow_legacy_rsa {
         let keys = config.preferred.key.to_mut();
-        if !keys.contains(&russh::keys::key::SSH_RSA) {
+        if !keys.contains(&russh::keys::Algorithm::Rsa { hash: None }) {
             // 现代算法优先，旧签名仅作为此连接的末位备选。
-            keys.push(russh::keys::key::SSH_RSA);
+            keys.push(russh::keys::Algorithm::Rsa { hash: None });
         }
+    }
+    // OpenSSH 5.3 支持 GEX-SHA256；不为兼容旧主机降级到 SHA-1 KEX。
+    if !config.preferred.kex.contains(&russh::kex::DH_GEX_SHA256) {
+        config.preferred.kex.to_mut().push(russh::kex::DH_GEX_SHA256);
     }
     config
 }
@@ -38,13 +45,12 @@ fn ssh_client_config(allow_legacy_rsa: bool) -> client::Config {
 #[derive(Clone)]
 struct ClientHandler;
 
-#[async_trait::async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::key::PublicKey,
+        _server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> std::result::Result<bool, Self::Error> {
         Ok(true)
     }
@@ -67,7 +73,7 @@ impl SshConn {
             .authenticate_password(&server.username, &server.password)
             .await
             .map_err(|e| format!("auth {}@{} failed: {e}", server.username, server.host))?;
-        if !ok {
+        if !ok.success() {
             return Err(format!(
                 "auth failed for {}@{}: 密码错误或服务器不允许密码登录",
                 server.username, server.host
@@ -349,14 +355,19 @@ mod terminal_tests {
     fn legacy_rsa_is_opt_in_and_preserves_modern_algorithms() {
         let defaults = client::Config::default();
         let normal = ssh_client_config(false);
-        assert_eq!(normal.preferred.key, defaults.preferred.key);
+        let modern_keys: Vec<_> = defaults.preferred.key.iter().filter(|key| **key != russh::keys::Algorithm::Rsa { hash: None }).cloned().collect();
+        assert_eq!(normal.preferred.key.as_ref(), modern_keys.as_slice());
         let legacy = ssh_client_config(true);
-        assert!(legacy.preferred.key.contains(&russh::keys::key::SSH_RSA));
-        assert!(legacy.preferred.key.starts_with(&defaults.preferred.key));
-        assert_eq!(legacy.preferred.kex, defaults.preferred.kex);
+        assert!(legacy.preferred.key.contains(&russh::keys::Algorithm::Rsa { hash: None }));
+        assert!(legacy.preferred.key.starts_with(&modern_keys));
+        assert_eq!(legacy.preferred.kex, normal.preferred.kex);
+        assert!(legacy.preferred.kex.contains(&russh::kex::DH_GEX_SHA256));
+        assert!(!normal.preferred.key.contains(&russh::keys::Algorithm::Rsa { hash: None }));
+        assert!(!legacy.preferred.kex.contains(&russh::kex::DH_G1_SHA1));
+        assert!(!legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
         assert_eq!(legacy.preferred.cipher, defaults.preferred.cipher);
         assert_eq!(legacy.preferred.mac, defaults.preferred.mac);
-        assert_eq!(ssh_client_config(false).preferred.key, defaults.preferred.key);
+        assert_eq!(ssh_client_config(false).preferred.key, normal.preferred.key);
     }
 
     #[test]
