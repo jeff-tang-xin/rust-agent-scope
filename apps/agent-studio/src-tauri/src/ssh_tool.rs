@@ -454,6 +454,66 @@ mod terminal_tests {
         assert!(pool.send_command("ws", "srv", "pwd").await.is_err());
     }
 
+    #[tokio::test]
+    async fn session_binding_supplies_omitted_server_and_rejects_mismatch() {
+        // ops 会话已绑定服务器：模型省略 server 时按绑定补齐（否则模型会因
+        // 不知道服务器名而反问用户、不发工具调用）。
+        let dir = std::env::temp_dir().join(format!("ox-binding-{}", uuid::Uuid::new_v4().simple()));
+        let session_dir = dir.join("s1");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(session_dir.join("binding.json"), json!({"server":"platform"}).to_string()).unwrap();
+        let tool = RemoteShellTool::new(Arc::new(SshPool::new()), None)
+            .with_terminal_workspace(Some("ws".into()))
+            .with_session_dir(dir.clone());
+        let ctx = agentscope_core::tool::ToolContext {
+            session_id: "s1".into(),
+            ..agentscope_core::tool::ToolContext::new("call-1", "remote_shell")
+        };
+        let input = json!({"command":"free -m"});
+        // 未连接服务器 → 报错信息里的 server 名应为绑定补齐后的 platform
+        // （证明省略 server 时确实按会话绑定解析，而非空名）。
+        let resolved = tool
+            .call_with_context(input.clone(), &ctx)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        let text = resolved.content;
+        assert!(text.contains("platform"), "server 应由绑定补齐: {text}");
+        assert!(text.contains("未连接"), "{text}");
+
+        // 显式给出与绑定不符的服务器 → 拒绝。
+        let mismatch = tool
+            .call_with_context(json!({"server":"other","command":"free -m"}), &ctx)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        assert!(
+            mismatch.content.contains("仅可操作服务器 `platform`"),
+            "应提示当前会话仅可操作 platform: {}",
+            mismatch.content
+        );
+
+        // 没有绑定文件 → 不补齐，报空名/未连接。
+        let ctx2 = agentscope_core::tool::ToolContext {
+            session_id: "s2".into(),
+            ..agentscope_core::tool::ToolContext::new("call-2", "remote_shell")
+        };
+        let unbound = tool
+            .call_with_context(json!({"command":"free -m"}), &ctx2)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        assert!(unbound.content.contains("required"), "{}", unbound.content);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ops_tool_schema_makes_server_optional() {
+        let ops = RemoteShellTool::new(Arc::new(SshPool::new()), None).with_terminal_workspace(Some("ws".into()));
+        let params = ops.parameters();
+        assert_eq!(params["required"], json!(["command"]), "ops 模式 server 应可选");
+        assert!(ops.description().contains("OPTIONAL"));
+        let plain = RemoteShellTool::new(Arc::new(SshPool::new()), None);
+        assert_eq!(plain.parameters()["required"], json!(["server","command"]), "非 ops 仍要求 server");
+    }
+
     #[test]
     fn legacy_server_config_defaults_off_and_roundtrips() {
         let mut server: ServerConfig = serde_json::from_value(json!({"name":"test", "host":"localhost"})).unwrap();
@@ -518,7 +578,7 @@ impl Tool for RemoteShellTool {
 
     fn description(&self) -> &str {
         if self.terminal_workspace.is_some() {
-            return "Execute an approved single-line command unchanged in the existing workspace Bash terminal. Requires user confirmation. Returns captured terminal output (including command echo) and shell exit code when the prompt hook fires. Uses current shell directory and environment. MANDATORY: commands must be non-interactive, bounded, produce a finite result, and terminate by themselves. Never use continuous monitoring/following commands (tail -f/-F, journalctl -f, watch), interactive programs, infinite loops, background jobs, or unbounded streams. Use finite snapshots instead: tail -n 100 FILE, journalctl -n 100 --no-pager, top -b -n 1, vmstat 1 5, ping -c 4 HOST. Specify count/time limits where applicable; if bounded execution cannot be ensured, do not execute and ask the user. Do not change PROMPT_COMMAND. Timeout/disconnection means unknown completion, not success; inspect partial output and ask the user before retrying.";
+            return "Execute an approved single-line command unchanged in the existing workspace Bash terminal. The `server` argument is OPTIONAL: omit it to use the server bound to the current session (shown in the servers panel). Do not ask the user which server to use - the session already has one bound. Requires user confirmation. Returns captured terminal output (including command echo) and shell exit code when the prompt hook fires. Uses current shell directory and environment. MANDATORY: commands must be non-interactive, bounded, produce a finite result, and terminate by themselves. Never use continuous monitoring/following commands (tail -f/-F, journalctl -f, watch), interactive programs, infinite loops, background jobs, or unbounded streams. Use finite snapshots instead: tail -n 100 FILE, journalctl -n 100 --no-pager, top -b -n 1, vmstat 1 5, ping -c 4 HOST. Specify count/time limits where applicable; if bounded execution cannot be ensured, do not execute and ask the user. Do not change PROMPT_COMMAND. Timeout/disconnection means unknown completion, not success; inspect partial output and ask the user before retrying.";
         }
         "Execute a single shell command on a connected remote server over SSH and \
          return its output and exit code. The server must be connected from the \
@@ -532,6 +592,19 @@ impl Tool for RemoteShellTool {
     }
 
     fn parameters(&self) -> Value {
+        // ops（共享 PTY）会话已绑定唯一服务器：server 省略即可，避免模型因
+        // 不知道服务器名而反问用户、从而不发工具调用（实测：必填时模型只回
+        // 计划性文字；可选时立即发出命令）。非 ops 仍按显式服务器名调用。
+        if self.terminal_workspace.is_some() {
+            return json!({
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "Optional. Omit to use the server bound to the current session."},
+                    "command": {"type": "string", "description": "A single shell command to run."}
+                },
+                "required": ["command"]
+            });
+        }
         json!({
             "type": "object",
             "properties": {
@@ -543,6 +616,9 @@ impl Tool for RemoteShellTool {
     }
 
     async fn call_with_context(&self, input: Value, ctx: &agentscope_core::tool::ToolContext) -> Result<ToolOutput> {
+        let mut input = input;
+        // 会话绑定是服务器名的真相：模型省略 server 时按绑定补齐（ops 会话
+        // 已绑定唯一服务器）；显式给了且与绑定不符则拒绝，防止跨服务器误操作。
         if let Some(dir) = &self.workspace_state_dir {
             let path = dir.join(&ctx.session_id).join("binding.json");
             match std::fs::read(path) {
@@ -551,9 +627,18 @@ impl Tool for RemoteShellTool {
                         Ok(value) => value,
                         Err(_) => return Ok(ToolOutput::error("无法读取服务器绑定，拒绝执行")),
                     };
-                    if let Some(bound) = binding.get("server").and_then(Value::as_str)
-                        && !bound.is_empty() && input.get("server").and_then(Value::as_str) != Some(bound) {
-                        return Ok(ToolOutput::error(format!("当前会话仅可操作服务器 `{bound}`")));
+                    if let Some(bound) = binding.get("server").and_then(Value::as_str) {
+                        let bound = bound.trim();
+                        if !bound.is_empty() {
+                            let requested = input.get("server").and_then(Value::as_str).map(str::trim).unwrap_or("");
+                            if requested.is_empty() && self.terminal_workspace.is_some() {
+                                if let Some(map) = input.as_object_mut() {
+                                    map.insert("server".to_string(), Value::String(bound.to_string()));
+                                }
+                            } else if requested != bound {
+                                return Ok(ToolOutput::error(format!("当前会话仅可操作服务器 `{bound}`")));
+                            }
+                        }
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
