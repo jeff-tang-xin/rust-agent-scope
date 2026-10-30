@@ -156,6 +156,9 @@ impl DatabaseServerConfig {
 /// 不进日志与事件；留空则走用户机器上已配置的 ssh agent/默认密钥。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
+    /// 仅为本服务器允许旧 RSA/SHA-1 主机签名；默认关闭。
+    #[serde(default)]
+    pub allow_legacy_rsa: bool,
     /// 展示名（唯一键）。
     pub name: String,
     pub host: String,

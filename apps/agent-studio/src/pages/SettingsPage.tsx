@@ -668,6 +668,12 @@ export default function SettingsPage({
                 <label className="lbl">Description</label>
                 <PasteButton onPaste={(t) => setServerDraft({ ...serverDraft, description: t })} />
               </div>
+              <label className="member-check">
+                <input type="checkbox" checked={serverDraft.allow_legacy_rsa ?? false}
+                  onChange={(e) => setServerDraft({ ...serverDraft, allow_legacy_rsa: e.target.checked })} />
+                兼容旧服务器（允许 RSA/SHA-1）
+              </label>
+              <div className="desc">默认关闭，仅此服务器生效。只追加 ssh-rsa，不启用 ssh-dss；建议升级服务端 SSH。保存后断开并重新连接生效。</div>
               <input
                 className="field"
                 value={serverDraft.description}

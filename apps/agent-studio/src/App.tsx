@@ -389,7 +389,9 @@ export default function App() {
           <WorkspacePage category={tab} onCreate={() => setWsForm({ kind: "new" })} />
         ) : (
           /* 有工作区：会话视图（左栏 + keep-alive 会话 + 文件面板在会话内） */
-          <div className="workspace-layout">
+          <div className={`workspace-layout ${tab === "ops" ? "ops-layout" : ""}`}>
+            <details className={`workspace-navigation ${tab === "ops" ? "ops-navigation" : ""}`} open={tab !== "ops" ? true : undefined}>
+              {tab === "ops" && <summary>工作区与 Agent 会话 · {activeWs?.name}</summary>}
             <SessionSidebar
               workspaces={inCat}
               selectedId={activeWs?.id ?? ""}
@@ -409,7 +411,8 @@ export default function App() {
               categoryLabel={cat?.label ?? "工作区"}
               width={ssWidth}
             />
-            <div className="ss-resize" onMouseDown={startSsResize} aria-hidden />
+            </details>
+            {tab !== "ops" && <div className="ss-resize" onMouseDown={startSsResize} aria-hidden />}
             {/* keep-alive：所有工作区会话常挂，非当前隐藏（事件持续归流）。 */}
             {workspaces.map((w) => {
               const agent = agents.find((a) => a.id === w.agent_id);

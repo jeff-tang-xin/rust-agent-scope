@@ -18,7 +18,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type SessionBinding, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
-import ServersPanel from "./ServersPanel";
+import OpsWorkbench from "./OpsWorkbench";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
 import DataViewerModal from "./DataViewerModal";
@@ -619,6 +619,7 @@ export default function Conversation({
   const [binding, setBinding] = useState<SessionBinding>({});
   useEffect(() => {
     let alive = true;
+    setBinding({});
     api
       .getSessionBinding(workspace.id, sessionId)
       .then((b) => alive && setBinding(b ?? {}))
@@ -1217,6 +1218,8 @@ export default function Conversation({
   // 全局快捷键：Esc 关灯箱（其次停止运行）；Ctrl/Cmd+K 聚焦会话搜索。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Shell 的 Esc / Ctrl+K 属于终端，不能触发 Agent 的全局快捷键。
+      if (e.target instanceof Element && e.target.closest(".ops-terminal")) return;
       if (e.key === "Escape") {
         if (lightbox) {
           setLightbox(null);
@@ -1736,7 +1739,7 @@ export default function Conversation({
     onModeChange(next);
   };
 
-  return (
+  const content = (
     <div className="conversation">
       {lightbox && (
         <div className="lightbox" onClick={() => setLightbox(null)}>
@@ -2039,16 +2042,8 @@ export default function Conversation({
       </div>
       {dragActive && <div className="drop-hint">松开以添加附件</div>}
       </div>
-      {filesOpen ? (
-        workspace.kind === "ops" ? (
-          <ServersPanel
-            onCollapse={() => setFilesOpen(false)}
-            boundServers={workspace.bound_servers}
-            sessionBinding={binding.server ?? null}
-            onBindServer={(name) => void bindConnection("server", name)}
-            onConfirm={onConfirm}
-          />
-        ) : workspace.kind === "db" ? (
+      {workspace.kind === "ops" ? null : filesOpen ? (
+        workspace.kind === "db" ? (
           <DatabasesPanel
             onCollapse={() => setFilesOpen(false)}
             boundDatabases={workspace.bound_databases}
@@ -2069,13 +2064,13 @@ export default function Conversation({
         <div className="file-panel-tabs">
           <button
             className="file-panel-tab"
-            title={workspace.kind === "ops" ? "展开服务器面板" : workspace.kind === "db" ? "展开数据库面板" : "展开文件面板"}
+            title={workspace.kind === "db" ? "展开数据库面板" : "展开文件面板"}
             onClick={() => {
               setFilesOpen(true);
               setOxOpen(false);
             }}
           >
-            {workspace.kind === "ops" ? "🖥" : workspace.kind === "db" ? "🗄" : "📁"}
+            {workspace.kind === "db" ? "🗄" : "📁"}
           </button>
           <button
             className="file-panel-tab"
@@ -2091,4 +2086,29 @@ export default function Conversation({
       )}
     </div>
   );
+  if (workspace.kind !== "ops") return content;
+  return <OpsWorkbench workspace={workspace} server={binding.server ?? ""} busy={busy}
+    onConfirm={onConfirm}
+    onSelect={async (name) => {
+      await api.setSessionBinding(workspace.id, sessionId, "server", name);
+      setBinding((prev) => ({ ...prev, server: name }));
+    }}
+    lines={entries.flatMap((entry) => {
+      if (entry.kind === "msg") return [{ id: `${sessionId}:${entry.id}`, text: `${entry.role === "user" ? "👤" : "🤖"} ${entry.text}` }];
+      if (entry.kind === "tool") return [{ id: `${sessionId}:${entry.id}`, text: `⚙ ${entry.name} ${entry.args}\n${entry.result ?? "执行中…"}` }];
+      if (entry.kind === "confirm") return [{ id: `${sessionId}:${entry.id}`, text: "⚠ 操作需要确认，请检查下方的工具参数并批准或拒绝。" }];
+      return [];
+    })}
+    onAgentInput={async (text) => {
+      if (busyRef.current) throw new Error("Agent 正在运行，请等待或停止当前任务");
+      setBusySafe(true);
+      setEntries((prev) => [...prev, { kind: "msg", role: "user", text, id: nextId() }]);
+      try {
+        await api.sendMessage(workspace.id, runtimeMode, sessionId,
+          `[当前服务器：${binding.server}。输入来自 AI 终端。危险操作先说明影响并请求工具审批；不要推测 PTY 的当前目录，涉及相对路径时先询问或明确绝对路径。]\n${text}`);
+      } catch (e) { setBusySafe(false); throw e; }
+    }}>
+      {busy && <button className="btn danger" onClick={() => void interrupt()}>停止 Agent</button>}
+      {entries.filter((entry) => entry.kind === "confirm").map((entry) => <div key={entry.id}>{renderEntry(entry)}</div>)}
+    </OpsWorkbench>;
 }

@@ -214,7 +214,7 @@ function ServerItem({
 }
 
 /** 远程目录树（懒加载；文件行内操作：下载/删除；目录头部：上传到此目录）。 */
-function RemoteTree({
+export function RemoteTree({
   server,
   onConfirm,
 }: {
@@ -266,6 +266,10 @@ function RemoteTree({
     try {
       const name = picked.split(/[\\/]/).pop() ?? "upload.bin";
       const remote = `${dir.replace(/\/$/, "")}/${name}`;
+      const entries = await api.sshListDir(server, dir);
+      if (entries.some((entry) => entry.name === name)) {
+        if (!await onConfirm?.("覆盖远程文件", `服务器 ${server} 上的 ${remote} 已存在，确定覆盖？`)) return;
+      }
       await api.sshUpload(server, picked, remote);
       void loadDir(dir);
     } catch (e) {

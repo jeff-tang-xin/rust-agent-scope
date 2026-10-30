@@ -480,6 +480,36 @@ pub async fn ssh_exec(
     })
 }
 
+/// 手动 Shell 的独立 PTY，不复用 agent 的单命令 exec。
+#[tauri::command]
+pub async fn ssh_terminal_open(
+    state: State<'_, AppState>, workspace_id: String, name: String,
+    cols: u32, rows: u32, output: tauri::ipc::Channel<ssh_tool::TerminalEvent>,
+) -> Result<String, String> {
+    let config = state.snapshot();
+    let ws = config.workspaces.iter().find(|w| w.id == workspace_id).ok_or("工作区不存在")?;
+    if ws.kind != "ops" || (!ws.bound_servers.is_empty() && !ws.bound_servers.contains(&name)) {
+        return Err("服务器不在运维工作区授权范围内".into());
+    }
+    state.ssh_pool.open_terminal(&name, cols, rows, output).await
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_input(state: State<'_, AppState>, id: String, data: String) -> Result<(), String> {
+    if data.len() > 64 * 1024 { return Err("单次输入超过 64KB".into()); }
+    state.ssh_pool.terminal_input(&id, ssh_tool::TerminalInput::Data(data.into_bytes())).await
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_resize(state: State<'_, AppState>, id: String, cols: u32, rows: u32) -> Result<(), String> {
+    state.ssh_pool.terminal_input(&id, ssh_tool::TerminalInput::Resize(cols, rows)).await
+}
+
+#[tauri::command]
+pub async fn ssh_terminal_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.ssh_pool.terminal_input(&id, ssh_tool::TerminalInput::Close).await
+}
+
 /// 列远程目录（名称 + 类型 + 大小；目录在前）。
 #[tauri::command]
 pub async fn ssh_list_dir(
@@ -2329,6 +2359,10 @@ pub fn run() {
             ssh_connect,
             ssh_disconnect,
             ssh_exec,
+            ssh_terminal_open,
+            ssh_terminal_input,
+            ssh_terminal_resize,
+            ssh_terminal_close,
             ssh_status,
             ssh_list_dir,
             ssh_upload,

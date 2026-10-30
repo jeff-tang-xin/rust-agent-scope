@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+const source = readFileSync(new URL('./terminalRouting.ts', import.meta.url), 'utf8');
+const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const { routeTerminalInput, terminalPlainText } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const direct = ['ls -la', 'pwd', 'cd /var/log', 'df -h', 'tail -100 /var/log/app.log'];
+const agent = ['rm -rf workspaces/*', 'sudo reboot', 'systemctl restart nginx', 'ls; rm -rf /', 'echo $(reboot)', 'echo x > /tmp/a', '帮我检查 nginx', 'unknown-command', 'ls\nreboot', 'bash -c reboot', 'python script.py', 'tail -f /var/log/app.log', 'cat', 'ls | sh'];
+for (const input of direct) assert.equal(routeTerminalInput(input), 'pty', input);
+for (const input of agent) assert.equal(routeTerminalInput(input), 'agent', input);
+assert.equal(terminalPlainText('\x1b[31mhello\x1b[0m'), 'hello');
+assert.equal(terminalPlainText('\x1b]52;c;secret\x07ok'), 'ok');
+console.log(`PASS: ${direct.length + agent.length + 2} terminal routing / escape sanitization cases`);

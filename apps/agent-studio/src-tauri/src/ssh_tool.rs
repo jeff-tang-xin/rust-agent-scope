@@ -21,8 +21,20 @@ use crate::config::ServerConfig;
 /// 单命令输出上限（防上下文打爆；超出截断并注明）。
 const MAX_OUTPUT: usize = 16 * 1024;
 
-/// russh 客户端 handler：接受任意主机密钥（运维工具面向用户自配的服务器，
-/// 与 `ssh -o StrictHostKeyChecking=accept-new` 的首次连接语义一致）。
+fn ssh_client_config(allow_legacy_rsa: bool) -> client::Config {
+    let mut config = client::Config::default();
+    if allow_legacy_rsa {
+        let keys = config.preferred.key.to_mut();
+        if !keys.contains(&russh::keys::key::SSH_RSA) {
+            // 现代算法优先，旧签名仅作为此连接的末位备选。
+            keys.push(russh::keys::key::SSH_RSA);
+        }
+    }
+    config
+}
+
+/// 现有 handler 接受任意主机密钥，尚无 known_hosts 校验。
+/// 不等同于 accept-new：后者还会拒绝已知主机的密钥变化。
 #[derive(Clone)]
 struct ClientHandler;
 
@@ -46,7 +58,7 @@ pub struct SshConn {
 impl SshConn {
     /// 建连 + 认证（密码；空密码直接尝试，失败报错提示补档案）。
     pub async fn connect(server: ServerConfig) -> std::result::Result<Self, String> {
-        let config = Arc::new(client::Config::default());
+        let config = Arc::new(ssh_client_config(server.allow_legacy_rsa));
         let addr = (server.host.as_str(), server.port);
         let mut handle = client::connect(config, addr, ClientHandler)
             .await
@@ -221,15 +233,77 @@ fn append_truncated(buf: &mut Vec<u8>, data: &[u8]) {
     }
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct TerminalEvent {
+    pub data: Vec<u8>,
+    pub closed: bool,
+}
+
+pub enum TerminalInput {
+    Data(Vec<u8>),
+    Resize(u32, u32),
+    Close,
+}
+
 /// SSH 连接池（AppState 持有；按服务器名缓存已认证连接）。
 #[derive(Default)]
 pub struct SshPool {
     sessions: Mutex<HashMap<String, Arc<SshConn>>>,
+    terminals: Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<TerminalInput>>>>,
 }
 
 impl SshPool {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 独立 PTY 通道；输入和窗口变化通过有界队列送入同一个任务。
+    pub async fn open_terminal(
+        &self, server: &str, cols: u32, rows: u32,
+        output: tauri::ipc::Channel<TerminalEvent>,
+    ) -> std::result::Result<String, String> {
+        let conn = self.get(server).await?;
+        let mut channel = conn.handle.channel_open_session().await.map_err(|e| e.to_string())?;
+        channel.request_pty(true, "xterm-256color", cols.clamp(1, 500), rows.clamp(1, 300), 0, 0, &[])
+            .await.map_err(|e| e.to_string())?;
+        channel.request_shell(true).await.map_err(|e| e.to_string())?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        self.terminals.lock().await.insert(id.clone(), tx);
+        let terminals = self.terminals.clone();
+        let task_id = id.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    input = rx.recv() => {
+                        let result = match input {
+                            Some(TerminalInput::Data(data)) => channel.data(&data[..]).await,
+                            Some(TerminalInput::Resize(cols, rows)) => channel.window_change(cols.clamp(1, 500), rows.clamp(1, 300), 0, 0).await,
+                            Some(TerminalInput::Close) | None => break,
+                        };
+                        if result.is_err() { break; }
+                    }
+                    msg = channel.wait() => {
+                        match msg {
+                            Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
+                                if output.send(TerminalEvent { data: data.to_vec(), closed: false }).is_err() { break; }
+                            }
+                            Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => break,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            let _ = channel.close().await;
+            terminals.lock().await.remove(&task_id);
+            let _ = output.send(TerminalEvent { data: vec![], closed: true });
+        });
+        Ok(id)
+    }
+
+    pub async fn terminal_input(&self, id: &str, input: TerminalInput) -> std::result::Result<(), String> {
+        let tx = self.terminals.lock().await.get(id).cloned().ok_or("终端已关闭")?;
+        tx.send(input).await.map_err(|_| "终端已关闭".into())
     }
 
     /// 取已连接会话；未连接报错（前端先 connect）。
@@ -263,7 +337,50 @@ impl SshPool {
     }
 
     pub async fn is_connected(&self, server_name: &str) -> bool {
-        self.sessions.lock().await.contains_key(server_name)
+        self.sessions.lock().await.get(server_name).is_some_and(|conn| !conn.handle.is_closed())
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_rsa_is_opt_in_and_preserves_modern_algorithms() {
+        let defaults = client::Config::default();
+        let normal = ssh_client_config(false);
+        assert_eq!(normal.preferred.key, defaults.preferred.key);
+        let legacy = ssh_client_config(true);
+        assert!(legacy.preferred.key.contains(&russh::keys::key::SSH_RSA));
+        assert!(legacy.preferred.key.starts_with(&defaults.preferred.key));
+        assert_eq!(legacy.preferred.kex, defaults.preferred.kex);
+        assert_eq!(legacy.preferred.cipher, defaults.preferred.cipher);
+        assert_eq!(legacy.preferred.mac, defaults.preferred.mac);
+        assert_eq!(ssh_client_config(false).preferred.key, defaults.preferred.key);
+    }
+
+    #[test]
+    fn legacy_server_config_defaults_off_and_roundtrips() {
+        let mut server: ServerConfig = serde_json::from_value(json!({"name":"test", "host":"localhost"})).unwrap();
+        assert!(!server.allow_legacy_rsa);
+        server.allow_legacy_rsa = true;
+        let decoded: ServerConfig = serde_json::from_value(serde_json::to_value(server).unwrap()).unwrap();
+        assert!(decoded.allow_legacy_rsa);
+    }
+
+    #[tokio::test]
+    async fn missing_terminal_rejects_input() {
+        let pool = SshPool::new();
+        assert!(pool.terminal_input("missing", TerminalInput::Data(vec![3])).await.is_err());
+        assert!(!pool.is_connected("missing").await);
+    }
+
+    #[test]
+    fn terminal_event_preserves_binary_utf8_chunks() {
+        let event = TerminalEvent { data: vec![0x1b, 0x5b, 0xe4, 0xb8], closed: false };
+        let value = serde_json::to_value(event).unwrap();
+        assert_eq!(value["data"], json!([27, 91, 228, 184]));
+        assert_eq!(value["closed"], false);
     }
 }
 
@@ -273,6 +390,7 @@ pub struct RemoteShellTool {
     /// 允许操作的服务器档案名白名单；`None` = 不限（工作区未绑定列表时
     /// 按类别默认开放）。`Some` 时调用参数 `server` 不在名单内即拒绝。
     allowed_servers: Option<Vec<String>>,
+    workspace_state_dir: Option<std::path::PathBuf>,
 }
 
 impl RemoteShellTool {
@@ -280,7 +398,13 @@ impl RemoteShellTool {
         Self {
             pool,
             allowed_servers,
+            workspace_state_dir: None,
         }
+    }
+
+    pub fn with_session_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.workspace_state_dir = Some(dir);
+        self
     }
 }
 
@@ -305,6 +429,27 @@ impl Tool for RemoteShellTool {
             },
             "required": ["server", "command"]
         })
+    }
+
+    async fn call_with_context(&self, input: Value, ctx: &agentscope_core::tool::ToolContext) -> Result<ToolOutput> {
+        if let Some(dir) = &self.workspace_state_dir {
+            let path = dir.join(&ctx.session_id).join("binding.json");
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    let binding: Value = match serde_json::from_slice(&bytes) {
+                        Ok(value) => value,
+                        Err(_) => return Ok(ToolOutput::error("无法读取服务器绑定，拒绝执行")),
+                    };
+                    if let Some(bound) = binding.get("server").and_then(Value::as_str)
+                        && !bound.is_empty() && input.get("server").and_then(Value::as_str) != Some(bound) {
+                        return Ok(ToolOutput::error(format!("当前会话仅可操作服务器 `{bound}`")));
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Ok(ToolOutput::error("无法读取服务器绑定，拒绝执行")),
+            }
+        }
+        self.call(input).await
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {

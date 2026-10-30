@@ -119,6 +119,7 @@ export interface DatabaseKindInfo {
 
 /** SSH 服务器档案（设置页管理；ops 工作区 remote_shell/SFTP 按名字引用）。 */
 export interface ServerConfig {
+  allow_legacy_rsa?: boolean;
   name: string;
   host: string;
   port: number;
