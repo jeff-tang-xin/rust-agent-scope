@@ -1106,6 +1106,9 @@ async fn turn_chain(
                 return;
             }
         };
+        // 模型调用/状态写入等失败会由核心层发出 Error 事件：记录下来，
+        // 事件流结束后据此发 failed 终态（此前失败被静默吞成「本轮已结束」）。
+        let mut turn_error: Option<String> = None;
 
         // delta 微批：TextBlockDelta/ThinkingBlockDelta 在 16ms 窗口内同块
         // 合并成一条再 emit——长输出时每秒数百条 delta 逐条 IPC + 前端逐条
@@ -1177,6 +1180,14 @@ async fn turn_chain(
                 },
             };
             let delta_info = match &event.kind {
+                agentscope_core::event::AgentEventKind::Error { message, .. } => {
+                    // 核心层失败事件：记下来，事件流结束后发 failed 终态。
+                    // 仍照常转发给前端（前端按 ERROR 类型展示），但终态必须
+                    // 是 failed——不能让失败以「completed」收场。
+                    flush_delta!();
+                    turn_error = Some(message.clone());
+                    None
+                }
                 agentscope_core::event::AgentEventKind::TextBlockDelta { reply_id, block_id, delta } => {
                     Some((true, reply_id.clone(), block_id.clone(), delta.clone()))
                 }
@@ -1228,6 +1239,22 @@ async fn turn_chain(
                     turn_id,
                     outcome: "interrupted",
                     error: None,
+                },
+            );
+            return;
+        }
+
+        // 执行失败（模型调用报错等）：发 failed 终态并返回。
+        // 失败必须显式呈现，不能以 completed 冒充，也不结算、不续轮。
+        if let Some(error) = turn_error.take() {
+            let _ = app.emit(
+                "turn-finished",
+                TurnFinished {
+                    workspace_id,
+                    session_id,
+                    turn_id,
+                    outcome: "failed",
+                    error: Some(error),
                 },
             );
             return;

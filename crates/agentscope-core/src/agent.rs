@@ -134,6 +134,15 @@ pub struct ReActAgent {
     max_iters: usize,
     /// 迭代边界异步钩子（见 [`IterationHook`]；None = 无）。
     iteration_hook: Option<IterationHook>,
+    /// 是否启用孤儿工具调用自动补齐（对应 Java `enablePendingToolRecovery`）。
+    ///
+    /// 历史里存在「有 tool_use 无 tool_result」的调用时，后续模型请求会被
+    /// OpenAI 兼容协议判非法（缺 `tool_call_id` 配对）而 400。开启后，agent
+    /// 在新一轮推理前为这些孤儿调用合成一条**错误**工具结果，让会话能继续。
+    ///
+    /// 默认关闭（对齐 Java 默认值）：补齐是「承认这次调用失败了」的动作，
+    /// 不应默认替用户下结论。
+    enable_pending_tool_recovery: bool,
 }
 
 // trait 对象字段（model/memory）不满足自动 derive 的 bound，手动实现 Debug
@@ -164,6 +173,7 @@ pub struct ReActAgentBuilder {
     permission_context: Option<PermissionContextState>,
     max_iters: usize,
     iteration_hook: Option<IterationHook>,
+    enable_pending_tool_recovery: bool,
 }
 
 impl ReActAgent {
@@ -184,6 +194,7 @@ impl ReActAgent {
             permission_context: None,
             max_iters: 10,
             iteration_hook: None,
+            enable_pending_tool_recovery: false,
         }
     }
 
@@ -992,6 +1003,16 @@ impl ReActAgent {
             Ok(_) => "completed",
             Err(_) => "failed",
         };
+        // 失败必须以事件形式外发：事件流此前只呈现过程，调用方拿到的只是
+        // 「channel 关闭」，无法区分「正常结束」与「模型调用报错」，失败被静默
+        // 吞掉。发出后再传播，调用方既有事件也有 Err。
+        if let Err(error) = &outcome {
+            ctx.emit(AgentEventKind::Error {
+                reply_id: Some(ctx.reply_id.clone()),
+                message: error.to_string(),
+            })
+            .await;
+        }
         let state = ctx.snapshot();
         match &ctx.recorder {
             Some(recorder) => {
@@ -1030,14 +1051,99 @@ impl ReActAgent {
         // 权限 HITL：输入里的确认答复先应用（批准/拒绝），再过滤掉不进对话历史
         // （对齐 Java `validateAndAcceptConfirmResults` + resume 滤掉确认答复）。
         let confirm_results = extract_confirm_results(&input.msgs);
-        if !confirm_results.is_empty() {
+        let had_confirm_results = !confirm_results.is_empty();
+        if had_confirm_results {
             self.apply_confirm_results(ctx, confirm_results).await?;
+        }
+        // 历史里仍处于 ASKING（等授权）且没有结果的调用：
+        // - 本次**没有**确认结果 → 显式失败（对齐 Java `validateAndAcceptConfirmResults`
+        //   的 IllegalStateException）。继续推理会把未配对的 tool_use 带进模型请求 →
+        //   协议层 400，报错还完全指不到「其实是缺一次授权」。
+        // - 本次**有**确认结果但只覆盖了部分调用 → 剩余的继续等授权，本轮重新挂起
+        //   （对齐 Java `resumeAgent` → `acting` → 权限门再次 ASK → 再次挂起）。
+        let asking = {
+            let state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+            crate::message::asking_tool_calls(&state.context)
+        };
+        if !asking.is_empty() {
+            if !had_confirm_results {
+                let summary = asking
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::ToolUse { id, name, .. } => Some(format!("{name} (id={id})")),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(Error::InvalidInput(format!(
+                    "agent is paused for human-in-the-loop confirmation: the following tool call(s) \
+                     are awaiting approval: [{summary}]. This call supplied no confirmation, so it \
+                     cannot proceed; approve or deny the pending tool call(s) first."
+                )));
+            }
+            // 部分批准：剩余调用仍待授权 → 重新挂起，等用户下一次裁决。
+            ctx.emit(AgentEventKind::RequireUserConfirm {
+                reply_id: ctx.reply_id.clone(),
+                tool_calls: asking,
+            })
+            .await;
+            let final_msg = self
+                .last_assistant_message(ctx)
+                .map(|msg| msg.with_generate_reason(GenerateReason::PermissionAsking))
+                .unwrap_or_else(|| Msg::assistant(&self.name, Vec::new()));
+            if let Some(recorder) = &ctx.recorder {
+                recorder.result(&final_msg);
+            }
+            if let (Some(recorder), Some(execution)) = (&ctx.recorder, &ctx.execution) {
+                execution
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .continue_or_close(recorder)
+                    .map_err(Error::Session)?;
+            }
+            ctx.emit(AgentEventKind::AgentResult {
+                result: final_msg.clone(),
+            })
+            .await;
+            ctx.emit(AgentEventKind::AgentEnd {
+                reply_id: ctx.reply_id.clone(),
+            })
+            .await;
+            return Ok(final_msg);
         }
         for msg in &input.msgs {
             if has_confirm_results(msg) {
                 continue;
             }
             ctx.push(msg.clone());
+        }
+        // 孤儿工具调用恢复（对齐 Java `maybePatchPendingToolCalls`）：
+        // 历史里存在「有 tool_use 无 tool_result」的调用时，下一次模型请求会被
+        // OpenAI 兼容协议判非法（assistant 的 tool_calls 缺配对的 tool 消息），
+        // 直接 400。开启开关后，在推理前为这些调用各合成一条**错误**结果。
+        //
+        // 时机：必须在确认结果落定之后（否则会把「用户马上要确认的调用」当成
+        // 孤儿抹掉，破坏 HITL 语义），也必须在任何模型请求之前。
+        if self.enable_pending_tool_recovery {
+            self.patch_pending_tool_calls(ctx)?;
+        } else {
+            // 恢复关闭且孤儿仍在 → 显式失败（对齐 Java `doCallInner` 末段
+            // 的 IllegalStateException：「Pending tool calls exist without results.
+            // Enable enablePendingToolRecovery or provide tool results.」）。
+            // 不显式拦住的话，请求会带着未配对的 tool_use 打到模型，得到的 400
+            // 完全指不到真正原因——用户看到的是「模型报错」而不是「历史里有个
+            // 没跑完的工具调用」。
+            let pending = {
+                let state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+                crate::message::pending_tool_use_ids(&state.context)
+            };
+            if !pending.is_empty() {
+                return Err(Error::InvalidInput(format!(
+                    "pending tool calls exist without results: [{}]. Enable pending tool \
+                     recovery, or provide the tool results for these calls.",
+                    pending.join(", ")
+                )));
+            }
         }
         // 会话开始：基线 / 运行 / 回合 / 输入
         // 执行命令驱动时，日志里记录的是命令准入后的输入（resume 会滤掉确认答复）
@@ -1518,6 +1624,104 @@ impl ReActAgent {
         Ok(())
     }
 
+    /// 取历史中最后一条 assistant 消息（对齐 Java `MessageUtils.lastAssistantMessage`）。
+    fn last_assistant_message(&self, ctx: &RunContext) -> Option<Msg> {
+        let state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+        state
+            .context
+            .iter()
+            .rev()
+            .find(|msg| msg.role == crate::message::Role::Assistant)
+            .cloned()
+    }
+
+    /// 为历史中的孤儿工具调用合成错误结果（对应 Java `maybePatchPendingToolCalls`）。
+    ///
+    /// 孤儿 = 最后一条 assistant 消息里有 `tool_use`，但历史中没有配对的
+    /// `tool_result`。成因：工具执行前进程退出、回合被中断、权限确认后未续跑。
+    /// 留着不管，下一次模型请求会因缺 `tool_call_id` 配对被协议层判非法（400）。
+    ///
+    /// 处理规则（对齐 Java）：
+    /// - 只看**最后一条** assistant 消息的 `tool_use`（更早的批次已成对）；
+    /// - 跳过 `ASKING` 的调用——它们等的是用户确认，尚未执行，抹掉会破坏 HITL；
+    /// - 本次调用已自带工具结果时不补齐（真实结果优先，绝不覆盖）；
+    /// - 合成结果是**错误**状态，不是成功——不伪造执行结论。
+    fn patch_pending_tool_calls(&self, ctx: &RunContext) -> Result<()> {
+        let pending = {
+            let state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+            crate::message::extract_pending_tool_calls(&state.context)
+        };
+        if pending.is_empty() {
+            return Ok(());
+        }
+        // 只补「非 ASKING」的调用：ASKING 还在等用户确认，等确认结果落地后
+        // 由 apply_confirm_results 正常执行或拒绝。
+        let orphan: Vec<ContentBlock> = pending
+            .into_iter()
+            .filter(|block| {
+                !matches!(
+                    block,
+                    ContentBlock::ToolUse {
+                        state: Some(crate::message::ToolCallState::Asking),
+                        ..
+                    }
+                )
+            })
+            .collect();
+        if orphan.is_empty() {
+            return Ok(());
+        }
+        let mut patched = Vec::new();
+        for block in orphan {
+            let ContentBlock::ToolUse { id, name, .. } = block else {
+                continue;
+            };
+            let message = Msg::tool_result(
+                &self.name,
+                &id,
+                &name,
+                format!(
+                    "Previous tool execution failed or was interrupted. Tool: {name}"
+                ),
+                crate::message::ToolResultState::Error,
+            );
+            // 对应的 tool_use 标记为已结束：它不会再被执行。
+            {
+                let mut state = ctx.state.lock().unwrap_or_else(|error| error.into_inner());
+                for msg in state.context.iter_mut() {
+                    for block in msg.content.iter_mut() {
+                        if let ContentBlock::ToolUse {
+                            id: block_id,
+                            state: block_state,
+                            ..
+                        } = block
+                        {
+                            if block_id == &id {
+                                *block_state = Some(crate::message::ToolCallState::Finished);
+                            }
+                        }
+                    }
+                }
+            }
+            ctx.push(message.clone());
+            patched.push(message);
+        }
+        if patched.is_empty() {
+            return Ok(());
+        }
+        // 补齐是「历史事实」，必须落进会话日志，否则重启后又是孤儿。
+        ctx.capture("pending_tool_calls_patched")?;
+        for message in patched {
+            if let Some(recorder) = &ctx.recorder {
+                recorder.append(
+                    "tool/result",
+                    serde_json::json!({ "message": message, "synthetic": true }),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// 执行单个工具调用：权限门控 → 会话事件 → 执行 → ToolResult 三段事件。
     ///
     /// "模型发起了什么调用"已由 reasoning 阶段的 ToolCall 三段事件表达
@@ -1751,7 +1955,8 @@ impl ReActAgent {
         let (tx, rx) = mpsc::channel::<AgentEvent>(32);
         let this = self.clone();
         let task = tokio::spawn(async move {
-            // 出错时仅关闭 channel：错误语义由 call() 承担，事件流只负责过程呈现
+            // 失败会先由 run() 发出 Error 事件，再关闭 channel——调用方据此
+            // 区分「正常结束」与「出错」，不再把失败当静默结束。
             let _ = this.run(runtime, vec![msg], Some(tx), true, None).await;
         });
         Ok((rx, task))
@@ -1901,6 +2106,21 @@ impl ReActAgentBuilder {
         self
     }
 
+    /// 启用孤儿工具调用自动补齐（对应 Java `enablePendingToolRecovery`）。
+    ///
+    /// 开启后，agent 在每轮推理前检查历史：若最后一条 assistant 消息里有工具
+    /// 调用但没有配对结果（工具执行前进程退出、被中断、权限确认未续跑），
+    /// 就为它们各合成一条**错误**工具结果写回历史。
+    ///
+    /// 这样后续模型请求满足 `tool_call` / `tool_call_id` 配对约束，不会 400；
+    /// 模型也能看到「这次调用失败了」并自行决定重试还是换策略。
+    ///
+    /// 默认关闭：补齐等于替这次调用下了「失败」的结论，属于需要显式授权的动作。
+    pub fn enable_pending_tool_recovery(mut self, enable: bool) -> Self {
+        self.enable_pending_tool_recovery = enable;
+        self
+    }
+
     /// 构建 agent。只有 `model` 是必填项。
     pub fn build(self) -> Result<ReActAgent> {
         let model = self
@@ -1933,6 +2153,7 @@ impl ReActAgentBuilder {
             permission_context: self.permission_context,
             max_iters: self.max_iters,
             iteration_hook: self.iteration_hook,
+            enable_pending_tool_recovery: self.enable_pending_tool_recovery,
         })
     }
 }
@@ -3446,5 +3667,377 @@ mod tests {
         assert!(result.is_err());
         // 只有迭代边界的常规调用，没有 forced 恢复
         assert_eq!(*calls.lock().unwrap(), vec![false]);
+    }
+
+    /// 预置一份「有 tool_use 无 tool_result」的历史（模拟工具执行前进程退出）。
+    fn seed_orphan_history(store: &Arc<dyn AgentStateStore>, session_id: &str) {
+        let mut state = AgentState::new();
+        state.session_id = session_id.to_string();
+        state.context.push(Msg::user("user", "跑一下 ls"));
+        state.context.push(Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: None,
+                content: None,
+            }],
+        ));
+        store
+            .save::<AgentState>(None, session_id, LEGACY_STATE_KEY, &state)
+            .unwrap();
+    }
+
+    /// 开启恢复后：历史里的孤儿 tool_use 被补上**错误**结果，
+    /// 模型请求里 tool_use 与 tool 消息重新配对（不再 400）。
+    #[tokio::test]
+    async fn pending_tool_recovery_patches_orphan_call_with_error_result() {
+        let store: Arc<dyn AgentStateStore> = Arc::new(InMemoryAgentStateStore::new());
+        seed_orphan_history(&store, "session-orphan");
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_for_model = Arc::clone(&seen);
+        struct Capturing {
+            seen: Arc<Mutex<Vec<Vec<Msg>>>>,
+        }
+        #[async_trait::async_trait]
+        impl Model for Capturing {
+            async fn call(&self, request: ChatRequest) -> Result<crate::model::ChatResponse> {
+                self.seen.lock().unwrap().push(request.messages);
+                Ok(crate::model::ChatResponse::from_text("已恢复"))
+            }
+        }
+
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(Capturing { seen }))
+            .state_store(store)
+            .default_session_id("session-orphan")
+            .enable_pending_tool_recovery(true)
+            .build()
+            .unwrap();
+
+        agent.call(Msg::user("user", "继续")).await.unwrap();
+
+        // 模型收到的请求里：assistant 的 tool_use 有配对的 tool 消息
+        let requests = seen_for_model.lock().unwrap();
+        let first = &requests[0];
+        let tool_use_ids: Vec<String> = first
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolUse { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let result_ids: Vec<String> = first
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_use_ids, vec!["call_1".to_string()]);
+        assert_eq!(result_ids, vec!["call_1".to_string()]);
+
+        // 补的是错误结果，不是成功——不伪造执行结论
+        let result_state = first
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .find_map(|b| match b {
+                ContentBlock::ToolResult { state, .. } => Some(*state),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(result_state, ToolResultState::Error);
+    }
+
+    /// 恢复关闭时不动历史（默认保守：补齐等于替用户下「失败」的结论），
+    /// 并显式报错而不是把未配对的 tool_use 带进模型请求（协议层 400）。
+    #[tokio::test]
+    async fn pending_tool_recovery_is_off_by_default() {
+        let store: Arc<dyn AgentStateStore> = Arc::new(InMemoryAgentStateStore::new());
+        seed_orphan_history(&store, "session-no-recovery");
+
+        let agent = plain(vec![crate::model::ChatResponse::from_text("回复")])
+            .state_store(store)
+            .default_session_id("session-no-recovery")
+            .build()
+            .unwrap();
+
+        let error = agent.call(Msg::user("user", "继续")).await.unwrap_err();
+        assert!(
+            error.to_string().contains("pending tool calls exist without results"),
+            "恢复关闭时应显式报错：{error}"
+        );
+
+        // 历史里仍然没有 tool_result：孤儿原样保留
+        let has_result = history(&agent)
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+        assert!(!has_result, "恢复关闭时不应补齐");
+    }
+
+    /// ASKING（等用户确认）的调用不算孤儿：补齐会破坏 HITL 语义。
+    ///
+    /// 本次调用又没带确认结果 → 显式失败（对齐 Java `validateAndAcceptConfirmResults`
+    /// 的 IllegalStateException）：不能把未配对的 tool_use 带进模型请求。
+    #[tokio::test]
+    async fn pending_tool_recovery_skips_asking_tool_calls() {
+        let store: Arc<dyn AgentStateStore> = Arc::new(InMemoryAgentStateStore::new());
+        let mut state = AgentState::new();
+        state.session_id = "session-asking".to_string();
+        state.context.push(Msg::user("user", "跑一下 ls"));
+        state.context.push(Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: Some(ToolCallState::Asking),
+                content: None,
+            }],
+        ));
+        store
+            .save::<AgentState>(None, "session-asking", LEGACY_STATE_KEY, &state)
+            .unwrap();
+
+        let agent = plain(vec![crate::model::ChatResponse::from_text("回复")])
+            .state_store(store)
+            .default_session_id("session-asking")
+            .enable_pending_tool_recovery(true)
+            .build()
+            .unwrap();
+
+        let error = agent.call(Msg::user("user", "继续")).await.unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("awaiting approval"),
+            "错误应指明待授权的调用：{message}"
+        );
+
+        // 历史里没有被补出来的 ToolResult：ASKING 的调用不被补齐。
+        let has_result = history(&agent)
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+        assert!(!has_result, "ASKING 的调用不应被补齐");
+    }
+
+    /// 部分批准：只覆盖了部分 ASKING 调用时，剩余的继续等授权，本轮重新挂起
+    /// （对齐 Java `resumeAgent` → `acting` → 权限门再次 ASK → 再次挂起）。
+    ///
+    /// 关键：不能带着未配对的 `tool_use` 继续推理（协议层 400）。
+    #[tokio::test]
+    async fn partial_confirm_leaves_remaining_asking_calls_suspended() {
+        let mut toolkit = Toolkit::new();
+        toolkit.register(Arc::new(AddTool));
+        toolkit.register(Arc::new(WebSearchTool));
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(MockModel {
+                responses: Mutex::new(vec![
+                    crate::model::ChatResponse::from_text("都执行完了"),
+                    crate::model::ChatResponse {
+                        content: vec![
+                            ContentBlock::ToolUse {
+                                id: "call_add".into(),
+                                name: "add".into(),
+                                input: json!({"a": 1, "b": 2}),
+                                state: None,
+                                content: None,
+                            },
+                            ContentBlock::ToolUse {
+                                id: "call_web".into(),
+                                name: "web_search".into(),
+                                input: json!({"q": "rust"}),
+                                state: None,
+                                content: None,
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                ]),
+            }))
+            .toolkit(toolkit)
+            .memory(Arc::new(InMemoryMemory::new()))
+            .permission(Arc::new(AskAll))
+            .build()
+            .unwrap();
+
+        // 第一轮：两个调用都挂起
+        let reply = agent.call(Msg::user("user", "算一下并搜一下")).await.unwrap();
+        assert_eq!(reply.text(), "");
+
+        // 只批准 add：web_search 名字不同，不自动放行，仍待授权
+        let confirm = crate::event::ConfirmResult {
+            confirmed: true,
+            tool_call: ContentBlock::ToolUse {
+                id: "call_add".into(),
+                name: "add".into(),
+                input: json!({"a": 1, "b": 2}),
+                state: None,
+                content: None,
+            },
+            rules: None,
+            reason: None,
+        };
+        let confirm_msg = Msg::new(Role::User, "user", Vec::new()).with_metadata(
+            serde_json::json!({
+                (crate::message::metadata_keys::CONFIRM_RESULTS):
+                    serde_json::to_value(vec![confirm]).unwrap(),
+            }),
+        );
+        let reply2 = agent.call(confirm_msg).await.unwrap();
+
+        // 本轮重新挂起：不再发模型请求（模型只准备了一次响应，用完即证伪）
+        assert!(
+            reply2.text().is_empty(),
+            "剩余调用待授权时应重新挂起，而不是继续推理：{}",
+            reply2.text()
+        );
+        assert_eq!(
+            reply2.generate_reason,
+            Some(GenerateReason::PermissionAsking),
+            "应带 PermissionAsking 停止原因"
+        );
+
+        // 已批准的调用有真实结果；未批准的调用仍无结果（不能被补齐成成功）
+        let history = history(&agent);
+        let results: Vec<(String, ToolResultState)> = history
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult { id, state, .. } => Some((id.clone(), state.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results.len(), 1, "只有已批准的调用该有结果: {results:?}");
+        assert_eq!(results[0].0, "call_add");
+        assert!(matches!(results[0].1, ToolResultState::Success));
+    }
+
+    /// 恢复关闭且历史里仍有孤儿调用 → 显式失败，而不是把未配对的 tool_use
+    /// 带进模型请求变成 400（对齐 Java `doCallInner` 末段的 IllegalStateException）。
+    #[tokio::test]
+    async fn pending_tool_recovery_disabled_fails_explicitly() {
+        let store: Arc<dyn AgentStateStore> = Arc::new(InMemoryAgentStateStore::new());
+        let mut state = AgentState::new();
+        state.session_id = "session-orphan-off".to_string();
+        state.context.push(Msg::user("user", "跑一下 ls"));
+        state.context.push(Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: None,
+                content: None,
+            }],
+        ));
+        store
+            .save::<AgentState>(None, "session-orphan-off", LEGACY_STATE_KEY, &state)
+            .unwrap();
+
+        let agent = plain(vec![crate::model::ChatResponse::from_text("回复")])
+            .state_store(store)
+            .default_session_id("session-orphan-off")
+            .build()
+            .unwrap();
+
+        let error = agent.call(Msg::user("user", "继续")).await.unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("pending tool calls exist without results"),
+            "错误应指明是孤儿调用未补齐：{message}"
+        );
+        assert!(message.contains("call_1"), "错误应列出孤儿调用 id：{message}");
+    }
+
+    /// 已有真实结果的调用不被覆盖（真实结果优先）。
+    #[tokio::test]
+    async fn pending_tool_recovery_keeps_existing_real_result() {
+        let store: Arc<dyn AgentStateStore> = Arc::new(InMemoryAgentStateStore::new());
+        let mut state = AgentState::new();
+        state.session_id = "session-paired".to_string();
+        state.context.push(Msg::user("user", "跑一下 ls"));
+        state.context.push(Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: None,
+                content: None,
+            }],
+        ));
+        state.context.push(Msg::tool_result(
+            "assistant",
+            "call_1",
+            "shell",
+            "file.txt",
+            ToolResultState::Success,
+        ));
+        store
+            .save::<AgentState>(None, "session-paired", LEGACY_STATE_KEY, &state)
+            .unwrap();
+
+        let agent = plain(vec![crate::model::ChatResponse::from_text("回复")])
+            .state_store(store)
+            .default_session_id("session-paired")
+            .enable_pending_tool_recovery(true)
+            .build()
+            .unwrap();
+
+        agent.call(Msg::user("user", "继续")).await.unwrap();
+
+        let results: Vec<(String, ToolResultState)> = history(&agent)
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult { id, state, .. } => Some((id.clone(), *state)),
+                _ => None,
+            })
+            .collect();
+        // 只有原来那一条成功结果，没有多出合成的错误结果
+        assert_eq!(
+            results,
+            vec![("call_1".to_string(), ToolResultState::Success)]
+        );
+    }
+
+    /// 模型调用失败时：事件流里出现 Error 事件，失败不再被静默吞掉。
+    #[tokio::test]
+    async fn model_failure_emits_error_event() {
+        struct Failing;
+        #[async_trait::async_trait]
+        impl Model for Failing {
+            async fn call(&self, _request: ChatRequest) -> Result<crate::model::ChatResponse> {
+                Err(Error::Model("connection refused".into()))
+            }
+        }
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(Failing))
+            .memory(Arc::new(InMemoryMemory::new()))
+            .build()
+            .unwrap();
+
+        let (mut rx, task) = agent
+            .stream_events_with_context(RuntimeContext::new(), Msg::user("user", "你好"))
+            .await
+            .unwrap();
+        let mut saw_error = false;
+        while let Some(event) = rx.recv().await {
+            if let AgentEventKind::Error { message, .. } = &event.kind {
+                assert!(message.contains("connection refused"), "{message}");
+                saw_error = true;
+            }
+        }
+        task.await.unwrap();
+        assert!(saw_error, "模型失败必须发出 Error 事件");
     }
 }

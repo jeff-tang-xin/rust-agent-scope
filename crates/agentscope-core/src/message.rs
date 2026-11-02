@@ -460,6 +460,110 @@ impl Msg {
     }
 }
 
+/// 找出会话历史里「有工具调用但没有对应结果」的孤儿调用 id。
+///
+/// 对齐 Java `MessageUtils.pendingToolUseIds`：只看**最后一条 assistant 消息**
+/// 的工具调用块，与历史中已存在的全部 `ToolResult` id 求差集。
+///
+/// 孤儿调用会让后续模型请求非法——OpenAI 兼容协议要求 assistant 消息里的每个
+/// `tool_call` 都有配对的 tool 消息（`tool_call_id`），缺一个即 400。成因是
+/// 工具执行前进程退出、被中断、或权限确认挂起后未续跑。
+pub fn pending_tool_use_ids(messages: &[Msg]) -> Vec<String> {
+    let Some(last_assistant) = messages
+        .iter()
+        .rev()
+        .find(|msg| msg.role == Role::Assistant)
+    else {
+        return Vec::new();
+    };
+    let has_result = |id: &str| {
+        messages.iter().any(|msg| {
+            msg.content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::ToolResult { id: rid, .. } if rid == id))
+        })
+    };
+    let mut pending: Vec<String> = Vec::new();
+    for block in last_assistant.content.iter() {
+        let ContentBlock::ToolUse { id, .. } = block else {
+            continue;
+        };
+        if !has_result(id) && !pending.iter().any(|seen| seen == id) {
+            pending.push(id.clone());
+        }
+    }
+    pending
+}
+
+/// 取出历史中处于「等待结果」状态的孤儿工具调用块。
+///
+/// 对齐 Java `MessageUtils.extractPendingToolCalls`：在 [`pending_tool_use_ids`]
+/// 的基础上，按历史顺序返回对应的 `ToolUse` 块（含 id / name / state）。
+pub fn extract_pending_tool_calls(messages: &[Msg]) -> Vec<ContentBlock> {
+    let pending_ids = pending_tool_use_ids(messages);
+    if pending_ids.is_empty() {
+        return Vec::new();
+    }
+    // 对齐 Java `extractRecentToolCalls`：只取**最后一条** assistant 消息里的调用块，
+    // 不横扫全历史——更早批次已成对，横扫会在 id 复用时取到陈旧调用。
+    let Some(last_assistant) = messages
+        .iter()
+        .rev()
+        .find(|msg| msg.role == Role::Assistant)
+    else {
+        return Vec::new();
+    };
+    last_assistant
+        .content
+        .iter()
+        .filter(|block| {
+            matches!(block, ContentBlock::ToolUse { id, .. } if pending_ids.iter().any(|p| p == id))
+        })
+        .cloned()
+        .collect()
+}
+
+/// 找出仍在等待用户授权确认的工具调用（对齐 Java `ReActAgent.askingToolCalls`）。
+///
+/// 只看**最后一条** assistant 消息里的 `ASKING` 状态调用，且该调用还没有
+/// 任何结果——已经拿到结果的不再是「待确认」。
+///
+/// 用途：这类调用一旦被带进模型请求就是非法请求（缺 `tool_call_id` 配对），
+/// 框架必须先拦住并给出可操作的提示，而不是让协议层报 400。
+pub fn asking_tool_calls(messages: &[Msg]) -> Vec<ContentBlock> {
+    let Some(last_assistant) = messages
+        .iter()
+        .rev()
+        .find(|msg| msg.role == Role::Assistant)
+    else {
+        return Vec::new();
+    };
+    last_assistant
+        .content
+        .iter()
+        .filter(|block| {
+            matches!(
+                block,
+                ContentBlock::ToolUse {
+                    state: Some(ToolCallState::Asking),
+                    ..
+                }
+            )
+        })
+        .filter(|block| {
+            let ContentBlock::ToolUse { id, .. } = block else {
+                return false;
+            };
+            !messages.iter().any(|msg| {
+                msg.content.iter().any(|other| {
+                    matches!(other, ContentBlock::ToolResult { id: rid, .. } if rid == id)
+                })
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,5 +824,118 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let back: Msg = serde_json::from_str(&json).unwrap();
         assert_eq!(back, msg);
+    }
+
+    /// 助手消息含工具调用、但历史里没有对应结果 → 视为孤儿。
+    #[test]
+    fn pending_tool_use_ids_detects_orphan_call() {
+        let assistant = Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: None,
+                content: None,
+            }],
+        );
+        let history = vec![Msg::user("user", "跑一下"), assistant];
+        assert_eq!(pending_tool_use_ids(&history), vec!["call_1".to_string()]);
+    }
+
+    /// 已有真实结果的调用不算孤儿（不能被补齐逻辑重复处理）。
+    #[test]
+    fn pending_tool_use_ids_ignores_paired_calls() {
+        let assistant = Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: None,
+                content: None,
+            }],
+        );
+        let result = Msg::tool_result(
+            "assistant",
+            "call_1",
+            "shell",
+            "file.txt",
+            ToolResultState::Success,
+        );
+        let history = vec![Msg::user("user", "跑一下"), assistant, result];
+        assert!(pending_tool_use_ids(&history).is_empty());
+        assert!(extract_pending_tool_calls(&history).is_empty());
+    }
+
+    /// 只看最后一条 assistant 消息：更早批次已成对，不算孤儿。
+    #[test]
+    fn pending_tool_use_ids_only_looks_at_last_assistant() {
+        let first = Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({}),
+                state: None,
+                content: None,
+            }],
+        );
+        let first_result = Msg::tool_result(
+            "assistant",
+            "call_1",
+            "shell",
+            "ok",
+            ToolResultState::Success,
+        );
+        let last = Msg::assistant("assistant", vec![ContentBlock::Text { text: "好了".into() }]);
+        let history = vec![first, first_result, last];
+        assert!(pending_tool_use_ids(&history).is_empty());
+    }
+
+    /// 同一批里部分完成、部分缺失 → 只报缺失的那些。
+    #[test]
+    fn pending_tool_use_ids_reports_only_missing_ones() {
+        let assistant = Msg::assistant(
+            "assistant",
+            vec![
+                ContentBlock::ToolUse {
+                    id: "call_1".into(),
+                    name: "shell".into(),
+                    input: json!({}),
+                    state: None,
+                    content: None,
+                },
+                ContentBlock::ToolUse {
+                    id: "call_2".into(),
+                    name: "shell".into(),
+                    input: json!({}),
+                    state: None,
+                    content: None,
+                },
+            ],
+        );
+        let result = Msg::tool_result(
+            "assistant",
+            "call_1",
+            "shell",
+            "ok",
+            ToolResultState::Success,
+        );
+        let history = vec![assistant, result];
+        assert_eq!(pending_tool_use_ids(&history), vec!["call_2".to_string()]);
+        let pending = extract_pending_tool_calls(&history);
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            pending[0],
+            ContentBlock::ToolUse { ref id, .. } if id == "call_2"
+        ));
+    }
+
+    /// 没有 assistant 消息时没有孤儿。
+    #[test]
+    fn pending_tool_use_ids_empty_without_assistant_message() {
+        let history = vec![Msg::user("user", "你好")];
+        assert!(pending_tool_use_ids(&history).is_empty());
     }
 }

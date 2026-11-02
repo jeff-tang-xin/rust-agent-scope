@@ -212,6 +212,9 @@ fn build_member(
         .state_store(state_store)
         .default_session_id("main")
         .as_leaf_subagent()
+        // 成员同样是持久化会话：孤儿工具调用恢复与主 agent 保持一致，
+        // 否则成员会话一旦留下孤儿就会永久卡死。
+        .enable_pending_tool_recovery(Some(true))
         .build()
 }
 
@@ -234,6 +237,9 @@ fn build_spawn_agent(
         .toolkit(toolkit)
         .state_store(state_store)
         .default_session_id("subagent")
+        // 分身与主 agent 同策略：孤儿工具调用补齐**错误**结果，避免分身
+        // 会话因缺配对被模型协议层判 400 后永久卡死。
+        .enable_pending_tool_recovery(true)
         .build()
         .map_err(|e| format!("build subagent `{name}`: {e}"))?;
     Ok(Arc::new(agent))
@@ -491,6 +497,17 @@ pub fn build_agent(
         // 宽松，但低于内置智能体显式配置的 80（DEFAULT_MAX_ITERS）。
         builder = builder.max_iters(config::FALLBACK_MAX_ITERS as usize);
     }
+    // 孤儿工具调用恢复：**显式开启**（Java 侧全局默认是 false）。
+    //
+    // 偏离理由：Studio 是会话持久化的桌面应用，工具执行前进程退出/回合被中断
+    // 是常态而非边缘情况。恢复关闭时，历史里一旦留下「有 tool_use 无 tool_result」
+    // 的孤儿，该会话就会永久卡死——每次调用都因缺配对被模型协议层判 400，
+    // 用户既看不到原因也无法继续。开启后孤儿会被补上**错误**结果（不伪造成功），
+    // 会话可以继续。
+    //
+    // 补齐只影响「最后一条 assistant 消息里没有结果的调用」，绝不覆盖已有真实
+    // 结果，也不碰仍在等用户授权（ASKING）的调用。
+    builder = builder.enable_pending_tool_recovery(Some(true));
     // 危险工具默认走用户授权（AgentScope 权限引擎 ask 规则，会话级持久化）：
     // shell 执行与文件写入/编辑需用户批准后才会执行；目录穿越由 Sandboxed
     // 文件层硬拒（path escapes workspace root），不在此列。

@@ -243,6 +243,7 @@ pub(crate) fn build_general_purpose_factory(
     parent_model: &Arc<dyn Model>,
     parent_toolkit: Option<&Toolkit>,
     max_iters: Option<usize>,
+    enable_pending_tool_recovery: Option<bool>,
 ) -> Arc<SubagentFactory> {
     let model = parent_model.clone();
     let toolkit = allowlisted_inherited_toolkit(parent_toolkit, &[]);
@@ -254,6 +255,10 @@ pub(crate) fn build_general_purpose_factory(
             .toolkit(toolkit.copy());
         if let Some(max_iters) = max_iters {
             builder = builder.max_iters(max_iters);
+        }
+        // 声明里没写就继承父设置（tri-state：None = 继承）。
+        if let Some(enable) = enable_pending_tool_recovery {
+            builder = builder.enable_pending_tool_recovery(enable);
         }
         builder
             .build()
@@ -273,6 +278,7 @@ pub(crate) fn build_declared_factory(
     main_workspace: &Path,
     state_store: Option<Arc<dyn AgentStateStore>>,
     max_iters: Option<usize>,
+    parent_enable_pending_tool_recovery: Option<bool>,
 ) -> Arc<SubagentFactory> {
     let decl = decl.clone();
     let parent_model = parent_model.clone();
@@ -298,6 +304,13 @@ pub(crate) fn build_declared_factory(
             builder = builder.max_iters(decl.steps as usize);
         } else if let Some(max_iters) = max_iters {
             builder = builder.max_iters(max_iters);
+        }
+        // 孤儿工具调用恢复：声明显式指定优先，否则继承父设置（tri-state）。
+        let enable_pending_tool_recovery = decl
+            .enable_pending_tool_recovery
+            .or(parent_enable_pending_tool_recovery);
+        if let Some(enable) = enable_pending_tool_recovery {
+            builder = builder.enable_pending_tool_recovery(enable);
         }
         if decl.persist_session {
             if let Some(store) = &state_store {
@@ -529,6 +542,9 @@ pub struct HarnessAgentBuilder {
     /// 记忆工作区（flush/consolidation 的落盘根）：`None` 用主工作区。
     /// studio 把它锚到 `<项目>/.ox`，与 memory_save 工具同根——记忆不落项目根。
     memory_workspace: Option<Arc<WorkspaceManager>>,
+    /// 孤儿工具调用恢复策略（对应 Java `enablePendingToolRecovery`）：
+    /// `Some(true)` 开启，`Some(false)` 关闭，`None` = 不指定（子代理继承父设置）。
+    enable_pending_tool_recovery: Option<bool>,
 }
 
 impl HarnessAgentBuilder {
@@ -558,6 +574,7 @@ impl HarnessAgentBuilder {
             permission_context: None,
             compaction_config: Some(CompactionConfig::default()),
             memory_workspace: None,
+            enable_pending_tool_recovery: None,
         }
     }
 
@@ -588,6 +605,17 @@ impl HarnessAgentBuilder {
     /// 最大迭代轮数。
     pub fn max_iters(mut self, max_iters: usize) -> Self {
         self.max_iters = Some(max_iters);
+        self
+    }
+
+    /// 孤儿工具调用恢复策略（对应 Java `enablePendingToolRecovery`）。
+    ///
+    /// 开启后，历史里「有 tool_use 无 tool_result」的调用会被补上**错误**结果，
+    /// 使后续模型请求满足工具调用配对约束（否则 OpenAI 兼容协议直接 400）。
+    ///
+    /// `None`（默认）= 不指定：主 agent 用核心层默认值（关闭），子代理继承父设置。
+    pub fn enable_pending_tool_recovery(mut self, enable: Option<bool>) -> Self {
+        self.enable_pending_tool_recovery = enable;
         self
     }
 
@@ -767,6 +795,7 @@ impl HarnessAgentBuilder {
                         &model,
                         Some(&toolkit),
                         self.max_iters,
+                        self.enable_pending_tool_recovery,
                     ),
                 ));
             }
@@ -782,6 +811,7 @@ impl HarnessAgentBuilder {
                         workspace_manager.root(),
                         self.state_store.clone(),
                         self.max_iters,
+                        self.enable_pending_tool_recovery,
                     ),
                 ));
             }
@@ -883,6 +913,9 @@ impl HarnessAgentBuilder {
         builder = builder.toolkit(toolkit.copy());
         if let Some(max_iters) = self.max_iters {
             builder = builder.max_iters(max_iters);
+        }
+        if let Some(enable) = self.enable_pending_tool_recovery {
+            builder = builder.enable_pending_tool_recovery(enable);
         }
         if let Some(store) = &self.state_store {
             builder = builder.state_store(store.clone());

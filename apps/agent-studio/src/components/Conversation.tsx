@@ -1138,6 +1138,23 @@ export default function Conversation({
             },
           ]);
           break;
+        case "ERROR": {
+          // 核心层失败事件（模型调用报错等）：立即呈现错误，不让失败静默。
+          // turn-finished(failed) 会再兜一次，这里保证错误在事件流上就可见。
+          finalizeStreams();
+          const message = typeof ev.message === "string" ? ev.message : "未知错误";
+          setError(message);
+          setEntries((prev) => [
+            ...prev.filter((e) => e.kind !== "indicator"),
+            {
+              kind: "indicator",
+              text: `本轮失败：${message}`,
+              ts: nowTime(),
+              id: nextId(),
+            },
+          ]);
+          break;
+        }
         default:
           break;
       }

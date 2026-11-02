@@ -234,6 +234,19 @@ pub enum AgentEventKind {
         label: String,
     },
 
+    // ---------- 错误 ----------
+    /// 本次执行失败（模型调用失败、状态写入失败等）。
+    ///
+    /// 事件流此前只呈现过程、不承载错误语义，调用方拿到的只是「channel 关闭」，
+    /// 无法区分「正常结束」与「模型调用报错」——失败被静默吞掉。失败必须以
+    /// 事件形式外发，调用方据此给出终态与可见提示。
+    Error {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply_id: Option<String>,
+        /// 面向用户的错误描述（不含密钥等敏感信息）。
+        message: String,
+    },
+
     // ---------- 自定义 ----------
     /// 工具 / 扩展通过 emitter 发出的自定义事件。
     Custom {
@@ -276,6 +289,7 @@ pub enum AgentEventType {
     ExternalExecutionResult,
     RequestStop,
     SubagentExposed,
+    Error,
     HintBlock,
     AllToolsDenied,
     ContextCompactionStart,
@@ -343,6 +357,7 @@ impl AgentEvent {
             AgentEventKind::RequestStop { .. } => AgentEventType::RequestStop,
             AgentEventKind::SubagentExposed { .. } => AgentEventType::SubagentExposed,
             AgentEventKind::AllToolsDenied { .. } => AgentEventType::AllToolsDenied,
+            AgentEventKind::Error { .. } => AgentEventType::Error,
             AgentEventKind::Custom { .. } => AgentEventType::Custom,
         }
     }
