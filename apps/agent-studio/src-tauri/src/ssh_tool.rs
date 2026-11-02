@@ -285,9 +285,9 @@ impl SshPool {
         tokio::spawn(async move {
             let token = uuid::Uuid::new_v4().simple().to_string();
             let mut capture = crate::terminal_capture::Capture::new(&token);
-            // Only a plain Bash without an existing prompt hook is supported; never
-            // overwrite a user's hook. The OSC marker is consumed before display.
-            let setup = format!(" if [ -n \"$BASH_VERSION\" ] && [ -z \"$PROMPT_COMMAND\" ]; then PROMPT_COMMAND='printf \"\\033]777;{token};%s\\007\" \"$?\"'; fi\r");
+            // Install a completion marker while preserving any existing Bash
+            // PROMPT_COMMAND hooks. The OSC marker is consumed before display.
+            let setup = crate::terminal_capture::bash_prompt_setup(&token);
             let setup_ok = channel.data(setup.as_bytes()).await.is_ok();
             let mut cancel_tick = tokio::time::interval(std::time::Duration::from_millis(100));
             let mut deadline: Option<tokio::time::Instant> = None;

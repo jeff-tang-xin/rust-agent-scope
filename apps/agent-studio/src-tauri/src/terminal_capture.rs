@@ -4,6 +4,15 @@ use tokio::sync::oneshot;
 pub type Reply = oneshot::Sender<Result<(String, i32), String>>;
 const LIMIT: usize = 16 * 1024;
 
+/// Prepend the marker without discarding scalar or array-valued Bash prompt hooks.
+/// Returning the original status also preserves `$?` for the existing first hook.
+pub fn bash_prompt_setup(token: &str) -> String {
+    // Tokens become shell identifiers as well as OSC payloads.
+    assert!(!token.is_empty() && token.bytes().all(|b| b.is_ascii_alphanumeric()));
+    let hook = format!("__ox_prompt_{token}");
+    format!(" if [ -n \"$BASH_VERSION\" ]; then {hook}() {{ local status=$?; printf '\\033]777;{token};%s\\007' \"$status\"; return \"$status\"; }}; PROMPT_COMMAND=({hook} \"${{PROMPT_COMMAND[@]}}\"); fi\r")
+}
+
 pub struct Capture {
     prefix: Vec<u8>,
     pending: Vec<u8>,
@@ -106,6 +115,37 @@ impl Capture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_setup_installs_hook_without_replacing_existing_entries() {
+        let setup = bash_prompt_setup("test");
+        assert!(setup.contains("PROMPT_COMMAND=(__ox_prompt_test \"${PROMPT_COMMAND[@]}\")"));
+        assert!(setup.contains("local status=$?;"));
+        assert!(setup.contains("return \"$status\";"));
+        assert!(!setup.contains("-z \"$PROMPT_COMMAND\""));
+        assert!(setup.ends_with('\r'));
+    }
+
+    // Remote shells are Bash; Windows development hosts need not have Bash installed.
+    #[cfg(unix)]
+    #[test]
+    fn prompt_setup_preserves_existing_hooks_and_status() {
+        let setup = bash_prompt_setup("test");
+        for (existing, expected) in [
+            ("unset PROMPT_COMMAND", ""),
+            ("PROMPT_COMMAND='printf \"old:%s\" \"$?\"'", "old:7"),
+            ("PROMPT_COMMAND=('printf \"old:%s\" \"$?\"' 'printf second')", "old:7second"),
+        ] {
+            // Join before setting the status so command substitution cannot change it.
+            let script = format!("{existing}\n{}\nhooks=$(IFS=';'; echo \"${{PROMPT_COMMAND[*]}}\")\n(exit 7)\neval \"$hooks\"\nexit 0", setup.trim());
+            let output = std::process::Command::new("bash")
+                .args(["--noprofile", "--norc", "-c", &script])
+                .output().expect("Bash is required for prompt hook regression tests");
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert_eq!(String::from_utf8_lossy(&output.stdout), format!("\x1b]777;test;7\x07{expected}"));
+        }
+    }
+
     #[tokio::test]
     async fn fragmented_prompt_returns_output_and_exit_code() {
         let mut c = Capture::new("test");
