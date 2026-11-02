@@ -415,4 +415,13 @@ export function onTurnStarted(handler: (payload: TurnStartedPayload) => void) {
   return listen<TurnStartedPayload>("turn-started", (e) => handler(e.payload));
 }
 
+/** 会话归档广播（archive_session 成功后发）：左栏据此刷新常规列表。 */
+export function onSessionArchived(
+  handler: (payload: { workspace_id: string; session_id: string }) => void,
+) {
+  return listen<{ workspace_id: string; session_id: string }>("session-archived", (e) =>
+    handler(e.payload),
+  );
+}
+
 export type Unlisten = UnlistenFn;

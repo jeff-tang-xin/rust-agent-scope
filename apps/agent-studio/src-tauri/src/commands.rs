@@ -1946,6 +1946,7 @@ fn remove_archive_marker(dir: &std::path::Path) -> Result<(), String> {
 #[tauri::command]
 pub async fn archive_session(
     state: State<'_, AppState>,
+    app: AppHandle,
     workspace_id: String,
     mode: String,
     session_id: String,
@@ -1958,7 +1959,14 @@ pub async fn archive_session(
     if !dir.is_dir() {
         return Err("会话不存在".to_string());
     }
-    write_archive_marker(&dir)
+    write_archive_marker(&dir)?;
+    // 广播归档事件：归档可能来自会话页「+ 新会话」（不经左栏），左栏据此
+    // 刷新常规列表（把该会话过滤出去）。发送失败不影响归档本身。
+    let _ = app.emit(
+        "session-archived",
+        serde_json::json!({ "workspace_id": workspace_id, "session_id": session_id }),
+    );
+    Ok(())
 }
 
 /// 还原会话：删掉归档标记文件，会话重新出现在常规列表里。

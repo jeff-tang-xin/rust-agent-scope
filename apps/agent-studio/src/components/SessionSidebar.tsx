@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
+  onSessionArchived,
   onTurnFinished,
   type ArchivedSession,
   type SessionSummary,
@@ -136,6 +137,17 @@ export default function SessionSidebar({
   // turn 结束刷新 session 摘要（新会话落盘 / 消息数变化）。
   useEffect(() => {
     const un = onTurnFinished((p) => {
+      if (selected && p.workspace_id === selected.id) void load();
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [selected, load]);
+
+  // 归档广播：归档可能来自会话页「+ 新会话」（不经左栏），后端发事件，
+  // 这里刷新常规列表把该会话过滤出去。
+  useEffect(() => {
+    const un = onSessionArchived((p) => {
       if (selected && p.workspace_id === selected.id) void load();
     });
     return () => {

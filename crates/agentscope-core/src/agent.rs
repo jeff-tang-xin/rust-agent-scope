@@ -1075,6 +1075,15 @@ impl ReActAgent {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
+                // 无确认结果也必须重新挂出审批事件：恢复的会话里，上一轮的
+                // 确认卡片早已随进程消失，前端不知道有 pending 调用——只报错
+                // 不给入口，用户既不能继续对话也无法批准，会话死锁。事件先发
+                // （前端据此重建确认卡片），错误随后返回（保留指引语义）。
+                ctx.emit(AgentEventKind::RequireUserConfirm {
+                    reply_id: ctx.reply_id.clone(),
+                    tool_calls: asking,
+                })
+                .await;
                 return Err(Error::InvalidInput(format!(
                     "agent is paused for human-in-the-loop confirmation: the following tool call(s) \
                      are awaiting approval: [{summary}]. This call supplied no confirmation, so it \
@@ -3825,6 +3834,64 @@ mod tests {
             .flat_map(|m| m.content.iter())
             .any(|b| matches!(b, ContentBlock::ToolResult { .. }));
         assert!(!has_result, "ASKING 的调用不应被补齐");
+    }
+
+    /// 恢复的会话 + ASKING + 本次无确认结果：报错的同时必须重新挂出
+    /// `RequireUserConfirm`——上一轮的确认卡片已随进程消失，前端不知道有
+    /// pending 调用；只报错不给入口，用户既不能继续对话也无法批准，死锁。
+    #[tokio::test]
+    async fn asking_without_confirm_input_reemits_require_user_confirm() {
+        let store: Arc<dyn AgentStateStore> = Arc::new(InMemoryAgentStateStore::new());
+        let mut state = AgentState::new();
+        state.session_id = "session-asking-reemit".to_string();
+        state.context.push(Msg::user("user", "跑一下 ls"));
+        state.context.push(Msg::assistant(
+            "assistant",
+            vec![ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "shell".into(),
+                input: json!({"cmd": "ls"}),
+                state: Some(ToolCallState::Asking),
+                content: None,
+            }],
+        ));
+        store
+            .save::<AgentState>(None, "session-asking-reemit", LEGACY_STATE_KEY, &state)
+            .unwrap();
+
+        let agent = plain(vec![crate::model::ChatResponse::from_text("回复")])
+            .state_store(store)
+            .default_session_id("session-asking-reemit")
+            .enable_pending_tool_recovery(true)
+            .build()
+            .unwrap();
+
+        let mut rx = agent
+            .stream_events(Msg::user("user", "继续"))
+            .await
+            .unwrap();
+        let mut saw_confirm = false;
+        let mut saw_error = false;
+        while let Some(event) = rx.recv().await {
+            match event.kind {
+                AgentEventKind::RequireUserConfirm { tool_calls, .. } => {
+                    saw_confirm = true;
+                    assert_eq!(tool_calls.len(), 1, "挂出的应是被卡住的调用");
+                    assert!(
+                        matches!(&tool_calls[0], ContentBlock::ToolUse { id, .. } if id == "call_1"),
+                        "挂出的调用应与历史 ASKING 一致: {:?}",
+                        tool_calls[0]
+                    );
+                }
+                AgentEventKind::Error { .. } => saw_error = true,
+                _ => {}
+            }
+        }
+        assert!(
+            saw_confirm,
+            "必须重新挂出 RequireUserConfirm（前端据此重建审批卡片）"
+        );
+        assert!(saw_error, "报错语义保留：本轮仍以失败收场");
     }
 
     /// 部分批准：只覆盖了部分 ASKING 调用时，剩余的继续等授权，本轮重新挂起

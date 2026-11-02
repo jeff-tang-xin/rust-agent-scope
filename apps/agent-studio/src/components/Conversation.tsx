@@ -1476,7 +1476,25 @@ export default function Conversation({
     });
   };
 
-  const newSession = () => {
+  const newSession = async () => {
+    // 有内容的会话先归档再开新的（数据保留、可从归档箱还原；后端会先停
+    // 运行中的 turn）——开新会话即收尾当前会话，避免废弃/卡死会话堆积在
+    // 常规列表里。空会话直接切，不产生垃圾归档；归档失败不阻断新建
+    // （降级为只新建，错误提示但不拦路）。
+    if (entries.length > 0) {
+      const ok = onConfirm
+        ? await onConfirm(
+            "归档当前会话",
+            "将归档当前会话并开启新会话。\n会话数据保留，可在左栏「归档箱」中还原。",
+          )
+        : true;
+      if (!ok) return;
+      try {
+        await api.archiveSession(workspace.id, runtimeMode, sessionId);
+      } catch (err) {
+        setError(String(err));
+      }
+    }
     const id = `${runtimeMode}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
     onSessionChange(id);
   };
@@ -1801,7 +1819,12 @@ export default function Conversation({
             </button>
           </div>
         )}
-        <button className="btn ghost" onClick={newSession} disabled={busy}>
+        <button
+          className="btn ghost"
+          onClick={() => void newSession()}
+          disabled={busy}
+          title="归档当前会话并开启新会话（空会话直接切换）"
+        >
           + 新会话
         </button>
         <span className="spacer" />
