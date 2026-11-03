@@ -982,6 +982,9 @@ pub async fn browser_preview_shot(state: State<'_, AppState>) -> Result<String, 
     let Some(page) = state.browser_session.current_page().await else {
         return Ok(String::new());
     };
+    // 直播画面自适应：内容超宽的页面（固定宽度布局的中台系统）整页等比
+    // 缩小到视口内，避免右侧裁切；说明串仅调试用，不影响返回。
+    let _zoom_note = crate::browser_tool::fit_page_zoom(&page).await;
     let bytes = page
         .screenshot(chromiumoxide::page::ScreenshotParams::builder().build())
         .await

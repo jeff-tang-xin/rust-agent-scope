@@ -234,6 +234,39 @@ async fn snapshot(page: &chromiumoxide::Page) -> std::result::Result<Value, Stri
     Ok(value)
 }
 
+// ---------- 直播画面自适应缩小 ----------
+
+/// 截图前自适应缩小：页面内容宽（固定宽度布局的中台系统常见 1920 设计稿）
+/// 超出视口时注入 CSS zoom 把整页等比缩小到刚好装进视口——内容完整不裁切，
+/// 看缩小画面足够（DOM 不变；getBoundingClientRect 与 CDP 输入事件同处
+/// 缩放后坐标系，点击仍然准确）。内容不超宽时自动恢复 100%。
+/// 返回 Some(说明) 表示本次调整了缩放；页面异常时静默跳过（不影响截图）。
+pub async fn fit_page_zoom(page: &chromiumoxide::Page) -> Option<String> {
+    let result = page.evaluate(FIT_ZOOM_JS).await.ok()?;
+    let note: Option<String> = result.into_value().ok()?;
+    note
+}
+
+const FIT_ZOOM_JS: &str = r#"(() => {
+  const de = document.documentElement;
+  const body = document.body;
+  if (!de || !body) return null;
+  const cur = parseFloat(de.style.zoom || '1') || 1;
+  const vw = de.clientWidth * cur;      // 视口可用宽（视觉 px，不含滚动条）
+  const contentW = body.scrollWidth;    // 页面内容宽（缩放坐标系）
+  if (contentW * cur > vw + 1) {
+    const z = vw / contentW;
+    if (Math.abs(cur - z) <= 0.002) return null;
+    de.style.zoom = z.toFixed(4);
+    return '页面已等比缩小到 ' + Math.round(z * 100) + '%（内容 ' + Math.round(contentW) + 'px 超出视口 ' + Math.round(vw) + 'px）';
+  }
+  if (Math.abs(cur - 1) > 0.002) {
+    de.style.zoom = '';
+    return '已恢复 100% 缩放';
+  }
+  return null;
+})()"#;
+
 fn render_snapshot(info: &Value) -> String {
     let title = info["title"].as_str().unwrap_or("");
     let url = info["url"].as_str().unwrap_or("");
