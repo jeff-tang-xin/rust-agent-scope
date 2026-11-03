@@ -232,41 +232,6 @@ impl StudioConfig {
     /// 确保内置 ops/db 工作区在列（幂等）：目录固定在 `{data_dir}/ops`、
     /// `{data_dir}/db`（≈ ~/.ox/ops、~/.ox/db），智能体指向内置运维/数据库
     /// 智能体。用户仍可自建同类别工作区；内置项可改不可删。
-    pub fn ensure_default_workspaces(&mut self, data_dir: &std::path::Path) {
-        let builtins = [
-            (
-                BUILTIN_OPS_WS_ID,
-                "运维工作区",
-                "ops",
-                OPS_AGENT_ID,
-                data_dir.join("ops"),
-            ),
-            (
-                BUILTIN_DB_WS_ID,
-                "数据库运维工作区",
-                "db",
-                DB_AGENT_ID,
-                data_dir.join("db"),
-            ),
-        ];
-        for (id, name, kind, agent_id, dir) in builtins {
-            if !self.workspaces.iter().any(|w| w.id == id) {
-                self.workspaces.push(WorkspaceConfig {
-                    id: id.into(),
-                    name: name.into(),
-                    kind: kind.into(),
-                    agent_id: agent_id.into(),
-                    dir: dir.to_string_lossy().into_owned(),
-                    members: Vec::new(),
-                    // 内置工作区不预绑定：ops/db 按类别默认开放，collab 无远程能力。
-                    bound_servers: Vec::new(),
-                    bound_databases: Vec::new(),
-                    created_at: 0,
-                    auto_resource: None,
-                });
-            }
-        }
-    }
     pub fn provider(&self, name: &str) -> Option<&ModelProviderConfig> {
         self.providers.iter().find(|p| p.name == name)
     }
@@ -288,14 +253,10 @@ impl StudioConfig {
 
 /// 内置默认智能体的稳定 id（前后端共享：不可删除，其余字段可改）。
 pub const DEFAULT_AGENT_ID: &str = "default-assistant";
-/// 内置运维智能体（ops 工作区默认绑定）。
+/// 内置运维智能体（ops 自动工作区默认绑定）。
 pub const OPS_AGENT_ID: &str = "builtin-ops-agent";
-/// 内置数据库智能体（db 工作区默认绑定）。
+/// 内置数据库智能体（db 自动工作区默认绑定）。
 pub const DB_AGENT_ID: &str = "builtin-db-agent";
-/// 内置运维工作区（目录 `{data_dir}/ops`）。
-pub const BUILTIN_OPS_WS_ID: &str = "builtin-ops";
-/// 内置数据库运维工作区（目录 `{data_dir}/db`）。
-pub const BUILTIN_DB_WS_ID: &str = "builtin-db";
 
 /// 内置默认智能体的上一版预置提示词（指纹）：用户从未编辑过时升级为新版，
 /// 编辑过则原样保留——区分「还是旧默认」与「用户自定义」的唯一手段。
@@ -434,17 +395,16 @@ impl ConfigStore {
     }
 
     /// 加载配置并保证内置 agent/工作区在列。`data_dir` 给定时同时 seed
-    /// 内置 ops/db 工作区（目录挂 `{data_dir}/ops`、`{data_dir}/db`）。
-    pub fn load_with_data_dir(&self, data_dir: Option<&std::path::Path>) -> StudioConfig {
+    /// 内置 ops/db 工作区已移除：ops/db 工作区由服务器/数据库档案自动衍生
+    /// （一资源一工作区，见 commands.rs 的 ensure_auto_workspace），不再注入
+    /// 固定 id 的内置工作区——否则用户删除后每次启动又被重建（「一直在」）。
+    pub fn load(&self) -> StudioConfig {
         let mut config = match std::fs::read(&self.path) {
             Ok(bytes) => serde_json::from_slice::<StudioConfig>(&bytes).unwrap_or_default(),
             // 首次初始化（文件不存在）：注入内置默认 agent，开箱即用。
             Err(_) => StudioConfig::default(),
         };
         config.ensure_default_agent();
-        if let Some(dir) = data_dir {
-            config.ensure_default_workspaces(dir);
-        }
         config
     }
 
@@ -506,7 +466,7 @@ mod tests {
         let store = ConfigStore::new(&dir);
 
         // 首次 load（文件不存在）：注入三个内置智能体（全能/运维/数据库）。
-        let first = store.load_with_data_dir(None);
+        let first = store.load();
         assert_eq!(first.agents.len(), 3);
         let d = first.agent(DEFAULT_AGENT_ID).unwrap();
         assert_eq!(d.name, "全能助手");
@@ -517,16 +477,16 @@ mod tests {
         // 老配置文件升级（无 default）：load 自动补上。
         let legacy = br#"{"providers":[],"agents":[]}"#;
         std::fs::write(dir.join("studio-config.json"), legacy).unwrap();
-        assert!(store.load_with_data_dir(None).agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
+        assert!(store.load().agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
 
         // 历史遗留的删除标记（旧版本语义）：同样注入（标记已废弃、被忽略）。
         let marked = br#"{"providers":[],"agents":[],"default_agent_removed":true}"#;
         std::fs::write(dir.join("studio-config.json"), marked).unwrap();
-        assert!(store.load_with_data_dir(None).agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
+        assert!(store.load().agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
 
         // 损坏的配置文件：兜底为空配置 + 注入内置 agent（至少开箱可用）。
         std::fs::write(dir.join("studio-config.json"), b"not json").unwrap();
-        assert!(store.load_with_data_dir(None).agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
+        assert!(store.load().agents.iter().any(|a| a.id == DEFAULT_AGENT_ID));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -2532,7 +2532,7 @@ pub fn run() {
             }));
             let config_dir = data_dir.join("config");
             let config_store = ConfigStore::new(&config_dir);
-            let mut config = config_store.load_with_data_dir(Some(&data_dir));
+            let mut config = config_store.load();
             // 存量服务器/数据库档案补建自动衍生工作区（幂等）：一资源一
             // 工作区，兼容「自动工作区」上线前已保存的档案——否则旧档案
             // 要重新保存一次才会出现。此后 save/delete 档案实时联动。
