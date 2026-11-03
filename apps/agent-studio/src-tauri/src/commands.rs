@@ -2532,7 +2532,49 @@ pub fn run() {
             }));
             let config_dir = data_dir.join("config");
             let config_store = ConfigStore::new(&config_dir);
-            let config = config_store.load_with_data_dir(Some(&data_dir));
+            let mut config = config_store.load_with_data_dir(Some(&data_dir));
+            // 存量服务器/数据库档案补建自动衍生工作区（幂等）：一资源一
+            // 工作区，兼容「自动工作区」上线前已保存的档案——否则旧档案
+            // 要重新保存一次才会出现。此后 save/delete 档案实时联动。
+            {
+                let live_servers: Vec<String> = config
+                    .servers
+                    .iter()
+                    .map(|s| format!("server:{}", s.name))
+                    .collect();
+                prune_auto_workspaces(&mut config, "server:", &live_servers);
+                let server_names: Vec<String> =
+                    config.servers.iter().map(|s| s.name.clone()).collect();
+                for name in &server_names {
+                    ensure_auto_workspace(
+                        &mut config,
+                        &format!("server:{name}"),
+                        name,
+                        "ops",
+                        crate::config::OPS_AGENT_ID,
+                    );
+                }
+                let live_dbs: Vec<String> = config
+                    .databases
+                    .iter()
+                    .map(|d| format!("database:{}", d.name))
+                    .collect();
+                prune_auto_workspaces(&mut config, "database:", &live_dbs);
+                let db_names: Vec<String> =
+                    config.databases.iter().map(|d| d.name.clone()).collect();
+                for name in &db_names {
+                    ensure_auto_workspace(
+                        &mut config,
+                        &format!("database:{name}"),
+                        name,
+                        "db",
+                        crate::config::DB_AGENT_ID,
+                    );
+                }
+                if let Err(e) = config_store.save(&config) {
+                    eprintln!("persist auto workspaces failed: {e}");
+                }
+            }
             let db_catalog = Arc::new(DbCatalog::new());
             db_catalog.replace_all(&config.databases);
             app.manage(AppState {

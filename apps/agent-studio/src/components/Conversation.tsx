@@ -626,12 +626,24 @@ export default function Conversation({
     setBinding({});
     api
       .getSessionBinding(workspace.id, sessionId)
-      .then((b) => alive && setBinding(b ?? {}))
+      .then((b) => {
+        if (!alive) return;
+        let next = b ?? {};
+        // ops 自动工作区（绑定唯一服务器）：会话无绑定时自动绑上——
+        // 服务器即工作区，选中即用，无需手选。绑定失败静默（档案可能
+        // 已删，remote_shell 执行时会给出明确报错）。
+        if (workspace.kind === "ops" && !next.server && (workspace.bound_servers?.length ?? 0) === 1) {
+          const autoServer = workspace.bound_servers[0];
+          next = { ...next, server: autoServer };
+          void api.setSessionBinding(workspace.id, sessionId, "server", autoServer).catch(() => {});
+        }
+        setBinding(next);
+      })
       .catch(() => alive && setBinding({}));
     return () => {
       alive = false;
     };
-  }, [workspace.id, sessionId]);
+  }, [workspace.id, sessionId, workspace.kind, workspace.bound_servers]);
   const bindConnection = async (kind: "database" | "server", name: string | null) => {
     setBinding((prev) => ({ ...prev, [kind]: name ?? undefined }));
     try {

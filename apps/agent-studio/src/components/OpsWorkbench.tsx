@@ -21,15 +21,30 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
   const [error, setError] = useState("");
   useEffect(() => {
     let alive = true;
-    void api.listServers().then(async (all) => {
+    void api.listServers().then((all) => {
+      if (!alive) return;
       const list = workspace.bound_servers?.length ? all.filter((s) => workspace.bound_servers.includes(s.name)) : all;
-      const states = await Promise.all(list.map((s) => api.sshStatus(s.name)));
-      if (alive) { setServers(list); setConnected(list.filter((_, i) => states[i]).map((s) => s.name)); }
+      setServers(list);
     }).catch((e) => { if (alive) setError(String(e)); });
     return () => { alive = false; };
   }, [workspace.bound_servers]);
+  // 服务器即工作区：会话绑定的服务器自动连接并打开终端，无需手动点连。
+  useEffect(() => {
+    if (!server) return;
+    let alive = true;
+    void (async () => {
+      try {
+        if (!await api.sshStatus(server)) await api.sshConnect(server);
+        if (!alive) return;
+        setConnected((prev) => prev.includes(server) ? prev : [...prev, server]);
+        setOpened((prev) => prev.includes(server) ? prev : [...prev, server]);
+      } catch (e) { if (alive) setError(String(e)); }
+    })();
+    return () => { alive = false; };
+  }, [server]);
+  // 多服务器绑定的手动工作区：工具栏下拉切换（自动工作区恒为一台，不出现）。
   const select = async (name: string) => {
-    if (busy || pending) return;
+    if (busy || pending || name === server) return;
     setPending(true); setError("");
     try {
       if (!await api.sshStatus(name)) await api.sshConnect(name);
@@ -44,19 +59,19 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
   }, [ready, mode, server]);
   const needsApproval = lines.some((line) => line.kind === "confirm");
   return <div className="ops-workbench">
-    <aside className="ops-servers">
-      <div className="file-panel-head">服务器</div>
-      {servers.map((s) => <button key={s.name} className={`ops-server ${server === s.name ? "active" : ""}`} disabled={busy || pending} onClick={() => void select(s.name)}>
-        <strong>{connected.includes(s.name) ? "● " : "○ "}{s.name}</strong><small>{s.username}@{s.host}:{s.port}</small>
-      </button>)}
-      {!servers.length && <div className="file-empty">暂无服务器，请在设置中添加并绑定。</div>}
-      {busy && <div className="file-empty">Agent 运行中，暂不可切换服务器</div>}
-    </aside>
     <section className="ops-center">
       <div className="ops-toolbar"><div className="mode-switch">
         <button className={mode === "agent" ? "active" : ""} onClick={() => setMode("agent")}>Agent</button>
         <button className={mode === "shell" ? "active" : ""} onClick={() => setMode("shell")}>Shell</button>
-      </div><span>{server || "请选择服务器"}</span>{pending && <span>连接中…</span>}
+      </div>
+        {servers.length > 1 ? (
+          <select className="ops-server-select" value={server} disabled={busy || pending}
+            onChange={(e) => void select(e.target.value)}
+            title="切换该工作区绑定的服务器">
+            {servers.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+          </select>
+        ) : <span>{server || "未绑定服务器"}</span>}
+        {pending && <span>连接中…</span>}
         {ready && <button className="btn ghost" disabled={busy || pending} onClick={async () => {
           if (!await onConfirm?.("断开服务器", `断开 ${server} 的 SSH 连接？该服务器的其他终端也会断开。`)) return;
           setPending(true);
@@ -70,7 +85,7 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
         {opened.filter((name) => connected.includes(name)).map((name) => <div key={name} className={`ops-terminal-slot ${name === server ? "" : "hidden"}`}>
           <Suspense fallback={<div className="file-empty">加载终端…</div>}><SshTerminal workspaceId={workspace.id} server={name} agentMode={mode === "agent"} busy={busy || pending} lines={name === server ? lines : []} onAgentInput={onAgentInput} /></Suspense>
         </div>)}
-        {!ready && <div className="file-empty">选择服务器后打开交互式 Shell。</div>}
+        {!ready && <div className="file-empty">{server ? "正在连接服务器…" : "该工作区未绑定服务器，请在设置中绑定。"}</div>}
       </div>
       <div className="ops-terminal-controls" aria-live="polite">
         {needsApproval && <div className="file-panel-head" role="status">有工具等待授权，请在下方批准或拒绝</div>}
