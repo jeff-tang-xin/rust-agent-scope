@@ -2004,7 +2004,7 @@ export default function Conversation({
             计划模式
           </span>
         )}
-        <label className="btn ghost attach-btn" title="添加附件（图片/文件，≤8MB）">
+        <label className="btn ghost attach-btn" title="添加附件（图片直接看；Excel/PDF/CSV 自动解析成文本；其他文件原样附带，≤8MB）">
           📎
           <input
             type="file"

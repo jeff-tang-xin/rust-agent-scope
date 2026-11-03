@@ -1125,22 +1125,17 @@ pub async fn send_message(
         blocks.push(ContentBlock::Text { text });
     }
     for att in attachments.unwrap_or_default() {
-        let is_image = att.media_type.starts_with("image/");
-        let source = Source::Base64 {
-            media_type: att.media_type,
-            data: att.data_base64,
-        };
-        if is_image {
+        if att.media_type.starts_with("image/") {
             blocks.push(ContentBlock::Image {
-                source,
+                source: Source::Base64 {
+                    media_type: att.media_type,
+                    data: att.data_base64,
+                },
                 min_pixels: None,
                 max_pixels: None,
             });
         } else {
-            blocks.push(ContentBlock::Data {
-                source,
-                name: Some(att.name),
-            });
+            blocks.extend(attachment_to_blocks(att));
         }
     }
     // 确认答复：无聊天内容，metadata 携带确认结果（core 恢复时提取应用，
@@ -1192,6 +1187,148 @@ pub struct AttachmentInput {
     pub name: String,
     pub media_type: String,
     pub data_base64: String,
+}
+
+/// 附件块构造：图片走 Image 块；Excel/PDF/CSV 解析成文本注入（模型读不了
+/// 二进制 Data 块）；其余走 Data 块。解析失败降级为 Data 块并附错误说明，
+/// 不让单个坏附件卡死整条消息。
+fn attachment_to_blocks(att: AttachmentInput) -> Vec<ContentBlock> {
+    let lower = att.name.to_lowercase();
+    let mt = att.media_type.to_lowercase();
+    let is_excel = mt.contains("spreadsheetml")
+        || mt.contains("ms-excel")
+        || lower.ends_with(".xlsx")
+        || lower.ends_with(".xls")
+        || lower.ends_with(".xlsm");
+    let is_csv = mt == "text/csv" || lower.ends_with(".csv");
+    let is_pdf = mt == "application/pdf" || lower.ends_with(".pdf");
+
+    if is_excel {
+        return match parse_excel(&att.data_base64) {
+            Ok(text) => vec![ContentBlock::Text {
+                text: format!("[Excel 附件: {}]\n{}", att.name, text),
+            }],
+            Err(e) => vec![
+                ContentBlock::Text {
+                    text: format!("[附件 {}: Excel 解析失败: {e}，已按原始文件附带]", att.name),
+                },
+                data_block(&att),
+            ],
+        };
+    }
+    if is_csv {
+        return match decode_utf8_text(&att.data_base64) {
+            Ok(text) => vec![ContentBlock::Text {
+                text: format!("[CSV 附件: {}]\n{}", att.name, clamp_text(text, 100_000)),
+            }],
+            Err(e) => vec![
+                ContentBlock::Text {
+                    text: format!("[附件 {}: CSV 解码失败: {e}，已按原始文件附带]", att.name),
+                },
+                data_block(&att),
+            ],
+        };
+    }
+    if is_pdf {
+        return match parse_pdf(&att.data_base64) {
+            Ok(text) => vec![ContentBlock::Text {
+                text: format!("[PDF 附件: {}]\n{}", att.name, clamp_text(text, 100_000)),
+            }],
+            Err(e) => vec![
+                ContentBlock::Text {
+                    text: format!("[附件 {}: PDF 解析失败: {e}，已按原始文件附带]", att.name),
+                },
+                data_block(&att),
+            ],
+        };
+    }
+    vec![data_block(&att)]
+}
+
+fn data_block(att: &AttachmentInput) -> ContentBlock {
+    ContentBlock::Data {
+        source: Source::Base64 {
+            media_type: att.media_type.clone(),
+            data: att.data_base64.clone(),
+        },
+        name: Some(att.name.clone()),
+    }
+}
+
+/// 文本超长截断（防 token 爆炸；截断处给标记）。
+fn clamp_text(s: String, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s;
+    }
+    let cut: String = s.chars().take(max_chars).collect();
+    format!("{cut}\n…（内容过长已截断）")
+}
+
+fn decode_b64(b64: &str) -> std::result::Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| e.to_string())
+}
+
+fn decode_utf8_text(b64: &str) -> std::result::Result<String, String> {
+    let bytes = decode_b64(b64)?;
+    String::from_utf8(bytes).map_err(|e| e.to_string())
+}
+
+/// Excel 解析：所有 sheet 转 TSV 文本（每 sheet 最多 200 行、每行 50 列、
+/// 每单元格 200 字符，防 token 爆炸）。
+fn parse_excel(b64: &str) -> std::result::Result<String, String> {
+    use calamine::Reader as _;
+    let bytes = decode_b64(b64)?;
+    let cursor = std::io::Cursor::new(bytes);
+    let mut workbook = calamine::open_workbook_auto_from_rs(cursor)
+        .map_err(|e| format!("{e}"))?;
+    let mut out = String::new();
+    for (si, sheet_name) in workbook.sheet_names().iter().enumerate() {
+        if si >= 10 {
+            out.push_str("…（更多 sheet 省略）\n");
+            break;
+        }
+        out.push_str(&format!("### Sheet: {sheet_name}\n"));
+        let range = workbook
+            .worksheet_range(sheet_name)
+            .map_err(|e| format!("{e}"))?;
+        for (ri, row) in range.rows().enumerate() {
+            if ri >= 200 {
+                out.push_str("…（更多行省略）\n");
+                break;
+            }
+            let cells: Vec<String> = row
+                .iter()
+                .take(50)
+                .map(|c| {
+                    let s = c.to_string();
+                    if s.chars().count() > 200 {
+                        format!("{}…", s.chars().take(200).collect::<String>())
+                    } else {
+                        s
+                    }
+                })
+                .collect();
+            out.push_str(&cells.join("\t"));
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
+/// PDF 解析：提取文本（扫描件/图片型 PDF 提不出文字，会得到近空文本——
+/// 此时提示用户该 PDF 需 OCR）。
+fn parse_pdf(b64: &str) -> std::result::Result<String, String> {
+    let bytes = decode_b64(b64)?;
+    let text = pdf_extract::extract_text_from_mem(&bytes)
+        .map_err(|e| format!("{e}"))?;
+    let trimmed = text.trim();
+    if trimmed.chars().count() < 20 {
+        return Err("未能提取到文本（可能是扫描件/图片型 PDF，需要 OCR）".to_string());
+    }
+    Ok(text)
 }
 
 /// turn 链的静态上下文（收拢参数，避免过长签名）。
@@ -1524,7 +1661,8 @@ pub async fn steer_turn(
     if !session.is_running().await {
         return Err("no turn is running in this session".to_string());
     }
-    // 消息构造：文本块 + 附件块（对齐 send_message：图片走 Image，其余走 Data）。
+    // 消息构造：文本块 + 附件块（对齐 send_message：图片走 Image，
+    // Excel/PDF/CSV 解析成文本，其余走 Data）。
     let mut blocks: Vec<ContentBlock> = Vec::new();
     if !message.trim().is_empty() {
         blocks.push(ContentBlock::Text {
@@ -1532,22 +1670,17 @@ pub async fn steer_turn(
         });
     }
     for att in attachments.unwrap_or_default() {
-        let is_image = att.media_type.starts_with("image/");
-        let source = Source::Base64 {
-            media_type: att.media_type,
-            data: att.data_base64,
-        };
-        if is_image {
+        if att.media_type.starts_with("image/") {
             blocks.push(ContentBlock::Image {
-                source,
+                source: Source::Base64 {
+                    media_type: att.media_type,
+                    data: att.data_base64,
+                },
                 min_pixels: None,
                 max_pixels: None,
             });
         } else {
-            blocks.push(ContentBlock::Data {
-                source,
-                name: Some(att.name),
-            });
+            blocks.extend(attachment_to_blocks(att));
         }
     }
     // 同一条 steer 重复入队没有价值：IME 连击等极端竞态下前端防重可能
