@@ -208,17 +208,21 @@ const SNAPSHOT_JS: &str = r#"(() => {
     return path.join(' > ');
   };
   const visible = (el) => !!(el.offsetParent || el.getClientRects().length);
-  const elements = [...document.querySelectorAll('a[href],button,input,select,textarea,[role="button"],[onclick],[contenteditable]')]
-    .filter(visible).slice(0, 60)
+  const allInteractive = [...document.querySelectorAll('a[href],button,input,select,textarea,[role="button"],[onclick],[contenteditable]')]
+    .filter(visible);
+  const elements = allInteractive.slice(0, 200)
     .map(el => ({
       tag: el.tagName.toLowerCase(),
       text: ((el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '') + '').trim().slice(0, 50),
       selector: sel(el),
     }));
+  const rawText = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n');
   return {
     title: document.title,
     url: location.href,
-    text: (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, 2500),
+    text: rawText.slice(0, 6000),
+    textTruncated: rawText.length > 6000,
+    interactiveTotal: allInteractive.length,
     elements
   };
 })()"#;
@@ -282,6 +286,20 @@ fn render_snapshot(info: &Value) -> String {
             let selector = el["selector"].as_str().unwrap_or("");
             out.push_str(&format!("- <{tag}> {text:?} → selector: {selector}\n"));
         }
+    }
+    // 截断必须显式告知：否则 Agent 会把「快照里没有」误判为「页面上不存在」
+    // （实测：列表页 114 个可交互元素，旧上限 60 时弹层/抽屉控件永远列不进来）。
+    let total = info["interactiveTotal"].as_u64().unwrap_or(0);
+    if total > 200 {
+        out.push_str(&format!(
+            "\n⚠ 可交互元素共 {total} 个，上方仅列前 200 个；弹层/抽屉内的控件可能未列出——\
+             用 browser_evaluate 传 IIFE 精查目标容器\n"
+        ));
+    }
+    if info["textTruncated"].as_bool() == Some(true) {
+        out.push_str(
+            "\n⚠ 可见文本过长已截断——用 browser_evaluate 精查特定区域的 innerText\n",
+        );
     }
     out
 }
