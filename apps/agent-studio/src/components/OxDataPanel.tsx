@@ -88,6 +88,7 @@ function BlackboardTab({
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<BlackboardEntry | null>(null);
   const [viewing, setViewing] = useState<BlackboardEntry | null>(null);
+  const [filter, setFilter] = useState<string>("all");
 
   const load = useCallback(async () => {
     try {
@@ -134,7 +135,24 @@ function BlackboardTab({
       {entries !== null && entries.length === 0 && (
         <div className="file-empty">黑板为空：智能体登记结论/风险后会出现在这里</div>
       )}
-      {entries?.map((e) => (
+      {entries !== null && entries.length > 0 && (
+        <div className="ox-filters">
+          {["all", ...KINDS].map((k) => (
+            <button
+              key={k}
+              className={`ox-filter-chip ${filter === k ? "active" : ""}`}
+              onClick={() => setFilter(k)}
+            >
+              {k === "all" ? `全部 ${entries.length}` : `${KIND_LABEL[k]} ${entries.filter((e) => e.type === k).length}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {entries
+        ?.filter((e) => filter === "all" || e.type === filter)
+        .slice()
+        .reverse()
+        .map((e) => (
         <div key={e.id} className={`ox-entry ox-kind-${e.type}`}>
           <div className="ox-entry-meta">
             <span className={`ox-badge ox-badge-${e.type}`}>{KIND_LABEL[e.type] ?? e.type}</span>
@@ -150,7 +168,7 @@ function BlackboardTab({
             </button>
           </div>
           <div
-            className="ox-entry-content"
+            className="ox-entry-content clamp"
             title="点击查看全文"
             onClick={() => setViewing(e)}
           >

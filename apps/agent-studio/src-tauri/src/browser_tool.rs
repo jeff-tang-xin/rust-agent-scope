@@ -1,0 +1,499 @@
+// 内置浏览器自动化工具集：给 Agent 一个真实 Chromium 浏览器（headful，
+// 真实渲染不失真），支持导航、读页面结构、点击、输入、截图、关闭。
+//
+// 底层：chromiumoxide（CDP 协议）驱动本机 Edge/Chrome/Chromium——三者同为
+// Chromium 内核，CDP 协议通用，不挑品牌。浏览器进程懒启动（首次工具调用
+// 才拉起），会话级复用同一标签页；用户手动关掉浏览器后下次调用自动重启。
+//
+// 浏览器可执行文件发现（跨平台）：环境变量 STUDIO_BROWSER_PATH 显式指定
+// 优先；否则用 chromiumoxide 自带发现（CHROME 环境变量 → PATH which →
+// Windows 注册表 → 各平台常见安装路径），Edge/Chrome/Chromium 均可。
+//
+// 截图保存到工作区 `.ox/screenshots/`（用户可在文件面板查看）。
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use chromiumoxide::Browser;
+use serde_json::{json, Value};
+
+use agentscope_core::error::Result;
+use agentscope_core::tool::{Tool, ToolOutput};
+
+// ---------- 浏览器可执行文件发现 ----------
+
+/// 探测本机 Chromium 系浏览器：STUDIO_BROWSER_PATH 显式覆盖优先；否则用
+/// chromiumoxide 自带的跨平台发现（CHROME 环境变量 → PATH which → Windows
+/// 注册表 → Windows/macOS 常见安装路径），Edge/Chrome/Chromium 均可。
+pub fn find_browser_executable() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("STUDIO_BROWSER_PATH") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    chromiumoxide::detection::default_executable(
+        chromiumoxide::detection::DetectionOptions::default(),
+    )
+    .ok()
+}
+
+// ---------- 浏览器会话（懒启动 + 复用 + 死亡自愈） ----------
+
+struct BrowserHandle {
+    /// 保活：drop 即结束浏览器进程。
+    _browser: Browser,
+    page: Arc<chromiumoxide::Page>,
+}
+
+pub struct BrowserSession {
+    inner: tokio::sync::Mutex<Option<BrowserHandle>>,
+}
+
+/// 按工作区装配的浏览器工具上下文：全局共享一个浏览器会话，截图目录
+/// 归各工作区（`.ox/screenshots/`）。
+pub struct BrowserCtx {
+    pub session: Arc<BrowserSession>,
+    pub screenshots_dir: PathBuf,
+}
+
+impl BrowserSession {
+    pub fn new() -> Self {
+        Self {
+            inner: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// 取活跃页面；无浏览器或已死亡时（重）启动。headful 真实窗口。
+    async fn page(&self) -> std::result::Result<Arc<chromiumoxide::Page>, String> {
+        let mut guard = self.inner.lock().await;
+        if let Some(handle) = guard.as_ref() {
+            // 轻量探测：浏览器被用户手动关闭后 evaluate 会失败 → 重建。
+            if handle.page.evaluate("1").await.is_ok() {
+                return Ok(handle.page.clone());
+            }
+            *guard = None;
+        }
+        let exe = find_browser_executable().ok_or_else(|| {
+            "未找到 Chromium 系浏览器。请安装 Microsoft Edge 或 Google Chrome（任一即可），\
+             或设置环境变量 STUDIO_BROWSER_PATH 指向浏览器可执行文件"
+                .to_string()
+        })?;
+        let config = chromiumoxide::BrowserConfig::builder()
+            .chrome_executable(exe)
+            .with_head()
+            .window_size(1380, 900)
+            .build()
+            .map_err(|e| format!("浏览器配置失败: {e}"))?;
+        let (browser, mut handler) = Browser::launch(config)
+            .await
+            .map_err(|e| format!("启动浏览器失败: {e}"))?;
+        // CDP 事件循环必须持续驱动，否则所有操作挂起。
+        tokio::spawn(async move {
+            while let Some(event) = handler.next().await {
+                if event.is_err() {
+                    break;
+                }
+            }
+        });
+        let page = Arc::new(
+            browser
+                .new_page("about:blank")
+                .await
+                .map_err(|e| format!("打开标签页失败: {e}"))?,
+        );
+        *guard = Some(BrowserHandle {
+            _browser: browser,
+            page: page.clone(),
+        });
+        Ok(page)
+    }
+
+    async fn invalidate(&self) {
+        *self.inner.lock().await = None;
+    }
+}
+
+use futures::StreamExt as _;
+
+// ---------- 页面快照（Agent「看」页面的眼睛） ----------
+
+/// 抽取页面标题、可见文本与可交互元素清单（每个元素带可用的 CSS selector）。
+const SNAPSHOT_JS: &str = r#"(() => {
+  const sel = (el) => {
+    if (el.id) return '#' + CSS.escape(el.id);
+    const path = [];
+    let node = el;
+    while (node && node.nodeType === 1 && path.length < 4) {
+      let s = node.tagName.toLowerCase();
+      if (node.id) { path.unshift('#' + CSS.escape(node.id)); break; }
+      const parent = node.parentElement;
+      if (parent) {
+        const same = [...parent.children].filter(c => c.tagName === node.tagName);
+        if (same.length > 1) s += ':nth-of-type(' + (same.indexOf(node) + 1) + ')';
+      }
+      path.unshift(s);
+      node = parent;
+    }
+    return path.join(' > ');
+  };
+  const visible = (el) => !!(el.offsetParent || el.getClientRects().length);
+  const elements = [...document.querySelectorAll('a[href],button,input,select,textarea,[role="button"],[onclick],[contenteditable]')]
+    .filter(visible).slice(0, 60)
+    .map(el => ({
+      tag: el.tagName.toLowerCase(),
+      text: ((el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '') + '').trim().slice(0, 50),
+      selector: sel(el),
+    }));
+  return {
+    title: document.title,
+    url: location.href,
+    text: (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, 2500),
+    elements
+  };
+})()"#;
+
+async fn snapshot(page: &chromiumoxide::Page) -> std::result::Result<Value, String> {
+    let result = page
+        .evaluate(SNAPSHOT_JS)
+        .await
+        .map_err(|e| format!("读取页面失败: {e}"))?;
+    let value: Value = result
+        .into_value()
+        .map_err(|e| format!("解析页面快照失败: {e}"))?;
+    Ok(value)
+}
+
+fn render_snapshot(info: &Value) -> String {
+    let title = info["title"].as_str().unwrap_or("");
+    let url = info["url"].as_str().unwrap_or("");
+    let text = info["text"].as_str().unwrap_or("");
+    let mut out = format!("页面: {title}\nURL: {url}\n\n[可见文本]\n{text}\n\n[可交互元素]\n");
+    if let Some(elements) = info["elements"].as_array() {
+        if elements.is_empty() {
+            out.push_str("(无)\n");
+        }
+        for el in elements {
+            let tag = el["tag"].as_str().unwrap_or("");
+            let text = el["text"].as_str().unwrap_or("");
+            let selector = el["selector"].as_str().unwrap_or("");
+            out.push_str(&format!("- <{tag}> {text:?} → selector: {selector}\n"));
+        }
+    }
+    out
+}
+
+fn input_str(input: &Value, key: &str) -> std::result::Result<String, ToolOutput> {
+    input
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            ToolOutput::error(format!("缺少必填参数 `{key}`"))
+        })
+}
+
+fn url_scheme_allowed(url: &str) -> bool {
+    url.starts_with("http://")
+        || url.starts_with("https://")
+        || url == "about:blank"
+        || url.starts_with("file://")
+}
+
+// ---------- 工具：browser_navigate ----------
+
+pub struct BrowserNavigate {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserNavigate {
+    fn name(&self) -> &str {
+        "browser_navigate"
+    }
+
+    fn description(&self) -> &str {
+        "Open a URL in the built-in real browser (visible window, true rendering). \
+         Use it to let the user see a page you built, or to start a browser automation \
+         session for testing. Returns the page title, visible text and interactive \
+         elements (with CSS selectors for browser_click / browser_type)."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Absolute URL (http/https/file)."}
+            },
+            "required": ["url"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let url = match input_str(&input, "url") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        if !url_scheme_allowed(&url) {
+            return Ok(ToolOutput::error("仅支持 http/https/file URL"));
+        }
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        if let Err(e) = page.goto(&url).await {
+            self.ctx.session.invalidate().await;
+            return Ok(ToolOutput::error(format!(
+                "导航失败（浏览器可能已被关闭，下次调用将自动重启）: {e}"
+            )));
+        }
+        // SPA 首帧渲染缓冲。
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        match snapshot(&page).await {
+            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Err(e) => Ok(ToolOutput::error(e)),
+        }
+    }
+}
+
+// ---------- 工具：browser_snapshot ----------
+
+pub struct BrowserSnapshot {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserSnapshot {
+    fn name(&self) -> &str {
+        "browser_snapshot"
+    }
+
+    fn description(&self) -> &str {
+        "Read the current browser page: title, visible text and interactive elements \
+         with CSS selectors. Use after navigation or actions to verify page state."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(&self, _input: Value) -> Result<ToolOutput> {
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        match snapshot(&page).await {
+            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Err(e) => Ok(ToolOutput::error(e)),
+        }
+    }
+}
+
+// ---------- 工具：browser_click ----------
+
+pub struct BrowserClick {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserClick {
+    fn name(&self) -> &str {
+        "browser_click"
+    }
+
+    fn description(&self) -> &str {
+        "Click an element on the current browser page by CSS selector (from \
+         browser_navigate / browser_snapshot output). Returns the page state after \
+         the click."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS selector of the element to click."}
+            },
+            "required": ["selector"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let selector = match input_str(&input, "selector") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let element = match page.find_element(&selector).await {
+            Ok(el) => el,
+            Err(_) => {
+                return Ok(ToolOutput::error(format!(
+                    "未找到元素: {selector}（先 browser_snapshot 获取可用 selector）"
+                )))
+            }
+        };
+        if let Err(e) = element.click().await {
+            return Ok(ToolOutput::error(format!("点击失败: {e}")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        match snapshot(&page).await {
+            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Err(e) => Ok(ToolOutput::error(e)),
+        }
+    }
+}
+
+// ---------- 工具：browser_type ----------
+
+pub struct BrowserType {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserType {
+    fn name(&self) -> &str {
+        "browser_type"
+    }
+
+    fn description(&self) -> &str {
+        "Clear an input/textarea (CSS selector) and type text into it. Set submit=true \
+         to press Enter afterwards (form submit / search). Returns the page state."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS selector of the input element."},
+                "text": {"type": "string", "description": "Text to type (replaces existing content)."},
+                "submit": {"type": "boolean", "description": "Optional. Press Enter after typing."}
+            },
+            "required": ["selector", "text"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let selector = match input_str(&input, "selector") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let text = match input_str(&input, "text") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let submit = input.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let element = match page.find_element(&selector).await {
+            Ok(el) => el,
+            Err(_) => {
+                return Ok(ToolOutput::error(format!(
+                    "未找到元素: {selector}（先 browser_snapshot 获取可用 selector）"
+                )))
+            }
+        };
+        // 清空已有内容再输入（replace 语义）。
+        let _ = element.call_js_fn("function() { this.focus(); this.value = ''; }", false).await;
+        if let Err(e) = element.type_str(&text).await {
+            return Ok(ToolOutput::error(format!("输入失败: {e}")));
+        }
+        if submit {
+            let _ = element.press_key("Enter").await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        match snapshot(&page).await {
+            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Err(e) => Ok(ToolOutput::error(e)),
+        }
+    }
+}
+
+// ---------- 工具：browser_screenshot ----------
+
+pub struct BrowserScreenshot {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserScreenshot {
+    fn name(&self) -> &str {
+        "browser_screenshot"
+    }
+
+    fn description(&self) -> &str {
+        "Take a full-page screenshot of the current browser page, save it under the \
+         workspace `.ox/screenshots/` directory and return the file path (user can \
+         open it from the file panel)."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(&self, _input: Value) -> Result<ToolOutput> {
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let bytes = match page
+            .screenshot(
+                chromiumoxide::page::ScreenshotParams::builder()
+                    .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
+                    .full_page(true)
+                    .build(),
+            )
+            .await
+        {
+            Ok(b) => b,
+            Err(e) => return Ok(ToolOutput::error(format!("截图失败: {e}"))),
+        };
+        let dir = &self.ctx.screenshots_dir;
+        if std::fs::create_dir_all(dir).is_err() {
+            return Ok(ToolOutput::error(format!("无法创建截图目录: {}", dir.display())));
+        }
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or_default();
+        let path = dir.join(format!("shot-{stamp}.png"));
+        if let Err(e) = std::fs::write(&path, &bytes) {
+            return Ok(ToolOutput::error(format!("写入截图失败: {e}")));
+        }
+        Ok(ToolOutput::ok(format!(
+            "截图已保存: {}\n（可在文件面板的 .ox/screenshots/ 下查看）",
+            path.display()
+        )))
+    }
+}
+
+// ---------- 工具：browser_close ----------
+
+pub struct BrowserClose {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserClose {
+    fn name(&self) -> &str {
+        "browser_close"
+    }
+
+    fn description(&self) -> &str {
+        "Close the built-in browser and end the automation session. Call it when \
+         page testing is done to free resources."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(&self, _input: Value) -> Result<ToolOutput> {
+        self.ctx.session.invalidate().await;
+        Ok(ToolOutput::ok("浏览器已关闭".to_string()))
+    }
+}

@@ -58,6 +58,8 @@ pub struct ResourceHandles {
     pub db_catalog: Arc<DbCatalog>,
     /// 内存配置副本（remote_shell 做 host 一致性校验用）。
     pub config: Arc<std::sync::Mutex<crate::config::StudioConfig>>,
+    /// 全局共享浏览器会话（内置浏览器自动化工具；懒启动 headful）。
+    pub browser: Arc<crate::browser_tool::BrowserSession>,
 }
 
 impl StudioMode {
@@ -351,6 +353,18 @@ pub fn build_agent(
 
     let mut toolkit = Toolkit::new();
     register_base_tools(&mut toolkit, &workspace, memory_workspace.clone())?;
+    // 内置浏览器自动化（所有场景开放）：headful 真浏览器 + CDP，截图归
+    // 工作区 `.ox/screenshots/`。
+    let browser_ctx = Arc::new(crate::browser_tool::BrowserCtx {
+        session: Arc::clone(&resources.browser),
+        screenshots_dir: workspace_root.join(".ox").join("screenshots"),
+    });
+    toolkit.register(Arc::new(crate::browser_tool::BrowserNavigate { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserSnapshot { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserClick { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserType { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserScreenshot { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserClose { ctx: Arc::clone(&browser_ctx) }));
     // 旧版任务记录锚在 workspace_root（用户项目根）下的 tasks/，违反 .ox
     // 数据规范（非业务内容不散落项目根）——一次性迁入 .ox/tasks/。
     // tmp 残留（原子写的 *.json.tmp.*）直接删；目录空了才移除。

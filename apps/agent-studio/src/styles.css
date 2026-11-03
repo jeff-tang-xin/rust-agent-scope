@@ -1993,6 +1993,39 @@ select:focus:not(:focus-visible) {
   line-height: 1.5;
 }
 
+/* 列表里正文折叠为 3 行（点击条目弹全文）；筛选 chips。 */
+.ox-entry-content.clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.ox-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ox-filter-chip {
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ox-filter-chip.active {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+}
+
 .ox-edit-kind {
   display: flex;
   align-items: center;

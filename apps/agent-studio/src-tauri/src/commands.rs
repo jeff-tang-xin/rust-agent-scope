@@ -207,6 +207,8 @@ pub struct AppState {
     pub ssh_pool: Arc<SshPool>,
     /// 数据库档案目录（db 工作区：db_query/db_dml 工具与查询模式共用）。
     pub db_catalog: Arc<DbCatalog>,
+    /// 全局共享浏览器会话（内置浏览器自动化工具；首次调用懒启动）。
+    pub browser_session: Arc<crate::browser_tool::BrowserSession>,
 }
 
 impl AppState {
@@ -274,6 +276,7 @@ impl AppState {
             ssh_pool: Arc::clone(&self.ssh_pool),
             db_catalog: Arc::clone(&self.db_catalog),
             config: Arc::clone(&self.config),
+            browser: Arc::clone(&self.browser_session),
         };
         let built = factory::build_agent(&ws, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs, &resources)?;
         let handle = Arc::new(AgentHandle::new(built.agent));
@@ -2584,6 +2587,7 @@ pub fn run() {
                 data_dir,
                 ssh_pool: Arc::new(SshPool::new()),
                 db_catalog,
+                browser_session: Arc::new(crate::browser_tool::BrowserSession::new()),
             });
             Ok(())
         })

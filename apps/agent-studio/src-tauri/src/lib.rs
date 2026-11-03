@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod browser_tool;
 mod commands;
 mod config;
 mod db_exec;
