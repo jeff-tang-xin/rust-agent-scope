@@ -1,4 +1,4 @@
-// 内置浏览器自动化工具集：给 Agent 一个真实 Chromium 浏览器（headful，
+// 内置浏览器自动化工具集：给 Agent 一个真实 Chromium 浏览器（headless，
 // 真实渲染不失真），支持导航、读页面结构、点击、输入、截图、关闭。
 //
 // 底层：chromiumoxide（CDP 协议）驱动本机 Edge/Chrome/Chromium——三者同为
@@ -88,7 +88,7 @@ impl BrowserSession {
         guard.as_ref().map(|h| h.page.clone())
     }
 
-    /// 取活跃页面；无浏览器或已死亡时（重）启动。headful 真实窗口。
+    /// 取活跃页面；无浏览器或已死亡时（重）启动。headless 静默运行。
     async fn page(&self) -> std::result::Result<Arc<chromiumoxide::Page>, String> {
         let mut guard = self.inner.lock().await;
         if let Some(handle) = guard.as_ref() {
@@ -103,9 +103,11 @@ impl BrowserSession {
              或设置环境变量 STUDIO_BROWSER_PATH 指向浏览器可执行文件"
                 .to_string()
         })?;
+        // headless 静默运行：不弹浏览器窗口，画面经 CDP 截图流到右侧
+        // 「浏览器直播」面板（等比缩放不失真）。window_size 决定视口，
+        // 即直播画面的比例。
         let config = chromiumoxide::BrowserConfig::builder()
             .chrome_executable(exe)
-            .with_head()
             .window_size(1380, 900)
             .build()
             .map_err(|e| format!("浏览器配置失败: {e}"))?;
@@ -267,7 +269,8 @@ async fn wait_for_selector(
     }
 }
 
-/// 操作高亮：给元素画 1.5s 红框，让用户在真实窗口里看清 Agent 正在操作谁。
+/// 操作高亮：给元素画 1.5s 红框，用户在右侧「浏览器直播」面板里能看清
+/// Agent 正在操作谁（headless 下这是唯一的视觉通道）。
 async fn highlight(element: &chromiumoxide::Element) {
     let _ = element
         .call_js_fn(
