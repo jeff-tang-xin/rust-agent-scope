@@ -192,6 +192,22 @@ export default function SessionSidebar({
         >
           »
         </button>
+        {/* 收窄态工作区列：多工作区时也能看到/切换工作区——否则只显示
+            当前工作区的会话方块，既不知道当前在哪个工作区也无法切换。 */}
+        {workspaces.length > 0 && (
+          <div className="ss-rail ss-ws-rail">
+            {workspaces.map((w) => (
+              <button
+                key={w.id}
+                className={`ss-rail-item ws ${w.id === selectedId ? "active" : ""}`}
+                title={`${w.name} · 工作区`}
+                onClick={() => onSelectWorkspace(w.id)}
+              >
+                {(w.name.trim() || "·").slice(0, 2)}
+              </button>
+            ))}
+          </div>
+        )}
         {/* 收起态：当前工作区的会话小图标（首字符方块），点击直达切换会话；
             运行中带绿点角标，当前会话高亮。悬停看完整会话名。 */}
         {selected && sessionItems.length > 0 && (

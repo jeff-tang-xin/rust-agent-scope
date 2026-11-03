@@ -1144,6 +1144,21 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
   align-items: center;
 }
 .ss-collapse-btn { flex-shrink: 0; }
+/* 收窄态工作区列：在会话列上方，用分隔线 + 强调色文字与会话方块区分。 */
+.ss-ws-rail {
+  flex: none;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.ss-rail-item.ws {
+  color: var(--accent);
+  font-weight: 600;
+}
+.ss-rail-item.ws.active {
+  background: var(--accent);
+  color: var(--bg-raised);
+}
 .ss-rail {
   display: flex;
   flex-direction: column;

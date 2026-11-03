@@ -38,7 +38,12 @@ const CATS: { key: WorkspaceKind; label: string }[] = [
 const defaultSession = (mode: "solo" | "team") => (mode === "team" ? "team-main" : "main");
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("collab");
+  // 刷新恢复：tab 记 localStorage（非法值/被隐藏的类别由既有回落逻辑兜底），
+  // 刷新后停留在原菜单，不再总是回落「协同」。
+  const [tab, setTab] = useState<Tab>(() => {
+    const v = localStorage.getItem("studio-tab");
+    return v === "collab" || v === "ops" || v === "db" || v === "settings" ? v : "collab";
+  });
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceConfig[]>([]);
   // 服务器/数据库档案（工作区表单的绑定选择；加载失败不阻塞主流程）。
@@ -56,8 +61,10 @@ export default function App() {
     danger?: boolean;
     resolve: (ok: boolean) => void;
   } | null>(null);
-  // 当前选中的工作区（切类别时自动落到该类第一个）。
-  const [selectedId, setSelectedId] = useState("");
+  // 当前选中的工作区（切类别时自动落到该类第一个）。刷新恢复：记
+  // localStorage——刷新后停留在原工作区（session 本身已按工作区记忆），
+  // 不再回落到该类第一个；恢复值失效（工作区已删/跨类）由 activeWs 兜底。
+  const [selectedId, setSelectedId] = useState(() => localStorage.getItem("studio-ws") ?? "");
   // 导航显隐配置（Settings 页「界面」可改，localStorage 持久 + CustomEvent 通知；
   // 默认关闭——显式开启才显示，不用 db/ops 的用户不被无关菜单干扰）。
   const readNav = (key: string) => localStorage.getItem(key) === "1";
@@ -257,6 +264,15 @@ export default function App() {
   // 选中工作区：手动选的（且属于当前类）优先，否则该类第一个。
   const activeWs =
     workspaces.find((w) => w.id === selectedId && w.kind === tab) ?? inCat[0];
+
+  // 刷新恢复持久化：tab 即写；工作区写「实际生效」的 activeWs.id（含兜底
+  // 落位），恢复时直接命中，不会出现「记了 A 但落位到 B」的漂移。
+  useEffect(() => {
+    localStorage.setItem("studio-tab", tab);
+  }, [tab]);
+  useEffect(() => {
+    if (activeWs) localStorage.setItem("studio-ws", activeWs.id);
+  }, [activeWs?.id]);
 
   const openWorkspace = (wsId: string) => {
     setSelectedId(wsId);
