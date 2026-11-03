@@ -175,6 +175,8 @@ export interface SessionSummary {
   parent_session_id?: string;
   /** 会话名：自定义名优先，否则首条用户消息摘要；缺省回退 session id。 */
   title?: string;
+  /** ops 工作区：会话绑定的服务器档案名（未绑定为空）。 */
+  server?: string;
 }
 
 /** 已归档会话（归档箱列表项）：数据仍在磁盘，只是从常规列表里隐藏。 */

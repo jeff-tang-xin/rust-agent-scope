@@ -1594,11 +1594,9 @@ button.btn.sm { padding: 4px 12px; font-size: 12.5px; }
 .confirm-bulk { border-bottom: 1px solid var(--border-light); padding-bottom: 10px; }
 
 /* 运维工作台：资源 / Agent 或 Shell / 远程文件。 */
+/* ops 左栏与协同一致常驻（workspace-navigation 为 display: contents，
+   session-sidebar 直接参与 workspace-layout 的横向布局）。 */
 .workspace-navigation { display: contents; }
-.ops-layout { flex-direction: column; }
-.ops-navigation { display: block; position: relative; flex: 0 0 auto; border-bottom: 1px solid var(--border); }
-.ops-navigation summary { cursor: pointer; padding: 8px 14px; }
-.ops-navigation .session-sidebar { position: absolute; z-index: 20; top: 100%; height: 65vh; background: var(--bg); box-shadow: 0 8px 28px #0003; }
 .ops-workbench { display: flex; flex: 1; min-height: 0; min-width: 0; width: 100%; height: 100%; }
 .ops-servers { flex: 0 0 210px; overflow: auto; border-right: 1px solid var(--border); }
 .ops-server { display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 12px; text-align: left; background: transparent; color: inherit; border: 0; border-bottom: 1px solid var(--border); cursor: pointer; }

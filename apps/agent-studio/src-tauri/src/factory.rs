@@ -56,6 +56,8 @@ pub enum StudioMode {
 pub struct ResourceHandles {
     pub ssh_pool: Arc<SshPool>,
     pub db_catalog: Arc<DbCatalog>,
+    /// 内存配置副本（remote_shell 做 host 一致性校验用）。
+    pub config: Arc<std::sync::Mutex<crate::config::StudioConfig>>,
 }
 
 impl StudioMode {
@@ -436,7 +438,8 @@ pub fn build_agent(
             Arc::clone(&resources.ssh_pool),
             allowlist(&ws.bound_servers),
         ).with_terminal_workspace((mode == StudioMode::Ops).then(|| ws.id.clone()))
-        .with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))));
+        .with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))
+        .with_config(Arc::clone(&resources.config))));
     }
     if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
         let allowed = allowlist(&ws.bound_databases);
@@ -832,6 +835,7 @@ mod tests {
             bound_servers: vec![],
             bound_databases: vec![],
             created_at: 0,
+            auto_resource: None,
         };
         let context = default_permission_context(
             &read_only,

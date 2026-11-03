@@ -35,6 +35,7 @@ export default function SessionSidebar({
   onDeleteWorkspace,
   onCreateWorkspace,
   onDeleteSession,
+  onClearSession,
   onArchiveSession,
   onRestoreSession,
   /** 顶部分类名（协同/运维/数据库运维）——替换无信息量的「工作区」标题。 */
@@ -56,6 +57,8 @@ export default function SessionSidebar({
   onCreateWorkspace: () => void;
   /** 删除会话（App 层补 runtime mode；删除后本组件刷新列表）。 */
   onDeleteSession: (wsId: string, sessionId: string) => void;
+  /** 清空会话历史（App 层补 runtime mode；绑定保留，历史不可恢复）。 */
+  onClearSession: (wsId: string, sessionId: string) => void;
   /** 归档会话（App 层补 runtime mode；归档后本组件刷新列表）。 */
   onArchiveSession: (wsId: string, sessionId: string) => Promise<void>;
   /** 还原会话（从归档箱恢复）。 */
@@ -329,6 +332,13 @@ export default function SessionSidebar({
                           }}
                         >
                           ✎
+                        </button>
+                        <button
+                          className="icon-btn"
+                          title="清空会话历史（绑定保留，不可恢复）"
+                          onClick={() => onClearSession(w.id, s.session_id)}
+                        >
+                          🧹
                         </button>
                         <button
                           className="icon-btn"

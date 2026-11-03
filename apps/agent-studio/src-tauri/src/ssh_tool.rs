@@ -504,6 +504,66 @@ mod terminal_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[tokio::test]
+    async fn binding_host_mismatch_rejects_execution() {
+        // 绑定记录的 host 与当前档案不一致（删服务器后新增同名但指向别机）
+        // → 拒绝执行，防旧会话静默连到新机器。
+        let dir = std::env::temp_dir().join(format!("ox-host-{}", uuid::Uuid::new_v4().simple()));
+        let session_dir = dir.join("s1");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(
+            session_dir.join("binding.json"),
+            json!({"server":"platform","server_host":"10.0.0.1"}).to_string(),
+        )
+        .unwrap();
+        let ctx = agentscope_core::tool::ToolContext {
+            session_id: "s1".into(),
+            ..agentscope_core::tool::ToolContext::new("call-1", "remote_shell")
+        };
+        let mk_config = |host: &str| {
+            Arc::new(std::sync::Mutex::new(crate::config::StudioConfig {
+                servers: vec![serde_json::from_value(json!({"name":"platform","host":host})).unwrap()],
+                ..Default::default()
+            }))
+        };
+        let mk_tool = |config: Arc<std::sync::Mutex<crate::config::StudioConfig>>| {
+            RemoteShellTool::new(Arc::new(SshPool::new()), None)
+                .with_terminal_workspace(Some("ws".into()))
+                .with_session_dir(dir.clone())
+                .with_config(config)
+        };
+
+        // host 不一致 → 拒绝并提示重新确认绑定。
+        let rejected = mk_tool(mk_config("10.0.0.2"))
+            .call_with_context(json!({"command":"free -m"}), &ctx)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        assert!(rejected.content.contains("地址已变更"), "{}", rejected.content);
+
+        // host 一致 → 通过校验，走到「未连接」错误（证明没被 host 校验拦住）。
+        let passed = mk_tool(mk_config("10.0.0.1"))
+            .call_with_context(json!({"command":"free -m"}), &ctx)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        assert!(passed.content.contains("未连接"), "{}", passed.content);
+
+        // 档案已删除 → 拒绝。
+        let gone = mk_tool(Arc::new(std::sync::Mutex::new(crate::config::StudioConfig::default())))
+            .call_with_context(json!({"command":"free -m"}), &ctx)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        assert!(gone.content.contains("档案已不存在"), "{}", gone.content);
+
+        // 旧数据（无 server_host 字段）→ 跳过校验，行为与之前一致。
+        std::fs::write(session_dir.join("binding.json"), json!({"server":"platform"}).to_string()).unwrap();
+        let legacy = mk_tool(mk_config("10.0.0.2"))
+            .call_with_context(json!({"command":"free -m"}), &ctx)
+            .await
+            .expect("工具以 Ok(ToolOutput::error) 形式返回失败");
+        assert!(legacy.content.contains("未连接"), "{}", legacy.content);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn ops_tool_schema_makes_server_optional() {
         let ops = RemoteShellTool::new(Arc::new(SshPool::new()), None).with_terminal_workspace(Some("ws".into()));
@@ -547,6 +607,9 @@ pub struct RemoteShellTool {
     allowed_servers: Option<Vec<String>>,
     workspace_state_dir: Option<std::path::PathBuf>,
     terminal_workspace: Option<String>,
+    /// 内存配置副本：校验会话绑定记录的 host 与当前档案 host 一致
+    /// （防「删服务器后新增同名但指向别机」被旧会话静默沿用）。
+    config: Option<Arc<std::sync::Mutex<crate::config::StudioConfig>>>,
 }
 
 impl RemoteShellTool {
@@ -556,6 +619,7 @@ impl RemoteShellTool {
             allowed_servers,
             workspace_state_dir: None,
             terminal_workspace: None,
+            config: None,
         }
     }
 
@@ -567,6 +631,34 @@ impl RemoteShellTool {
     pub fn with_session_dir(mut self, dir: std::path::PathBuf) -> Self {
         self.workspace_state_dir = Some(dir);
         self
+    }
+
+    pub fn with_config(
+        mut self,
+        config: Arc<std::sync::Mutex<crate::config::StudioConfig>>,
+    ) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// 绑定 host 一致性校验：binding.json 记录了绑定时档案 host 且配置
+    /// 可达时，当前档案 host 不一致（或档案已删除）即拒绝执行。
+    /// 旧会话数据无 server_host 字段时跳过（重新绑定后即受保护）。
+    fn binding_host_matches(&self, server: &str, recorded_host: &str) -> std::result::Result<(), String> {
+        let Some(config) = &self.config else {
+            return Ok(());
+        };
+        let guard = config.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.servers.iter().find(|s| s.name == server) {
+            Some(current) if current.host == recorded_host => Ok(()),
+            Some(current) => Err(format!(
+                "服务器 `{server}` 的地址已变更（绑定时 {recorded_host}，当前 {}），请重新确认绑定后再执行",
+                current.host
+            )),
+            None => Err(format!(
+                "服务器 `{server}` 的档案已不存在（可能已删除），请重新绑定后再执行"
+            )),
+        }
     }
 }
 
@@ -637,6 +729,12 @@ impl Tool for RemoteShellTool {
                                 }
                             } else if requested != bound {
                                 return Ok(ToolOutput::error(format!("当前会话仅可操作服务器 `{bound}`")));
+                            }
+                            // 绑定 host 一致性：档案地址变更（同名不同机）或已删除时拒绝。
+                            if let Some(recorded) = binding.get("server_host").and_then(Value::as_str) {
+                                if let Err(e) = self.binding_host_matches(bound, recorded) {
+                                    return Ok(ToolOutput::error(e));
+                                }
                             }
                         }
                     }

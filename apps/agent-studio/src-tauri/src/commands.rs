@@ -150,6 +150,10 @@ pub struct SessionSummary {
     /// 都没有（新会话未发消息）为 None，前端回退显示 session id。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// ops 工作区：该会话绑定的服务器档案名（binding.json；未绑定为 None）。
+    /// 前端按服务器分组展示会话列表用。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
 }
 
 /// 归档标记文件名（会话目录内）：存在即已归档。数据留在原地，可还原。
@@ -194,7 +198,8 @@ pub struct ArchivedSession {
 /// 全局应用状态。
 pub struct AppState {
     pub config_store: ConfigStore,
-    pub config: Mutex<StudioConfig>,
+    /// 内存配置副本（Arc 共享给 remote_shell 等工具做 host 一致性校验）。
+    pub config: Arc<std::sync::Mutex<StudioConfig>>,
     /// 已装配 agent 缓存（懒装配；配置变更后失效重建）。
     pub handles: Mutex<HashMap<String, Arc<AgentHandle>>>,
     pub data_dir: std::path::PathBuf,
@@ -268,6 +273,7 @@ impl AppState {
         let resources = factory::ResourceHandles {
             ssh_pool: Arc::clone(&self.ssh_pool),
             db_catalog: Arc::clone(&self.db_catalog),
+            config: Arc::clone(&self.config),
         };
         let built = factory::build_agent(&ws, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs, &resources)?;
         let handle = Arc::new(AgentHandle::new(built.agent));
@@ -364,6 +370,20 @@ pub fn save_database(
     config.databases.retain(|d| d.name != database.name);
     config.databases.push(database.clone());
     state.db_catalog.replace_all(&config.databases);
+    // 数据库档案 → 自动衍生 db 工作区（一个库一个工作区，会话按库隔离）。
+    let live: Vec<String> = config
+        .databases
+        .iter()
+        .map(|d| format!("database:{}", d.name))
+        .collect();
+    prune_auto_workspaces(&mut config, "database:", &live);
+    ensure_auto_workspace(
+        &mut config,
+        &format!("database:{}", database.name),
+        &database.name,
+        "db",
+        crate::config::DB_AGENT_ID,
+    );
     state.persist(&config).map(|_| outcome)
 }
 
@@ -394,7 +414,78 @@ pub fn delete_database(state: State<'_, AppState>, name: String) -> Result<(), S
     let mut config = state.snapshot();
     config.databases.retain(|d| d.name != name);
     state.db_catalog.replace_all(&config.databases);
-    state.persist(&config)
+    // 档案删除 → 其自动衍生工作区一并移除（会话数据保留磁盘）。
+    let removed = remove_auto_workspaces(&mut config, &format!("database:{name}"));
+    state.persist(&config)?;
+    for id in removed {
+        state.invalidate(&id);
+    }
+    Ok(())
+}
+
+/// 资源档案（服务器/数据库）的自动衍生工作区：一个资源一个工作区，
+/// 会话与绑定天然按资源隔离（运维/数据库类别「按资源自动建工作目录」
+/// 的产品模型；协同工作区仍由用户手动创建，不受联动影响）。
+fn ensure_auto_workspace(
+    config: &mut StudioConfig,
+    resource_tag: &str,
+    display_name: &str,
+    kind: &str,
+    agent_id: &str,
+) {
+    // 已存在（按标记找）→ 同步展示名与绑定（档案编辑后跟随）。
+    if let Some(ws) = config
+        .workspaces
+        .iter_mut()
+        .find(|w| w.auto_resource.as_deref() == Some(resource_tag))
+    {
+        ws.name = display_name.to_string();
+        if kind == "ops" {
+            ws.bound_servers = vec![display_name.to_string()];
+        } else {
+            ws.bound_databases = vec![display_name.to_string()];
+        }
+        return;
+    }
+    config.workspaces.push(WorkspaceConfig {
+        id: uuid::Uuid::new_v4().simple().to_string(),
+        name: display_name.to_string(),
+        kind: kind.to_string(),
+        agent_id: agent_id.to_string(),
+        // 目录留空 = 默认 `{data_dir}/workspaces/{id}/workspace`；档案名
+        // 可能含路径不安全字符，不做子目录名。
+        dir: String::new(),
+        members: Vec::new(),
+        bound_servers: if kind == "ops" { vec![display_name.to_string()] } else { Vec::new() },
+        bound_databases: if kind == "db" { vec![display_name.to_string()] } else { Vec::new() },
+        created_at: unix_now(),
+        auto_resource: Some(resource_tag.to_string()),
+    });
+}
+
+/// 移除资源档案的自动衍生工作区，返回被移除的 id（调用方 invalidate）。
+/// 用户手动创建的工作区（auto_resource = None）永不被联动删除。
+fn remove_auto_workspaces(config: &mut StudioConfig, resource_tag: &str) -> Vec<String> {
+    let removed: Vec<String> = config
+        .workspaces
+        .iter()
+        .filter(|w| w.auto_resource.as_deref() == Some(resource_tag))
+        .map(|w| w.id.clone())
+        .collect();
+    config
+        .workspaces
+        .retain(|w| w.auto_resource.as_deref() != Some(resource_tag));
+    removed
+}
+
+/// 同步某类资源的自动工作区与档案列表：档案已删除（含改名 = 删旧建新）
+/// 的衍生工作区一并移除，防止残留孤儿工作区。
+fn prune_auto_workspaces(config: &mut StudioConfig, prefix: &str, live_tags: &[String]) {
+    config.workspaces.retain(|w| {
+        w.auto_resource
+            .as_deref()
+            .map_or(true, |tag| !tag.starts_with(prefix) || live_tags.contains(&tag.to_string()))
+    });
 }
 
 /// 数据库类型注册表（前端下拉与字段启停的数据源；新增类型自动跟随）。
@@ -424,15 +515,67 @@ pub fn save_server(state: State<'_, AppState>, server: ServerConfig) -> Result<(
     server.name = name;
     let mut config = state.snapshot();
     config.servers.retain(|s| s.name != server.name);
-    config.servers.push(server);
+    config.servers.push(server.clone());
+    // 服务器档案 → 自动衍生 ops 工作区（一台服务器一个工作区，会话按
+    // 服务器隔离）；档案改名（删旧建新）后旧衍生工作区一并清理。
+    let live: Vec<String> = config
+        .servers
+        .iter()
+        .map(|s| format!("server:{}", s.name))
+        .collect();
+    prune_auto_workspaces(&mut config, "server:", &live);
+    ensure_auto_workspace(
+        &mut config,
+        &format!("server:{}", server.name),
+        &server.name,
+        "ops",
+        crate::config::OPS_AGENT_ID,
+    );
     state.persist(&config)
 }
 
 #[tauri::command]
-pub fn delete_server(state: State<'_, AppState>, name: String) -> Result<(), String> {
+pub async fn delete_server(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let mut config = state.snapshot();
     config.servers.retain(|s| s.name != name);
-    state.persist(&config)
+    // 档案删除 → 其自动衍生工作区一并移除（会话数据保留磁盘）。
+    let removed = remove_auto_workspaces(&mut config, &format!("server:{name}"));
+    state.persist(&config)?;
+    for id in removed {
+        state.invalidate(&id);
+    }
+    // 断开该名下缓存连接（含已打开 PTY：连接关闭后 channel 数据流结束，
+    // 终端任务自然退出并发 closed 事件，前端显示断开）。
+    state.ssh_pool.disconnect(&name).await;
+    // 清理各工作区会话里指向它的绑定：binding.json 残留旧名字会让
+    // 「删了再新增同名（哪怕指向别机）」的档案被旧会话静默沿用。
+    for ws in config.workspaces.iter() {
+        let user_dir = factory::workspace_dir(&state.data_dir, &ws.id)
+            .join("state")
+            .join(USER_ID);
+        let entries = match std::fs::read_dir(&user_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue, // 该工作区还没有任何会话
+        };
+        for entry in entries.flatten() {
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let path = entry.path().join("binding.json");
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let Ok(mut binding) = serde_json::from_slice::<SessionBinding>(&bytes) else {
+                continue;
+            };
+            if binding.server.as_deref() == Some(name.as_str()) {
+                binding.server = None;
+                binding.server_host = None;
+                if let Ok(out) = serde_json::to_vec_pretty(&binding) {
+                    let _ = std::fs::write(&path, out);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 按名取 SSH 服务器档案。
@@ -1544,6 +1687,11 @@ pub struct SessionBinding {
     /// ops 工作区：该会话绑定的服务器档案名。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
+    /// 绑定时刻服务器档案的 host：remote_shell 执行时校验当前档案 host
+    /// 与之一致，防「删除服务器后新增同名但指向别机」被旧会话静默沿用。
+    /// 旧会话数据无此字段（None）时跳过校验，重新绑定后即生效。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_host: Option<String>,
 }
 
 /// 会话目录（校验 session_id 防路径穿越；与 list_sessions 的目录布局一致）。
@@ -1595,7 +1743,19 @@ pub fn set_session_binding(
         .unwrap_or_default();
     match kind.as_str() {
         "database" => binding.database = name.filter(|n| !n.trim().is_empty()),
-        "server" => binding.server = name.filter(|n| !n.trim().is_empty()),
+        // 绑定服务器即记录档案 host（档案不存在直接报错，不产生悬空绑定）；
+        // 解绑时一并清除，避免残留旧 host 误拦后续绑定。
+        "server" => match name.filter(|n| !n.trim().is_empty()) {
+            Some(n) => {
+                let server = find_server(&state.snapshot(), &n)?;
+                binding.server = Some(n);
+                binding.server_host = Some(server.host);
+            }
+            None => {
+                binding.server = None;
+                binding.server_host = None;
+            }
+        },
         other => return Err(format!("unknown binding kind `{other}`")),
     }
     if let Some(dir) = path.parent() {
@@ -1679,12 +1839,18 @@ fn scan_sessions(user_dir: &std::path::Path) -> Vec<SessionSummary> {
             continue;
         }
         let (title, messages, updated_at) = read_session_meta(&entry.path());
+        // 会话绑定的服务器名（ops 工作区按服务器分组展示用；读不到为 None）。
+        let server = std::fs::read(entry.path().join("binding.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<SessionBinding>(&bytes).ok())
+            .and_then(|b| b.server);
         out.push(SessionSummary {
             title,
             parent_session_id: parent_of.get(&session_id).cloned(),
             session_id,
             messages,
             updated_at,
+            server,
         });
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
@@ -2371,7 +2537,7 @@ pub fn run() {
             db_catalog.replace_all(&config.databases);
             app.manage(AppState {
                 config_store,
-                config: Mutex::new(config),
+                config: Arc::new(Mutex::new(config)),
                 handles: Mutex::new(HashMap::new()),
                 data_dir,
                 ssh_pool: Arc::new(SshPool::new()),

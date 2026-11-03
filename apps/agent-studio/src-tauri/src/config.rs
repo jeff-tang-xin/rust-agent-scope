@@ -104,6 +104,11 @@ pub struct WorkspaceConfig {
     pub bound_databases: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
+    /// 自动衍生标记（`server:<档案名>` / `database:<档案名>`）：该工作区由
+    /// 服务器/数据库档案自动创建（一个资源一个工作区，会话天然按资源隔离）。
+    /// save/delete 档案时据此同步创建/移除；None = 用户手动创建，不受联动影响。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_resource: Option<String>,
 }
 
 /// 工作区类型（协同 / 运维 / 数据库运维——都是工作区，针对不同的项目）。
@@ -257,6 +262,7 @@ impl StudioConfig {
                     bound_servers: Vec::new(),
                     bound_databases: Vec::new(),
                     created_at: 0,
+                    auto_resource: None,
                 });
             }
         }
@@ -539,6 +545,7 @@ mod tests {
             bound_servers: vec!["prod-1".into()],
             bound_databases: Vec::new(),
             created_at: 42,
+            auto_resource: None,
         };
         let bytes = serde_json::to_vec(&ws).unwrap();
         let back: WorkspaceConfig = serde_json::from_slice(&bytes).unwrap();
@@ -556,6 +563,7 @@ mod tests {
             bound_servers: Vec::new(),
             bound_databases: Vec::new(),
             created_at: 0,
+            auto_resource: None,
         }
         .kind_valid());
 

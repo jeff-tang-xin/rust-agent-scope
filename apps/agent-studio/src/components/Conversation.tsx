@@ -506,6 +506,7 @@ export default function Conversation({
   agent,
   runtimeMode,
   sessionId,
+  refreshKey,
   onSessionChange,
   onModeChange,
   onToast,
@@ -519,6 +520,8 @@ export default function Conversation({
   runtimeMode: "solo" | "team";
   /** 当前 session（受控：App 层持有，左栏可切换）。 */
   sessionId: string;
+  /** 清空信号：App 层清空当前会话后 +1，重拉历史（会话 id 不变）。 */
+  refreshKey?: number;
   onSessionChange: (sessionId: string) => void;
   onModeChange: (mode: "solo" | "team") => void;
   /** 全局 toast（App 层渲染）：会话内错误/提示统一走右上角通知。 */
@@ -804,7 +807,7 @@ export default function Conversation({
     return () => {
       alive = false;
     };
-  }, [workspace.id, sessionId, runtimeMode]);
+  }, [workspace.id, sessionId, runtimeMode, refreshKey]);
 
   // 事件归流：只处理 (agent_id, session_id) 匹配本组件的事件。
   useEffect(() => {

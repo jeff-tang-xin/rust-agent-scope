@@ -119,6 +119,9 @@ export default function App() {
   });
   // 运行中的 "workspaceId:sessionId"（全局事件监听维护，左栏显示状态）。
   const [running, setRunning] = useState<Set<string>>(new Set());
+  // 会话清空信号：清空当前会话后 +1，Conversation 据此重拉历史（会话 id
+  // 不变，绑定保留，仅上下文清空——effect 依赖里没有别的可变项）。
+  const [convRefresh, setConvRefresh] = useState(0);
   // 工作区表单（新建/编辑）。
   const [wsForm, setWsForm] = useState<{ kind: "new" | "edit"; initial?: WorkspaceConfig } | null>(null);
   // 主题：localStorage 优先，否则跟随系统；浅色为默认观感。
@@ -333,7 +336,26 @@ export default function App() {
     }
   };
 
-  const NavigationContainer = tab === "ops" ? "details" : "div";
+  /** 清空会话（SessionSidebar 调用）：确认 → 清空上下文 → 反馈。
+   *  会话 id 与服务器/数据库绑定保留，仅对话历史清空（不可恢复）；
+   *  当前会话清空后通过 convRefresh 让 Conversation 重拉空历史。 */
+  const clearSession = async (wsId: string, sessionId: string) => {
+    const ok = await confirm(
+      "清空会话",
+      `确定清空会话「${sessionId}」的全部对话历史？\n会话与服务器/数据库的绑定保留，历史清空后不可恢复。`,
+      { actionLabel: "清空", danger: false },
+    );
+    if (!ok) return;
+    try {
+      await api.clearSession(wsId, modes[wsId] ?? "solo", sessionId);
+      flash("会话已清空");
+      setConvRefresh((n) => n + 1);
+    } catch (e) {
+      fail(String(e));
+    }
+  };
+
+  const NavigationContainer = "div";
   return (
     <div className="app">
       {/* 顶部导航条：品牌 + 类别导航 + 主题切换（原左侧竖栏上移，四栏变三栏） */}
@@ -390,9 +412,8 @@ export default function App() {
           <WorkspacePage category={tab} onCreate={() => setWsForm({ kind: "new" })} />
         ) : (
           /* 有工作区：会话视图（左栏 + keep-alive 会话 + 文件面板在会话内） */
-          <div className={`workspace-layout ${tab === "ops" ? "ops-layout" : ""}`}>
-            <NavigationContainer className={`workspace-navigation ${tab === "ops" ? "ops-navigation" : ""}`}>
-              {tab === "ops" && <summary>工作区与 Agent 会话 · {activeWs?.name}</summary>}
+          <div className="workspace-layout">
+            <NavigationContainer className="workspace-navigation">
             <SessionSidebar
               workspaces={inCat}
               selectedId={activeWs?.id ?? ""}
@@ -403,6 +424,7 @@ export default function App() {
               }
               onNewSession={newSession}
               onDeleteSession={(wsId, sid) => void removeSession(wsId, sid)}
+              onClearSession={(wsId, sid) => void clearSession(wsId, sid)}
               onArchiveSession={archiveSession}
               onRestoreSession={restoreSession}
               running={running}
@@ -413,7 +435,7 @@ export default function App() {
               width={ssWidth}
             />
             </NavigationContainer>
-            {tab !== "ops" && <div className="ss-resize" onMouseDown={startSsResize} aria-hidden />}
+            <div className="ss-resize" onMouseDown={startSsResize} aria-hidden />
             {/* keep-alive：所有工作区会话常挂，非当前隐藏（事件持续归流）。 */}
             {workspaces.map((w) => {
               const agent = agents.find((a) => a.id === w.agent_id);
@@ -429,6 +451,7 @@ export default function App() {
                     onToast={toast}
                     onConfirm={confirm}
                     sessionId={sessionByWs[w.id] ?? defaultSession(mode)}
+                    refreshKey={convRefresh}
                     onSessionChange={(sid) =>
                       setSessionByWs((prev) => ({ ...prev, [w.id]: sid }))
                     }
