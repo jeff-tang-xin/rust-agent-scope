@@ -255,20 +255,24 @@ const FIT_ZOOM_JS: &str = r#"(() => {
   const de = document.documentElement;
   const body = document.body;
   if (!de || !body) return null;
-  const cur = parseFloat(de.style.zoom || '1') || 1;
-  const vw = de.clientWidth * cur;      // 视口可用宽（视觉 px，不含滚动条）
-  const contentW = body.scrollWidth;    // 页面内容宽（缩放坐标系）
-  if (contentW * cur > vw + 1) {
+  const href = location.href;
+  if (de.dataset.zoomFitFor !== href) {
+    // 新页面（导航/SPA 换路由）：重置决策状态。zoom 残留一并清掉（自愈）。
+    de.dataset.zoomFitFor = href;
+    de.style.zoom = '';
+  }
+  // 已注入过 zoom 的页面锁定不动：zoom 会改变 scrollWidth/clientWidth 的
+  // 测量坐标系，注入后再重算会形成反馈循环（实测页面被逐步缩到极小）。
+  if (de.style.zoom) return null;
+  const vw = de.clientWidth;           // 可用宽（不含滚动条），未缩放坐标系
+  const contentW = body.scrollWidth;   // 内容宽，测量干净
+  if (contentW > vw + 20) {            // 20px≈滚动条宽，边缘溢出不缩
     const z = vw / contentW;
-    if (Math.abs(cur - z) <= 0.002) return null;
+    if (z < 0.5) return '内容过宽（' + Math.round(contentW) + 'px），放弃自动缩放';
     de.style.zoom = z.toFixed(4);
     return '页面已等比缩小到 ' + Math.round(z * 100) + '%（内容 ' + Math.round(contentW) + 'px 超出视口 ' + Math.round(vw) + 'px）';
   }
-  if (Math.abs(cur - 1) > 0.002) {
-    de.style.zoom = '';
-    return '已恢复 100% 缩放';
-  }
-  return null;
+  return null; // 未注入：下次截图继续检测（适应先窄后宽的页面）
 })()"#;
 
 fn render_snapshot(info: &Value) -> String {
