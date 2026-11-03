@@ -212,14 +212,18 @@ body {
   overflow: auto;
   background: #1b1b1f;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
 }
 
-/* 等比缩放：宽度撑满面板、高度按比例，绝不拉伸变形。 */
+/* 等比缩放：在面板内完整显示（contain 语义），任何视口/面板比例下
+   都不拉伸变形、不裁切，留白均匀分布在四周。 */
 .browser-preview-img {
-  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
+  object-fit: contain;
   display: block;
 }
 .file-panel-head {
