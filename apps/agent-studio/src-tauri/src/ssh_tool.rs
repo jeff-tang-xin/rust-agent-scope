@@ -257,7 +257,10 @@ pub enum TerminalInput {
 pub struct SshPool {
     sessions: Mutex<HashMap<String, Arc<SshConn>>>,
     terminals: Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<TerminalInput>>>>,
-    terminal_bindings: Arc<Mutex<HashMap<String, (String, String)>>>,
+    // (workspace, server, 创建序号)：序号用于多终端时选最新（页面刷新后
+    // 旧 PTY 成孤儿，新开的终端序号更大、更接近用户当前上下文）。
+    terminal_bindings: Arc<Mutex<HashMap<String, (String, String, u64)>>>,
+    seq: std::sync::atomic::AtomicU64,
 }
 
 impl SshPool {
@@ -276,9 +279,22 @@ impl SshPool {
             .await.map_err(|e| e.to_string())?;
         channel.request_shell(true).await.map_err(|e| e.to_string())?;
         let id = uuid::Uuid::new_v4().to_string();
+        // 同工作区同服务器的旧终端先关（页面刷新后旧 PTY 无人认领成孤儿，
+        // 每刷新一次泄一个；不变式：每工作区每服务器至多一个活跃 PTY，
+        // 由后端保证）。旧任务收到 Close 自行退出并清理绑定。
+        let stale: Vec<String> = self.terminal_bindings.lock().await.iter()
+            .filter(|(_, (ws, name, _))| ws == workspace && name == server)
+            .map(|(bound_id, _)| bound_id.clone())
+            .collect();
+        for bound_id in &stale {
+            if let Some(tx) = self.terminals.lock().await.get(bound_id) {
+                let _ = tx.try_send(TerminalInput::Close);
+            }
+        }
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, mut rx) = tokio::sync::mpsc::channel(128);
         self.terminals.lock().await.insert(id.clone(), tx);
-        self.terminal_bindings.lock().await.insert(id.clone(), (workspace.to_string(), server.to_string()));
+        self.terminal_bindings.lock().await.insert(id.clone(), (workspace.to_string(), server.to_string(), seq));
         let bindings = self.terminal_bindings.clone();
         let terminals = self.terminals.clone();
         let task_id = id.clone();
@@ -356,20 +372,33 @@ impl SshPool {
     }
 
     async fn send_command(&self, workspace: &str, server: &str, command: &str) -> std::result::Result<(String, i32), String> {
-        let ids: Vec<_> = self.terminal_bindings.lock().await.iter()
-            .filter(|(_, (ws, name))| ws == workspace && name == server)
-            .map(|(id, _)| id.clone()).collect();
-        if ids.len() != 1 {
-            return Err("当前工作区必须恰好有一个该服务器的终端；请打开终端或关闭重复窗口，不会回退到独立 exec".into());
-        }
+        // 终端绑定选创建序号最大的（最新窗口；孤儿/旧窗口已被 open_terminal
+        // 关闭，此处兜底处理瞬态并存）。没有可用终端时回退独立 exec 通道：
+        // 干净环境（cwd=home、不共享终端 cd 状态），但保证 Agent 不因终端
+        // 状态卡死——此前 0/多终端一律报错，页面刷新即触发，实测卡死。
+        let bound: Vec<(String, u64)> = self.terminal_bindings.lock().await.iter()
+            .filter(|(_, (ws, name, _))| ws == workspace && name == server)
+            .map(|(id, (_, _, seq))| (id.clone(), *seq))
+            .collect();
         // A literal newline could produce several prompts; do not mistake the first
         // for completion of the entire request. Interactive input belongs in SH.
         if command.contains(['\r', '\n', '\0', '\x1b', '\x03']) {
             return Err("Agent 命令须为单行且不含终端控制字符；多行/交互输入请切换 SH".into());
         }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.terminal_input(&ids[0], TerminalInput::Command(command.to_string(), tx)).await?;
-        rx.await.map_err(|_| "终端执行任务已关闭，结果未知".to_string())?
+        if let Some((id, _)) = bound.iter().max_by_key(|(_, seq)| *seq) {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            match self.terminal_input(id, TerminalInput::Command(command.to_string(), tx)).await {
+                Ok(()) => {
+                    // 命令已送入终端：结果未知时不回退 exec（可能已在远端
+                    // 执行，重发会重复执行命令）。
+                    return rx.await.map_err(|_| "终端执行任务已关闭，结果未知".to_string())?;
+                }
+                Err(_) => {} // 绑定已死（终端刚关闭）→ 落到 exec 回退
+            }
+        }
+        let conn = self.get(server).await?;
+        let out = conn.exec(command).await?;
+        Ok((out.text, out.exit_code))
     }
 
     /// 取已连接会话；未连接报错（前端先 connect）。
@@ -380,13 +409,29 @@ impl SshPool {
             .ok_or_else(|| format!("server `{server_name}` 未连接，请先在服务器面板连接"))
     }
 
-    /// 建连并缓存（重复连接先断旧再建新）。
+    /// 建连并缓存；已存在存活连接时直接复用（幂等）。此前重复 connect
+    /// 会覆盖旧连接，导致开在旧连接上的 PTY 静默死亡、终端绑定被清——
+    /// 前端却仍显示「已连接」，Agent 执行时报「必须恰好有一个终端」。
     pub async fn connect(
         &self,
         server: ServerConfig,
     ) -> std::result::Result<Arc<SshConn>, String> {
+        {
+            let map = self.sessions.lock().await;
+            if let Some(existing) = map.get(&server.name) {
+                if !existing.handle.is_closed() {
+                    return Ok(existing.clone());
+                }
+            }
+        }
         let conn = Arc::new(SshConn::connect(server.clone()).await?);
         let mut map = self.sessions.lock().await;
+        // 双检：并发 connect 时后完成者复用先完成者，避免覆盖存活连接。
+        if let Some(existing) = map.get(&server.name) {
+            if !existing.handle.is_closed() {
+                return Ok(existing.clone());
+            }
+        }
         map.insert(server.name.clone(), conn.clone());
         Ok(conn)
     }
@@ -433,9 +478,10 @@ mod terminal_tests {
     #[tokio::test]
     async fn command_uses_bound_terminal_unchanged() {
         let pool = SshPool::new();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
-        pool.terminals.lock().await.insert("pty".into(), tx);
-        pool.terminal_bindings.lock().await.insert("pty".into(), ("ws".into(), "srv".into()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        pool.terminals.lock().await.insert("pty".into(), tx.clone());
+        pool.terminal_bindings.lock().await.insert("pty".into(), ("ws".into(), "srv".into(), 0));
+        // 其他工作区的绑定不匹配 → 无可用终端 → 回退独立 exec → 未连接报错。
         assert!(pool.send_command("other", "srv", "pwd").await.is_err());
         let execute = pool.send_command("ws", "srv", "cd /tmp");
         let receive = async {
@@ -450,8 +496,22 @@ mod terminal_tests {
         let (result, _) = tokio::join!(execute, receive);
         assert_eq!(result.unwrap(), ("result".into(), 0));
         assert!(pool.send_command("ws", "srv", "pwd\nls").await.is_err());
-        pool.terminal_bindings.lock().await.insert("duplicate".into(), ("ws".into(), "srv".into()));
-        assert!(pool.send_command("ws", "srv", "pwd").await.is_err());
+        // 重复窗口（如页面刷新后孤儿未及清理）：选创建序号最大的最新终端，
+        // 不再报错卡死 Agent。
+        pool.terminals.lock().await.insert("duplicate".into(), tx);
+        pool.terminal_bindings.lock().await.insert("duplicate".into(), ("ws".into(), "srv".into(), 1));
+        let execute = pool.send_command("ws", "srv", "pwd");
+        let receive = async {
+            match rx.recv().await.unwrap() {
+                TerminalInput::Command(command, reply) => {
+                    assert_eq!(command, "pwd");
+                    reply.send(Ok(("latest".into(), 0))).unwrap();
+                }
+                _ => panic!("expected terminal command"),
+            }
+        };
+        let (result, _) = tokio::join!(execute, receive);
+        assert_eq!(result.unwrap(), ("latest".into(), 0));
     }
 
     #[tokio::test]
