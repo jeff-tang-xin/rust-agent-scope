@@ -104,12 +104,13 @@ impl BrowserSession {
                 .to_string()
         })?;
         // headless 静默运行：不弹浏览器窗口，画面经 CDP 截图流到右侧
-        // 「浏览器直播」面板（等比缩放不失真）。window_size 决定视口，
-        // 即直播画面的比例——取接近面板的竖长比例（1280 宽页面渲染
-        // 不失真，1200 高让画面在面板里尽量撑满）。
+        // 「浏览器直播」面板（等比缩放不失真）。window_size 决定视口：
+        // 宽 1680 = 被测中台系统需要的 ~1600px + 滚动条/余量，保证页面
+        // 按自然宽度渲染不被挤压（面板 contain 会自动缩小完整显示）；
+        // 高 1200 让画面在面板里尽量撑满。
         let config = chromiumoxide::BrowserConfig::builder()
             .chrome_executable(exe)
-            .window_size(1280, 1200)
+            .window_size(1680, 1200)
             .build()
             .map_err(|e| format!("浏览器配置失败: {e}"))?;
         let (browser, mut handler) = Browser::launch(config)
