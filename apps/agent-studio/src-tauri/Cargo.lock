@@ -53,6 +53,7 @@ dependencies = [
  "agentscope-harness",
  "agentscope-model-openai",
  "async-trait",
+ "base64 0.23.1",
  "chromiumoxide",
  "encoding_rs",
  "futures",

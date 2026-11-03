@@ -22,6 +22,7 @@ import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, typ
 import OpsWorkbench from "./OpsWorkbench";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
+import BrowserPreviewPanel from "./BrowserPreviewPanel";
 import DataViewerModal from "./DataViewerModal";
 
 type Entry =
@@ -561,6 +562,7 @@ export default function Conversation({
   const [filesOpen, setFilesOpen] = useState(true);
   // .ox 数据面板（黑板报 + 记忆）：与文件/服务器/数据库面板互斥展开。
   const [oxOpen, setOxOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2117,6 +2119,8 @@ export default function Conversation({
           onCollapse={() => setOxOpen(false)}
           onToast={onToast}
         />
+      ) : browserOpen ? (
+        <BrowserPreviewPanel onCollapse={() => setBrowserOpen(false)} />
       ) : (
         <div className="file-panel-tabs">
           <button
@@ -2138,6 +2142,17 @@ export default function Conversation({
             }}
           >
             📋
+          </button>
+          <button
+            className="file-panel-tab"
+            title="展开浏览器直播面板（Agent 正在操作的页面）"
+            onClick={() => {
+              setBrowserOpen(true);
+              setFilesOpen(false);
+              setOxOpen(false);
+            }}
+          >
+            🌐
           </button>
         </div>
       )}

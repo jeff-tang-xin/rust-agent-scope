@@ -179,6 +179,49 @@ body {
   flex-direction: column;
   min-height: 0;
 }
+
+/* 浏览器直播面板：比普通面板宽（留给页面画面），上限保证对话区不被
+   压到不可用（对话区至少保留 ~420px）。 */
+.browser-preview-panel {
+  width: min(46vw, calc(100vw - 420px), 720px);
+}
+
+.browser-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.browser-preview-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #1b1b1f;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* 等比缩放：宽度撑满面板、高度按比例，绝不拉伸变形。 */
+.browser-preview-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
 .file-panel-head {
   display: flex;
   align-items: center;

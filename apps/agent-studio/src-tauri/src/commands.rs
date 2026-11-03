@@ -974,9 +974,23 @@ pub fn update_workspace(
     Ok(())
 }
 
+/// 浏览器直播：抓取当前页面视口截图（base64 PNG）供右侧预览面板轮询显示。
+/// 浏览器未启动返回空串（前端显示等待态）——预览不拉起浏览器。
 #[tauri::command]
-pub fn delete_workspace(state: State<'_, AppState>, workspace_id: String) -> Result<(), String> {
-    let mut config = state.snapshot();
+pub async fn browser_preview_shot(state: State<'_, AppState>) -> Result<String, String> {
+    use base64::Engine as _;
+    let Some(page) = state.browser_session.current_page().await else {
+        return Ok(String::new());
+    };
+    let bytes = page
+        .screenshot(chromiumoxide::page::ScreenshotParams::builder().build())
+        .await
+        .map_err(|e| format!("截图失败: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+#[tauri::command]
+pub fn delete_workspace(state: State<'_, AppState>, workspace_id: String) -> Result<(), String> {    let mut config = state.snapshot();
     config.workspaces.retain(|w| w.id != workspace_id);
     state.persist(&config)?;
     state.invalidate(&workspace_id);
@@ -2593,6 +2607,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_providers,
+            browser_preview_shot,
             save_provider,
             delete_provider,
             list_databases,

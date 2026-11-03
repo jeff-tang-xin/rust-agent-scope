@@ -49,6 +49,9 @@ struct BrowserHandle {
 
 pub struct BrowserSession {
     inner: tokio::sync::Mutex<Option<BrowserHandle>>,
+    /// 页面控制台错误缓冲（console.error + 未捕获异常）：后台事件监听任务
+    /// 写入，工具输出时 drain——Agent 能「看到」页面 JS 报错（白屏根因）。
+    console: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// 按工作区装配的浏览器工具上下文：全局共享一个浏览器会话，截图目录
@@ -58,11 +61,31 @@ pub struct BrowserCtx {
     pub screenshots_dir: PathBuf,
 }
 
+fn push_console(buf: &std::sync::Mutex<Vec<String>>, msg: String) {
+    let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.len() < 50 {
+        guard.push(msg);
+    }
+}
+
 impl BrowserSession {
     pub fn new() -> Self {
         Self {
             inner: tokio::sync::Mutex::new(None),
+            console: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
+    }
+
+    /// 取走并清空累积的页面控制台错误（工具输出时调用）。
+    pub async fn drain_console(&self) -> Vec<String> {
+        std::mem::take(&mut *self.console.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// 当前活跃页面（预览面板用）；浏览器未启动返回 None——预览不拉起
+    /// 浏览器，只有 Agent 工具调用才启动。
+    pub async fn current_page(&self) -> Option<Arc<chromiumoxide::Page>> {
+        let guard = self.inner.lock().await;
+        guard.as_ref().map(|h| h.page.clone())
     }
 
     /// 取活跃页面；无浏览器或已死亡时（重）启动。headful 真实窗口。
@@ -103,6 +126,48 @@ impl BrowserSession {
                 .await
                 .map_err(|e| format!("打开标签页失败: {e}"))?,
         );
+        // 新会话清空旧缓冲（旧页面的报错对新页面无意义）。
+        self.console.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        // 后台监听 console.error 与未捕获异常 → 缓冲（Agent 测试页面时
+        // 能看到 JS 报错，白屏/接口异常不再静默）。
+        let console_buf = Arc::clone(&self.console);
+        let page_for_console = Arc::clone(&page);
+        tokio::spawn(async move {
+            if let Ok(mut events) = page_for_console
+                .event_listener::<chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled>()
+                .await
+            {
+                while let Some(event) = events.next().await {
+                    if matches!(event.r#type, chromiumoxide::cdp::js_protocol::runtime::ConsoleApiCalledType::Error) {
+                        let text = event
+                            .args
+                            .iter()
+                            .filter_map(|arg| arg.value.as_ref().map(|v| v.to_string()))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        push_console(&console_buf, format!("console.error: {text}"));
+                    }
+                }
+            }
+        });
+        let console_buf = Arc::clone(&self.console);
+        let page_for_exception = Arc::clone(&page);
+        tokio::spawn(async move {
+            if let Ok(mut events) = page_for_exception
+                .event_listener::<chromiumoxide::cdp::js_protocol::runtime::EventExceptionThrown>()
+                .await
+            {
+                while let Some(event) = events.next().await {
+                    let details = &event.exception_details;
+                    let desc = details
+                        .exception
+                        .as_ref()
+                        .and_then(|ex| ex.description.clone())
+                        .unwrap_or_else(|| details.text.clone());
+                    push_console(&console_buf, format!("未捕获异常: {desc}"));
+                }
+            }
+        });
         *guard = Some(BrowserHandle {
             _browser: browser,
             page: page.clone(),
@@ -184,6 +249,47 @@ fn render_snapshot(info: &Value) -> String {
     out
 }
 
+/// 轮询等待元素出现（替代固定 sleep；SPA 慢加载时 Agent 传 wait_for）。
+async fn wait_for_selector(
+    page: &chromiumoxide::Page,
+    selector: &str,
+    timeout_ms: u64,
+) -> std::result::Result<(), String> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    loop {
+        if page.find_element(selector).await.is_ok() {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!("等待元素超时: {selector}"));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
+/// 操作高亮：给元素画 1.5s 红框，让用户在真实窗口里看清 Agent 正在操作谁。
+async fn highlight(element: &chromiumoxide::Element) {
+    let _ = element
+        .call_js_fn(
+            "function() { const el = this; el.style.outline = '2px solid #ff4d4f'; el.style.outlineOffset = '2px'; setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 1500); }",
+            false,
+        )
+        .await;
+}
+
+/// snapshot 输出 + 附加累积的页面控制台错误（drain）。
+async fn render_with_console(session: &BrowserSession, info: &Value) -> String {
+    let mut out = render_snapshot(info);
+    let console = session.drain_console().await;
+    if !console.is_empty() {
+        out.push_str("\n[页面控制台错误]\n");
+        for line in console {
+            out.push_str(&format!("- {line}\n"));
+        }
+    }
+    out
+}
+
 fn input_str(input: &Value, key: &str) -> std::result::Result<String, ToolOutput> {
     input
         .get(key)
@@ -224,7 +330,8 @@ impl Tool for BrowserNavigate {
         json!({
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "Absolute URL (http/https/file)."}
+                "url": {"type": "string", "description": "Absolute URL (http/https/file)."},
+                "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) before reading the page - use for SPAs."}
             },
             "required": ["url"]
         })
@@ -250,8 +357,18 @@ impl Tool for BrowserNavigate {
         }
         // SPA 首帧渲染缓冲。
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let mut note = String::new();
+        if let Some(selector) = input.get("wait_for").and_then(|v| v.as_str()) {
+            if let Err(e) = wait_for_selector(&page, selector, 5000).await {
+                note = format!("\n⚠ {e}");
+            }
+        }
         match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Ok(info) => Ok(ToolOutput::ok(format!(
+                "{}{}",
+                render_with_console(&self.ctx.session, &info).await,
+                note
+            ))),
             Err(e) => Ok(ToolOutput::error(e)),
         }
     }
@@ -284,7 +401,10 @@ impl Tool for BrowserSnapshot {
             Err(e) => return Ok(ToolOutput::error(e)),
         };
         match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Ok(info) => {
+                let out = render_with_console(&self.ctx.session, &info).await;
+                Ok(ToolOutput::ok(out))
+            }
             Err(e) => Ok(ToolOutput::error(e)),
         }
     }
@@ -312,7 +432,8 @@ impl Tool for BrowserClick {
         json!({
             "type": "object",
             "properties": {
-                "selector": {"type": "string", "description": "CSS selector of the element to click."}
+                "selector": {"type": "string", "description": "CSS selector of the element to click."},
+                "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) after the click."}
             },
             "required": ["selector"]
         })
@@ -335,12 +456,23 @@ impl Tool for BrowserClick {
                 )))
             }
         };
+        highlight(&element).await;
         if let Err(e) = element.click().await {
             return Ok(ToolOutput::error(format!("点击失败: {e}")));
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let mut note = String::new();
+        if let Some(selector) = input.get("wait_for").and_then(|v| v.as_str()) {
+            if let Err(e) = wait_for_selector(&page, selector, 5000).await {
+                note = format!("\n⚠ {e}");
+            }
+        }
         match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Ok(info) => Ok(ToolOutput::ok(format!(
+                "{}{}",
+                render_with_console(&self.ctx.session, &info).await,
+                note
+            ))),
             Err(e) => Ok(ToolOutput::error(e)),
         }
     }
@@ -369,7 +501,8 @@ impl Tool for BrowserType {
             "properties": {
                 "selector": {"type": "string", "description": "CSS selector of the input element."},
                 "text": {"type": "string", "description": "Text to type (replaces existing content)."},
-                "submit": {"type": "boolean", "description": "Optional. Press Enter after typing."}
+                "submit": {"type": "boolean", "description": "Optional. Press Enter after typing."},
+                "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) after typing/submit."}
             },
             "required": ["selector", "text"]
         })
@@ -399,6 +532,7 @@ impl Tool for BrowserType {
         };
         // 清空已有内容再输入（replace 语义）。
         let _ = element.call_js_fn("function() { this.focus(); this.value = ''; }", false).await;
+        highlight(&element).await;
         if let Err(e) = element.type_str(&text).await {
             return Ok(ToolOutput::error(format!("输入失败: {e}")));
         }
@@ -406,8 +540,18 @@ impl Tool for BrowserType {
             let _ = element.press_key("Enter").await;
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let mut note = String::new();
+        if let Some(selector) = input.get("wait_for").and_then(|v| v.as_str()) {
+            if let Err(e) = wait_for_selector(&page, selector, 5000).await {
+                note = format!("\n⚠ {e}");
+            }
+        }
         match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(render_snapshot(&info))),
+            Ok(info) => Ok(ToolOutput::ok(format!(
+                "{}{}",
+                render_with_console(&self.ctx.session, &info).await,
+                note
+            ))),
             Err(e) => Ok(ToolOutput::error(e)),
         }
     }
