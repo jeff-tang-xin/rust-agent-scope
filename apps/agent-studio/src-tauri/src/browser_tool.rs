@@ -318,6 +318,11 @@ pub struct BrowserNavigate {
 
 #[async_trait::async_trait]
 impl Tool for BrowserNavigate {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "browser_navigate"
     }
@@ -385,6 +390,11 @@ pub struct BrowserSnapshot {
 
 #[async_trait::async_trait]
 impl Tool for BrowserSnapshot {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "browser_snapshot"
     }
@@ -421,6 +431,11 @@ pub struct BrowserClick {
 
 #[async_trait::async_trait]
 impl Tool for BrowserClick {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "browser_click"
     }
@@ -489,6 +504,11 @@ pub struct BrowserType {
 
 #[async_trait::async_trait]
 impl Tool for BrowserType {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "browser_type"
     }
@@ -568,6 +588,11 @@ pub struct BrowserScreenshot {
 
 #[async_trait::async_trait]
 impl Tool for BrowserScreenshot {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "browser_screenshot"
     }
@@ -626,6 +651,11 @@ pub struct BrowserClose {
 
 #[async_trait::async_trait]
 impl Tool for BrowserClose {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "browser_close"
     }
