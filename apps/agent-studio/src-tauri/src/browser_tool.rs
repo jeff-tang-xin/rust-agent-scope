@@ -709,3 +709,78 @@ impl Tool for BrowserClose {
         Ok(ToolOutput::ok("浏览器已关闭".to_string()))
     }
 }
+
+// ---------- 工具：browser_evaluate ----------
+
+pub struct BrowserEvaluate {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserEvaluate {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_evaluate"
+    }
+
+    fn description(&self) -> &str {
+        "Execute arbitrary JavaScript in the current page and return the JSON-serialized \
+         result. Use it to probe DOM state that browser_snapshot cannot reach (Shadow DOM, \
+         iframes, computed styles, JS variables) or to diagnose rendering/interaction \
+         issues. Pass a single expression or an IIFE like `(() => { ... return {...}; })()`. \
+         Prefer browser_click / browser_type for interactions instead of DOM writes."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "script": {"type": "string", "description": "JavaScript expression or IIFE to evaluate. The return value must be JSON-serializable plain data."}
+            },
+            "required": ["script"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let script = match input_str(&input, "script") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let result = match page.evaluate(script.as_str()).await {
+            Ok(r) => r,
+            Err(e) => return Ok(ToolOutput::error(format!("执行失败: {e}"))),
+        };
+        let value: Value = match result.into_value() {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(ToolOutput::error(format!(
+                    "结果不可 JSON 序列化（请返回纯数据对象）: {e}"
+                )))
+            }
+        };
+        let mut out = serde_json::to_string_pretty(&value).unwrap_or_else(|_| format!("{value:?}"));
+        // 防止大结果（如整段 innerHTML）撑爆上下文。
+        const MAX_CHARS: usize = 100_000;
+        if out.len() > MAX_CHARS {
+            out.truncate(MAX_CHARS);
+            out.push_str("\n…（结果过长已截断，请缩小返回范围）");
+        }
+        // 执行的脚本可能触发页面报错，与其他工具一致附加控制台错误。
+        let console = self.ctx.session.drain_console().await;
+        if !console.is_empty() {
+            out.push_str("\n[页面控制台错误]\n");
+            for line in console {
+                out.push_str(&format!("- {line}\n"));
+            }
+        }
+        Ok(ToolOutput::ok(out))
+    }
+}

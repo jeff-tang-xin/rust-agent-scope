@@ -365,6 +365,7 @@ pub fn build_agent(
     toolkit.register(Arc::new(crate::browser_tool::BrowserType { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserScreenshot { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserClose { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserEvaluate { ctx: Arc::clone(&browser_ctx) }));
     // 旧版任务记录锚在 workspace_root（用户项目根）下的 tasks/，违反 .ox
     // 数据规范（非业务内容不散落项目根）——一次性迁入 .ox/tasks/。
     // tmp 残留（原子写的 *.json.tmp.*）直接删；目录空了才移除。
