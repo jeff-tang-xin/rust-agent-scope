@@ -16,7 +16,7 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
   const [servers, setServers] = useState<ServerConfig[]>([]);
   const [connected, setConnected] = useState<string[]>([]);
   const [opened, setOpened] = useState<string[]>([]);
-  const [mode, setMode] = useState<"agent" | "shell">("shell");
+  const [mode, setMode] = useState<"agent" | "shell">("agent");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -71,7 +71,8 @@ export default function OpsWorkbench({ workspace, server, busy, onSelect, onConf
             {servers.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
           </select>
         ) : <span>{server || "未绑定服务器"}</span>}
-        {pending && <span>连接中…</span>}
+        <span className={`conn-dot ${ready ? "on" : "off"}`} title={ready ? "已连接" : "未连接"} />
+        <span className="conn-text">{ready ? "已连接" : pending ? "连接中…" : "未连接"}</span>
         {ready && <button className="btn ghost" disabled={busy || pending} onClick={async () => {
           if (!await onConfirm?.("断开服务器", `断开 ${server} 的 SSH 连接？该服务器的其他终端也会断开。`)) return;
           setPending(true);
