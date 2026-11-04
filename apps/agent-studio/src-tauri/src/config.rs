@@ -111,8 +111,8 @@ pub struct WorkspaceConfig {
     pub auto_resource: Option<String>,
 }
 
-/// 工作区类型（协同 / 运维 / 数据库运维——都是工作区，针对不同的项目）。
-pub const WORKSPACE_KINDS: &[&str] = &["collab", "ops", "db"];
+/// 工作区类型（协同 / 运维 / 数据库运维 / 测试——都是工作区，针对不同的项目）。
+pub const WORKSPACE_KINDS: &[&str] = &["collab", "ops", "db", "test"];
 
 impl WorkspaceConfig {
     pub fn kind_valid(&self) -> bool {
@@ -227,6 +227,13 @@ impl StudioConfig {
             Some(_) => {}
             None => self.agents.push(default_db_agent()),
         }
+        match self.agents.iter_mut().find(|a| a.id == TEST_AGENT_ID) {
+            Some(agent) if agent.sys_prompt == LEGACY_TEST_AGENT_PROMPT => {
+                agent.sys_prompt = default_test_agent().sys_prompt;
+            }
+            Some(_) => {}
+            None => self.agents.push(default_test_agent()),
+        }
     }
 
     /// 确保内置 ops/db 工作区在列（幂等）：目录固定在 `{data_dir}/ops`、
@@ -257,6 +264,8 @@ pub const DEFAULT_AGENT_ID: &str = "default-assistant";
 pub const OPS_AGENT_ID: &str = "builtin-ops-agent";
 /// 内置数据库智能体（db 自动工作区默认绑定）。
 pub const DB_AGENT_ID: &str = "builtin-db-agent";
+/// 内置测试智能体（test 工作区默认绑定）。
+pub const TEST_AGENT_ID: &str = "builtin-test-agent";
 
 /// 内置默认智能体的上一版预置提示词（指纹）：用户从未编辑过时升级为新版，
 /// 编辑过则原样保留——区分「还是旧默认」与「用户自定义」的唯一手段。
@@ -373,6 +382,37 @@ fn default_db_agent() -> AgentConfig {
             "- 用 db_query 执行只读 SQL（SELECT/WITH/EXPLAIN/SHOW），无需确认，适合探查表结构与数据；",
             "- 用 db_dml 执行变更（INSERT/UPDATE/DELETE/DDL），每次执行需用户确认，先说明影响范围（表、预计行数）。",
             "不确定就说不确定，不编造查询结果。用中文与用户交流。",
+        ]
+        .join("\n"),
+        provider: String::new(),
+        max_iters: DEFAULT_MAX_ITERS,
+        created_at: 0,
+    }
+}
+
+/// 内置测试智能体的上一版预置提示词（指纹，用途同上）。
+const LEGACY_TEST_AGENT_PROMPT: &str = concat!(
+    "你是测试工程师，负责按测试用例执行功能测试并产出报告。你可以：\n",
+    "- 用浏览器工具（browser_navigate / browser_snapshot / browser_click / browser_type / browser_screenshot / browser_evaluate）在真实页面上执行测试步骤；\n",
+    "- 严格按用例步骤执行，每步用 snapshot 验证；步骤失败或阻塞立即停止，不重试、不换路径；\n",
+    "- 关键节点截图留证；结束时按约定 JSON 协议输出结果。\n",
+    "不确定就说不确定，不编造页面状态。用中文与用户交流。\n",
+);
+
+/// 内置测试智能体：按用例执行功能测试（浏览器自动化 + 结构化结果协议）。
+/// sys_prompt 只保留身份与能力概述——协议与方法论由 BASE_PROMPT + TEST_PROMPT
+/// 场景层统一提供。
+fn default_test_agent() -> AgentConfig {
+    AgentConfig {
+        id: TEST_AGENT_ID.into(),
+        name: "测试助手".into(),
+        description: "内置的测试执行助手：浏览器自动化按用例执行、阻塞即停、结构化结果。".into(),
+        sys_prompt: [
+            "你是测试工程师，负责按测试用例执行功能测试并产出报告。",
+            "- 用浏览器工具（browser_navigate / browser_snapshot / browser_click / browser_type / browser_screenshot / browser_evaluate）在真实页面上执行测试步骤；",
+            "- 严格按用例步骤执行，每步用 snapshot 验证；步骤失败或阻塞立即停止，不重试、不换路径；",
+            "- 关键节点截图留证；结束时按约定 JSON 协议输出结果。",
+            "不确定就说不确定，不编造页面状态。用中文与用户交流。",
         ]
         .join("\n"),
         provider: String::new(),

@@ -18,6 +18,7 @@ const KIND_LABEL: Record<WorkspaceKind, string> = {
   collab: "协同",
   ops: "运维",
   db: "数据库运维",
+  test: "测试",
 };
 
 export default function WorkspaceFormModal({

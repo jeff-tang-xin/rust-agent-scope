@@ -44,6 +44,9 @@ chromiumoxide = "0.9.1"
 base64 = "0.23.1"
 calamine = "0.38.0"
 pdf-extract = "0.12.1"
+# XMind 导入解析（.xmind = zip 包；zip/quick-xml 已在依赖树，编译增量小）
+zip = "9"
+quick-xml = "0.42"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

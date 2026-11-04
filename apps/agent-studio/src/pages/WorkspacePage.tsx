@@ -18,6 +18,10 @@ const CATEGORY_META: Record<WorkspaceKind, { title: string; sub: string }> = {
     title: "数据库运维工作区",
     sub: "数据库工作台 · 只读 SQL",
   },
+  test: {
+    title: "测试工作区",
+    sub: "测试工作台 · 需求 → 用例 → 自动执行 → 报告与 Bug",
+  },
 };
 
 export default function WorkspacePage({

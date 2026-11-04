@@ -20,6 +20,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type SessionBinding, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 import OpsWorkbench from "./OpsWorkbench";
+import TestWorkbench from "./TestWorkbench";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
 import BrowserPreviewPanel from "./BrowserPreviewPanel";
@@ -544,11 +545,13 @@ export default function Conversation({
   };
   // 拖拽附件进行中（容器高亮提示）。
   const [dragActive, setDragActive] = useState(false);
-  // 文件面板显隐（可收起成细条）。
-  const [filesOpen, setFilesOpen] = useState(true);
+  // 文件面板显隐（可收起成细条）；test 工作区默认收起，让位给测试工作台。
+  const [filesOpen, setFilesOpen] = useState(workspace.kind !== "test");
   // .ox 数据面板（黑板报 + 记忆）：与文件/服务器/数据库面板互斥展开。
   const [oxOpen, setOxOpen] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
+  // 测试工作台（test 工作区默认展开：需求/用例/任务/报告是这类工作区的主操作面）。
+  const [testOpen, setTestOpen] = useState(workspace.kind === "test");
   const [planActive, setPlanActive] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2107,6 +2110,15 @@ export default function Conversation({
         />
       ) : browserOpen ? (
         <BrowserPreviewPanel onCollapse={() => setBrowserOpen(false)} />
+      ) : testOpen ? (
+        <TestWorkbench
+          workspace={workspace}
+          sessionId={sessionId}
+          runtimeMode={runtimeMode}
+          convBusy={busy}
+          onToast={onToast ?? (() => {})}
+          onCollapse={() => setTestOpen(false)}
+        />
       ) : (
         <div className="file-panel-tabs">
           <button
@@ -2140,6 +2152,20 @@ export default function Conversation({
           >
             🌐
           </button>
+          {workspace.kind === "test" && (
+            <button
+              className="file-panel-tab"
+              title="展开测试工作台（需求 / 用例 / 任务 / 报告）"
+              onClick={() => {
+                setTestOpen(true);
+                setFilesOpen(false);
+                setOxOpen(false);
+                setBrowserOpen(false);
+              }}
+            >
+              🧪
+            </button>
+          )}
         </div>
       )}
     </div>

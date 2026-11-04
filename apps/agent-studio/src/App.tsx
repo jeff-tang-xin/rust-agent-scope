@@ -32,6 +32,7 @@ const CATS: { key: WorkspaceKind; label: string }[] = [
   { key: "collab", label: "协同" },
   { key: "ops", label: "运维" },
   { key: "db", label: "数据库运维" },
+  { key: "test", label: "测试" },
 ];
 
 /** 工作区默认 session（与 Conversation 原逻辑一致：solo/team 各自空间）。 */
@@ -42,7 +43,9 @@ export default function App() {
   // 刷新后停留在原菜单，不再总是回落「协同」。
   const [tab, setTab] = useState<Tab>(() => {
     const v = localStorage.getItem("studio-tab");
-    return v === "collab" || v === "ops" || v === "db" || v === "settings" ? v : "collab";
+    return v === "collab" || v === "ops" || v === "db" || v === "test" || v === "settings"
+      ? v
+      : "collab";
   });
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceConfig[]>([]);

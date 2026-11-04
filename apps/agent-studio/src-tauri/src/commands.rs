@@ -24,6 +24,12 @@ use crate::db_exec::{self, DbCatalog};
 use crate::factory;
 use crate::ssh_tool::{self, SshPool};
 use crate::session::{AgentHandle, SessionHandle, TurnInfo};
+use crate::testing::{
+    test_build_bug_report, test_build_report, test_delete_bug, test_delete_case,
+    test_delete_config, test_delete_requirement, test_delete_task, test_import_cases,
+    test_list_data, test_parse_excel, test_parse_xmind, test_read_screenshot, test_save_bug,
+    test_save_case, test_save_config, test_save_requirement, test_save_task, test_update_task,
+};
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
 pub(crate) const USER_ID: &str = "studio";
@@ -212,7 +218,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    fn snapshot(&self) -> StudioConfig {
+    pub(crate) fn snapshot(&self) -> StudioConfig {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -1817,11 +1823,13 @@ fn notify_if_background(
 
 /// 会话导出写盘：前端经系统保存对话框拿到路径后调用（用户主动选择的
 /// 路径，写它即用户意图）。独立 command 免装 fs 插件全家桶。
+/// 允许 .md（会话/测试报告导出）与 .json（测试用例导出，跨工作区复用）。
 #[tauri::command]
 pub async fn write_export_file(path: String, contents: String) -> Result<(), String> {
-    // 只允许写 .md（导出语义），防被滥用成任意文件写。
-    if !path.to_lowercase().ends_with(".md") {
-        return Err("export only supports .md files".into());
+    // 只允许写 .md / .json（导出语义），防被滥用成任意文件写。
+    let lower = path.to_lowercase();
+    if !lower.ends_with(".md") && !lower.ends_with(".json") {
+        return Err("export only supports .md/.json files".into());
     }
     tokio::fs::write(&path, contents.as_bytes())
         .await
@@ -2805,6 +2813,24 @@ pub fn run() {
             memory_delete_file,
             write_export_file,
             open_log_dir,
+            test_list_data,
+            test_save_requirement,
+            test_delete_requirement,
+            test_save_case,
+            test_delete_case,
+            test_import_cases,
+            test_save_task,
+            test_update_task,
+            test_delete_task,
+            test_save_bug,
+            test_delete_bug,
+            test_save_config,
+            test_delete_config,
+            test_read_screenshot,
+            test_parse_excel,
+            test_parse_xmind,
+            test_build_report,
+            test_build_bug_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

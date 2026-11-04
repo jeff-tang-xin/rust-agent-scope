@@ -30,8 +30,8 @@ export interface AgentConfig {
   created_at: number;
 }
 
-/** 工作区类型：协同（solo/team 可切，solo 下 plan/free 可切）/ 运维 / 数据库运维。 */
-export type WorkspaceKind = "collab" | "ops" | "db";
+/** 工作区类型：协同（solo/team 可切，solo 下 plan/free 可切）/ 运维 / 数据库运维 / 测试。 */
+export type WorkspaceKind = "collab" | "ops" | "db" | "test";
 
 /** 工作区：针对一个项目的工作环境。 */
 export interface WorkspaceConfig {
@@ -197,6 +197,114 @@ export interface WorkspaceFileEntry {
   path: string;
   is_dir: boolean;
   size: number;
+}
+
+// ---------- 测试工作区（需求 / 用例 / 任务 / Bug；数据存 .ox/testing/） ----------
+
+/** 需求（测试的对象；用例生成与任务关联的锚点）。 */
+export interface TestRequirement {
+  id: string;
+  title: string;
+  content: string;
+  created_at: number;
+}
+
+/** 测试用例（AI 生成 / Excel、XMind 导入 / 手工录入共用一份结构）。 */
+export interface TestCase {
+  id: string;
+  title: string;
+  precondition: string;
+  steps: string[];
+  expected: string;
+  priority: string;
+  tags: string[];
+  /** 关联需求 id（空 = 未关联）。 */
+  requirement_id: string;
+  /** manual / ai / excel / xmind。 */
+  source: string;
+  created_at: number;
+}
+
+/** 单步执行结果。 */
+export interface TestStepResult {
+  no: number;
+  status: string;
+  note: string;
+}
+
+/** 单用例执行结果（任务创建时初始化为 pending，编排器逐个回写）。 */
+export interface TestCaseResult {
+  case_id: string;
+  /** pending / running / pass / fail / blocked / error。 */
+  status: string;
+  actual: string;
+  steps: TestStepResult[];
+  /** 截图文件名（.ox/screenshots/ 下，经 test_read_screenshot 读取）。 */
+  screenshots: string[];
+  /** 关联 Bug id（fail/blocked 时创建）。 */
+  bug_id: string;
+  raw_reply: string;
+  started_at: number;
+  finished_at: number;
+}
+
+/** 测试账号（可复用配置里的一组登录凭据；明文存本地，UI 遮蔽显示）。 */
+export interface TestAccount {
+  username: string;
+  password: string;
+  note: string;
+}
+
+/** 测试配置：被测环境 + 账号等可复用资产，任务按 config_id 引用。 */
+export interface TestConfig {
+  id: string;
+  name: string;
+  base_url: string;
+  accounts: TestAccount[];
+  notes: string;
+  created_at: number;
+}
+
+/** 测试任务：关联需求与用例，创建后由前端编排器逐用例自动执行。 */
+export interface TestTask {
+  id: string;
+  name: string;
+  /** 被测系统地址（执行提示词里带给 agent）。 */
+  base_url: string;
+  /** 引用的测试配置 id（空 = 未引用，用 base_url 手填值）。 */
+  config_id: string;
+  requirement_ids: string[];
+  case_ids: string[];
+  /** pending / running / done。 */
+  status: string;
+  results: TestCaseResult[];
+  created_at: number;
+  finished_at: number;
+}
+
+/** Bug 报告（fail/blocked 自动提交 + 手工补充）。 */
+export interface TestBug {
+  id: string;
+  title: string;
+  severity: string;
+  steps: string;
+  expected: string;
+  actual: string;
+  screenshots: string[];
+  case_id: string;
+  task_id: string;
+  /** open / fixed / closed。 */
+  status: string;
+  created_at: number;
+}
+
+/** 测试工作区全量数据（test_list_data 一次拉齐）。 */
+export interface TestingData {
+  requirements: TestRequirement[];
+  cases: TestCase[];
+  tasks: TestTask[];
+  bugs: TestBug[];
+  configs: TestConfig[];
 }
 
 export interface TurnStartedPayload {
@@ -379,6 +487,50 @@ export const api = {
   // ---------- 运行日志 ----------
 
   openLogDir: () => invoke<void>("open_log_dir"),
+
+  // ---------- 会话导出（系统保存对话框拿路径后写盘；仅 .md） ----------
+
+  writeExportFile: (path: string, contents: string) =>
+    invoke<void>("write_export_file", { path, contents }),
+
+  // ---------- 测试工作区（数据 CRUD / 导入解析 / 报告生成） ----------
+
+  testListData: (workspaceId: string) =>
+    invoke<TestingData>("test_list_data", { workspaceId }),
+  testSaveRequirement: (workspaceId: string, requirement: TestRequirement) =>
+    invoke<TestRequirement>("test_save_requirement", { workspaceId, requirement }),
+  testDeleteRequirement: (workspaceId: string, id: string) =>
+    invoke<boolean>("test_delete_requirement", { workspaceId, id }),
+  testSaveCase: (workspaceId: string, testCase: TestCase) =>
+    invoke<TestCase>("test_save_case", { workspaceId, case: testCase }),
+  testDeleteCase: (workspaceId: string, id: string) =>
+    invoke<boolean>("test_delete_case", { workspaceId, id }),
+  testImportCases: (workspaceId: string, cases: TestCase[]) =>
+    invoke<TestCase[]>("test_import_cases", { workspaceId, cases }),
+  testSaveTask: (workspaceId: string, task: TestTask) =>
+    invoke<TestTask>("test_save_task", { workspaceId, task }),
+  testUpdateTask: (workspaceId: string, task: TestTask) =>
+    invoke<void>("test_update_task", { workspaceId, task }),
+  testDeleteTask: (workspaceId: string, id: string) =>
+    invoke<boolean>("test_delete_task", { workspaceId, id }),
+  testSaveBug: (workspaceId: string, bug: TestBug) =>
+    invoke<TestBug>("test_save_bug", { workspaceId, bug }),
+  testDeleteBug: (workspaceId: string, id: string) =>
+    invoke<boolean>("test_delete_bug", { workspaceId, id }),
+  testSaveConfig: (workspaceId: string, config: TestConfig) =>
+    invoke<TestConfig>("test_save_config", { workspaceId, config }),
+  testDeleteConfig: (workspaceId: string, id: string) =>
+    invoke<boolean>("test_delete_config", { workspaceId, id }),
+  testReadScreenshot: (workspaceId: string, fileName: string) =>
+    invoke<string>("test_read_screenshot", { workspaceId, fileName }),
+  testParseExcel: (workspaceId: string, fileBase64: string) =>
+    invoke<TestCase[]>("test_parse_excel", { workspaceId, fileBase64 }),
+  testParseXmind: (workspaceId: string, fileBase64: string) =>
+    invoke<TestCase[]>("test_parse_xmind", { workspaceId, fileBase64 }),
+  testBuildReport: (workspaceId: string, taskId: string) =>
+    invoke<string>("test_build_report", { workspaceId, taskId }),
+  testBuildBugReport: (workspaceId: string, bugId: string) =>
+    invoke<string>("test_build_bug_report", { workspaceId, bugId }),
 
   // ---------- .ox 数据管理（黑板报 + 记忆，用户面板） ----------
 

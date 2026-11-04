@@ -49,6 +49,7 @@ pub enum StudioMode {
     Team,
     Ops,
     Db,
+    Test,
 }
 
 /// 工具面共享的资源句柄（AppState 持有，装配时传给工具）。
@@ -69,6 +70,7 @@ impl StudioMode {
             "team" => Some(Self::Team),
             "ops" => Some(Self::Ops),
             "db" => Some(Self::Db),
+            "test" => Some(Self::Test),
             _ => None,
         }
     }
@@ -307,10 +309,11 @@ pub fn build_agent(
     member_defs: &[(AgentConfig, ModelProviderConfig)],
     resources: &ResourceHandles,
 ) -> Result<BuiltAgent, String> {
-    // 运行方式解析：协同 → solo/team（用户可切）；ops/db → 由类型决定。
+    // 运行方式解析：协同 → solo/team（用户可切）；ops/db/test → 由类型决定。
     let mode = match ws.kind.as_str() {
         "ops" => StudioMode::Ops,
         "db" => StudioMode::Db,
+        "test" => StudioMode::Test,
         _ => StudioMode::parse(runtime_mode)
             .filter(|m| matches!(m, StudioMode::Solo | StudioMode::Team))
             .unwrap_or(StudioMode::Solo),
@@ -397,11 +400,17 @@ pub fn build_agent(
             Arc::clone(&memory_workspace),
             agent.id.clone(),
         )),
-        StudioMode::Ops | StudioMode::Db => Arc::new(InMemoryTaskRepository::new()),
+        StudioMode::Ops | StudioMode::Db | StudioMode::Test => Arc::new(InMemoryTaskRepository::new()),
     };
     match mode {
         StudioMode::Ops => {
             // 远程运维工具面：web 检索（remote_shell 在 match 后统一注册）。
+            toolkit.register(Arc::new(WebFetchTool::new()));
+            toolkit.register(Arc::new(WebSearchTool::new()));
+        }
+        StudioMode::Test => {
+            // 测试工具面：web 检索（查文档/排错资料）；浏览器 7 件套已在
+            // 上方对所有模式统一注册。
             toolkit.register(Arc::new(WebFetchTool::new()));
             toolkit.register(Arc::new(WebSearchTool::new()));
         }
@@ -622,6 +631,9 @@ fn default_permission_context(
     let mut ask_tools: Vec<&'static str> = match mode {
         StudioMode::Ops => vec!["remote_shell"],
         StudioMode::Db => vec!["db_dml"],
+        // 测试工作区：浏览器工具全部只读免确认（headless 沙箱内操作），
+        // 文件写入/编辑/shell 不在工具面，无需 ask 规则。
+        StudioMode::Test => vec![],
         StudioMode::Solo | StudioMode::Team => {
             let mut tools = vec!["execute", "write_file", "edit_file"];
             if !ws.bound_servers.is_empty() {
@@ -759,7 +771,8 @@ fn allowlist(bound: &[String]) -> Option<Vec<String>> {
 /// 系统提示：description → 基座协议（[`default_prompt::BASE_PROMPT`]，四类
 /// 模式共用——文件/shell/记忆工具全模式注册，web/remote/db 等模式特有工具
 /// 在各场景层说明）→ 用户自定义 sys_prompt → 场景层（solo 自由 / team 领队 /
-/// ops 运维 / db 数据库；ops/db 无 team 与 plan 运行方式，场景层仅 free 语义）
+/// ops 运维 / db 数据库 / test 测试；ops/db/test 无 team 与 plan 运行方式，
+/// 场景层仅 free 语义）
 /// → .ox 数据规范。
 ///
 /// plan 场景层（[`default_prompt::SOLO_PLAN_PROMPT`]）不在此拼接——plan 由
@@ -778,6 +791,7 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
         StudioMode::Team => crate::default_prompt::TEAM_PROMPT.to_string(),
         StudioMode::Ops => crate::default_prompt::OPS_PROMPT.to_string(),
         StudioMode::Db => crate::default_prompt::DB_PROMPT.to_string(),
+        StudioMode::Test => crate::default_prompt::TEST_PROMPT.to_string(),
     };
     prompt.push_str("\n\n");
     prompt.push_str(&role_note);
