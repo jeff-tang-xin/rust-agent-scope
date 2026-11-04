@@ -194,6 +194,16 @@ const nowMs = () => Date.now();
 /** AI 审查时一次性送进提示词的用例条数上限（超出按抽样审查并注明总数）。 */
 const REVIEW_MAX_CASES = 60;
 
+/** 单条用例的最长等待（超时即中断该轮并记为失败，继续下一条）。
+ *
+ * 不给上限的话，一旦某轮卡住（模型流停摆、浏览器 CDP 无响应），会话锁会被
+ * 那一轮一直占着：前端干等，后端后续每条消息都返回 "a turn is already
+ * running"，整批用例报废。 */
+const CASE_TIMEOUT_MS = 10 * 60_000;
+
+/** 一轮结束的等待结果。`timedOut` 让调用方能区分「跑完了但失败」与「根本没回来」。 */
+type TurnWait = { ok: boolean; timedOut: boolean };
+
 const fmtTime = (ms: number) =>
   ms > 0 ? new Date(ms).toLocaleString("zh-CN", { hour12: false }) : "—";
 
@@ -224,8 +234,16 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 /** 执行提示词（与 TEST_PROMPT 的结果输出协议呼应；纪律部分提示词里已带）。
- *  任务引用了测试配置时，地址与账号从配置注入——账号密码只配一次，多任务复用。 */
-function execPrompt(task: TestTask, tc: TestCase, config?: TestConfig | null): string {
+ *  任务引用了测试配置时，地址与账号从配置注入——账号密码只配一次，多任务复用。
+ *  `dataProfile` 是对应用例所属需求登记的数据现状：执行时取值必须据实（精准查询
+ *  用真实存在的数据、分页页码与日期断言落在真实范围内），否则会把「数据不够」
+ *  误报成功能 Bug。 */
+function execPrompt(
+  task: TestTask,
+  tc: TestCase,
+  config?: TestConfig | null,
+  dataProfile = "",
+): string {
   const steps = tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
   const baseUrl = config?.base_url || task.base_url;
   const accounts = config?.accounts ?? [];
@@ -250,6 +268,9 @@ function execPrompt(task: TestTask, tc: TestCase, config?: TestConfig | null): s
     steps || "（无步骤，按标题理解执行）",
     `预期结果：${tc.expected}`,
     ...(config?.notes ? [`环境约定：${config.notes}`] : []),
+    ...(dataProfile
+      ? ["被测系统当前真实情况（用例里的具体值都必须以此为准，不要臆造）：", dataProfile]
+      : []),
     "",
     "按测试工作区纪律执行：逐步执行并截图留证；某步失败或被阻塞时立即停止，不重试、不绕过。",
     "完成后在回复末尾按结果输出协议输出一个 ```json 代码块。",
@@ -324,23 +345,66 @@ export default function TestWorkbench({
 
   // ---------- 会话编排原语 ----------
 
-  /** 等指定 turn 结束（事件驱动 + 兜底超时；返回是否正常完成）。 */
-  const waitTurnFinished = (turnId: string, timeoutMs = 15 * 60_000) =>
-    new Promise<boolean>((resolve) => {
+  /** 等指定 turn 结束（事件驱动 + 兜底超时）。 */
+  const waitTurnFinished = (turnId: string, timeoutMs = CASE_TIMEOUT_MS) =>
+    new Promise<TurnWait>((resolve) => {
       let settled = false;
-      const finish = (ok: boolean, un: Promise<() => void>) => {
+      let timer = 0;
+      // listen 注册是异步的（返回 Promise<unlisten>）：先占位、拿到后再替换，
+      // 避免「已 settle 才拿到 unlisten」导致监听泄漏。
+      let off: () => void = () => {};
+      const finish = (ok: boolean, timedOut: boolean) => {
         if (settled) return;
         settled = true;
-        un.then((f) => f()).catch(() => {});
-        resolve(ok);
+        window.clearTimeout(timer);
+        off();
+        resolve({ ok, timedOut });
       };
       const un = onTurnFinished((p) => {
         if (p.workspace_id === workspace.id && p.turn_id === turnId) {
-          finish(p.outcome === "completed", un);
+          finish(p.outcome === "completed", false);
         }
       });
-      setTimeout(() => finish(false, un), timeoutMs);
+      void un
+        .then((f) => {
+          if (settled) f();
+          else off = f;
+        })
+        .catch(() => {});
+      timer = window.setTimeout(() => finish(false, true), timeoutMs);
     });
+
+  /** 等一轮结束并取回复；超时/失败返回空串，同时带回失败原因（写进用例结果）。 */
+  const awaitTurn = async (turnId: string): Promise<{ text: string; failure: string }> => {
+    const wait = await waitTurnFinished(turnId);
+    if (wait.timedOut) {
+      // 必须中断：否则后端那一轮的会话锁一直不释放，后续用例全部发不出去。
+      try {
+        await api.interruptTurn(workspace.id, runtimeMode, sessionId);
+      } catch {
+        /* 已自然结束，忽略 */
+      }
+      return {
+        text: "",
+        failure: `执行超时（${CASE_TIMEOUT_MS / 60_000} 分钟没有返回结果），已中断该轮`,
+      };
+    }
+    if (!wait.ok) return { text: "", failure: "本轮未正常完成（模型/工具报错或被中断）" };
+    return { text: await lastAssistantText(), failure: "" };
+  };
+
+  /** 发送一条消息。会话锁在「中断 → 立刻重发」时可能还没释放（后端 turn_chain
+   *  收尾是异步的），遇到占用短暂重试，而不是把这一条判死。 */
+  const sendWithRetry = async (text: string) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await api.sendMessage(workspace.id, runtimeMode, sessionId, text);
+      } catch (e) {
+        if (!String(e).includes("already running") || attempt >= 10) throw e;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+  };
 
   /** 取会话最后一条助手回复文本。 */
   const lastAssistantText = async () => {
@@ -361,21 +425,31 @@ export default function TestWorkbench({
     }
     try {
       onToast("info", `已把需求「${req.title}」发给测试智能体，等待生成…`);
+      const dataProfile = req.data_profile.trim();
       const prompt = [
         `请根据以下需求设计测试用例，并按用例生成协议在回复末尾输出一个 \`\`\`json 代码块（{"cases":[...]}）。`,
         "",
         `需求标题：${req.title}`,
         `需求内容：`,
         req.content || "（无补充描述，按标题理解）",
+        "",
+        "被测系统数据现状：",
+        dataProfile || "（未提供）",
+        "",
+        "用例必须与真实情况一致（违反即视为无效用例）：",
+        "1. 用例里出现的任何具体值——页码、条数、日期、编号、名称、金额、状态——都要能从上面的数据现状或需求描述里找到出处。",
+        "2. 找不到出处的，不要臆造一个「看起来合理」的值：改写成前置条件（先准备成什么状态），或参数化表述（取列表第一条、取当前时间、用上一步得到的值）。",
+        "3. 客观条件不足以支撑某个场景时（数据量、时间范围、权限、状态等），把「需要先具备什么」写进前置条件，或如实说明该场景当前不可测，不要假设条件成立。",
+        "4. 只有专门验证某个反向场景（如查询不存在的数据、超出真实范围的取值）时，才使用超出真实范围的值，并在标题里写明该场景。",
       ].join("\n");
       const turn = await api.sendMessage(workspace.id, runtimeMode, sessionId, prompt);
-      const ok = await waitTurnFinished(turn.turn_id);
-      const text = ok ? await lastAssistantText() : "";
+      const { text, failure } = await awaitTurn(turn.turn_id);
+      if (failure) toast("error", `生成用例失败：${failure}`);
       const cases = parseGeneratedCases(extractJsonBlock(text)).map((c) => ({
         ...c,
         requirement_id: req.id,
       }));
-      if (!cases.length) {
+      if (!cases.length && !failure) {
         toast("error", "未能从回复解析出用例（缺少 {\"cases\":[...]} 代码块），可在会话里让智能体重试");
       }
       return cases;
@@ -423,10 +497,10 @@ export default function TestWorkbench({
         ...lines,
       ].join("\n");
       const turn = await api.sendMessage(workspace.id, runtimeMode, sessionId, prompt);
-      const ok = await waitTurnFinished(turn.turn_id);
-      const text = ok ? await lastAssistantText() : "";
+      const { text, failure } = await awaitTurn(turn.turn_id);
+      if (failure) toast("error", `审查失败：${failure}`);
       const review = parseCaseReview(extractJsonBlock(text));
-      if (!review) {
+      if (!review && !failure) {
         toast("error", "未能从回复解析出审查结论（缺少审查协议代码块），可在会话里让智能体重试");
       }
       return review;
@@ -613,7 +687,7 @@ export default function TestWorkbench({
             data={data}
             busy={convBusy || runningRef.current}
             onNewReq={() =>
-              setReqForm({ id: "", title: "", content: "", created_at: 0 })
+              setReqForm({ id: "", title: "", content: "", data_profile: "", created_at: 0 })
             }
             onEditReq={setReqForm}
             onDeleteReq={async (r) => {
@@ -691,7 +765,7 @@ export default function TestWorkbench({
                 toast("error", String(e));
               }
             }}
-            onRun={(t) => void runTask(t)}
+            onRun={(t, force) => void runTask(t, force)}
             onGantt={setGanttTask}
             onCaseFlow={(cid) => setFlowCase(data.cases.find((c) => c.id === cid) ?? null)}
             onBugView={(bid) => {
@@ -889,8 +963,12 @@ export default function TestWorkbench({
   );
 
   // ---------- 任务执行编排（逐用例；fail/blocked 直接提交 Bug，不重试） ----------
+  //
+  // 编排器跑在前端 async 循环里：刷新页面/关窗口会让循环凭空消失，任务就永远
+  // 停在 running。所以「中断 → 刷新 → 续跑」是必须支持的路径：任务状态是
+  // running 时按钮显示「继续执行」，点它按用例结果续跑（已通过的跳过）。
 
-  async function runTask(task: TestTask) {
+  async function runTask(task: TestTask, force = false) {
     if (runningRef.current) {
       toast("error", "已有任务在执行中");
       return;
@@ -899,23 +977,119 @@ export default function TestWorkbench({
       toast("error", "会话正在运行，请等待或停止当前对话再执行任务");
       return;
     }
+    // 全量重跑会覆盖全部已有结果，属不可逆操作，先确认再动。
+    if (
+      force &&
+      !window.confirm(
+        `强制全量重跑「${task.name}」？\n\n将逐条重跑全部用例，已有执行结果会被覆盖（Bug 记录保留）。`,
+      )
+    ) {
+      return;
+    }
     runningRef.current = true;
     setRunningTaskId(task.id);
     try {
-      // 以磁盘上的最新任务为基准（面板状态可能落后）。
+      // 上次执行被刷新/崩溃打断时，后端那个 turn 可能还在跑并占着会话锁，
+      // 后续每条消息都会被拒（"a turn is already running"）——这就是「刷新后
+      // 续不上」。先读最新任务，确认是中断残留再清一次：interrupt_turn 幂等，
+      // 没有运行中的 turn 时后端返回 false，无副作用。
       const fresh = await api.testListData(workspace.id);
       const t = fresh.tasks.find((x) => x.id === task.id);
       if (!t) {
         toast("error", "任务不存在（可能已被删除）");
         return;
       }
+      if (t.status === "running") {
+        try {
+          await api.interruptTurn(workspace.id, runtimeMode, sessionId);
+        } catch {
+          /* 没有可中断的 turn，忽略 */
+        }
+      }
       const casesById = new Map(fresh.cases.map((c) => [c.id, c]));
+      // 用例所属需求的数据现状（执行时注入，避免模型自己去编查询值/页码/日期）。
+      const dataProfileOf = (c: TestCase) =>
+        fresh.requirements.find((r) => r.id === c.requirement_id)?.data_profile?.trim() ?? "";
       // 任务引用的测试配置（环境 + 账号）；配置已删则回退任务自带 base_url。
       const config = fresh.configs.find((c) => c.id === t.config_id) ?? null;
       const results = t.results.map((r) => ({ ...r }));
+
+      // 每条用例最近一次 Bug（一条用例可能有多条历史 Bug，取创建时间最新的）。
+      // 重跑筛选与「不重复建 Bug」都依赖它。
+      const latestBugByCase = new Map<string, TestBug>();
+      for (const b of fresh.bugs) {
+        if (!b.case_id) continue;
+        const prev = latestBugByCase.get(b.case_id);
+        if (!prev || b.created_at >= prev.created_at) latestBugByCase.set(b.case_id, b);
+      }
+      /** 该用例是否还有「待处理」的 Bug（未修复 → 重跑没有意义，等修）。 */
+      const openBugOf = (caseId: string) => {
+        const b = latestBugByCase.get(caseId);
+        return b && b.status === "open" ? b : null;
+      };
+
+      // 重跑筛选用例：只跑「Bug 已修复（含已关闭）」和「还没跑过」的。
+      // - 无结果 / pending / running（上次中断残留）→ 跑；
+      // - pass → 跳过（已通过，重跑只会白烧一轮模型）；
+      // - fail / blocked / error → 看该用例最近一条 Bug：仍 open 就跳过，
+      //   已 fixed/closed（或无 Bug，如协议解析失败）才重跑。
+      const targets: string[] = [];
+      let skippedPassed = 0;
+      let skippedOpenBug = 0;
+      if (force) {
+        // 强制全量重跑：无视「已通过 / 待修 Bug」筛选，逐条重跑（已有结果被覆盖）。
+        targets.push(...t.case_ids);
+      } else {
+        for (const cid of t.case_ids) {
+          const st = results.find((x) => x.case_id === cid)?.status ?? "pending";
+          if (st === "pending" || st === "running") {
+            targets.push(cid);
+            continue;
+          }
+          if (st === "pass") {
+            skippedPassed += 1;
+            continue;
+          }
+          if (openBugOf(cid)) {
+            skippedOpenBug += 1;
+            continue;
+          }
+          targets.push(cid);
+        }
+      }
+      if (!targets.length) {
+        // 全部跳过仍要给任务收尾：上次被打断的任务若剩的都在等 Bug 修，
+        // 不置 done 就会永远显示「继续执行」。
+        if (t.status === "running") {
+          await api.testUpdateTask(workspace.id, {
+            ...t,
+            status: "done",
+            results,
+            finished_at: nowMs(),
+          });
+          await reload();
+        }
+        onToast(
+          "info",
+          t.case_ids.length
+            ? `没有需要执行的用例：已通过 ${skippedPassed} 条、待修 Bug 未处理 ${skippedOpenBug} 条（重跑只跑「已修复」与「未跑过」的用例；需要全跑请用「全量重跑」）`
+            : "任务没有关联用例，无法执行",
+        );
+        return;
+      }
+      const skipNote = [
+        skippedPassed > 0 ? `已通过 ${skippedPassed} 条` : "",
+        skippedOpenBug > 0 ? `待修 Bug 未处理 ${skippedOpenBug} 条` : "",
+      ]
+        .filter(Boolean)
+        .join("、");
+      if (skipNote) {
+        onToast("info", `本次跳过 ${skipNote}；将执行 ${targets.length} 条`);
+      }
+
       let done = 0;
-      for (let i = 0; i < t.case_ids.length; i++) {
-        const cid = t.case_ids[i];
+      for (let i = 0; i < targets.length; i++) {
+        const cid = targets[i];
         const ri = results.findIndex((r) => r.case_id === cid);
         if (ri < 0) continue;
         const tc = casesById.get(cid);
@@ -929,18 +1103,42 @@ export default function TestWorkbench({
           done++;
           continue;
         }
-        setRunProgress(`${i + 1}/${t.case_ids.length}：${tc.title}`);
-        results[ri] = { ...results[ri], status: "running", started_at: nowMs() };
+        setRunProgress(`${i + 1}/${targets.length}：${tc.title}`);
+        // 新一轮执行先清掉上一次的 Bug 关联与原始回复：本次还没结论，
+        // 留着旧 bug_id 会让「通过」的用例仍显示挂着 Bug。
+        results[ri] = {
+          ...results[ri],
+          status: "running",
+          started_at: nowMs(),
+          bug_id: "",
+          raw_reply: "",
+        };
         await api.testUpdateTask(workspace.id, { ...t, status: "running", results });
         await reload();
 
+        // 卡住是「看不出在等还是死了」的根源：每 5 秒把已等秒数写进进度，
+        // 用户才知道该继续等还是该中断。
+        const caseStart = Date.now();
+        const ticker = window.setInterval(() => {
+          const sec = Math.round((Date.now() - caseStart) / 1000);
+          setRunProgress(`${i + 1}/${targets.length}：${tc.title}（已等 ${sec}s）`);
+        }, 5000);
+
         let reply = "";
+        // 本轮失败的真实原因（超时/发送失败/非正常结束）。以前一律吞成空串，
+        // 面板只能显示笼统的「解析失败」，看不出到底卡在哪一步。
+        let failure = "";
         try {
-          const turn = await api.sendMessage(workspace.id, runtimeMode, sessionId, execPrompt(t, tc, config));
-          const ok = await waitTurnFinished(turn.turn_id);
-          if (ok) reply = await lastAssistantText();
-        } catch {
-          reply = ""; // 发送失败按 error 处理，不中断整个任务
+          const turn = await sendWithRetry(
+            execPrompt(t, tc, config, dataProfileOf(tc)),
+          );
+          const r = await awaitTurn(turn.turn_id);
+          reply = r.text;
+          failure = r.failure;
+        } catch (e) {
+          failure = `发送失败：${String(e)}`;
+        } finally {
+          window.clearInterval(ticker);
         }
         const outcome = parseExecOutcome(extractJsonBlock(reply));
         if (outcome) {
@@ -955,42 +1153,55 @@ export default function TestWorkbench({
           };
           // fail/blocked → 直接提交 Bug（需求 6：阻塞不重试）。
           if (outcome.result !== "pass") {
-            const b = outcome.bug ?? {};
-            const bug: TestBug = {
-              id: "",
-              title: b.title?.trim() || `${tc.title}（${outcome.result === "blocked" ? "执行阻塞" : "用例失败"}）`,
-              severity: b.severity?.trim() || "P2",
-              steps:
-                b.steps?.trim() ||
-                tc.steps.map((s, si) => `${si + 1}. ${s}`).join("\n") ||
-                tc.title,
-              expected: b.expected?.trim() || tc.expected,
-              actual: b.actual?.trim() || outcome.actual,
-              screenshots: outcome.screenshots,
-              case_id: tc.id,
-              task_id: t.id,
-              status: "open",
-              created_at: 0,
-            };
-            try {
-              const saved = await api.testSaveBug(workspace.id, bug);
-              results[ri].bug_id = saved.id;
-              onToast("info", `已提交 Bug：${saved.title}`);
-            } catch (e) {
-              toast("error", `Bug 提交失败：${String(e)}`);
+            // 同一用例已有「待处理」Bug 时不再新建：重跑会把同一问题刷成一堆
+            // 重复报告。Bug 已修复/已关闭后再次失败，说明是回归或新问题，才另建一条。
+            const existing = openBugOf(tc.id);
+            if (existing) {
+              results[ri].bug_id = existing.id;
+              onToast("info", `已存在待处理 Bug「${existing.title}」，本次不重复创建`);
+            } else {
+              const b = outcome.bug ?? {};
+              const bug: TestBug = {
+                id: "",
+                title: b.title?.trim() || `${tc.title}（${outcome.result === "blocked" ? "执行阻塞" : "用例失败"}）`,
+                severity: b.severity?.trim() || "P2",
+                steps:
+                  b.steps?.trim() ||
+                  tc.steps.map((s, si) => `${si + 1}. ${s}`).join("\n") ||
+                  tc.title,
+                expected: b.expected?.trim() || tc.expected,
+                actual: b.actual?.trim() || outcome.actual,
+                screenshots: outcome.screenshots,
+                case_id: tc.id,
+                task_id: t.id,
+                status: "open",
+                created_at: 0,
+              };
+              try {
+                const saved = await api.testSaveBug(workspace.id, bug);
+                results[ri].bug_id = saved.id;
+                // 新 Bug 立刻进索引：同一次任务里后面的用例不会重复建，
+                // 也保证本次后续重跑筛选看到的是最新状态。
+                latestBugByCase.set(tc.id, saved);
+                onToast("info", `已提交 Bug：${saved.title}`);
+              } catch (e) {
+                toast("error", `Bug 提交失败：${String(e)}`);
+              }
             }
           }
         } else {
           results[ri] = {
             ...results[ri],
             status: "error",
-            actual: "未能从回复解析出结果 JSON（协议见测试智能体提示词）",
+            // 优先展示真实失败原因（超时/发送失败），否则才是协议解析问题。
+            actual: failure || "未能从回复解析出结果 JSON（协议见测试智能体提示词）",
             raw_reply: reply,
             finished_at: nowMs(),
           };
         }
         done++;
-        const isLast = done === t.case_ids.length;
+        // 跳过的不计入 total，否则任务永远收不了尾。
+        const isLast = done === targets.length;
         await api.testUpdateTask(workspace.id, {
           ...t,
           status: isLast ? "done" : "running",
@@ -999,7 +1210,12 @@ export default function TestWorkbench({
         });
         await reload();
       }
-      onToast("info", `任务「${t.name}」执行完成`);
+      onToast(
+        "info",
+        `任务「${t.name}」执行完成：本次执行 ${targets.length} 条${
+          skippedPassed + skippedOpenBug > 0 ? `，跳过 ${skippedPassed + skippedOpenBug} 条` : ""
+        }`,
+      );
     } catch (e) {
       toast("error", `任务执行中断：${String(e)}`);
     } finally {
@@ -1269,7 +1485,7 @@ function TasksTab({
   onNewTask: () => void;
   onEditTask: (t: TestTask) => void;
   onDeleteTask: (t: TestTask) => void;
-  onRun: (t: TestTask) => void;
+  onRun: (t: TestTask, force?: boolean) => void;
   onGantt: (t: TestTask) => void;
   onCaseFlow: (caseId: string) => void;
   onBugView: (bugId: string) => void;
@@ -1364,9 +1580,31 @@ function TasksTab({
                     className="btn"
                     disabled={runningTaskId !== ""}
                     onClick={() => onRun(t)}
-                    title={running ? "执行中" : "执行（逐用例跑，已有结果将被覆盖）"}
+                    title={
+                      running
+                        ? "执行中"
+                        : t.status === "running"
+                          ? "上次执行被中断（刷新/关闭页面会中断编排）——点此从未完成的用例继续"
+                          : t.status === "done"
+                            ? "重跑：只跑「Bug 已修复」和「还没跑过」的用例"
+                            : "执行（逐用例跑）"
+                    }
                   >
-                    {running ? "执行中…" : t.status === "pending" ? "执行" : "重跑"}
+                    {running
+                      ? "执行中…"
+                      : t.status === "running"
+                        ? "继续执行"
+                        : t.status === "done"
+                          ? "重跑"
+                          : "执行"}
+                  </button>
+                  <button
+                    className="icon-btn"
+                    disabled={runningTaskId !== ""}
+                    title="强制全量重跑（忽略「已通过」与「待修 Bug」筛选，覆盖已有结果）"
+                    onClick={() => onRun(t, true)}
+                  >
+                    ⟳
                   </button>
                   <button className="icon-btn" title="甘特图" onClick={() => onGantt(t)}>
                     ▤
@@ -1690,6 +1928,21 @@ function ReqFormModal({
           value={r.content}
           onChange={(e) => setR({ ...r, content: e.target.value })}
           placeholder="粘贴需求文档或功能说明，智能体按此生成用例"
+        />
+        <label className="lbl">当前真实情况（生成用例的依据）</label>
+        <textarea
+          className="field test-area"
+          rows={4}
+          value={r.data_profile}
+          onChange={(e) => setR({ ...r, data_profile: e.target.value })}
+          placeholder={
+            "被测系统当前的客观情况，例如：\n" +
+            "- 数据规模：商品共 10 条，每页 20 条\n" +
+            "- 时间范围：创建时间集中在 2025-03 ~ 2025-06\n" +
+            "- 真实样例：ID=1001「春季衬衫」，最新一条 2025-06-18\n" +
+            "- 其他：权限模型（管理员/普通用户）、可写范围、已知限制\n" +
+            "用例里的具体值都会以此为准；留空则退化成「取列表第一条」这类相对写法。"
+          }
         />
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>

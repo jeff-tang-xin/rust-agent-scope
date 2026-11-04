@@ -208,6 +208,8 @@ export interface TestRequirement {
   id: string;
   title: string;
   content: string;
+  /** 被测系统当前的数据现状（数据量/时间范围等）；用例的分页与日期断言以此为准。 */
+  data_profile: string;
   created_at: number;
 }
 

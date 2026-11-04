@@ -30,6 +30,12 @@ pub struct Requirement {
     pub title: String,
     #[serde(default)]
     pub content: String,
+    /// 被测系统当前的数据现状（数据量、时间范围、账号/权限分布等）。
+    ///
+    /// 用例里的分页页码、日期断言必须来自这里：数据只有 10 条却写「翻到第
+    /// 100 页」、数据是 2025 年的却断言 2026 年，都是凭空捏造的假用例。
+    #[serde(default)]
+    pub data_profile: String,
     #[serde(default)]
     pub created_at: u64,
 }
@@ -1433,6 +1439,7 @@ mod tests {
                 id: "r1".into(),
                 title: "登录功能".into(),
                 content: String::new(),
+                data_profile: String::new(),
                 created_at: 0,
             }],
             configs: vec![],
