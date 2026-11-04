@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type SessionBinding, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 import OpsWorkbench from "./OpsWorkbench";
 import TestWorkbench from "./TestWorkbench";
@@ -65,7 +66,7 @@ const normText = (t: string) => t.replace(/\s+/g, " ").trim();
   void setShown;
   return (
     <>
-      <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</Markdown>
       {active && <span className="type-cursor" aria-hidden />}
     </>
   );
@@ -100,7 +101,7 @@ const markdownComponents = {
 };
 const MemoMarkdown = memo(function MemoMarkdown({ text }: { text: string }) {
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+    <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
       {text}
     </Markdown>
   );
@@ -1586,7 +1587,8 @@ export default function Conversation({
   const supportsPlan = runtimeMode === "solo" && !isTestWorkspace;
 
   // 单条消息渲染（时间线行内）。assistant 流式输出接打字机；
-  // user 输入保持纯文本（避免用户打的 * _ 被意外格式化）。
+  // user 输入同样走 markdown 渲染（remark-breaks 让单换行生效——
+  // 用户手打的换行按所见即所得显示；* _ # 等标记会被格式化，属预期）。
   const renderEntry = (e: Entry) => {
     if (e.kind === "msg") {
       return (
@@ -1609,8 +1611,14 @@ export default function Conversation({
                 </div>
               )}
             </>
-          ) : (
+          ) : e.role === "system" ? (
             <div className="bubble">{e.text}</div>
+          ) : (
+            <div className="bubble md">
+              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
+                {e.text}
+              </Markdown>
+            </div>
           )}
         </div>
       );

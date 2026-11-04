@@ -24,6 +24,15 @@ import {
   type WorkspaceConfig,
 } from "../api";
 import { usePanelWidth } from "./usePanelWidth";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
+
+/** 测试工作台内 LLM 文本（报告 / Bug 字段 / 评审条目）的统一 markdown 渲染。
+ *  remark-breaks：模型常用单换行分段，按聊天惯例渲染成 <br>，避免挤成一段。 */
+function TestMarkdown({ text }: { text: string }) {
+  return <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text}</Markdown>;
+}
 
 type TestTab = "cases" | "tasks" | "reports" | "configs";
 
@@ -2503,7 +2512,9 @@ function ReviewList({ title, items }: { title: string; items: string[] }) {
       {title}（{items.length}）
       <ul className="test-review-items">
         {items.map((t, i) => (
-          <li key={i}>{t}</li>
+          <li key={i}>
+            <TestMarkdown text={t} />
+          </li>
         ))}
       </ul>
     </div>
@@ -2693,7 +2704,9 @@ function ReportModal({
     <div className="modal-mask" onClick={onClose}>
       <div className="modal test-modal test-modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-title">{title}</div>
-        <pre className="test-report mono">{md}</pre>
+        <div className="test-report md">
+          <TestMarkdown text={md} />
+        </div>
         <div className="modal-actions">
           <button
             className="btn ghost"
@@ -2763,15 +2776,21 @@ function BugModal({
           来源用例：{caseTitle} · 来源任务：{taskName} · {fmtTime(bug.created_at)}
         </div>
         <label className="lbl">复现步骤</label>
-        <pre className="test-bug-block">{bug.steps}</pre>
+        <div className="test-bug-block md">
+          <TestMarkdown text={bug.steps} />
+        </div>
         <div className="lbl-row">
           <div className="lbl-col">
             <label className="lbl">预期结果</label>
-            <pre className="test-bug-block">{bug.expected || "—"}</pre>
+            <div className="test-bug-block md">
+              <TestMarkdown text={bug.expected || "—"} />
+            </div>
           </div>
           <div className="lbl-col">
             <label className="lbl">实际结果</label>
-            <pre className="test-bug-block">{bug.actual || "—"}</pre>
+            <div className="test-bug-block md">
+              <TestMarkdown text={bug.actual || "—"} />
+            </div>
           </div>
         </div>
         {bug.screenshots.length > 0 && (
