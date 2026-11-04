@@ -2116,6 +2116,21 @@ function TaskFormModal({
   const [generating, setGenerating] = useState(false);
   const toggle = (arr: string[], id: string) =>
     arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id];
+  /** 勾/取消需求时联动其名下用例：一个需求动辄几十条用例，逐条点不现实。
+   *  只在点需求这一刻联动，之后手动改个别用例不会被覆盖回去。 */
+  const toggleRequirement = (reqId: string) => {
+    const on = !t.requirement_ids.includes(reqId);
+    const own = data.cases.filter((c) => c.requirement_id === reqId).map((c) => c.id);
+    setT({
+      ...t,
+      requirement_ids: on
+        ? [...t.requirement_ids, reqId]
+        : t.requirement_ids.filter((x) => x !== reqId),
+      case_ids: on
+        ? Array.from(new Set([...t.case_ids, ...own]))
+        : t.case_ids.filter((id) => !own.includes(id)),
+    });
+  };
   // 选中配置后地址取自配置（配置是唯一事实源），手填输入框禁用。
   const pickedConfig = data.configs.find((c) => c.id === t.config_id) ?? null;
 
@@ -2183,9 +2198,7 @@ function TaskFormModal({
                 <input
                   type="checkbox"
                   checked={t.requirement_ids.includes(r.id)}
-                  onChange={() =>
-                    setT({ ...t, requirement_ids: toggle(t.requirement_ids, r.id) })
-                  }
+                  onChange={() => toggleRequirement(r.id)}
                 />
                 {r.title}
               </label>
@@ -2226,9 +2239,29 @@ function TaskFormModal({
             </div>
           </>
         )}
-        <label className="lbl">
-          关联用例（{t.case_ids.length}/{data.cases.length}）
-        </label>
+        <div className="test-req-row">
+          <label className="lbl">
+            关联用例（{t.case_ids.length}/{data.cases.length}）
+          </label>
+          {data.cases.length > 0 && (
+            <>
+              <button
+                className="btn ghost"
+                title="选中全部用例"
+                onClick={() => setT({ ...t, case_ids: data.cases.map((c) => c.id) })}
+              >
+                全选
+              </button>
+              <button
+                className="btn ghost"
+                title="清空已选用例"
+                onClick={() => setT({ ...t, case_ids: [] })}
+              >
+                清空
+              </button>
+            </>
+          )}
+        </div>
         <div className="check-group test-checks">
           {data.cases.length === 0 && drafts.length === 0 && (
             <span className="hint">
@@ -2240,7 +2273,20 @@ function TaskFormModal({
               <input
                 type="checkbox"
                 checked={t.case_ids.includes(c.id)}
-                onChange={() => setT({ ...t, case_ids: toggle(t.case_ids, c.id) })}
+                onChange={() => {
+                  const on = !t.case_ids.includes(c.id);
+                  // 勾选用例时顺带勾上它所属的需求（避免「用例选了、需求没选」的矛盾）；
+                  // 取消时不反向联动——用户往往只想摘掉这一条。
+                  const needReq =
+                    on && c.requirement_id && !t.requirement_ids.includes(c.requirement_id);
+                  setT({
+                    ...t,
+                    case_ids: toggle(t.case_ids, c.id),
+                    requirement_ids: needReq
+                      ? [...t.requirement_ids, c.requirement_id]
+                      : t.requirement_ids,
+                  });
+                }}
               />
               <span className={`badge ${prioClass(c.priority)}`}>{c.priority}</span>{" "}
               {c.title}

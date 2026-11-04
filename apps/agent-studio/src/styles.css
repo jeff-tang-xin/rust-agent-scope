@@ -2294,6 +2294,8 @@ select:focus:not(:focus-visible) {
 .test-req-row { display: flex; align-items: center; gap: 6px; }
 .test-req-row .member-check { flex: 1; min-width: 0; }
 .test-req-row .btn { flex: none; padding: 2px 8px; font-size: 11.5px; }
+/* 需求行/用例区标题行里的 label 与右侧按钮同排：去掉 label 的上下留白。 */
+.test-req-row label.lbl { flex: 1; margin: 0; }
 /* AI 审查关卡 */
 .test-review-box {
   border: 1px solid var(--border);
