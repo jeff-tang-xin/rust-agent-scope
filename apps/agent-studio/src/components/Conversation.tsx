@@ -23,6 +23,7 @@ import OpsWorkbench from "./OpsWorkbench";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
 import BrowserPreviewPanel from "./BrowserPreviewPanel";
+import { usePanelWidth } from "./usePanelWidth";
 import DataViewerModal from "./DataViewerModal";
 
 type Entry =
@@ -337,28 +338,13 @@ function FilePanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<{ path: string; content: string } | null>(null);
-  // 面板宽度（左缘拖拽调宽，localStorage 记忆；180–480px）。
-  const [fpWidth, setFpWidth] = useState(() => {
-    const v = Number(localStorage.getItem("ox-fp-width"));
-    return v >= 180 && v <= 480 ? v : 250;
-  });
-  const startFpResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = fpWidth;
-    const onMove = (ev: MouseEvent) => {
-      // 面板在右侧：向左拖 = 变宽。
-      const w = Math.min(480, Math.max(180, startW - (ev.clientX - startX)));
-      setFpWidth(w);
-      localStorage.setItem("ox-fp-width", String(w));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
+  // 面板宽度（左缘拖拽调宽，localStorage 记忆；180–480px，对话区保底 420）。
+  const { w: fpWidth, startResize: startFpResize } = usePanelWidth(
+    "ox-fp-width",
+    250,
+    180,
+    480,
+  );
   const expandedRef = useRef<Set<string>>(expanded);
   expandedRef.current = expanded;
 

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type BlackboardEntry, type MemoryFileEntry } from "../api";
 import DataViewerModal from "./DataViewerModal";
+import { usePanelWidth } from "./usePanelWidth";
 
 const KINDS = ["note", "finding", "risk", "conclusion"] as const;
 
@@ -44,8 +45,12 @@ export default function OxDataPanel({
   onToast?: (kind: "error" | "info", text: string) => void;
 }) {
   const [tab, setTab] = useState<"board" | "memory">("board");
+  // 面板宽度（左缘拖拽调宽，localStorage 记忆；180–480px，对话区保底 420）。
+  const { w: panelWidth, startResize } = usePanelWidth("ox-ox-width", 250, 180, 480);
   return (
-    <aside className="file-panel">
+    <>
+      <div className="fp-resize" onMouseDown={startResize} aria-hidden />
+      <aside className="file-panel" style={{ width: panelWidth }}>
       <div className="file-panel-head">
         <div className="ox-tabs">
           <button
@@ -72,6 +77,7 @@ export default function OxDataPanel({
         <MemoryTab workspaceId={workspaceId} onToast={onToast} />
       )}
     </aside>
+    </>
   );
 }
 

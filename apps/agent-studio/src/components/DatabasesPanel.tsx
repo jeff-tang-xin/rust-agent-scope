@@ -3,6 +3,7 @@
 // （db_query 免确认 / db_dml 走审批卡）。
 import { useCallback, useEffect, useState } from "react";
 import { api, type DatabaseServerConfig } from "../api";
+import { usePanelWidth } from "./usePanelWidth";
 
 /** 元数据查询（按 db_type 拼只读 SQL，走 db_execute）。 */
 const META_SQL = {
@@ -105,6 +106,8 @@ export default function DatabasesPanel({
   const [allNames, setAllNames] = useState<string[]>([]); // 绑定下拉选项（白名单内全量）
   const [active, setActive] = useState(""); // 当前展开的数据库
   const [error, setError] = useState("");
+  // 面板宽度（左缘拖拽调宽，localStorage 记忆；180–480px，对话区保底 420）。
+  const { w: panelWidth, startResize } = usePanelWidth("ox-db-width", 250, 180, 480);
 
   const reload = useCallback(async () => {
     try {
@@ -127,7 +130,9 @@ export default function DatabasesPanel({
   }, [reload]);
 
   return (
-    <aside className="file-panel">
+    <>
+      <div className="fp-resize" onMouseDown={startResize} aria-hidden />
+      <aside className="file-panel" style={{ width: panelWidth }}>
       <div className="file-panel-head">
         <span>数据库</span>
         <span className="spacer" />
@@ -171,6 +176,7 @@ export default function DatabasesPanel({
         </div>
       )}
     </aside>
+    </>
   );
 }
 

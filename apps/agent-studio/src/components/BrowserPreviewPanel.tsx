@@ -7,12 +7,21 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { usePanelWidth } from "./usePanelWidth";
 
 const POLL_MS = 600;
 
 export default function BrowserPreviewPanel({ onCollapse }: { onCollapse: () => void }) {
   const [shot, setShot] = useState<string>("");
   const [error, setError] = useState("");
+  // 面板宽度（左缘拖拽调宽，localStorage 记忆；320–1200px，对话区保底 420）。
+  // 默认值对齐原 CSS min(46vw, 100vw-420px, 720px) 的常见落点。
+  const { w: panelWidth, startResize } = usePanelWidth(
+    "ox-browser-width",
+    Math.min(720, Math.max(320, window.innerWidth - 620)),
+    320,
+    1200,
+  );
 
   useEffect(() => {
     let stopped = false;
@@ -35,7 +44,9 @@ export default function BrowserPreviewPanel({ onCollapse }: { onCollapse: () => 
   }, []);
 
   return (
-    <aside className="file-panel browser-preview-panel">
+    <>
+      <div className="fp-resize" onMouseDown={startResize} aria-hidden />
+      <aside className="file-panel browser-preview-panel" style={{ width: panelWidth }}>
       <div className="file-panel-head">
         <span className="browser-preview-title">
           {shot ? (
@@ -69,5 +80,6 @@ export default function BrowserPreviewPanel({ onCollapse }: { onCollapse: () => 
         )}
       </div>
     </aside>
+    </>
   );
 }
