@@ -457,7 +457,8 @@ pub fn build_agent(
     // - ops 类别默认开放 remote_shell；db 类别默认开放 db_query/db_dml；
     // - 其余类别（collab）绑定非空才开放对应工具；
     // - 绑定列表非空时一律收窄为白名单（工具内校验，越界即拒绝）。
-    if mode == StudioMode::Ops || !ws.bound_servers.is_empty() {
+    // - test 类别工具面固定：既不开放也不因绑定而开放（测试只做浏览器测试）。
+    if mode != StudioMode::Test && (mode == StudioMode::Ops || !ws.bound_servers.is_empty()) {
         toolkit.register(Arc::new(RemoteShellTool::new(
             Arc::clone(&resources.ssh_pool),
             allowlist(&ws.bound_servers),
@@ -465,7 +466,7 @@ pub fn build_agent(
         .with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))
         .with_config(Arc::clone(&resources.config))));
     }
-    if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
+    if mode != StudioMode::Test && (mode == StudioMode::Db || !ws.bound_databases.is_empty()) {
         let allowed = allowlist(&ws.bound_databases);
         // 会话状态目录：db 工具执行时按会话绑定（binding.json）收窄白名单。
         let session_state_dir = Some(
@@ -556,6 +557,10 @@ pub fn build_agent(
             .plan_file_directory(".ox/plans")
             .plan_prompt(crate::default_prompt::SOLO_PLAN_PROMPT);
     }
+    // 测试工作区不接 harness 的 plan 状态机：那里的 plan 语义是「代码修改前的
+    // 只读设计阶段」（拦写工具 + 注入「只做设计不执行」提示 + plan_exit 需人工
+    // 批准），与测试自动执行（模型要真的点按钮填表单）直接冲突。测试的「计划」
+    // 是产品语义层的用例集（用例即计划），由 TEST_PROMPT 与测试工作台把关。
     if mode == StudioMode::Team {
         // 成员声明注册：SubagentsMiddleware 会把成员指引并入 leader 系统提示
         // （对齐 TeamContext 注入成员快照的语义）。成员是引用的已有智能体：

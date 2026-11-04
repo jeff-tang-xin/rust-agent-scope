@@ -236,6 +236,42 @@ impl StudioConfig {
         }
     }
 
+    /// 测试工作区归一化（幂等）：测试工作区固定使用内置测试助手，且不绑定
+    /// 服务器/数据库（工具面固定为「浏览器 + 只读文件 + 检索」）。
+    ///
+    /// 存量工作区的迁移：老配置里 test 工作区可能绑了别的智能体（早期新建
+    /// 时下拉默认取列表第一个）——一律改绑内置测试助手。若测试助手尚未绑定
+    /// Provider 而原智能体绑过，则把该 Provider 一次性继承过来（否则存量
+    /// 用户改绑后会立刻报「尚未绑定模型 Provider」）。
+    pub fn ensure_test_workspaces(&mut self) {
+        for ws in self.workspaces.iter_mut() {
+            if ws.kind != "test" {
+                continue;
+            }
+            ws.bound_servers.clear();
+            ws.bound_databases.clear();
+            if ws.agent_id == TEST_AGENT_ID {
+                continue;
+            }
+            // 原智能体的 provider → 测试助手（仅当测试助手自己还没绑时）。
+            let inherited = self
+                .agents
+                .iter()
+                .find(|a| a.id == ws.agent_id)
+                .map(|a| a.provider.clone())
+                .filter(|p| !p.trim().is_empty());
+            ws.agent_id = TEST_AGENT_ID.to_string();
+            if let Some(provider) = inherited {
+                if let Some(test_agent) = self.agents.iter_mut().find(|a| a.id == TEST_AGENT_ID)
+                {
+                    if test_agent.provider.trim().is_empty() {
+                        test_agent.provider = provider;
+                    }
+                }
+            }
+        }
+    }
+
     /// 确保内置 ops/db 工作区在列（幂等）：目录固定在 `{data_dir}/ops`、
     /// `{data_dir}/db`（≈ ~/.ox/ops、~/.ox/db），智能体指向内置运维/数据库
     /// 智能体。用户仍可自建同类别工作区；内置项可改不可删。
@@ -445,6 +481,8 @@ impl ConfigStore {
             Err(_) => StudioConfig::default(),
         };
         config.ensure_default_agent();
+        // 测试工作区归一化：固定内置测试助手 + 不绑服务器/数据库（存量迁移）。
+        config.ensure_test_workspaces();
         config
     }
 
@@ -465,6 +503,62 @@ mod tests {
         let raw = br#"{"providers":[],"agents":[]}"#;
         let config: StudioConfig = serde_json::from_slice(raw).unwrap();
         assert!(config.databases.is_empty());
+    }
+
+    /// 测试工作区归一化：固定内置测试助手 + 清空服务器/数据库绑定 +
+    /// 原智能体的 provider 一次性继承给测试助手（存量用户无感迁移）。
+    #[test]
+    fn test_workspaces_are_normalized_to_builtin_test_agent() {
+        let mut config = StudioConfig::default();
+        config.ensure_default_agent();
+        // 一个绑了别的智能体（且带 provider）的测试工作区。
+        config.agents.push(AgentConfig {
+            id: "custom-agent".into(),
+            name: "我的智能体".into(),
+            description: String::new(),
+            sys_prompt: "自定义".into(),
+            provider: "my-provider".into(),
+            max_iters: 0,
+            created_at: 0,
+        });
+        config.workspaces.push(WorkspaceConfig {
+            id: "ws-test".into(),
+            name: "测试工作区".into(),
+            kind: "test".into(),
+            agent_id: "custom-agent".into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec!["srv".into()],
+            bound_databases: vec!["db".into()],
+            created_at: 0,
+            auto_resource: None,
+        });
+        // 一个协同工作区：不受影响。
+        config.workspaces.push(WorkspaceConfig {
+            id: "ws-collab".into(),
+            name: "协同工作区".into(),
+            kind: "collab".into(),
+            agent_id: "custom-agent".into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec!["srv".into()],
+            bound_databases: vec![],
+            created_at: 0,
+            auto_resource: None,
+        });
+
+        config.ensure_test_workspaces();
+
+        let test_ws = config.workspace("ws-test").unwrap();
+        assert_eq!(test_ws.agent_id, TEST_AGENT_ID);
+        assert!(test_ws.bound_servers.is_empty());
+        assert!(test_ws.bound_databases.is_empty());
+        // provider 继承：测试助手此前没绑 → 继承原智能体的。
+        assert_eq!(config.agent(TEST_AGENT_ID).unwrap().provider, "my-provider");
+        // 协同工作区原样保留。
+        let collab_ws = config.workspace("ws-collab").unwrap();
+        assert_eq!(collab_ws.agent_id, "custom-agent");
+        assert_eq!(collab_ws.bound_servers, vec!["srv".to_string()]);
     }
 
     /// 预置提示词指纹迁移：内置智能体仍为旧默认文本 → 升级为新默认；
@@ -505,14 +599,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let store = ConfigStore::new(&dir);
 
-        // 首次 load（文件不存在）：注入三个内置智能体（全能/运维/数据库）。
+        // 首次 load（文件不存在）：注入四个内置智能体（全能/运维/数据库/测试）。
         let first = store.load();
-        assert_eq!(first.agents.len(), 3);
+        assert_eq!(first.agents.len(), 4);
         let d = first.agent(DEFAULT_AGENT_ID).unwrap();
         assert_eq!(d.name, "全能助手");
         assert!(d.provider.is_empty());
         assert!(first.agent(OPS_AGENT_ID).is_some());
         assert!(first.agent(DB_AGENT_ID).is_some());
+        assert!(first.agent(TEST_AGENT_ID).is_some());
 
         // 老配置文件升级（无 default）：load 自动补上。
         let legacy = br#"{"providers":[],"agents":[]}"#;

@@ -52,6 +52,8 @@ export interface WorkspaceConfig {
 }
 
 export const DEFAULT_AGENT_ID = "default-assistant";
+/** 内置测试助手 id：测试工作区固定绑定它（前后端同一常量，后端会校验）。 */
+export const TEST_AGENT_ID = "builtin-test-agent";
 
 // ---------- .ox 数据（共享黑板 + 记忆；用户面板管理） ----------
 

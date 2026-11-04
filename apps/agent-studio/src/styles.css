@@ -2290,6 +2290,26 @@ select:focus:not(:focus-visible) {
 .test-checks .member-check { padding: 4px 8px; font-size: 12px; }
 .test-import-list { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; }
 .test-import-title { flex: 1; min-width: 0; font-size: 12.5px; }
+/* 需求行（勾选 + AI 生成按钮） */
+.test-req-row { display: flex; align-items: center; gap: 6px; }
+.test-req-row .member-check { flex: 1; min-width: 0; }
+.test-req-row .btn { flex: none; padding: 2px 8px; font-size: 11.5px; }
+/* AI 审查关卡 */
+.test-review-box {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.test-review-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.test-review-head .test-filter { width: auto; max-width: 160px; padding: 2px 4px; font-size: 12px; }
+.test-review-report { display: flex; flex-direction: column; gap: 6px; }
+.test-review-score { font-size: 12.5px; }
+.test-review-sub { font-size: 12px; color: var(--text-dim); }
+.test-review-items { margin: 2px 0 0; padding-left: 18px; color: var(--text); }
+.test-review-items li { line-height: 1.5; }
+.test-review-sugg-item { color: var(--text); line-height: 1.6; }
 .test-flow-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px; background: var(--bg-raised, transparent); }
 .test-flow { display: block; }
 .test-report {

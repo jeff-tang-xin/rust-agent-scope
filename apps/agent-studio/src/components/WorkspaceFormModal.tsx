@@ -6,6 +6,7 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   api,
+  TEST_AGENT_ID,
   type AgentConfig,
   type DatabaseServerConfig,
   type ServerConfig,
@@ -43,7 +44,11 @@ export default function WorkspaceFormModal({
   onSaved: (msg: string) => void;
 }) {
   const kind = initial?.kind ?? category;
-  const [agentId, setAgentId] = useState(initial?.agent_id ?? agents[0]?.id ?? "");
+  // 测试工作区固定用内置测试助手（产品规则）：不选、不可改，后端同样校验。
+  const isTest = kind === "test";
+  const [agentId, setAgentId] = useState(
+    isTest ? TEST_AGENT_ID : (initial?.agent_id ?? agents[0]?.id ?? ""),
+  );
   const [name, setName] = useState(initial?.name ?? "");
   const [dir, setDir] = useState(initial?.dir ?? "");
   // team 成员（仅协同工作区）：引用已有智能体 id（lead 之外）。
@@ -62,6 +67,9 @@ export default function WorkspaceFormModal({
 
   const editing = Boolean(initial?.id);
   const agent = agents.find((a) => a.id === agentId);
+  // 测试助手可能还没建（后端 load 时兜底注入，前端列表未必有）：以 id 兜底。
+  const testAgent = agents.find((a) => a.id === TEST_AGENT_ID);
+  const effectiveAgentId = isTest ? TEST_AGENT_ID : agentId;
 
   const toggleMember = (id: string) => {
     setMembers((prev) =>
@@ -92,17 +100,19 @@ export default function WorkspaceFormModal({
   };
 
   const save = async () => {
-    if (!agent || saving) return;
+    if (saving) return;
+    if (!isTest && !agent) return;
     setSaving(true);
     const payload: WorkspaceConfig = {
       id: initial?.id ?? "",
       name,
       kind,
-      agent_id: agentId,
+      agent_id: effectiveAgentId,
       dir,
       members: kind === "collab" ? members.filter((m) => m !== agentId) : [],
-      bound_servers: boundServers,
-      bound_databases: boundDatabases,
+      // 测试工作区工具面固定：不绑服务器/数据库（后端同样拒绝）。
+      bound_servers: isTest ? [] : boundServers,
+      bound_databases: isTest ? [] : boundDatabases,
       created_at: initial?.created_at ?? 0,
     };
     try {
@@ -111,7 +121,11 @@ export default function WorkspaceFormModal({
         onSaved(`工作区 ${name} 已更新`);
       } else {
         const created = await api.createWorkspace(payload);
-        onSaved(`工作区 ${created.name} 已创建（智能体：${agent.name}）`);
+        onSaved(
+          isTest
+            ? `工作区 ${created.name} 已创建（智能体：测试助手）`
+            : `工作区 ${created.name} 已创建（智能体：${agent?.name ?? ""}）`,
+        );
       }
     } catch (e) {
       setError(String(e));
@@ -133,29 +147,48 @@ export default function WorkspaceFormModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{editing ? `编辑${KIND_LABEL[kind]}工作区` : `新建${KIND_LABEL[kind]}工作区`}</h2>
         {error && <div className="notice error">{error}</div>}
-        {agents.length === 0 && (
+        {agents.length === 0 && !isTest && (
           <div className="notice info">
             还没有可用的智能体——请先到 Settings 创建，或使用内置的「全能助手」。
           </div>
         )}
 
-        <label className="lbl">智能体（本工作区用它干活）</label>
-        <select
-          className="field"
-          value={agentId}
-          onChange={(e) => setAgentId(e.target.value)}
-        >
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-              {a.provider ? "" : "（未绑定 Provider）"}
-            </option>
-          ))}
-        </select>
-        {agent && (
-          <div className="desc" style={{ margin: "4px 0 0" }}>
-            {agent.description || "（无描述）"}
-          </div>
+        {isTest ? (
+          <>
+            <label className="lbl">智能体</label>
+            <div className="desc" style={{ margin: "4px 0 12px" }}>
+              测试工作区固定使用内置「测试助手」（{TEST_AGENT_ID}）——不可改选。
+              {testAgent && !testAgent.provider && (
+                <>
+                  {" "}
+                  <strong>
+                    该助手尚未绑定模型 Provider，请到「设置 → 智能体 → 测试助手」绑定后再用。
+                  </strong>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <label className="lbl">智能体（本工作区用它干活）</label>
+            <select
+              className="field"
+              value={agentId}
+              onChange={(e) => setAgentId(e.target.value)}
+            >
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {a.provider ? "" : "（未绑定 Provider）"}
+                </option>
+              ))}
+            </select>
+            {agent && (
+              <div className="desc" style={{ margin: "4px 0 0" }}>
+                {agent.description || "（无描述）"}
+              </div>
+            )}
+          </>
         )}
 
         <div className="lbl-row">
@@ -214,60 +247,64 @@ export default function WorkspaceFormModal({
           </>
         )}
 
-        <label className="lbl">绑定服务器</label>
-        <div className="desc" style={{ marginBottom: 4 }}>
-          勾选后开放 remote_shell 且仅限勾选的服务器；不勾选 = 可操作全部
-        </div>
-        {servers.length === 0 ? (
-          <div className="desc">暂无服务器档案——可先到 Settings 添加。</div>
-        ) : (
-          <div className="check-group">
-            {servers.map((s) => (
-              <label key={s.name} className="member-check">
-                <input
-                  type="checkbox"
-                  checked={boundServers.includes(s.name)}
-                  onChange={() => toggleBound(setBoundServers, s.name)}
-                />
-                <span className="name">{s.name}</span>
-                <span className="desc">
-                  {s.host}:{s.port}
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
+        {!isTest && (
+          <>
+            <label className="lbl">绑定服务器</label>
+            <div className="desc" style={{ marginBottom: 4 }}>
+              勾选后开放 remote_shell 且仅限勾选的服务器；不勾选 = 可操作全部
+            </div>
+            {servers.length === 0 ? (
+              <div className="desc">暂无服务器档案——可先到 Settings 添加。</div>
+            ) : (
+              <div className="check-group">
+                {servers.map((s) => (
+                  <label key={s.name} className="member-check">
+                    <input
+                      type="checkbox"
+                      checked={boundServers.includes(s.name)}
+                      onChange={() => toggleBound(setBoundServers, s.name)}
+                    />
+                    <span className="name">{s.name}</span>
+                    <span className="desc">
+                      {s.host}:{s.port}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
 
-        <label className="lbl">绑定数据库</label>
-        <div className="desc" style={{ marginBottom: 4 }}>
-          勾选后开放 db_query / db_dml 且仅限勾选的库；不勾选 = 可访问全部
-        </div>
-        {databases.length === 0 ? (
-          <div className="desc">暂无数据库档案——可先到 Settings 添加。</div>
-        ) : (
-          <div className="check-group">
-            {databases.map((d) => (
-              <label key={d.name} className="member-check">
-                <input
-                  type="checkbox"
-                  checked={boundDatabases.includes(d.name)}
-                  onChange={() => toggleBoundDatabase(d.name)}
-                />
-                <span className="name">{d.name}</span>
-                <span className="desc">
-                  {d.db_type}
-                  {d.database ? ` · ${d.database}` : ""}
-                </span>
-              </label>
-            ))}
-          </div>
+            <label className="lbl">绑定数据库</label>
+            <div className="desc" style={{ marginBottom: 4 }}>
+              勾选后开放 db_query / db_dml 且仅限勾选的库；不勾选 = 可访问全部
+            </div>
+            {databases.length === 0 ? (
+              <div className="desc">暂无数据库档案——可先到 Settings 添加。</div>
+            ) : (
+              <div className="check-group">
+                {databases.map((d) => (
+                  <label key={d.name} className="member-check">
+                    <input
+                      type="checkbox"
+                      checked={boundDatabases.includes(d.name)}
+                      onChange={() => toggleBoundDatabase(d.name)}
+                    />
+                    <span className="name">{d.name}</span>
+                    <span className="desc">
+                      {d.db_type}
+                      {d.database ? ` · ${d.database}` : ""}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         <div className="modal-actions">
           <button
             className="btn"
             onClick={() => void save()}
-            disabled={!name || !agent || saving}
+            disabled={!name || (!isTest && !agent) || saving}
           >
             {saving ? "保存中…" : editing ? "保存修改" : "创建"}
           </button>

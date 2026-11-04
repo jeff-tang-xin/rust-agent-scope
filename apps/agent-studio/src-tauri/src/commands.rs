@@ -892,12 +892,23 @@ pub fn create_agent(state: State<'_, AppState>, mut agent: AgentConfig) -> Resul
 // ---------- workspaces（工作区 = 针对一个项目的工作环境） ----------
 
 /// 校验工作区引用完整性：类型合法、智能体存在、team 成员存在。
+///
+/// 测试工作区额外受两条硬约束（产品规则「测试工作区只做测试」）：
+/// 固定内置测试助手、且不绑定服务器/数据库（工具面固定）。
 fn validate_workspace(config: &StudioConfig, ws: &WorkspaceConfig) -> Result<(), String> {
     if !ws.kind_valid() {
         return Err(format!(
             "unknown workspace kind `{}` (expected one of {:?})",
             ws.kind, WORKSPACE_KINDS
         ));
+    }
+    if ws.kind == "test" {
+        if ws.agent_id != crate::config::TEST_AGENT_ID {
+            return Err("测试工作区固定使用内置测试助手，不能绑定其他智能体".to_string());
+        }
+        if !ws.bound_servers.is_empty() || !ws.bound_databases.is_empty() {
+            return Err("测试工作区不支持绑定服务器/数据库（工具面固定）".to_string());
+        }
     }
     if !config.agents.iter().any(|a| a.id == ws.agent_id) {
         return Err(format!("工作区引用的智能体 `{}` 不存在", ws.agent_id));
@@ -1741,6 +1752,18 @@ pub async fn interrupt_turn(
 
 // ---------- plan mode ----------
 
+/// 工作区是否测试类别（plan 固定开启的判定依据；纯函数便于单测）。
+fn config_workspace_is_test(config: &StudioConfig, workspace_id: &str) -> bool {
+    config
+        .workspace(workspace_id)
+        .is_some_and(|ws| ws.kind == "test")
+}
+
+/// 工作区是否测试类别（取当前配置快照）。
+fn is_test_workspace(state: &AppState, workspace_id: &str) -> bool {
+    config_workspace_is_test(&state.snapshot(), workspace_id)
+}
+
 #[tauri::command]
 pub async fn set_plan_mode(
     state: State<'_, AppState>,
@@ -1749,6 +1772,11 @@ pub async fn set_plan_mode(
     session_id: String,
     active: bool,
 ) -> Result<PlanStatus, String> {
+    // 测试工作区固定计划模式：不可切换（产品语义「测试即计划」）。
+    // 后端硬拦——前端隐藏开关只是表象，这条才是真正的护栏。
+    if is_test_workspace(&state, &workspace_id) {
+        return Err("测试工作区固定使用计划模式，不能切换".to_string());
+    }
     let handle = state.handle(&workspace_id, &mode)?;
     if active {
         let plan_file = handle
@@ -1780,6 +1808,13 @@ pub async fn get_plan_status(
     mode: String,
     session_id: String,
 ) -> Result<PlanStatus, String> {
+    // 测试工作区恒为计划态（读侧与写侧一致：写侧拒绝切换，读侧报 active）。
+    if is_test_workspace(&state, &workspace_id) {
+        return Ok(PlanStatus {
+            active: true,
+            plan_file: None,
+        });
+    }
     let handle = state.handle(&workspace_id, &mode)?;
     Ok(PlanStatus {
         active: handle
@@ -1823,13 +1858,14 @@ fn notify_if_background(
 
 /// 会话导出写盘：前端经系统保存对话框拿到路径后调用（用户主动选择的
 /// 路径，写它即用户意图）。独立 command 免装 fs 插件全家桶。
-/// 允许 .md（会话/测试报告导出）与 .json（测试用例导出，跨工作区复用）。
+/// 允许 .md（会话/测试报告导出）、.json（测试用例导出，跨工作区复用）
+/// 与 .csv（测试用例导出，Excel 可直接打开）。
 #[tauri::command]
 pub async fn write_export_file(path: String, contents: String) -> Result<(), String> {
-    // 只允许写 .md / .json（导出语义），防被滥用成任意文件写。
+    // 只允许写 .md / .json / .csv（导出语义），防被滥用成任意文件写。
     let lower = path.to_lowercase();
-    if !lower.ends_with(".md") && !lower.ends_with(".json") {
-        return Err("export only supports .md/.json files".into());
+    if !lower.ends_with(".md") && !lower.ends_with(".json") && !lower.ends_with(".csv") {
+        return Err("export only supports .md/.json/.csv files".into());
     }
     tokio::fs::write(&path, contents.as_bytes())
         .await
@@ -2966,5 +3002,89 @@ mod tests {
         assert_eq!(archived[0].archived_at, 200);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 测试工作区校验：只认内置测试助手、不许绑服务器/数据库；
+    /// 其它类别不受这两条约束。
+    #[test]
+    fn test_workspace_validation_is_restricted() {
+        let mut config = StudioConfig::default();
+        config.ensure_default_agent();
+        let other = AgentConfig {
+            id: "custom-agent".into(),
+            name: "我的智能体".into(),
+            description: String::new(),
+            sys_prompt: "自定义".into(),
+            provider: String::new(),
+            max_iters: 0,
+            created_at: 0,
+        };
+        config.agents.push(other.clone());
+
+        let mk = |kind: &str, agent_id: &str| WorkspaceConfig {
+            id: "ws-1".into(),
+            name: "工作区".into(),
+            kind: kind.into(),
+            agent_id: agent_id.into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec![],
+            bound_databases: vec![],
+            created_at: 0,
+            auto_resource: None,
+        };
+
+        // 测试工作区 + 内置测试助手 → 通过。
+        assert!(validate_workspace(
+            &config,
+            &mk("test", crate::config::TEST_AGENT_ID)
+        )
+        .is_ok());
+        // 测试工作区 + 其他智能体 → 拒绝。
+        assert!(validate_workspace(&config, &mk("test", "custom-agent")).is_err());
+        // 协同工作区 + 其他智能体 → 通过（不受测试约束）。
+        assert!(validate_workspace(&config, &mk("collab", "custom-agent")).is_ok());
+
+        // 测试工作区绑服务器/数据库 → 拒绝。
+        let mut bound = mk("test", crate::config::TEST_AGENT_ID);
+        bound.bound_servers = vec!["srv".into()];
+        assert!(validate_workspace(&config, &bound).is_err());
+        let mut bound_db = mk("test", crate::config::TEST_AGENT_ID);
+        bound_db.bound_databases = vec!["db".into()];
+        assert!(validate_workspace(&config, &bound_db).is_err());
+    }
+
+    /// 测试工作区判定（set_plan_mode/get_plan_status 的固定 plan 护栏依据）：
+    /// 只按 kind 判定，与智能体绑定、名称无关；未知 id 不误判为测试。
+    #[test]
+    fn test_workspace_kind_detection_for_plan_lock() {
+        let mut config = StudioConfig::default();
+        config.workspaces.push(WorkspaceConfig {
+            id: "ws-test".into(),
+            name: "测试".into(),
+            kind: "test".into(),
+            agent_id: crate::config::TEST_AGENT_ID.into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec![],
+            bound_databases: vec![],
+            created_at: 0,
+            auto_resource: None,
+        });
+        config.workspaces.push(WorkspaceConfig {
+            id: "ws-collab".into(),
+            name: "协同".into(),
+            kind: "collab".into(),
+            agent_id: crate::config::DEFAULT_AGENT_ID.into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec![],
+            bound_databases: vec![],
+            created_at: 0,
+            auto_resource: None,
+        });
+        assert!(config_workspace_is_test(&config, "ws-test"));
+        assert!(!config_workspace_is_test(&config, "ws-collab"));
+        assert!(!config_workspace_is_test(&config, "ws-missing"));
     }
 }

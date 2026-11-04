@@ -93,6 +93,64 @@ function parseGeneratedCases(obj: Record<string, unknown> | null): TestCase[] {
   return out;
 }
 
+/** 用例审查结论（TEST_PROMPT 的审查协议输出）。 */
+interface CaseReview {
+  coverage: {
+    score: number;
+    covered: string[];
+    missing: string[];
+  };
+  duplicates: string[];
+  conflicts: string[];
+  risk: "high" | "medium" | "low";
+  suggestions: {
+    title: string;
+    steps: string[];
+    expected: string;
+    priority: string;
+  }[];
+  verdict: "pass" | "revise";
+}
+
+/** 从 AI 回复解析审查结论（{"coverage":...,"verdict":...} 协议）。 */
+function parseCaseReview(obj: Record<string, unknown> | null): CaseReview | null {
+  if (!obj) return null;
+  const cov = (obj.coverage ?? {}) as Record<string, unknown>;
+  const rawCovered = Array.isArray(cov.covered) ? cov.covered.map(String) : [];
+  const rawMissing = Array.isArray(cov.missing) ? cov.missing.map(String) : [];
+  const rawDup = Array.isArray(obj.duplicates) ? obj.duplicates.map(String) : [];
+  const rawConflicts = Array.isArray(obj.conflicts) ? obj.conflicts.map(String) : [];
+  const riskRaw = String(obj.risk ?? "medium");
+  const risk =
+    riskRaw === "high" || riskRaw === "medium" || riskRaw === "low" ? riskRaw : "medium";
+  const rawSuggestions = Array.isArray(obj.suggestions) ? obj.suggestions : [];
+  const suggestions: CaseReview["suggestions"] = [];
+  for (const s of rawSuggestions) {
+    if (!s || typeof s !== "object") continue;
+    const o = s as Record<string, unknown>;
+    const title = String(o.title ?? "").trim();
+    if (!title) continue;
+    suggestions.push({
+      title,
+      steps: Array.isArray(o.steps) ? o.steps.map(String).filter((x) => x.trim()) : [],
+      expected: String(o.expected ?? ""),
+      priority: String(o.priority ?? "P2"),
+    });
+  }
+  const verdictRaw = String(obj.verdict ?? "revise");
+  const verdict = verdictRaw === "pass" ? "pass" : "revise";
+  const scoreRaw = Number(cov.score);
+  const score = Number.isFinite(scoreRaw) ? Math.max(0, Math.min(100, scoreRaw)) : 0;
+  return {
+    coverage: { score, covered: rawCovered, missing: rawMissing },
+    duplicates: rawDup,
+    conflicts: rawConflicts,
+    risk,
+    suggestions,
+    verdict,
+  };
+}
+
 /** 执行结果协议（TEST_PROMPT 的输出契约）。 */
 interface ExecOutcome {
   result: "pass" | "fail" | "blocked";
@@ -132,6 +190,9 @@ function parseExecOutcome(obj: Record<string, unknown> | null): ExecOutcome | nu
 }
 
 const nowMs = () => Date.now();
+
+/** AI 审查时一次性送进提示词的用例条数上限（超出按抽样审查并注明总数）。 */
+const REVIEW_MAX_CASES = 60;
 
 const fmtTime = (ms: number) =>
   ms > 0 ? new Date(ms).toLocaleString("zh-CN", { hour12: false }) : "—";
@@ -292,11 +353,11 @@ export default function TestWorkbench({
 
   // ---------- 用例生成 / 导入 ----------
 
-  /** 让会话里的测试智能体按需求生成用例 → 解析 → 预览确认。 */
-  const generateCases = async (req: TestRequirement) => {
+  /** 让会话里的测试智能体按需求生成用例草稿（不落库，返回给调用方决定）。 */
+  const requestCaseDrafts = async (req: TestRequirement): Promise<TestCase[]> => {
     if (convBusy || runningRef.current) {
       toast("error", "会话正在运行，请等待当前任务完成再生成用例");
-      return;
+      return [];
     }
     try {
       onToast("info", `已把需求「${req.title}」发给测试智能体，等待生成…`);
@@ -316,11 +377,62 @@ export default function TestWorkbench({
       }));
       if (!cases.length) {
         toast("error", "未能从回复解析出用例（缺少 {\"cases\":[...]} 代码块），可在会话里让智能体重试");
-        return;
       }
-      setImportPreview({ source: "ai", cases });
+      return cases;
     } catch (e) {
       toast("error", `生成用例失败：${String(e)}`);
+      return [];
+    }
+  };
+
+  /** 让会话里的测试智能体按需求生成用例 → 解析 → 预览确认。 */
+  const generateCases = async (req: TestRequirement) => {
+    const cases = await requestCaseDrafts(req);
+    if (!cases.length) return;
+    setImportPreview({ source: "ai", cases });
+  };
+
+  /** AI 审查用例覆盖度与全面性（上传导入前的关卡）：返回结构化审查结论。 */
+  const reviewCases = async (
+    cases: TestCase[],
+    req: TestRequirement | null,
+  ): Promise<CaseReview | null> => {
+    if (convBusy || runningRef.current) {
+      toast("error", "会话正在运行，请等待当前任务完成再审查");
+      return null;
+    }
+    if (!cases.length) return null;
+    try {
+      onToast("info", `已把 ${cases.length} 条用例发给测试智能体，等待审查…`);
+      // 用例过多时按条数截断（抽样审查），并把总数与抽样范围写进提示词——
+      // 让模型在结论里如实注明，避免「静默只审了一部分」。
+      const shown = cases.slice(0, REVIEW_MAX_CASES);
+      const truncated = cases.length - shown.length;
+      const lines = shown.map((c, i) => {
+        const steps = c.steps.map((s) => `    ${s}`).join("\n");
+        return `${i + 1}. [${c.priority}] ${c.title}\n  前置：${c.precondition || "无"}\n  步骤：\n${steps || "    （无）"}\n  预期：${c.expected || "（无）"}`;
+      });
+      const prompt = [
+        `请审查以下测试用例的覆盖度与全面性，并按用例审查协议在回复末尾输出一个 \`\`\`json 代码块。`,
+        "",
+        req
+          ? `关联需求：${req.title}\n需求内容：${req.content || "（无补充描述）"}`
+          : "未关联具体需求：只能基于用例本身判断结构完整性与场景全面性，缺需求依据的部分请在结论里如实说明缺口。",
+        "",
+        `用例共 ${cases.length} 条${truncated > 0 ? `，本次只提供前 ${shown.length} 条（另有 ${truncated} 条未提供）` : ""}：`,
+        ...lines,
+      ].join("\n");
+      const turn = await api.sendMessage(workspace.id, runtimeMode, sessionId, prompt);
+      const ok = await waitTurnFinished(turn.turn_id);
+      const text = ok ? await lastAssistantText() : "";
+      const review = parseCaseReview(extractJsonBlock(text));
+      if (!review) {
+        toast("error", "未能从回复解析出审查结论（缺少审查协议代码块），可在会话里让智能体重试");
+      }
+      return review;
+    } catch (e) {
+      toast("error", `审查失败：${String(e)}`);
+      return null;
     }
   };
 
@@ -341,10 +453,15 @@ export default function TestWorkbench({
     }
   };
 
-  const confirmImport = async () => {
+  /** 确认导入（只导入用户勾选的用例）。 */
+  const confirmImport = async (picked: TestCase[]) => {
     if (!importPreview) return;
+    if (!picked.length) {
+      toast("error", "没有勾选任何用例");
+      return;
+    }
     try {
-      const saved = await api.testImportCases(workspace.id, importPreview.cases);
+      const saved = await api.testImportCases(workspace.id, picked);
       onToast("info", `已导入 ${saved.length} 条用例`);
       setImportPreview(null);
       await reload();
@@ -353,7 +470,7 @@ export default function TestWorkbench({
     }
   };
 
-  // ---------- 用例跨工作区复用（JSON 导出 / 导入） ----------
+  // ---------- 用例跨工作区复用（JSON / CSV 导出、JSON 导入） ----------
 
   const exportCasesJson = async (cases: TestCase[]) => {
     try {
@@ -364,6 +481,39 @@ export default function TestWorkbench({
       if (!path) return;
       await api.writeExportFile(path, JSON.stringify(cases, null, 2));
       onToast("info", `已导出 ${cases.length} 条用例：${path}`);
+    } catch (e) {
+      toast("error", `导出失败：${String(e)}`);
+    }
+  };
+
+  /** 导出 CSV（Excel 可直接打开；步骤多行合并为 `; `）。 */
+  const exportCasesCsv = async (cases: TestCase[]) => {
+    try {
+      const path = await save({
+        defaultPath: "test-cases.csv",
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!path) return;
+      const cell = (v: string) => `"${v.replace(/"/g, '""').replace(/\r?\n/g, "; ")}"`;
+      const header = ["用例标题", "前置条件", "步骤", "预期结果", "优先级", "标签", "需求"].map(
+        cell,
+      );
+      const rows = cases.map((c) =>
+        [
+          c.title,
+          c.precondition,
+          c.steps.join("; "),
+          c.expected,
+          c.priority,
+          c.tags.join("; "),
+          data.requirements.find((r) => r.id === c.requirement_id)?.title ?? "",
+        ]
+          .map(cell)
+          .join(","),
+      );
+      // BOM：Excel 打开中文 CSV 需要 UTF-8 BOM，否则中文乱码。
+      await api.writeExportFile(path, `\uFEFF${[header.join(","), ...rows].join("\r\n")}`);
+      onToast("info", `已导出 ${cases.length} 条用例（CSV）：${path}`);
     } catch (e) {
       toast("error", `导出失败：${String(e)}`);
     }
@@ -505,6 +655,7 @@ export default function TestWorkbench({
             onImportXmind={(f) => void importFile(f, "xmind")}
             onImportJson={(f) => void importCasesJson(f)}
             onExportCases={(cases) => void exportCasesJson(cases)}
+            onExportCasesCsv={(cases) => void exportCasesCsv(cases)}
           />
         )}
 
@@ -634,16 +785,26 @@ export default function TestWorkbench({
           initial={taskForm}
           data={data}
           onClose={() => setTaskForm(null)}
-          onSave={async (t, autoRun) => {
+          onGenerateCases={requestCaseDrafts}
+          onSave={async (t, autoRun, newCases) => {
             try {
+              // AI 生成的用例先落库拿到 id，再与已有用例一起关联到任务。
+              let caseIds = t.case_ids;
+              if (newCases.length) {
+                const savedCases = await api.testImportCases(workspace.id, newCases);
+                caseIds = [...caseIds, ...savedCases.map((c) => c.id)];
+                onToast("info", `已保存 ${savedCases.length} 条 AI 生成的用例`);
+              }
               const saved = await api.testSaveTask(workspace.id, {
                 ...t,
+                case_ids: caseIds,
                 id: "",
                 status: "pending",
                 results: [],
                 created_at: 0,
                 finished_at: 0,
-              });              setTaskForm(null);
+              });
+              setTaskForm(null);
               await reload();
               onToast("info", `任务「${saved.name}」已创建`);
               // 需求：创建后自动跑测试任务（逐用例执行）。
@@ -659,8 +820,10 @@ export default function TestWorkbench({
         <ImportPreviewModal
           source={importPreview.source}
           cases={importPreview.cases}
+          requirements={data.requirements}
           onClose={() => setImportPreview(null)}
-          onConfirm={confirmImport}
+          onConfirm={(picked) => void confirmImport(picked)}
+          onReview={reviewCases}
         />
       )}
 
@@ -865,6 +1028,7 @@ function CasesTab({
   onImportXmind,
   onImportJson,
   onExportCases,
+  onExportCasesCsv,
 }: {
   data: TestingData;
   busy: boolean;
@@ -881,6 +1045,8 @@ function CasesTab({
   onImportJson: (f: File) => void;
   /** 导出当前筛选下的用例（跨工作区复用：导出 → 另一个工作区导入）。 */
   onExportCases: (cases: TestCase[]) => void;
+  /** 导出当前筛选下的用例为 CSV（Excel 可直接打开）。 */
+  onExportCasesCsv: (cases: TestCase[]) => void;
 }) {
   const excelRef = useRef<HTMLInputElement>(null);
   const xmindRef = useRef<HTMLInputElement>(null);
@@ -969,6 +1135,14 @@ function CasesTab({
             onClick={() => onExportCases(cases)}
           >
             导出 JSON
+          </button>
+          <button
+            className="btn"
+            disabled={cases.length === 0}
+            title="把当前筛选下的用例导出为 CSV，Excel 可直接打开"
+            onClick={() => onExportCasesCsv(cases)}
+          >
+            导出 CSV
           </button>
         </div>
         <input
@@ -1655,6 +1829,7 @@ function TaskFormModal({
   data,
   onClose,
   onSave,
+  onGenerateCases,
 }: {
   initial: {
     name: string;
@@ -1674,14 +1849,35 @@ function TaskFormModal({
       case_ids: string[];
     },
     autoRun: boolean,
+    /** 本次由 AI 生成、待持久化并关联到任务的用例（用户已勾选确认）。 */
+    newCases: TestCase[],
   ) => void;
+  /** 让会话里的测试智能体按需求生成用例草稿（未落库）。 */
+  onGenerateCases: (req: TestRequirement) => Promise<TestCase[]>;
 }) {
   const [t, setT] = useState(initial);
   const [autoRun, setAutoRun] = useState(true);
+  // AI 生成的用例草稿：先预览，用户勾选确认后随任务一起落库。
+  const [drafts, setDrafts] = useState<TestCase[]>([]);
+  const [pickedDrafts, setPickedDrafts] = useState<Set<number>>(new Set());
+  const [generating, setGenerating] = useState(false);
   const toggle = (arr: string[], id: string) =>
     arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id];
   // 选中配置后地址取自配置（配置是唯一事实源），手填输入框禁用。
   const pickedConfig = data.configs.find((c) => c.id === t.config_id) ?? null;
+
+  /** 按选中的需求生成用例草稿（已存在的结果会被替换）。 */
+  const generate = async (req: TestRequirement) => {
+    setGenerating(true);
+    try {
+      const cases = await onGenerateCases(req);
+      if (!cases.length) return;
+      setDrafts(cases);
+      setPickedDrafts(new Set(cases.map((_, i) => i)));
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -1729,24 +1925,62 @@ function TaskFormModal({
             <span className="hint">暂无需求（可只关联用例）</span>
           )}
           {data.requirements.map((r) => (
-            <label key={r.id} className="member-check">
-              <input
-                type="checkbox"
-                checked={t.requirement_ids.includes(r.id)}
-                onChange={() =>
-                  setT({ ...t, requirement_ids: toggle(t.requirement_ids, r.id) })
-                }
-              />
-              {r.title}
-            </label>
+            <div key={r.id} className="test-req-row">
+              <label className="member-check">
+                <input
+                  type="checkbox"
+                  checked={t.requirement_ids.includes(r.id)}
+                  onChange={() =>
+                    setT({ ...t, requirement_ids: toggle(t.requirement_ids, r.id) })
+                  }
+                />
+                {r.title}
+              </label>
+              <button
+                className="btn"
+                disabled={generating}
+                title="按该需求让测试智能体生成用例（生成后可勾选确认，保存任务时一并落库）"
+                onClick={() => void generate(r)}
+              >
+                {generating ? "生成中…" : "AI 生成用例"}
+              </button>
+            </div>
           ))}
         </div>
+        {drafts.length > 0 && (
+          <>
+            <label className="lbl">
+              AI 生成的用例（{pickedDrafts.size}/{drafts.length}，保存任务时落库并关联）
+            </label>
+            <div className="check-group test-checks">
+              {drafts.map((c, i) => (
+                <label key={i} className="member-check">
+                  <input
+                    type="checkbox"
+                    checked={pickedDrafts.has(i)}
+                    onChange={() => {
+                      const next = new Set(pickedDrafts);
+                      if (next.has(i)) next.delete(i);
+                      else next.add(i);
+                      setPickedDrafts(next);
+                    }}
+                  />
+                  <span className={`badge ${prioClass(c.priority)}`}>{c.priority}</span>{" "}
+                  {c.title}
+                  <span className="hint">（{c.steps.length} 步）</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
         <label className="lbl">
           关联用例（{t.case_ids.length}/{data.cases.length}）
         </label>
         <div className="check-group test-checks">
-          {data.cases.length === 0 && (
-            <span className="hint">暂无用例，请先在「需求与用例」页准备</span>
+          {data.cases.length === 0 && drafts.length === 0 && (
+            <span className="hint">
+              暂无用例：可在上方按需求「AI 生成用例」，或先在「需求与用例」页准备
+            </span>
           )}
           {data.cases.map((c) => (
             <label key={c.id} className="member-check">
@@ -1770,9 +2004,19 @@ function TaskFormModal({
           </button>
           <button
             className="btn"
-            disabled={!t.name.trim() || t.case_ids.length === 0}
-            onClick={() => onSave({ ...t, name: t.name.trim() }, autoRun)}
-            title={!t.case_ids.length ? "至少关联一条用例" : ""}
+            disabled={
+              !t.name.trim() || (t.case_ids.length === 0 && pickedDrafts.size === 0)
+            }
+            onClick={() =>
+              onSave(
+                { ...t, name: t.name.trim() },
+                autoRun,
+                drafts.filter((_, i) => pickedDrafts.has(i)),
+              )
+            }
+            title={
+              t.case_ids.length === 0 && pickedDrafts.size === 0 ? "至少关联一条用例" : ""
+            }
           >
             保存
           </button>
@@ -1782,25 +2026,54 @@ function TaskFormModal({
   );
 }
 
-// ==================== 弹窗：导入预览 ====================
+// ==================== 弹窗：导入预览（含 AI 审查关卡） ====================
 
 function ImportPreviewModal({
   source,
   cases,
+  requirements,
   onClose,
   onConfirm,
+  onReview,
 }: {
   source: string;
   cases: TestCase[];
+  /** 需求列表（审查时选一项作为覆盖度依据）。 */
+  requirements: TestRequirement[];
   onClose: () => void;
-  onConfirm: () => void;
+  /** 导入用户勾选的用例。 */
+  onConfirm: (picked: TestCase[]) => void;
+  /** 发起 AI 审查（覆盖度与全面性）。 */
+  onReview: (cases: TestCase[], req: TestRequirement | null) => Promise<CaseReview | null>;
 }) {
   const [picked, setPicked] = useState<Set<number>>(new Set(cases.map((_, i) => i)));
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState<CaseReview | null>(null);
+  // 审查依据的需求（可选）：给了需求才能判「覆盖度」，否则只判结构完整性。
+  const [reqId, setReqId] = useState("");
   const toggle = (i: number) => {
     const next = new Set(picked);
     if (next.has(i)) next.delete(i);
     else next.add(i);
     setPicked(next);
+    // 改动勾选后旧审查结论不再对应当前批次：作废，要求重新审查。
+    if (source !== "ai") setReview(null);
+  };
+  const pickedCases = cases.filter((_, i) => picked.has(i));
+  // 上传路径必须先过 AI 审查才能落库（AI 生成路径本身已是 AI 产出，可直接确认）。
+  const needReview = source !== "ai";
+  const canConfirm = picked.size > 0 && (!needReview || !!review);
+  const runReview = async () => {
+    setReviewing(true);
+    try {
+      const req = requirements.find((r) => r.id === reqId) ?? null;
+      // 审查当前勾选的用例（没勾就审全部）。
+      const target = picked.size ? pickedCases : cases;
+      const result = await onReview(target, req);
+      if (result) setReview(result);
+    } finally {
+      setReviewing(false);
+    }
   };
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -1816,6 +2089,77 @@ function ImportPreviewModal({
                 : "XMind"}{" "}
           · {cases.length} 条）
         </div>
+
+        {/* AI 审查关卡：用户上传的用例先审覆盖度与全面性，确认后才导入。 */}
+        <div className="test-review-box">
+          <div className="test-review-head">
+            <span className="test-section-title">AI 审查（覆盖度与全面性）</span>
+            <span className="spacer" />
+            {requirements.length > 0 && (
+              <select
+                className="field test-filter"
+                value={reqId}
+                onChange={(e) => setReqId(e.target.value)}
+                title="选择关联需求，审查时以其为覆盖度依据"
+              >
+                <option value="">（不关联需求）</option>
+                {requirements.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.title}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button className="btn" disabled={reviewing} onClick={() => void runReview()}>
+              {reviewing ? "审查中…" : review ? "重新审查" : "开始审查"}
+            </button>
+          </div>
+          {!review && !reviewing && (
+            <div className="hint">
+              {needReview
+                ? "导入前必须先让测试智能体审查这批用例的覆盖度与全面性；审查结论会展示在下方。"
+                : "可让测试智能体审查这批用例的覆盖度与全面性（选填）。"}
+            </div>
+          )}
+          {reviewing && <div className="hint">正在审查，请稍候…</div>}
+          {review && (
+            <div className="test-review-report">
+              <div className="test-review-score">
+                覆盖度 <strong>{review.coverage.score}</strong> / 100 · 风险{" "}
+                <span
+                  className={`badge ${
+                    review.risk === "high"
+                      ? "st-fail"
+                      : review.risk === "low"
+                        ? "st-pass"
+                        : "st-running"
+                  }`}
+                >
+                  {review.risk === "high" ? "高" : review.risk === "low" ? "低" : "中"}
+                </span>{" "}
+                · 结论{" "}
+                <strong>{review.verdict === "pass" ? "覆盖充分" : "建议补充后再执行"}</strong>
+              </div>
+              <ReviewList title="已覆盖" items={review.coverage.covered} />
+              <ReviewList title="未覆盖 / 遗漏场景" items={review.coverage.missing} />
+              <ReviewList title="重复用例" items={review.duplicates} />
+              <ReviewList title="冲突用例" items={review.conflicts} />
+              {review.suggestions.length > 0 && (
+                <div className="test-review-sugg">
+                  <div className="test-review-sub">建议补充用例（{review.suggestions.length}）</div>
+                  {review.suggestions.map((s, i) => (
+                    <div key={i} className="test-review-sugg-item">
+                      <span className={`badge ${prioClass(s.priority)}`}>{s.priority}</span>{" "}
+                      {s.title}
+                      {s.expected && <span className="hint"> · 预期：{s.expected}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="test-import-list">
           {cases.map((c, i) => (
             <label key={i} className="member-check">
@@ -1834,13 +2178,35 @@ function ImportPreviewModal({
           </button>
           <button
             className="btn"
-            disabled={picked.size === 0}
-            onClick={() => onConfirm()}
+            disabled={!canConfirm}
+            onClick={() => onConfirm(pickedCases)}
+            title={
+              !canConfirm
+                ? needReview && !review
+                  ? "请先完成 AI 审查再导入"
+                  : "没有勾选任何用例"
+                : ""
+            }
           >
             导入选中（{picked.size}）
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 审查报告里的一组条目（空则不渲染）。 */
+function ReviewList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="test-review-sub">
+      {title}（{items.length}）
+      <ul className="test-review-items">
+        {items.map((t, i) => (
+          <li key={i}>{t}</li>
+        ))}
+      </ul>
     </div>
   );
 }

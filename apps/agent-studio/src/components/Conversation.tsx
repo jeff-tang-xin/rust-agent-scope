@@ -552,7 +552,8 @@ export default function Conversation({
   const [browserOpen, setBrowserOpen] = useState(false);
   // 测试工作台（test 工作区默认展开：需求/用例/任务/报告是这类工作区的主操作面）。
   const [testOpen, setTestOpen] = useState(workspace.kind === "test");
-  const [planActive, setPlanActive] = useState(false);
+  // 测试工作区固定计划模式：初始即亮（后端 getPlanStatus 同样恒报 active）。
+  const [planActive, setPlanActive] = useState(workspace.kind === "test");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   // 图片灯箱（点击消息图片放大查看；Esc/点击遮罩关闭）。
@@ -1580,7 +1581,9 @@ export default function Conversation({
   };
 
   // plan/free 仅 solo 运行方式下可用（产品语义）。
-  const supportsPlan = runtimeMode === "solo";
+  // 测试工作区固定计划模式（用例即计划）：不提供切换入口——后端同样拒绝切换。
+  const isTestWorkspace = workspace.kind === "test";
+  const supportsPlan = runtimeMode === "solo" && !isTestWorkspace;
 
   // 单条消息渲染（时间线行内）。assistant 流式输出接打字机；
   // user 输入保持纯文本（避免用户打的 * _ 被意外格式化）。
@@ -1990,7 +1993,7 @@ export default function Conversation({
         )}
         {planActive && (
           <span className="badge plan" style={{ alignSelf: "center" }}>
-            计划模式
+            {isTestWorkspace ? "计划模式 · 测试固定" : "计划模式"}
           </span>
         )}
         <label className="btn ghost attach-btn" title="添加附件（图片直接看；Excel/PDF/CSV 自动解析成文本；其他文件原样附带，≤8MB）">
