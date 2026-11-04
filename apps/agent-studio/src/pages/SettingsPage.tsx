@@ -231,6 +231,7 @@ export default function SettingsPage({
               [
                 ["ox-nav:show-ops", "运维菜单"],
                 ["ox-nav:show-db", "数据库运维菜单"],
+                ["ox-nav:show-test", "测试菜单"],
               ] as const
             ).map(([key, label]) => (
               <label

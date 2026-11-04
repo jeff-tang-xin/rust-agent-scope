@@ -73,16 +73,18 @@ export default function App() {
   const readNav = (key: string) => localStorage.getItem(key) === "1";
   const [showOps, setShowOps] = useState(() => readNav("ox-nav:show-ops"));
   const [showDb, setShowDb] = useState(() => readNav("ox-nav:show-db"));
+  const [showTest, setShowTest] = useState(() => readNav("ox-nav:show-test"));
   useEffect(() => {
     const onNavChange = () => {
       setShowOps(readNav("ox-nav:show-ops"));
       setShowDb(readNav("ox-nav:show-db"));
+      setShowTest(readNav("ox-nav:show-test"));
     };
     window.addEventListener("ox-nav-change", onNavChange);
     return () => window.removeEventListener("ox-nav-change", onNavChange);
   }, []);
   const cats = CATS.filter((c) =>
-    c.key === "ops" ? showOps : c.key === "db" ? showDb : true,
+    c.key === "ops" ? showOps : c.key === "db" ? showDb : c.key === "test" ? showTest : true,
   );
   // 会话左栏宽度（右缘拖拽调宽，localStorage 记忆；160–420px）。
   const [ssWidth, setSsWidth] = useState(() => {
@@ -109,7 +111,7 @@ export default function App() {
   useEffect(() => {
     if (tab !== "settings" && !cats.some((c) => c.key === tab)) setTab("collab");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showOps, showDb]);
+  }, [showOps, showDb, showTest]);
   // 每个工作区独立的运行方式（solo/team）与当前 session——多项目互不干扰。
   // 上次会话/运行方式按工作区记忆（localStorage）：刷新后回到原会话，
   // 而不是回落到固定 defaultSession（"main"）——那会显示另一个会话的历史，
