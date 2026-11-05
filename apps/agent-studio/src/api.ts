@@ -49,6 +49,8 @@ export interface WorkspaceConfig {
   /** 绑定的数据库档案名（能力白名单；空 = db 类别默认开放全部）。 */
   bound_databases: string[];
   created_at: number;
+  /** 绑定的协同工作区 id（仅 test 类）：共用其工作目录，需求/Bug 数据同处。 */
+  bound_workspace_id?: string | null;
 }
 
 export const DEFAULT_AGENT_ID = "default-assistant";

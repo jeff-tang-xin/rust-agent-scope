@@ -45,6 +45,10 @@ pub struct Requirement {
     /// 用户回答后存回需求，下次生成不再重复问。
     #[serde(default)]
     pub clarifications: Vec<String>,
+    /// 需求来源：`collab` = 协同工作区创建（讨论沉淀/协同面板手动建），
+    /// 空/`test` = 测试侧创建。测试侧列表据此显示来源徽标。
+    #[serde(default)]
+    pub origin: String,
     #[serde(default)]
     pub created_at: u64,
 }
@@ -158,11 +162,14 @@ pub struct Bug {
     pub case_id: String,
     #[serde(default)]
     pub task_id: String,
-    /// open | resolved
+    /// open | fixed | closed（协同修复后置 fixed，测试回归通过后置 closed）。
     #[serde(default)]
     pub status: String,
     #[serde(default)]
     pub created_at: u64,
+    /// 修复说明（协同修复 Bug 时由智能体/用户填写：改了什么、怎么修的）。
+    #[serde(default)]
+    pub fix_note: String,
 }
 
 /// 测试账号（可复用配置里的一组登录凭据；明文存本地 `.ox/testing/`，
@@ -219,13 +226,14 @@ pub struct TestingData {
 
 // ---------- 存储 ----------
 
-/// 测试数据根：`<workspace_root>/.ox/testing`。
+/// 测试数据根：`<workspace_root>/.ox/testing`。测试工作区绑定协同工作区时
+/// 跟随其目录——协同与测试读写同一份数据（打通的关键）。
 fn testing_root(state: &AppState, workspace_id: &str) -> Result<PathBuf, String> {
     let config = state.snapshot();
     let ws = config
         .workspace(workspace_id)
         .ok_or_else(|| format!("unknown workspace `{workspace_id}`"))?;
-    let root = factory::resolve_workspace_root(&state.data_dir, ws);
+    let root = factory::effective_workspace_root(&state.data_dir, &config, ws);
     Ok(root.join(".ox").join("testing"))
 }
 
@@ -1480,6 +1488,7 @@ mod tests {
                 data_profile: String::new(),
                 images: Vec::new(),
                 clarifications: Vec::new(),
+                origin: String::new(),
                 created_at: 0,
             }],
             configs: vec![],
@@ -1533,6 +1542,7 @@ mod tests {
                 task_id: "t1".into(),
                 status: "open".into(),
                 created_at: 0,
+                fix_note: String::new(),
             }],
         };
         let md = build_task_report(&data, &data.tasks[0]);

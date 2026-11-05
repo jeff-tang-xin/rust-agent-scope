@@ -109,6 +109,12 @@ pub struct WorkspaceConfig {
     /// save/delete 档案时据此同步创建/移除；None = 用户手动创建，不受联动影响。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_resource: Option<String>,
+    /// 绑定的协同工作区 id（**仅 test 类**）：测试与协同共用同一工作目录
+    /// ——需求/用例/Bug 数据（`.ox/testing/`）落在协同的目录下，协同智能体
+    /// （文件工具锚定同一目录）与协同侧需求面板读写的是同一份数据。
+    /// None = 不绑定（测试用自己的目录，行为与旧版一致）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_workspace_id: Option<String>,
 }
 
 /// 工作区类型（协同 / 运维 / 数据库运维 / 测试——都是工作区，针对不同的项目）。
@@ -532,6 +538,7 @@ mod tests {
             bound_databases: vec!["db".into()],
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         });
         // 一个协同工作区：不受影响。
         config.workspaces.push(WorkspaceConfig {
@@ -545,6 +552,7 @@ mod tests {
             bound_databases: vec![],
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         });
 
         config.ensure_test_workspaces();
@@ -641,6 +649,7 @@ mod tests {
             bound_databases: Vec::new(),
             created_at: 42,
             auto_resource: None,
+            bound_workspace_id: None,
         };
         let bytes = serde_json::to_vec(&ws).unwrap();
         let back: WorkspaceConfig = serde_json::from_slice(&bytes).unwrap();
@@ -659,6 +668,7 @@ mod tests {
             bound_databases: Vec::new(),
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         }
         .kind_valid());
 

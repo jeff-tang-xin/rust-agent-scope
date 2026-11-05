@@ -285,7 +285,7 @@ impl AppState {
             config: Arc::clone(&self.config),
             browser: Arc::clone(&self.browser_session),
         };
-        let built = factory::build_agent(&ws, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs, &resources)?;
+        let built = factory::build_agent(&ws, &config, &cfg, &provider, &self.data_dir, runtime_mode, &member_defs, &resources)?;
         let handle = Arc::new(AgentHandle::new(built.agent));
         self.handles
             .lock()
@@ -470,6 +470,7 @@ fn ensure_auto_workspace(
         bound_databases: if kind == "db" { vec![display_name.to_string()] } else { Vec::new() },
         created_at: unix_now(),
         auto_resource: Some(resource_tag.to_string()),
+        bound_workspace_id: None,
     });
 }
 
@@ -746,7 +747,7 @@ fn resolve_ws_root(state: &AppState, workspace_id: &str) -> Result<std::path::Pa
         .iter()
         .find(|w| w.id == workspace_id)
         .ok_or_else(|| format!("workspace `{}` not found", workspace_id))?;
-    let root = factory::resolve_workspace_root(&state.data_dir, ws);
+    let root = factory::effective_workspace_root(&state.data_dir, &config, ws);
     if !root.exists() {
         std::fs::create_dir_all(&root).map_err(|e| format!("create workspace dir failed: {e}"))?;
     }
@@ -910,6 +911,29 @@ fn validate_workspace(config: &StudioConfig, ws: &WorkspaceConfig) -> Result<(),
         if !ws.bound_servers.is_empty() || !ws.bound_databases.is_empty() {
             return Err("测试工作区不支持绑定服务器/数据库（工具面固定）".to_string());
         }
+        // 绑定协同工作区：目标必须存在且是 collab 类（共用其工作目录），
+        // 不可指向自己（自指会让目录解析语义含糊）。
+        if let Some(bid) = ws.bound_workspace_id.as_deref() {
+            if bid.is_empty() {
+                // 空串按未绑定处理（前端清空下拉时传空）。
+            } else if bid == ws.id {
+                return Err("测试工作区不能绑定自己".to_string());
+            } else {
+                let target = config
+                    .workspaces
+                    .iter()
+                    .find(|w| w.id == bid)
+                    .ok_or_else(|| format!("绑定的协同工作区 `{bid}` 不存在"))?;
+                if target.kind != "collab" {
+                    return Err(format!(
+                        "绑定的目标工作区 `{}` 是 {} 类，只能是协同（collab）工作区",
+                        target.name, target.kind
+                    ));
+                }
+            }
+        }
+    } else if ws.bound_workspace_id.is_some() {
+        return Err("只有测试工作区支持绑定协同工作区".to_string());
     }
     if !config.agents.iter().any(|a| a.id == ws.agent_id) {
         return Err(format!("工作区引用的智能体 `{}` 不存在", ws.agent_id));
@@ -1011,8 +1035,16 @@ pub async fn browser_preview_shot(state: State<'_, AppState>) -> Result<String, 
 }
 
 #[tauri::command]
-pub fn delete_workspace(state: State<'_, AppState>, workspace_id: String) -> Result<(), String> {    let mut config = state.snapshot();
+pub fn delete_workspace(state: State<'_, AppState>, workspace_id: String) -> Result<(), String> {
+    let mut config = state.snapshot();
     config.workspaces.retain(|w| w.id != workspace_id);
+    // 被删的是协同工作区时，绑定它的测试工作区自动解绑（回落自己的目录），
+    // 避免留下悬空引用导致目录解析失败。
+    for ws in config.workspaces.iter_mut() {
+        if ws.bound_workspace_id.as_deref() == Some(workspace_id.as_str()) {
+            ws.bound_workspace_id = None;
+        }
+    }
     state.persist(&config)?;
     state.invalidate(&workspace_id);
     // 数据目录保留（会话状态不丢；彻底清除属破坏性操作，由用户手动做）。
@@ -3034,6 +3066,7 @@ mod tests {
             bound_databases: vec![],
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         };
 
         // 测试工作区 + 内置测试助手 → 通过。
@@ -3072,6 +3105,7 @@ mod tests {
             bound_databases: vec![],
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         });
         config.workspaces.push(WorkspaceConfig {
             id: "ws-collab".into(),
@@ -3084,6 +3118,7 @@ mod tests {
             bound_databases: vec![],
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         });
         assert!(config_workspace_is_test(&config, "ws-test"));
         assert!(!config_workspace_is_test(&config, "ws-collab"));

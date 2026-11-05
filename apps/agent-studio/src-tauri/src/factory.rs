@@ -39,7 +39,7 @@ use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::{LocalFilesystem, LocalFsMode, PathPolicy, WorkspaceManager};
 use agentscope_model_openai::OpenAIChatModel;
 
-use crate::config::{AgentConfig, ModelProviderConfig, WorkspaceConfig};
+use crate::config::{AgentConfig, ModelProviderConfig, StudioConfig, WorkspaceConfig};
 use crate::team::{MemberRegistry, TeamDelegateTool};
 
 /// 工作区模式（类型化，替代字符串魔法值；对齐 service 的 agent 类型分化）。
@@ -120,6 +120,27 @@ pub fn resolve_workspace_root(data_dir: &Path, ws: &WorkspaceConfig) -> PathBuf 
     } else {
         expand_home(&ws.dir)
     }
+}
+
+/// 工作区文件根的**生效解析**：测试工作区绑定了协同工作区时，跟随目标的
+/// 工作目录（协同改目录测试自动跟随）——两边 `.ox/` 数据由此落在同一处。
+/// 其余情况与 [`resolve_workspace_root`] 一致。绑定目标缺失（被删后未解绑
+/// 的脏数据）时回落自己的目录，不报错——面板与装配不能因脏绑定而崩。
+pub fn effective_workspace_root(
+    data_dir: &Path,
+    config: &StudioConfig,
+    ws: &WorkspaceConfig,
+) -> PathBuf {
+    if ws.kind == "test" {
+        if let Some(bid) = ws.bound_workspace_id.as_deref() {
+            if !bid.trim().is_empty() {
+                if let Some(target) = config.workspace(bid) {
+                    return resolve_workspace_root(data_dir, target);
+                }
+            }
+        }
+    }
+    resolve_workspace_root(data_dir, ws)
 }
 
 /// 构建 OpenAI 兼容模型。
@@ -302,6 +323,7 @@ fn build_state_store(root: &Path) -> Result<Arc<dyn AgentStateStore>, String> {
 /// team 成员取 `member_defs`——工作区 members 引用的已有智能体。
 pub fn build_agent(
     ws: &WorkspaceConfig,
+    config: &StudioConfig,
     agent: &AgentConfig,
     provider: &ModelProviderConfig,
     data_dir: &Path,
@@ -321,7 +343,8 @@ pub fn build_agent(
     let dir = workspace_dir(data_dir, &ws.id);
     // 工作目录：配置指定绝对路径则用之（agent 直接在真实项目里干活），
     // 否则用默认目录。Sandboxed 模式把所有文件工具锚定在该根上。
-    let workspace_root = resolve_workspace_root(data_dir, ws);
+    // 测试工作区绑定协同工作区时跟随目标的目录（两边 .ox 数据同处）。
+    let workspace_root = effective_workspace_root(data_dir, config, ws);
     let workspace = build_workspace(&workspace_root)?;
     let memory_workspace = build_memory_workspace(&workspace_root)?;
     let state_store = build_state_store(&dir.join("state"))?;
@@ -831,6 +854,72 @@ mod tests {
 
     use super::*;
 
+    /// 测试工作区绑定协同工作区的目录解析：跟随目标（目标有自定义 dir 用之，
+    /// 空则用目标默认目录）；目标缺失（脏绑定）回落自己的目录；非 test 不受影响。
+    #[test]
+    fn effective_workspace_root_follows_bound_collab() {
+        let data_dir = std::env::temp_dir().join(format!("eff_root_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        let mk = |id: &str, kind: &str, dir: &str, bound: Option<&str>| WorkspaceConfig {
+            id: id.into(),
+            name: id.into(),
+            kind: kind.into(),
+            agent_id: "a".into(),
+            dir: dir.into(),
+            members: vec![],
+            bound_servers: vec![],
+            bound_databases: vec![],
+            created_at: 0,
+            auto_resource: None,
+            bound_workspace_id: bound.map(|s| s.to_string()),
+        };
+        let mut config = StudioConfig::default();
+        // 协同工作区：自定义目录（真实项目目录的典型形态）。
+        config.workspaces.push(mk("ws-collab", "collab", "F:\\proj\\demo", None));
+        // 测试工作区：绑定协同，自己不设 dir。
+        config.workspaces.push(mk("ws-test", "test", "", Some("ws-collab")));
+        // 对照：未绑定的测试工作区。
+        config.workspaces.push(mk("ws-test-free", "test", "", None));
+
+        // 绑定 → 跟随协同的自定义目录（两边 .ox 数据同处）。
+        let test_ws = config.workspace("ws-test").unwrap();
+        assert_eq!(
+            effective_workspace_root(&data_dir, &config, test_ws),
+            std::path::PathBuf::from("F:\\proj\\demo")
+        );
+        // 协同自己解析不变。
+        let collab_ws = config.workspace("ws-collab").unwrap();
+        assert_eq!(
+            effective_workspace_root(&data_dir, &config, collab_ws),
+            std::path::PathBuf::from("F:\\proj\\demo")
+        );
+        // 未绑定 → 自己的默认目录（行为与旧版一致）。
+        let free_ws = config.workspace("ws-test-free").unwrap();
+        assert_eq!(
+            effective_workspace_root(&data_dir, &config, free_ws),
+            workspace_dir(&data_dir, "ws-test-free").join("workspace")
+        );
+
+        // 协同目录为空 → 跟随目标的默认目录（引用先结束，再改配置）。
+        config.workspaces[0].dir = String::new();
+        let test_ws = config.workspace("ws-test").unwrap();
+        assert_eq!(
+            effective_workspace_root(&data_dir, &config, test_ws),
+            workspace_dir(&data_dir, "ws-collab").join("workspace")
+        );
+
+        // 脏绑定（目标已删）→ 回落自己的目录，不 panic。
+        config.workspaces.retain(|w| w.id != "ws-collab");
+        let test_ws = config.workspace("ws-test").unwrap();
+        assert_eq!(
+            effective_workspace_root(&data_dir, &config, test_ws),
+            workspace_dir(&data_dir, "ws-test").join("workspace")
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
     #[test]
     fn permanent_permissions_roundtrip_and_delete() {
         let dir = std::env::temp_dir().join(format!("perm_test_{}", std::process::id()));
@@ -870,6 +959,7 @@ mod tests {
             bound_databases: vec![],
             created_at: 0,
             auto_resource: None,
+            bound_workspace_id: None,
         };
         let context = default_permission_context(
             &read_only,

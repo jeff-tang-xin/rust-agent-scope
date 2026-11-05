@@ -24,6 +24,7 @@ const KIND_LABEL: Record<WorkspaceKind, string> = {
 
 export default function WorkspaceFormModal({
   agents,
+  workspaces,
   servers,
   databases,
   category,
@@ -32,6 +33,8 @@ export default function WorkspaceFormModal({
   onSaved,
 }: {
   agents: AgentConfig[];
+  /** 全部工作区（测试工作区选「绑定协同工作区」用：列出 collab 类）。 */
+  workspaces: WorkspaceConfig[];
   /** 服务器档案（设置页管理；勾选绑定 → 工作区开放 remote_shell 能力）。 */
   servers: ServerConfig[];
   /** 数据库档案（设置页管理；勾选绑定 → 工作区开放 db_query/db_dml 能力）。 */
@@ -51,6 +54,8 @@ export default function WorkspaceFormModal({
   );
   const [name, setName] = useState(initial?.name ?? "");
   const [dir, setDir] = useState(initial?.dir ?? "");
+  // 绑定的协同工作区（仅测试工作区）：共用其工作目录，需求/Bug 数据同处。
+  const [boundWsId, setBoundWsId] = useState(initial?.bound_workspace_id ?? "");
   // team 成员（仅协同工作区）：引用已有智能体 id（lead 之外）。
   const [members, setMembers] = useState<string[]>(initial?.members ?? []);
   // 绑定的服务器/数据库档案名（能力白名单：绑定 = 开放对应工具且只能操作
@@ -114,6 +119,8 @@ export default function WorkspaceFormModal({
       bound_servers: isTest ? [] : boundServers,
       bound_databases: isTest ? [] : boundDatabases,
       created_at: initial?.created_at ?? 0,
+      // 绑定协同工作区（仅测试类；空串归一为 null = 不绑定）。
+      bound_workspace_id: isTest ? boundWsId || null : null,
     };
     try {
       if (editing) {
@@ -167,6 +174,28 @@ export default function WorkspaceFormModal({
                 </>
               )}
             </div>
+            <label className="lbl">绑定协同工作区（共用其工作目录）</label>
+            <select
+              className="field"
+              value={boundWsId}
+              onChange={(e) => setBoundWsId(e.target.value)}
+            >
+              <option value="">不绑定（用自己的目录）</option>
+              {workspaces
+                .filter((w) => w.kind === "collab")
+                .map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                    {w.dir ? `（${w.dir}）` : "（默认目录）"}
+                  </option>
+                ))}
+            </select>
+            <div className="desc" style={{ margin: "4px 0 12px" }}>
+              绑定后测试与协同共用同一工作目录：需求、用例、Bug 数据（.ox/testing/）
+              落在协同的目录下，协同智能体与需求面板读写的是同一份数据——
+              协同讨论建需求 → 测试生成用例 → Bug 回流协同修复的闭环由此打通。
+              协同工作区更换目录时测试自动跟随。
+            </div>
           </>
         ) : (
           <>
@@ -206,13 +235,18 @@ export default function WorkspaceFormModal({
         />
 
         <div className="lbl-row">
-          <label className="lbl">Workspace（工作区目录，留空 = 默认 app data）</label>
-          <PasteButton onPaste={setDir} />
+          <label className="lbl">
+            {isTest && boundWsId
+              ? "Workspace（已绑定协同工作区，目录随其自动解析）"
+              : "Workspace（工作区目录，留空 = 默认 app data）"}
+          </label>
+          {!isTest && <PasteButton onPaste={setDir} />}
         </div>
         <input
           className="field"
           placeholder="如 F:\java\my-project 或 ~/.ox/db/my —— 智能体的文件工具将锚定该目录"
           value={dir}
+          disabled={isTest && Boolean(boundWsId)}
           onChange={(e) => {
             setDirTouched(true);
             setDir(e.target.value);

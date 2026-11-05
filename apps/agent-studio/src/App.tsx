@@ -559,6 +559,7 @@ export default function App() {
       {wsForm && (
         <WorkspaceFormModal
           agents={agents}
+          workspaces={workspaces}
           servers={servers}
           databases={databases}
           category={wsForm.initial?.kind ?? (cat?.key ?? "collab")}
