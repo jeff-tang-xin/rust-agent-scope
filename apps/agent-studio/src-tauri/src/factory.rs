@@ -456,10 +456,13 @@ pub fn build_agent(
             toolkit.register(Arc::new(WebSearchTool::new()));
         }
         StudioMode::Test => {
-            // 测试工具面：web 检索（查文档/排错资料）；浏览器 7 件套已在
+            // 测试工具面：web 检索（查文档/排错资料）+ 接口/并发测试
+            // （api_request：单发 HTTP + 内置并发压测，替代 shell 的 curl——
+            // 测试不装 shell，接口与并发场景由本工具承担）。浏览器 7 件套已在
             // 上方对所有模式统一注册。
             toolkit.register(Arc::new(WebFetchTool::new()));
             toolkit.register(Arc::new(WebSearchTool::new()));
+            toolkit.register(Arc::new(crate::api_tool::ApiRequest::new()));
         }
         StudioMode::Db => {
             // 数据库工具面：无类别特有工具（db_query/db_dml 在 match 后统一注册）。

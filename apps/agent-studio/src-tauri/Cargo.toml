@@ -31,6 +31,8 @@ uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 async-trait = "0.1"
 futures = "0.3"
+# 接口/并发测试工具（api_request）：HTTP 客户端（默认特性已够，body/text 均用原始文本）。
+reqwest = "0.12"
 
 # AgentScope Rust harness（path 依赖指向主仓库 crates；跨 workspace path 依赖合法）
 agentscope-core = { path = "../../../crates/agentscope-core" }

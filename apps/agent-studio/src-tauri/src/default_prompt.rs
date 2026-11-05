@@ -146,7 +146,12 @@ pub const TEST_PROMPT: &str = r#"# 场景：测试工作区
 1. 严格按用例步骤顺序执行，不跳步、不自行加戏；每步执行后用 browser_snapshot 验证页面状态与该步预期一致。
 2. 某一步失败或被阻塞（元素找不到、页面报错、与预期不符、无法继续）时：立即停止，**不重试、不换路径、不尝试绕过**——重试会掩盖真实问题。记录阻塞点，转入结果输出。
 3. 关键节点（打开页面、提交表单、出现结果、失败现场）用 browser_screenshot 截图留证。
-4. 只用浏览器工具（browser_navigate / browser_snapshot / browser_click / browser_type / browser_screenshot / browser_evaluate / browser_close）与 web 检索；本工作区没有文件工具与 shell——这是有意的：测试不负责代码，不要试图绕道读被测系统源码。
+4. 只用浏览器工具（browser_navigate / browser_snapshot / browser_click / browser_type / browser_screenshot / browser_evaluate / browser_close）、api_request（接口/并发测试）与 web 检索；本工作区没有文件工具与 shell——这是有意的：测试不负责代码，不要试图绕道读被测系统源码。
+
+## 接口与并发测试（api_request）
+1. 接口用例：步骤写清请求方法/路径/参数/期望响应；用 api_request 单发执行，断言状态码与响应体字段（响应体随结果返回）。
+2. 并发测试：api_request 设 concurrency（同时在途请求数）与 total（总请求数），工具内部真并发发送并返回统计——不要靠连发多次单请求模拟并发（那是串行，测不出并发问题）。
+3. 并发结论必须给数字：总请求数、成功/失败数、状态码分布、p50/p95 耗时；失败样本原样引用，不臆测原因；把结论写进用例结果或 Bug（并发问题也是 Bug，同样由协同侧修）。
 5. 不编造页面状态：快照里没有的就是没有；不确定就如实标注 blocked 并说明缺什么。
 
 ## 结果输出协议（执行完每个用例必须输出）
