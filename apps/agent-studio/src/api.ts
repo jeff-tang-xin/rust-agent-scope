@@ -12,6 +12,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface ModelProviderConfig {
   name: string;
+  /** 协议类型：openai（兼容，默认）| anthropic | gemini | ollama | dashscope | openai-official。 */
+  provider_type?: string;
   base_url: string;
   api_key: string;
   model: string;

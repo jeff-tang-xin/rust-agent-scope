@@ -37,7 +37,12 @@ use agentscope_harness::tools::{
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
 use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::{LocalFilesystem, LocalFsMode, PathPolicy, WorkspaceManager};
+use agentscope_model_anthropic::AnthropicChatModel;
+use agentscope_model_dashscope::DashScopeChatModel;
+use agentscope_model_gemini::GeminiChatModel;
+use agentscope_model_ollama::OllamaChatModel;
 use agentscope_model_openai::OpenAIChatModel;
+use agentscope_model_openai_official::OpenAiResponsesChatModel;
 
 use crate::config::{AgentConfig, ModelProviderConfig, StudioConfig, WorkspaceConfig};
 use crate::team::{MemberRegistry, TeamDelegateTool};
@@ -155,16 +160,75 @@ pub(crate) fn has_test_bound_to(config: &StudioConfig, collab_id: &str) -> bool 
     })
 }
 
-/// 构建 OpenAI 兼容模型。
+/// 构建模型实例：按 `provider_type` 分发到对应协议 crate（缺省 openai 兼容
+/// 协议——旧配置文件无该字段，行为与升级前一致）。各模型统一支持
+/// `with_base_url` / `with_context_window`；ollama 无认证，api_key 忽略。
 fn build_model(provider: &ModelProviderConfig) -> Result<Arc<dyn Model>, String> {
-    let mut model = OpenAIChatModel::new(&provider.api_key, &provider.model);
-    if !provider.base_url.is_empty() {
-        model = model.with_base_url(&provider.base_url);
-    }
-    if provider.context_window > 0 {
-        model = model.with_context_window(provider.context_window);
-    }
-    Ok(Arc::new(model))
+    let model: Arc<dyn Model> = match provider.provider_type.as_str() {
+        "anthropic" => {
+            let mut m = AnthropicChatModel::new(&provider.api_key, &provider.model);
+            if !provider.base_url.is_empty() {
+                m = m.with_base_url(&provider.base_url);
+            }
+            if provider.context_window > 0 {
+                m = m.with_context_window(provider.context_window);
+            }
+            Arc::new(m)
+        }
+        "gemini" => {
+            let mut m = GeminiChatModel::new(&provider.api_key, &provider.model);
+            if !provider.base_url.is_empty() {
+                m = m.with_base_url(&provider.base_url);
+            }
+            if provider.context_window > 0 {
+                m = m.with_context_window(provider.context_window);
+            }
+            Arc::new(m)
+        }
+        "ollama" => {
+            let mut m = OllamaChatModel::new(&provider.model);
+            if !provider.base_url.is_empty() {
+                m = m.with_base_url(&provider.base_url);
+            }
+            if provider.context_window > 0 {
+                m = m.with_context_window(provider.context_window);
+            }
+            Arc::new(m)
+        }
+        "dashscope" => {
+            let mut m = DashScopeChatModel::new(&provider.api_key, &provider.model);
+            if !provider.base_url.is_empty() {
+                m = m.with_base_url(&provider.base_url);
+            }
+            if provider.context_window > 0 {
+                m = m.with_context_window(provider.context_window);
+            }
+            Arc::new(m)
+        }
+        "openai-official" => {
+            let mut m = OpenAiResponsesChatModel::new(&provider.api_key, &provider.model);
+            if !provider.base_url.is_empty() {
+                m = m.with_base_url(&provider.base_url);
+            }
+            if provider.context_window > 0 {
+                m = m.with_context_window(provider.context_window);
+            }
+            Arc::new(m)
+        }
+        // "openai" 与空值（旧配置）：OpenAI 兼容协议（DeepSeek / vLLM /
+        // DashScope 兼容模式等）。
+        _ => {
+            let mut model = OpenAIChatModel::new(&provider.api_key, &provider.model);
+            if !provider.base_url.is_empty() {
+                model = model.with_base_url(&provider.base_url);
+            }
+            if provider.context_window > 0 {
+                model = model.with_context_window(provider.context_window);
+            }
+            Arc::new(model)
+        }
+    };
+    Ok(model)
 }
 
 /// 构建工作区：本地磁盘 + Sandboxed 模式（所有路径锚定 workspace 根，
@@ -416,6 +480,13 @@ pub fn build_agent(
     toolkit.register(Arc::new(crate::browser_tool::BrowserScreenshot { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserClose { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserEvaluate { ctx: Arc::clone(&browser_ctx) }));
+    // 坐标操作（视觉驱动）：看截图 → 按像素坐标发真实鼠标/键盘事件，
+    // 不依赖 CSS selector；每步回传新截图，模型连续看画面操作。
+    toolkit.register(Arc::new(crate::browser_tool::BrowserClickAt { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserTypeAt { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserHoverAt { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserScrollAt { ctx: Arc::clone(&browser_ctx) }));
+    toolkit.register(Arc::new(crate::browser_tool::BrowserDrag { ctx: Arc::clone(&browser_ctx) }));
     // 旧版任务记录锚在 workspace_root（用户项目根）下的 tasks/，违反 .ox
     // 数据规范（非业务内容不散落项目根）——一次性迁入 .ox/tasks/。
     // tmp 残留（原子写的 *.json.tmp.*）直接删；目录空了才移除。

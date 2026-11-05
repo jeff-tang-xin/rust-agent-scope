@@ -655,16 +655,28 @@ impl Tool for BrowserScreenshot {
     }
 
     fn description(&self) -> &str {
-        "Take a full-page screenshot of the current browser page, save it under the \
-         workspace `.ox/screenshots/` directory and return the file path (user can \
-         open it from the file panel)."
+        "Take a screenshot of the current browser page and RETURN THE IMAGE to you \
+         (multimodal) — you see exactly what the page looks like. Viewport screenshot \
+         by default: image coordinates map 1:1 to browser_click_at / browser_type_at / \
+         browser_hover_at / browser_scroll_at / browser_drag. Set full_page=true for \
+         the whole scrollable page (coordinates then do NOT map to viewport tools). \
+         Also saved under the workspace `.ox/screenshots/`."
     }
 
     fn parameters(&self) -> Value {
-        json!({"type": "object", "properties": {}})
+        json!({
+            "type": "object",
+            "properties": {
+                "full_page": {"type": "boolean", "description": "Capture the whole scrollable page instead of the viewport. Default false."}
+            }
+        })
     }
 
-    async fn call(&self, _input: Value) -> Result<ToolOutput> {
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let full_page = input
+            .get("full_page")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let page = match self.ctx.session.page().await {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
@@ -673,7 +685,7 @@ impl Tool for BrowserScreenshot {
             .screenshot(
                 chromiumoxide::page::ScreenshotParams::builder()
                     .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
-                    .full_page(true)
+                    .full_page(full_page)
                     .build(),
             )
             .await
@@ -693,10 +705,16 @@ impl Tool for BrowserScreenshot {
         if let Err(e) = std::fs::write(&path, &bytes) {
             return Ok(ToolOutput::error(format!("写入截图失败: {e}")));
         }
+        // 图像随结果回传：模型直接「看见」页面（视觉驱动操作的基础）。
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let scope = if full_page { "整页" } else { "视口" };
         Ok(ToolOutput::ok(format!(
-            "截图已保存: {}\n（可在文件面板的 .ox/screenshots/ 下查看）",
+            "{scope}截图已保存: {}（画面已随本结果回传——你看到的就是当前页面；\
+             视口截图的像素坐标可直接用于 click_at / type_at / hover_at / scroll_at / drag）",
             path.display()
-        )))
+        ))
+        .with_image("image/png", b64))
     }
 }
 
@@ -804,5 +822,460 @@ impl Tool for BrowserEvaluate {
             }
         }
         Ok(ToolOutput::ok(out))
+    }
+}
+
+// ---------- 坐标操作工具集（视觉驱动，像人一样操作） ----------
+//
+// 模型先 browser_screenshot「看见」页面，再按像素坐标发真实输入事件
+// （CDP Input 域：dispatchMouseEvent / insertText）——与真人操作走同一
+// 输入管线，hover/焦点/事件冒泡全部真实发生，不依赖 CSS selector。
+// 每个操作后回传新截图，模型连续看画面决定下一步（丝滑循环）。
+
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams,
+    DispatchMouseEventParamsBuilder, DispatchMouseEventType, InsertTextParams, MouseButton,
+};
+
+/// 发一个鼠标事件（builder 缺参 / CDP 报错统一转 String）。
+async fn mouse_event(
+    page: &chromiumoxide::Page,
+    event: std::result::Result<DispatchMouseEventParams, String>,
+) -> std::result::Result<(), String> {
+    let cmd = event?;
+    page.execute(cmd)
+        .await
+        .map_err(|e| format!("鼠标事件发送失败: {e}"))?;
+    Ok(())
+}
+
+fn mouse_builder(
+    event_type: DispatchMouseEventType,
+    x: f64,
+    y: f64,
+) -> DispatchMouseEventParamsBuilder {
+    DispatchMouseEventParams::builder()
+        .r#type(event_type)
+        .x(x)
+        .y(y)
+}
+
+/// 在 (x, y) 按下并释放左键（真实点击）。
+async fn mouse_click(page: &chromiumoxide::Page, x: f64, y: f64) -> std::result::Result<(), String> {
+    mouse_event(
+        page,
+        mouse_builder(DispatchMouseEventType::MousePressed, x, y)
+            .button(MouseButton::Left)
+            .click_count(1)
+            .build(),
+    )
+    .await?;
+    mouse_event(
+        page,
+        mouse_builder(DispatchMouseEventType::MouseReleased, x, y)
+            .button(MouseButton::Left)
+            .click_count(1)
+            .build(),
+    )
+    .await
+}
+
+/// 操作后的视口截图：存文件 + base64 回传（模型看效果）。
+async fn screenshot_with_image(ctx: &BrowserCtx) -> std::result::Result<ToolOutput, String> {
+    let page = ctx.session.page().await.map_err(|e| e)?;
+    let bytes = page
+        .screenshot(
+            chromiumoxide::page::ScreenshotParams::builder()
+                .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
+                .full_page(false)
+                .build(),
+        )
+        .await
+        .map_err(|e| format!("截图失败: {e}"))?;
+    let dir = &ctx.screenshots_dir;
+    std::fs::create_dir_all(dir).map_err(|e| format!("无法创建截图目录: {e}"))?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let path = dir.join(format!("shot-{stamp}.png"));
+    std::fs::write(&path, &bytes).map_err(|e| format!("写入截图失败: {e}"))?;
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(ToolOutput::ok(format!(
+        "操作完成，最新画面如上（已存 {}）",
+        path.display()
+    ))
+    .with_image("image/png", b64))
+}
+
+/// 操作工具的公共收尾：附加控制台错误 + 截图回传。
+async fn finish_with_screenshot(ctx: &BrowserCtx, note: String) -> ToolOutput {
+    let console = ctx.session.drain_console().await;
+    let mut note = note;
+    if !console.is_empty() {
+        note.push_str("\n[页面控制台错误]");
+        for line in console {
+            note.push_str(&format!("\n- {line}"));
+        }
+    }
+    match screenshot_with_image(ctx).await {
+        Ok(out) => out,
+        Err(e) => ToolOutput::error(format!("{note}\n截图失败: {e}")),
+    }
+}
+
+/// 坐标参数解析（x/y 必填，f64）。
+fn coord(input: &Value, key: &str) -> std::result::Result<f64, ToolOutput> {
+    match input.get(key).and_then(|v| v.as_f64()) {
+        Some(v) if v.is_finite() => Ok(v),
+        _ => Err(ToolOutput::error(format!("{key} 必须是数字坐标"))),
+    }
+}
+
+// ---------- 工具：browser_click_at ----------
+
+pub struct BrowserClickAt {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserClickAt {
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_click_at"
+    }
+
+    fn description(&self) -> &str {
+        "Click at viewport pixel coordinates (x, y) with real mouse events — no CSS \
+         selector needed. Workflow: browser_screenshot → look at the image → click \
+         the pixel position of the target. Returns a fresh screenshot."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "x": {"type": "number", "description": "Viewport X in pixels (from the last screenshot)."},
+                "y": {"type": "number", "description": "Viewport Y in pixels (from the last screenshot)."}
+            },
+            "required": ["x", "y"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Err(e), _) | (_, Err(e)) => return Ok(e),
+        };
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        if let Err(e) = mouse_click(&page, x, y).await {
+            return Ok(ToolOutput::error(format!("点击失败: {e}")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        Ok(finish_with_screenshot(&self.ctx, format!("已在 ({x:.0}, {y:.0}) 点击")).await)
+    }
+}
+
+// ---------- 工具：browser_type_at ----------
+
+pub struct BrowserTypeAt {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserTypeAt {
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_type_at"
+    }
+
+    fn description(&self) -> &str {
+        "Click at (x, y) to focus an input, then type text via IME insertText (CJK \
+         safe — Chinese input works). Set submit=true to press Enter afterwards \
+         (form submit / search). Returns a fresh screenshot."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "x": {"type": "number", "description": "Viewport X of the input field."},
+                "y": {"type": "number", "description": "Viewport Y of the input field."},
+                "text": {"type": "string", "description": "Text to type."},
+                "submit": {"type": "boolean", "description": "Press Enter after typing. Default false."}
+            },
+            "required": ["x", "y", "text"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Err(e), _) | (_, Err(e)) => return Ok(e),
+        };
+        let text = match input_str(&input, "text") {
+            Ok(v) => v.to_string(),
+            Err(e) => return Ok(e),
+        };
+        let submit = input.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        if let Err(e) = mouse_click(&page, x, y).await {
+            return Ok(ToolOutput::error(format!("聚焦失败: {e}")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if let Err(e) = page
+            .execute(InsertTextParams::new(text.as_str().to_string()))
+            .await
+            .map_err(|e| format!("输入失败: {e}"))
+        {
+            return Ok(ToolOutput::error(e));
+        }
+        if submit {
+            // Enter：keydown + keyup（windowsVirtualKeyCode 13）。
+            for key_type in [DispatchKeyEventType::KeyDown, DispatchKeyEventType::KeyUp] {
+                let ev = DispatchKeyEventParams::builder()
+                    .r#type(key_type)
+                    .key("Enter")
+                    .code("Enter")
+                    .windows_virtual_key_code(13)
+                    .build();
+                if let Ok(cmd) = ev {
+                    let _ = page.execute(cmd).await;
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let note = if submit {
+            format!("已在 ({x:.0}, {y:.0}) 输入并回车")
+        } else {
+            format!("已在 ({x:.0}, {y:.0}) 输入")
+        };
+        Ok(finish_with_screenshot(&self.ctx, note).await)
+    }
+}
+
+// ---------- 工具：browser_hover_at ----------
+
+pub struct BrowserHoverAt {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserHoverAt {
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_hover_at"
+    }
+
+    fn description(&self) -> &str {
+        "Move the mouse to (x, y) — triggers hover menus, tooltips and hover styles. \
+         Returns a fresh screenshot so you can see what appeared."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "x": {"type": "number", "description": "Viewport X."},
+                "y": {"type": "number", "description": "Viewport Y."}
+            },
+            "required": ["x", "y"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Err(e), _) | (_, Err(e)) => return Ok(e),
+        };
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        if let Err(e) = mouse_event(
+            &page,
+            mouse_builder(DispatchMouseEventType::MouseMoved, x, y).build(),
+        )
+        .await
+        {
+            return Ok(ToolOutput::error(format!("移动失败: {e}")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        Ok(finish_with_screenshot(&self.ctx, format!("鼠标已移至 ({x:.0}, {y:.0})")).await)
+    }
+}
+
+// ---------- 工具：browser_scroll_at ----------
+
+pub struct BrowserScrollAt {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserScrollAt {
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_scroll_at"
+    }
+
+    fn description(&self) -> &str {
+        "Scroll the mouse wheel at (x, y) by delta_y pixels (negative = up, positive \
+         = down). Returns a fresh screenshot."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "x": {"type": "number", "description": "Viewport X (scroll focus)."},
+                "y": {"type": "number", "description": "Viewport Y (scroll focus)."},
+                "delta_y": {"type": "number", "description": "Scroll amount in pixels; negative = up."}
+            },
+            "required": ["x", "y", "delta_y"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Err(e), _) | (_, Err(e)) => return Ok(e),
+        };
+        let dy = match coord(&input, "delta_y") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        if let Err(e) = mouse_event(
+            &page,
+            mouse_builder(DispatchMouseEventType::MouseWheel, x, y)
+                .delta_x(0.0)
+                .delta_y(dy)
+                .build(),
+        )
+        .await
+        {
+            return Ok(ToolOutput::error(format!("滚动失败: {e}")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        Ok(finish_with_screenshot(
+            &self.ctx,
+            format!("已在 ({x:.0}, {y:.0}) 滚动 {dy:.0}px"),
+        )
+        .await)
+    }
+}
+
+// ---------- 工具：browser_drag ----------
+
+pub struct BrowserDrag {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserDrag {
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_drag"
+    }
+
+    fn description(&self) -> &str {
+        "Drag from (from_x, from_y) to (to_x, to_y): mouse press, interpolated moves \
+         (real drag trajectory), release — for sliders and drag-and-drop. Returns a \
+         fresh screenshot."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "from_x": {"type": "number", "description": "Start viewport X."},
+                "from_y": {"type": "number", "description": "Start viewport Y."},
+                "to_x": {"type": "number", "description": "End viewport X."},
+                "to_y": {"type": "number", "description": "End viewport Y."}
+            },
+            "required": ["from_x", "from_y", "to_x", "to_y"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let (fx, fy) = match (coord(&input, "from_x"), coord(&input, "from_y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Err(e), _) | (_, Err(e)) => return Ok(e),
+        };
+        let (tx, ty) = match (coord(&input, "to_x"), coord(&input, "to_y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Err(e), _) | (_, Err(e)) => return Ok(e),
+        };
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let run = async {
+            mouse_event(
+                &page,
+                mouse_builder(DispatchMouseEventType::MousePressed, fx, fy)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build(),
+            )
+            .await?;
+            // 插值移动（12 步）：真实拖拽轨迹，drop 目标才能识别。
+            let steps = 12;
+            for i in 1..=steps {
+                let t = i as f64 / steps as f64;
+                let mx = fx + (tx - fx) * t;
+                let my = fy + (ty - fy) * t;
+                mouse_event(
+                    &page,
+                    mouse_builder(DispatchMouseEventType::MouseMoved, mx, my)
+                        .button(MouseButton::Left)
+                        .buttons(1)
+                        .build(),
+                )
+                .await?;
+            }
+            mouse_event(
+                &page,
+                mouse_builder(DispatchMouseEventType::MouseReleased, tx, ty)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build(),
+            )
+            .await
+        };
+        if let Err(e) = run.await {
+            return Ok(ToolOutput::error(format!("拖拽失败: {e}")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        Ok(finish_with_screenshot(
+            &self.ctx,
+            format!("已从 ({fx:.0}, {fy:.0}) 拖拽到 ({tx:.0}, {ty:.0})"),
+        )
+        .await)
     }
 }

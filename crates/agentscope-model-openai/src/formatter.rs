@@ -40,7 +40,8 @@ impl Formatter for OpenAIChatFormatter {
         msgs: &[Msg],
         _options: Option<&GenerateOptions>,
     ) -> Result<Vec<Self::RequestMessage>> {
-        Ok(msgs.iter().map(convert_message).collect())
+        // convert_message 可能展开为多条（工具结果带图时拆出紧随的 user 消息）。
+        Ok(msgs.iter().flat_map(convert_message).collect())
     }
 
     fn parse_response(&self, response: Self::Response) -> Result<ChatResponse> {
@@ -115,7 +116,10 @@ pub(crate) fn tools_to_openai(tools: &[ToolSchema]) -> Vec<OpenAITool> {
 }
 
 /// 把一条 [`Msg`] 转换为 OpenAI 协议消息（对应 Java `OpenAIMessageConverter#convertToMessage`）。
-pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
+///
+/// 返回 Vec：常规消息单元素；工具结果带图时展开为 tool 消息 + 紧随的
+/// user 图像消息（OpenAI tool 消息只支持纯文本，见 convert_tool_message）。
+pub(crate) fn convert_message(msg: &Msg) -> Vec<OpenAIMessage> {
     // 对齐 Java：SYSTEM 角色承载 ToolResult 时按 tool 消息发送
     if msg.role == Role::System && has_tool_result(msg) {
         return convert_tool_message(msg);
@@ -133,7 +137,7 @@ pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
         }),
         _ => None,
     };
-    match msg.role {
+    let message = match msg.role {
         Role::System => OpenAIMessage {
             role: "system".into(),
             content: Some(Value::String(text)),
@@ -181,8 +185,9 @@ pub(crate) fn convert_message(msg: &Msg) -> OpenAIMessage {
                 reasoning_content,
             }
         }
-        Role::Tool => convert_tool_message(msg),
-    }
+        Role::Tool => return convert_tool_message(msg),
+    };
+    vec![message]
 }
 
 fn has_tool_result(msg: &Msg) -> bool {
@@ -192,25 +197,67 @@ fn has_tool_result(msg: &Msg) -> bool {
 }
 
 /// tool 消息：内容取工具结果的文本形式（媒体块转文本引用），携带 `tool_call_id`、不带 name。
-fn convert_tool_message(msg: &Msg) -> OpenAIMessage {
-    let (tool_call_id, content) = msg
-        .content
-        .iter()
-        .find_map(|b| match b {
-            ContentBlock::ToolResult { id, output, .. } => {
-                Some((id.clone(), convert_tool_result_to_string(output)))
-            }
-            _ => None,
-        })
-        .unwrap_or_default();
-    OpenAIMessage {
+///
+/// 工具结果里的图像块（截图等多模态输出）OpenAI tool 消息装不下（只支持
+/// 纯文本）——拆出来作为**紧随的 user 消息**回传（多模态 content 数组，
+/// image_url data URI），模型下一轮就能「看见」工具操作的画面。
+fn convert_tool_message(msg: &Msg) -> Vec<OpenAIMessage> {
+    let found = msg.content.iter().find_map(|b| match b {
+        ContentBlock::ToolResult { id, output, .. } => Some((id.clone(), output)),
+        _ => None,
+    });
+    let Some((tool_call_id, output)) = found else {
+        return vec![OpenAIMessage {
+            role: "tool".into(),
+            content: Some(Value::String(String::new())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+            reasoning_content: None,
+        }];
+    };
+    let tool_msg = OpenAIMessage {
         role: "tool".into(),
-        content: Some(Value::String(content)),
+        content: Some(Value::String(convert_tool_result_to_string(output))),
         name: None,
         tool_calls: None,
         tool_call_id: Some(tool_call_id),
         reasoning_content: None,
+    };
+    // 图像块 → user 消息（base64 → data URI）。
+    let mut arr: Vec<Value> = Vec::new();
+    for block in output {
+        if let ContentBlock::Image {
+            source: Source::Base64 { media_type, data },
+            ..
+        } = block
+        {
+            if media_type.starts_with("image/") {
+                arr.push(json!({
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:{media_type};base64,{data}") }
+                }));
+            }
+        }
     }
+    if arr.is_empty() {
+        return vec![tool_msg];
+    }
+    arr.insert(
+        0,
+        json!({ "type": "text", "text": "[工具截图] 上面工具调用产出的画面：" }),
+    );
+    vec![
+        tool_msg,
+        OpenAIMessage {
+            role: "user".into(),
+            content: Some(Value::Array(arr)),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+            reasoning_content: None,
+        },
+    ]
 }
 
 /// 清洗消息名以满足 OpenAI 的 `^[a-zA-Z0-9_-]{1,64}$` 约束
@@ -349,7 +396,7 @@ mod tests {
     #[test]
     fn user_msg_conversion() {
         let msg = Msg::user("user", "你好");
-        let oai = convert_message(&msg);
+        let oai = &convert_message(&msg)[0];
         assert_eq!(oai.role, "user");
         assert_eq!(oai.name.as_deref(), Some("user"));
         assert_eq!(oai.content, Some(Value::String("你好".into())));
@@ -373,10 +420,10 @@ mod tests {
                 },
             ],
         );
-        let oai = convert_message(&msg);
+        let oai = &convert_message(&msg)[0];
         assert_eq!(oai.role, "assistant");
         assert_eq!(oai.content, Some(Value::String("我来算".into())));
-        let calls = oai.tool_calls.unwrap();
+        let calls = oai.tool_calls.as_ref().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function.name, "add");
         assert_eq!(calls[0].function.arguments, r#"{"a":1,"b":2}"#);
@@ -396,7 +443,7 @@ mod tests {
                 content: None,
             }],
         );
-        let oai = convert_message(&msg);
+        let oai = &convert_message(&msg)[0];
         assert_eq!(oai.content, Some(Value::String(String::new())));
         assert!(oai.tool_calls.is_some());
     }
@@ -419,7 +466,7 @@ mod tests {
             "3",
             ToolResultState::Success,
         );
-        let oai = convert_message(&msg);
+        let oai = &convert_message(&msg)[0];
         assert_eq!(oai.role, "tool");
         assert_eq!(oai.tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(oai.content, Some(Value::String("3".into())));
@@ -438,7 +485,7 @@ mod tests {
             state: ToolResultState::Success,
             execution_details: None,
         }];
-        let oai = convert_message(&msg);
+        let oai = &convert_message(&msg)[0];
         assert_eq!(oai.role, "tool");
         assert_eq!(oai.tool_call_id.as_deref(), Some("call_7"));
         assert_eq!(oai.content, Some(Value::String("12:00".into())));
@@ -472,8 +519,8 @@ mod tests {
                 },
             ],
         );
-        let oai = convert_message(&msg);
-        let content = oai.content.unwrap();
+        let oai = &convert_message(&msg)[0];
+        let content = oai.content.clone().unwrap();
         let arr = content.as_array().unwrap();
         assert_eq!(arr.len(), 3);
         assert_eq!(arr[0]["type"], "text");
@@ -534,14 +581,14 @@ mod tests {
                 ContentBlock::Text { text: "答案".into() },
             ],
         );
-        let oai = convert_message(&msg);
+        let oai = &convert_message(&msg)[0];
         assert_eq!(oai.reasoning_content.as_deref(), Some("推理"));
         let v = serde_json::to_value(&oai).unwrap();
         assert_eq!(v["reasoning_content"], "推理");
 
         // 无思考块时不携带该字段（skip_serializing_if 生效）
         let plain = Msg::assistant("assistant", vec![ContentBlock::Text { text: "hi".into() }]);
-        let v = serde_json::to_value(convert_message(&plain)).unwrap();
+        let v = serde_json::to_value(&convert_message(&plain)[0]).unwrap();
         assert!(v.get("reasoning_content").is_none());
     }
 

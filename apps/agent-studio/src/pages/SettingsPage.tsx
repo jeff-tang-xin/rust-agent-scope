@@ -15,9 +15,20 @@ import {
 import AgentFormModal from "../components/AgentFormModal";
 import PasteButton from "../components/PasteButton";
 
+/** Provider 协议类型注册表：值与后端 build_model 的分发键一致。 */
+const PROVIDER_TYPES: { value: string; label: string; baseUrl: string; keyless?: boolean }[] = [
+  { value: "openai", label: "OpenAI 兼容（DeepSeek / vLLM / DashScope 兼容模式…）", baseUrl: "https://api.openai.com/v1" },
+  { value: "openai-official", label: "OpenAI 官方（Responses API）", baseUrl: "https://api.openai.com" },
+  { value: "anthropic", label: "Anthropic（Claude）", baseUrl: "https://api.anthropic.com" },
+  { value: "gemini", label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
+  { value: "dashscope", label: "DashScope 原生（通义千问）", baseUrl: "https://dashscope.aliyuncs.com" },
+  { value: "ollama", label: "Ollama（本地，无需 Key）", baseUrl: "http://localhost:11434", keyless: true },
+];
+
 function emptyProvider(): ModelProviderConfig {
   return {
     name: "",
+    provider_type: "openai",
     base_url: "https://api.openai.com/v1",
     api_key: "",
     model: "",
@@ -268,12 +279,12 @@ export default function SettingsPage({
         {/* ---------- Providers ---------- */}
         <div className="card">
           <h2>Model Providers</h2>
-          <div className="desc">OpenAI 兼容服务（OpenAI / DashScope 兼容模式 / DeepSeek / Ollama / vLLM…）</div>
+          <div className="desc">模型服务（OpenAI 兼容 / OpenAI Responses / Anthropic / Gemini / DashScope / Ollama）</div>
           {providers.map((p) => (
             <div key={p.name} className="agent-list-item" style={{ cursor: "default" }}>
               <span className="name">{p.name}</span>
               <span className="desc">
-                {p.base_url} · {p.model}
+                [{p.provider_type || "openai"}] {p.base_url} · {p.model}
               </span>
               <span className="badge">{p.api_key ? "key set" : "no key"}</span>
               <button className="btn ghost" onClick={() => setProviderDraft(p)}>
@@ -286,6 +297,32 @@ export default function SettingsPage({
           ))}
           {providerDraft ? (
             <div style={{ marginTop: 12 }}>
+              <div className="lbl-row">
+                <label className="lbl">协议类型</label>
+              </div>
+              <select
+                className="field"
+                value={providerDraft.provider_type || "openai"}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const meta = PROVIDER_TYPES.find((t) => t.value === next);
+                  // base_url 未自定义（仍是某协议默认值）时跟随切换，否则保留
+                  const isPreset = PROVIDER_TYPES.some(
+                    (t) => providerDraft.base_url === t.baseUrl,
+                  );
+                  setProviderDraft({
+                    ...providerDraft,
+                    provider_type: next,
+                    base_url: isPreset && meta ? meta.baseUrl : providerDraft.base_url,
+                  });
+                }}
+              >
+                {PROVIDER_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
               <div className="row">
                 <div>
                   <div className="lbl-row">
@@ -343,7 +380,12 @@ export default function SettingsPage({
                 }
               />
               <div className="lbl-row">
-                <label className="lbl">API Key（仅存本地配置文件）</label>
+                <label className="lbl">
+                  {PROVIDER_TYPES.find((t) => t.value === (providerDraft.provider_type || "openai"))
+                    ?.keyless
+                    ? "API Key（Ollama 本地服务无需填写）"
+                    : "API Key（仅存本地配置文件）"}
+                </label>
                 <PasteButton
                   onPaste={(t) => setProviderDraft({ ...providerDraft, api_key: t })}
                 />

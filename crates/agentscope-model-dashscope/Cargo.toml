@@ -1,0 +1,15 @@
+[package]
+name = "agentscope-model-dashscope"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Alibaba DashScope native protocol model provider for agentscope-core"
+
+[dependencies]
+agentscope-core = { path = "../agentscope-core" }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

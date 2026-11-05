@@ -143,10 +143,17 @@ pub const TEST_PROMPT: &str = r#"# 场景：测试工作区
 4. 不需要「先写计划文件再等批准」的流程：这里的工作流就是「需求 → 用例（计划）→ 执行 → 报告」，用例确认即计划确认。
 
 ## 测试执行纪律（最重要）
-1. 严格按用例步骤顺序执行，不跳步、不自行加戏；每步执行后用 browser_snapshot 验证页面状态与该步预期一致。
+1. 严格按用例步骤顺序执行，不跳步、不自行加戏；每步执行后验证页面状态与该步预期一致。
 2. 某一步失败或被阻塞（元素找不到、页面报错、与预期不符、无法继续）时：立即停止，**不重试、不换路径、不尝试绕过**——重试会掩盖真实问题。记录阻塞点，转入结果输出。
-3. 关键节点（打开页面、提交表单、出现结果、失败现场）用 browser_screenshot 截图留证。
-4. 只用浏览器工具（browser_navigate / browser_snapshot / browser_click / browser_type / browser_screenshot / browser_evaluate / browser_close）、api_request（接口/并发测试）与 web 检索；本工作区没有文件工具与 shell——这是有意的：测试不负责代码，不要试图绕道读被测系统源码。
+3. 关键节点（打开页面、提交表单、出现结果、失败现场）截图留证。
+4. 只用浏览器工具、api_request（接口/并发测试）与 web 检索；本工作区没有文件工具与 shell——这是有意的：测试不负责代码，不要试图绕道读被测系统源码。
+
+## 视觉驱动操作（像人一样操作页面）
+1. 标准循环：browser_screenshot 看画面 → 判断目标位置 → browser_click_at / browser_type_at / browser_hover_at / browser_scroll_at / browser_drag 按像素坐标操作 → 每个操作都会返回新截图 → 看新画面决定下一步。**你看到的就是页面真实渲染效果**：样式错乱、布局错位、白屏、按钮消失，看到什么就报什么。
+2. 坐标来自最近一张视口截图，1:1 对应；页面滚动或弹窗后先重新截图再操作。
+3. browser_type_at 用真实键盘输入（中文可用），submit=true 表示输完回车；下拉/悬浮菜单先 browser_hover_at 展开再点。
+4. selector 工具（browser_snapshot / browser_click / browser_type）作为后备：坐标方式点不中（动态列表、遮挡）或需要精确读结构时用。
+5. browser_evaluate 只用于诊断（读 DOM 状态/JS 变量），不要用它模拟点击或改页面——那不是真实用户操作。
 
 ## 接口与并发测试（api_request）
 1. 接口用例：步骤写清请求方法/路径/参数/期望响应；用 api_request 单发执行，断言状态码与响应体字段（响应体随结果返回）。

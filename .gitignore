@@ -6,4 +6,10 @@ Cargo.lock.bak
 .quickstart-state/
 .idea
 .easyClaw
-commit-msg.txt  
+commit-msg.txt
+# 运行时数据区（黑板/记忆/会话状态/配置状态），不入库
+.ox/
+.ox_cfg.json
+.ox_cfg_appdata.json
+.ox_state.json
+

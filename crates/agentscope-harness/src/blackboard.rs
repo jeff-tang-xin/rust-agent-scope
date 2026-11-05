@@ -270,6 +270,7 @@ waiting on them. Entries are append-only for agents — ask the user to edit/rem
                 ),
                 state: ToolResultState::Success,
                 execution_details: None,
+                images: Vec::new(),
             }),
             Err(e) => Ok(ToolOutput::error(&e)),
         }
@@ -331,6 +332,7 @@ duplicated effort and conflicting decisions. The blackboard is shared across ses
                         content: "（黑板为空：还没有任何登记条目）".to_string(),
                         state: ToolResultState::Success,
                         execution_details: None,
+                        images: Vec::new(),
                     });
                 }
                 let mut sb = String::new();
@@ -347,6 +349,7 @@ duplicated effort and conflicting decisions. The blackboard is shared across ses
                     content: sb,
                     state: ToolResultState::Success,
                     execution_details: None,
+                    images: Vec::new(),
                 })
             }
             Err(e) => Ok(ToolOutput::error(&e)),

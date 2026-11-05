@@ -3,6 +3,11 @@ resolver = "2"
 members = [
     "crates/agentscope-core",
     "crates/agentscope-model-openai",
+    "crates/agentscope-model-anthropic",
+    "crates/agentscope-model-gemini",
+    "crates/agentscope-model-ollama",
+    "crates/agentscope-model-dashscope",
+    "crates/agentscope-model-openai-official",
     "crates/agentscope-harness",
     "examples/quickstart",
 ]
@@ -15,6 +20,11 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 agentscope-core = { path = "crates/agentscope-core" }
 agentscope-model-openai = { path = "crates/agentscope-model-openai" }
+agentscope-model-anthropic = { path = "crates/agentscope-model-anthropic" }
+agentscope-model-gemini = { path = "crates/agentscope-model-gemini" }
+agentscope-model-ollama = { path = "crates/agentscope-model-ollama" }
+agentscope-model-dashscope = { path = "crates/agentscope-model-dashscope" }
+agentscope-model-openai-official = { path = "crates/agentscope-model-openai-official" }
 
 async-trait = "0.1"
 base64 = "0.22"

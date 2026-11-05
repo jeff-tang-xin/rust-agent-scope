@@ -358,6 +358,7 @@ you MUST use it instead of shell commands."
             content: sb,
             state,
             execution_details: Some(details),
+            images: Vec::new(),
         })
     }
 }
@@ -469,6 +470,7 @@ impl Tool for WebFetchTool {
                 content: payload,
                 state: ToolResultState::Error,
                 execution_details: None,
+                images: Vec::new(),
             });
         }
         Ok(ToolOutput::ok(payload))
@@ -762,6 +764,7 @@ another node). Use task_output(block=false) to poll for completion."
             content: format_task_detail(&task),
             state: task_result_state(status),
             execution_details: None,
+            images: Vec::new(),
         })
     }
 

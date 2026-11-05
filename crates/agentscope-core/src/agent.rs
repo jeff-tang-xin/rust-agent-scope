@@ -17,7 +17,7 @@ use crate::context::RuntimeContext;
 use crate::error::{Error, Result};
 use crate::event::{AgentEvent, AgentEventEmitter, AgentEventKind, ConfirmResult};
 use crate::memory::Memory;
-use crate::message::{ContentBlock, GenerateReason, Msg, ToolCallState};
+use crate::message::{ContentBlock, GenerateReason, Msg, Role, ToolCallState};
 use crate::session::execution::SessionExecution;
 use crate::session::journal::SessionLog;
 use crate::session::projection::SessionProjection;
@@ -1874,13 +1874,27 @@ impl ReActAgent {
         })
         .await;
 
-        // 动作收尾：把结果块挂到动作上，重放据此清除「结果未知」
+        // 动作收尾：把结果块挂到动作上，重放据此清除「结果未知」。
+        // 工具带回的图像（截图等）作为 Image 块追加进 output——会话历史里
+        // 图跟 ToolResult 走（Anthropic 协议原生支持；OpenAI 由 formatter
+        // 拆为紧随的 user 消息）。
+        let mut output_blocks = vec![ContentBlock::Text {
+            text: output.content.clone(),
+        }];
+        for image in &output.images {
+            output_blocks.push(ContentBlock::Image {
+                source: crate::message::Source::Base64 {
+                    media_type: image.media_type.clone(),
+                    data: image.data.clone(),
+                },
+                min_pixels: None,
+                max_pixels: None,
+            });
+        }
         let result_block = ContentBlock::ToolResult {
             id: id.to_string(),
             name: name.to_string(),
-            output: vec![ContentBlock::Text {
-                text: output.content.clone(),
-            }],
+            output: output_blocks.clone(),
             state: result_state,
             execution_details: output.execution_details.clone(),
         };
@@ -1889,7 +1903,19 @@ impl ReActAgent {
             serde_json::json!({ "toolCallId": id, "result": result_block }),
         )?;
 
-        let result = Msg::tool_result(&self.name, id, name, output.content, result_state);
+        // 进对话历史的结果消息：直接构造（带图时 output 含 Image 块，
+        // Msg::tool_result 只支持纯文本）。
+        let result = Msg::new(
+            Role::Tool,
+            &self.name,
+            vec![ContentBlock::ToolResult {
+                id: id.to_string(),
+                name: name.to_string(),
+                output: output_blocks,
+                state: result_state,
+                execution_details: output.execution_details.clone(),
+            }],
+        );
         ctx.push(result);
         Ok(())
     }

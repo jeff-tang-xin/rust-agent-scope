@@ -37,6 +37,11 @@ reqwest = "0.12"
 # AgentScope Rust harness（path 依赖指向主仓库 crates；跨 workspace path 依赖合法）
 agentscope-core = { path = "../../../crates/agentscope-core" }
 agentscope-model-openai = { path = "../../../crates/agentscope-model-openai" }
+agentscope-model-anthropic = { path = "../../../crates/agentscope-model-anthropic" }
+agentscope-model-gemini = { path = "../../../crates/agentscope-model-gemini" }
+agentscope-model-ollama = { path = "../../../crates/agentscope-model-ollama" }
+agentscope-model-dashscope = { path = "../../../crates/agentscope-model-dashscope" }
+agentscope-model-openai-official = { path = "../../../crates/agentscope-model-openai-official" }
 agentscope-harness = { path = "../../../crates/agentscope-harness" }
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa", "flate2"] }
 russh-sftp = "2"

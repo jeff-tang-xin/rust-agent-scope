@@ -34,7 +34,73 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentscope-model-anthropic"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "agentscope-model-dashscope"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "agentscope-model-gemini"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "agentscope-model-ollama"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "agentscope-model-openai"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "agentscope-model-openai-official"
 version = "0.1.0"
 dependencies = [
  "agentscope-core",

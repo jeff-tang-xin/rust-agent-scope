@@ -32,6 +32,20 @@ pub struct ToolOutput {
     pub state: ToolResultState,
     /// 执行明细（对应 Java `ToolResultBlock.withExecutionDetails`；`None` = 不携带）。
     pub execution_details: Option<crate::message::ToolExecutionDetails>,
+    /// 工具产出的图像（截图等，base64）：随结果回传给多模态模型——
+    /// 智能体「看得见」工具操作的画面（浏览器截图 → 视觉驱动操作）。
+    /// 协议适配层负责落位：Anthropic 原生进 tool_result；OpenAI 拆为
+    /// 紧随的 user 消息（tool 消息只支持纯文本）。
+    pub images: Vec<ToolImage>,
+}
+
+/// 工具输出的图像载荷（base64 内联，对应 `ContentBlock::Image` 的 Base64Source）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolImage {
+    /// MIME 类型（如 `image/png`）。
+    pub media_type: String,
+    /// 不含 data: 前缀的纯 base64 数据。
+    pub data: String,
 }
 
 impl ToolOutput {
@@ -41,7 +55,17 @@ impl ToolOutput {
             content: content.into(),
             state: ToolResultState::Success,
             execution_details: None,
+            images: Vec::new(),
         }
+    }
+
+    /// 附加一张图像（builder 风格）：`ToolOutput::ok(..).with_image("image/png", b64)`。
+    pub fn with_image(mut self, media_type: impl Into<String>, data: impl Into<String>) -> Self {
+        self.images.push(ToolImage {
+            media_type: media_type.into(),
+            data: data.into(),
+        });
+        self
     }
 
     /// 失败输出（以错误信息回传给模型，模型可据此调整重试）。
@@ -50,6 +74,7 @@ impl ToolOutput {
             content: content.into(),
             state: ToolResultState::Error,
             execution_details: None,
+            images: Vec::new(),
         }
     }
 
@@ -59,6 +84,7 @@ impl ToolOutput {
             content: content.into(),
             state: ToolResultState::Denied,
             execution_details: None,
+            images: Vec::new(),
         }
     }
 
@@ -68,6 +94,7 @@ impl ToolOutput {
             content: content.into(),
             state: ToolResultState::Suspended,
             execution_details: None,
+            images: Vec::new(),
         }
     }
 

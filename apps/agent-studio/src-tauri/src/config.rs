@@ -10,15 +10,20 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// 模型 Provider 配置（OpenAI 兼容协议；`base_url` 可指向 DashScope 兼容模式、
-/// DeepSeek、Ollama、vLLM 等，对齐 `OpenAIChatModel::with_base_url` 的语义）。
+/// 模型 Provider 配置（`provider_type` 选择协议实现；`base_url` 可指向
+/// 兼容网关，对齐各 `*ChatModel::with_base_url` 的语义）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProviderConfig {
     /// 展示名（Agent 通过名字引用）。
     pub name: String,
-    /// OpenAI 兼容服务地址。
+    /// 协议类型：openai（兼容协议，默认）| anthropic | gemini | ollama |
+    /// dashscope | openai-official（Responses API）。缺省回落 openai——
+    /// 旧版本配置文件无此字段，行为与升级前一致。
+    #[serde(default)]
+    pub provider_type: String,
+    /// 服务地址（openai 兼容 / 各协议原生服务的地址；ollama 无认证）。
     pub base_url: String,
-    /// API key（仅存本地配置文件；日志与事件中不回显）。
+    /// API key（仅存本地配置文件；日志与事件中不回显。ollama 不需要）。
     #[serde(default)]
     pub api_key: String,
     /// 默认模型名（如 `deepseek-chat`、`qwen-plus`）。
