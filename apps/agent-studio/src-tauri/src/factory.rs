@@ -184,20 +184,26 @@ fn register_base_tools(
     toolkit: &mut Toolkit,
     workspace: &Arc<WorkspaceManager>,
     memory_workspace: Arc<WorkspaceManager>,
+    // 是否装配文件工具与本地 shell。测试工作区传 false：测试只对需求负责、
+    // 不碰代码（代码实现与修复是协同侧的职责），文件工具只会诱导它去读
+    // 被测系统源码（绑定协同后工作区根就是协同项目目录）。
+    include_fs: bool,
 ) -> Result<(), String> {
-    let fs = workspace
-        .filesystem()
-        .cloned()
-        .ok_or_else(|| "workspace has no filesystem layer".to_string())?;
-    for tool in FilesystemToolSet::new(fs, None).all() {
-        toolkit.register(tool);
+    if include_fs {
+        let fs = workspace
+            .filesystem()
+            .cloned()
+            .ok_or_else(|| "workspace has no filesystem layer".to_string())?;
+        for tool in FilesystemToolSet::new(fs, None).all() {
+            toolkit.register(tool);
+        }
+        // 本地 shell 执行（对齐 Java ShellExecuteTool）：锚定工作区根——
+        // working_directory 相对路径在沙箱根下解析，绝对路径 / `~` / `..`
+        // 已在工具层拒绝；权限面默认 ask（每次执行需用户批准）。
+        toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
+            LocalShellBackend::new_anchored(workspace.root().to_path_buf()),
+        ))));
     }
-    // 本地 shell 执行（对齐 Java ShellExecuteTool）：锚定工作区根——
-    // working_directory 相对路径在沙箱根下解析，绝对路径 / `~` / `..`
-    // 已在工具层拒绝；权限面默认 ask（每次执行需用户批准）。
-    toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
-        LocalShellBackend::new_anchored(workspace.root().to_path_buf()),
-    ))));
     // 记忆工具锚定独立的 .ox 记忆工作区（<项目>/.ox/）：MEMORY.md 与
     // memory/ 台账不落项目根，非业务产出与业务代码分离（.ox 数据规范）。
     let memory = MemoryToolSet::new(memory_workspace.clone());
@@ -239,7 +245,7 @@ fn build_member(
     let memory_workspace = build_memory_workspace(workspace.root())?;
     let state_store = build_state_store(&dir.join("state"))?;
     let mut toolkit = Toolkit::new();
-    register_base_tools(&mut toolkit, &workspace, memory_workspace)?;
+    register_base_tools(&mut toolkit, &workspace, memory_workspace, true)?;
     HarnessAgentBuilder::new()
         .name(&member.name)
         .sys_prompt(agentscope_harness::agent::build_subagent_sys_prompt(
@@ -390,7 +396,13 @@ pub fn build_agent(
     let members: MemberRegistry = Arc::new(members);
 
     let mut toolkit = Toolkit::new();
-    register_base_tools(&mut toolkit, &workspace, memory_workspace.clone())?;
+    // 测试工作区不装文件工具与 shell（测需求不碰代码，职责见 register_base_tools）。
+    register_base_tools(
+        &mut toolkit,
+        &workspace,
+        memory_workspace.clone(),
+        mode != StudioMode::Test,
+    )?;
     // 内置浏览器自动化（所有场景开放）：headful 真浏览器 + CDP，截图归
     // 工作区 `.ox/screenshots/`。
     let browser_ctx = Arc::new(crate::browser_tool::BrowserCtx {
