@@ -394,6 +394,105 @@ regress it), or 'closed' when the regression passed. Read-only otherwise."
     }
 }
 
+// ---------- 工具：bug_list ----------
+
+/// Bug 总览：跨需求列出 Bug（可按状态过滤）——修复排期的入口。
+pub struct BugList {
+    pub ctx: ReqCtx,
+}
+
+#[async_trait::async_trait]
+impl Tool for BugList {
+    fn name(&self) -> &str {
+        "bug_list"
+    }
+
+    fn description(&self) -> &str {
+        "List bugs across all requirements (id, title, severity, status, owning \
+requirement/case, reproduction steps, fix note). Optional status filter: open \
+(default when you want what needs fixing), fixed, closed, or omit for all. \
+Read-only. Use it to plan what to fix; use req_detail for the full requirement \
+context behind a bug."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["open", "fixed", "closed"],
+                    "description": "Filter by status. Omit to list all."}
+            }
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let status_filter = input_str(&input, "status").map(|s| s.trim().to_string());
+        if let Some(s) = &status_filter {
+            if !matches!(s.as_str(), "open" | "fixed" | "closed") {
+                return Ok(ToolOutput::error(format!(
+                    "status 只能是 open/fixed/closed 或省略，收到 `{s}`"
+                )));
+            }
+        }
+        let root = match self.ctx.root() {
+            Ok(r) => r,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let bugs: Vec<Bug> = load_json(&root.join("bugs.json"));
+        if bugs.is_empty() {
+            return Ok(ToolOutput::ok("暂无 Bug。测试任务执行中产出失败时会自动提交。"));
+        }
+        let cases: Vec<TestCase> = load_json(&root.join("cases.json"));
+        let requirements: Vec<Requirement> = load_json(&root.join("requirements.json"));
+        let matched: Vec<&Bug> = bugs
+            .iter()
+            .filter(|b| status_filter.as_deref().map_or(true, |s| b.status == s))
+            .collect();
+        if matched.is_empty() {
+            return Ok(ToolOutput::ok(format!(
+                "没有状态为 `{}` 的 Bug（共 {} 个 Bug）。",
+                status_filter.unwrap_or_default(),
+                bugs.len()
+            )));
+        }
+        let open_total = bugs.iter().filter(|b| b.status == "open").count();
+        let mut out = format!(
+            "共 {} 个 Bug（open {}）：\n",
+            bugs.len(),
+            open_total
+        );
+        for b in &matched {
+            let case = cases.iter().find(|c| c.id == b.case_id);
+            let req = case.and_then(|c| requirements.iter().find(|r| r.id == c.requirement_id));
+            out.push_str(&format!(
+                "\n- id={} 「{}」 严重度 {} 状态 {}｜需求：{}｜用例：{}\n",
+                b.id,
+                b.title,
+                b.severity,
+                b.status,
+                req.map_or("（未关联）", |r| r.title.as_str()),
+                case.map_or("（未关联）", |c| c.title.as_str()),
+            ));
+            if !b.steps.is_empty() {
+                out.push_str(&format!("  复现步骤：\n{}\n", b.steps));
+            }
+            if !b.expected.is_empty() || !b.actual.is_empty() {
+                out.push_str(&format!("  预期：{}｜实际：{}\n", b.expected, b.actual));
+            }
+            if !b.fix_note.is_empty() {
+                out.push_str(&format!("  修复说明：{}\n", b.fix_note));
+            }
+            if !b.screenshots.is_empty() {
+                out.push_str(&format!(
+                    "  截图：{}（.ox/screenshots/ 下）\n",
+                    b.screenshots.join(", ")
+                ));
+            }
+        }
+        Ok(ToolOutput::ok(out))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -549,6 +648,24 @@ mod tests {
         let bugs: Vec<Bug> = load_json(&root.join("bugs.json"));
         assert_eq!(bugs[0].status, "fixed");
         assert!(bugs[0].fix_note.contains("Login.tsx"));
+
+        // bug_list：全量列出（含修复说明）；open 过滤为空态。
+        let all = ok_text(BugList { ctx: ctx.clone() }.call(json!({})).await.unwrap());
+        assert!(all.contains("登录按钮无响应") && all.contains("fixed"));
+        assert!(all.contains("修复说明"));
+        let open_only = ok_text(
+            BugList { ctx: ctx.clone() }
+                .call(json!({"status": "open"}))
+                .await
+                .unwrap(),
+        );
+        assert!(open_only.contains("没有状态为 `open` 的 Bug"));
+        // 非法过滤值被拒。
+        let out = BugList { ctx: ctx.clone() }
+            .call(json!({"status": "whatever"}))
+            .await
+            .unwrap();
+        assert_eq!(out.state, ToolResultState::Error);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

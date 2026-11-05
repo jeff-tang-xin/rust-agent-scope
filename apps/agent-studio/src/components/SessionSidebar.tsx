@@ -291,9 +291,22 @@ export default function SessionSidebar({
           </div>
           {w.id === selectedId && (
             <>
-              <div className="ss-ws-path" title={w.dir.trim() || "默认工作区（~/.ox）"}>
-                {w.dir.trim() || "默认工作区（~/.ox）"}
-              </div>
+              {/* 测试工作区绑定协同后实际目录跟随协同（effective_workspace_root），
+                  路径行如实展示绑定目标，避免误以为数据落在自己的 dir（常为空）。 */}
+              {(() => {
+                const bound = w.bound_workspace_id
+                  ? workspaces.find((x) => x.id === w.bound_workspace_id)
+                  : null;
+                const pathText =
+                  w.kind === "test" && bound
+                    ? `↳ 绑定协同 ${bound.name}（${bound.dir.trim() || "默认目录"}）`
+                    : w.dir.trim() || "默认工作区（~/.ox）";
+                return (
+                  <div className="ss-ws-path" title={pathText}>
+                    {pathText}
+                  </div>
+                );
+              })()}
               <div className="ss-sessions">
               {(() => {
                 const renderRow = (s: SessionSummary, child: boolean) => {

@@ -13,6 +13,7 @@
 // 导出（系统保存对话框 + write_export_file，仅 .md）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   api,
@@ -1590,6 +1591,63 @@ const sourceLabel = (s: string) =>
 
 // ==================== 页签：测试任务 ====================
 
+/** 执行中内嵌直播：轮询 CDP 视口截图（与 BrowserPreviewPanel 同一数据源）。
+ * 用户执行任务时最想同时看的是「Agent 正在操作的页面」+「测试结论」——
+ * 直播嵌在任务列表上方，一屏同看，不用在两个互斥面板间来回切。 */
+function TestLiveView() {
+  const [shot, setShot] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const data = await invoke<string>("browser_preview_shot");
+        if (stopped) return;
+        setErr("");
+        setShot(data);
+      } catch (e) {
+        if (!stopped) setErr(String(e));
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 600);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+  return (
+    <div className="test-live">
+      <div className="test-live-head">
+        {shot ? (
+          <>
+            <span className="live-dot" /> Agent 正在操作页面
+          </>
+        ) : (
+          "🌐 等待 Agent 打开页面…"
+        )}
+        <span className="spacer" />
+        <span className="test-live-hint">操作在独立浏览器窗口，此处只读观察</span>
+      </div>
+      <div className="test-live-host">
+        {err ? (
+          <div className="file-empty">{err}</div>
+        ) : shot ? (
+          <img
+            className="test-live-img"
+            src={`data:image/png;base64,${shot}`}
+            alt="Agent 正在操作的页面"
+          />
+        ) : (
+          <div className="file-empty">
+            浏览器未启动。Agent 调用 browser_navigate 后，这里实时显示它正在操作的页面。
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TasksTab({
   data,
   runningTaskId,
@@ -1633,6 +1691,7 @@ function TasksTab({
   }
   return (
     <div className="test-body">
+      {runningTaskId !== "" && <TestLiveView />}
       <div className="test-section">
         <div className="test-section-head">
           <span className="test-section-title">测试任务（{data.tasks.length}）</span>

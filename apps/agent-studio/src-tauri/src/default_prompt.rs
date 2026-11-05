@@ -107,9 +107,9 @@ pub const TEAM_PROMPT: &str = r#"# 场景：team 领队
 
 /// 需求-Bug 闭环协议（协同侧：solo/team 共用，与测试工作区打通）。
 pub const REQ_LOOP_PROMPT: &str = r#"# 需求-Bug 闭环（与测试工作区打通）
-本工作区与测试工作区共享同一份需求/Bug 数据（存储由系统锚定，不要用文件工具直接读写，一律走专用工具 req_create / req_list / req_detail / bug_set_status）：
+本工作区与测试工作区共享同一份需求/Bug 数据（存储由系统锚定，不要用文件工具直接读写，一律走专用工具 req_create / req_list / req_detail / bug_list / bug_set_status）：
 1. 讨论收敛出明确、可测试的需求时用 req_create 沉淀（来源标记「协同」）——测试侧会看到它并生成用例、执行测试；需求还没收敛清楚（方案未定、验收标准不明）就不要急着创建。
-2. req_list 看需求全貌（用例数、Bug 数、来源）；req_detail 看单条需求的描述、数据现状、澄清记录、关联用例与 Bug（含复现步骤、预期/实际、截图文件名、修复说明）。
+2. req_list 看需求全貌（用例数、Bug 数、来源）；req_detail 看单条需求的描述、数据现状、澄清记录、关联用例与 Bug（含复现步骤、预期/实际、截图文件名、修复说明）；bug_list 跨需求列 Bug（可按 status=open 过滤）——用户让你修 Bug 或问「有哪些问题」时先看它，再对目标 Bug 所在需求 req_detail 拿完整上下文。
 3. 测试产出的 Bug 挂在需求下的用例上：修复前先 req_detail 拿复现步骤与失败证据；定位根因、修改代码并自测（编译/相关测试通过）后，用 bug_set_status 置 fixed 并写清 fix_note（改了什么、根因是什么、怎么修的）——测试侧「继续执行」会自动重跑该用例回归；回归通过后置 closed。
 4. 没有自测过不要置 fixed：虚假的 fixed 会让测试侧误判回归通过，污染整个闭环。"#;
 

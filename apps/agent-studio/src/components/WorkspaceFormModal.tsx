@@ -75,6 +75,11 @@ export default function WorkspaceFormModal({
   // 测试助手可能还没建（后端 load 时兜底注入，前端列表未必有）：以 id 兜底。
   const testAgent = agents.find((a) => a.id === TEST_AGENT_ID);
   const effectiveAgentId = isTest ? TEST_AGENT_ID : agentId;
+  // 绑定的协同工作区（测试类）：目录输入框展示其实际目录（只读），
+  // 比空输入框 + placeholder 直观——生效目录 = 协同的目录。
+  const boundWs = isTest
+    ? workspaces.find((w) => w.id === boundWsId) ?? null
+    : null;
 
   const toggleMember = (id: string) => {
     setMembers((prev) =>
@@ -245,7 +250,7 @@ export default function WorkspaceFormModal({
         <input
           className="field"
           placeholder="如 F:\java\my-project 或 ~/.ox/db/my —— 智能体的文件工具将锚定该目录"
-          value={dir}
+          value={isTest && boundWs ? boundWs.dir.trim() || "（协同默认目录）" : dir}
           disabled={isTest && Boolean(boundWsId)}
           onChange={(e) => {
             setDirTouched(true);

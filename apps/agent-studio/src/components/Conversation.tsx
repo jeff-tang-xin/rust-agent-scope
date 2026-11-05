@@ -25,6 +25,7 @@ import TestWorkbench from "./TestWorkbench";
 import DatabasesPanel from "./DatabasesPanel";
 import OxDataPanel from "./OxDataPanel";
 import BrowserPreviewPanel from "./BrowserPreviewPanel";
+import CollabTestPanel from "./CollabTestPanel";
 import { usePanelWidth } from "./usePanelWidth";
 import DataViewerModal from "./DataViewerModal";
 
@@ -551,6 +552,8 @@ export default function Conversation({
   // .ox 数据面板（黑板报 + 记忆）：与文件/服务器/数据库面板互斥展开。
   const [oxOpen, setOxOpen] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
+  // 协同侧「需求与 Bug」面板（仅协同工作区）：看绑定测试的需求/Bug、发起修复。
+  const [reqOpen, setReqOpen] = useState(false);
   // 测试工作台（test 工作区默认展开：需求/用例/任务/报告是这类工作区的主操作面）。
   const [testOpen, setTestOpen] = useState(workspace.kind === "test");
   // 测试工作区固定计划模式：初始即亮（后端 getPlanStatus 同样恒报 active）。
@@ -1281,8 +1284,8 @@ export default function Conversation({
     setAttachments(atts);
   };
 
-  const send = async () => {
-    const text = input.trim();
+  const send = async (override?: string) => {
+    const text = (override ?? input).trim();
     // busy 检查走同步 ref：state 在同一渲染周期内不更新，双击/回车+点击
     // 会连发两条（见 busyRef 注释）。
     if ((!text && attachments.length === 0) || busyRef.current) return;
@@ -2132,6 +2135,13 @@ export default function Conversation({
           onCollapse={() => setOxOpen(false)}
           onToast={onToast}
         />
+      ) : reqOpen ? (
+        <CollabTestPanel
+          workspaceId={workspace.id}
+          busy={busy}
+          onSend={(text) => void send(text)}
+          onCollapse={() => setReqOpen(false)}
+        />
       ) : browserOpen ? (
         <BrowserPreviewPanel onCollapse={() => setBrowserOpen(false)} />
       ) : testOpen ? (
@@ -2151,6 +2161,7 @@ export default function Conversation({
             onClick={() => {
               setFilesOpen(true);
               setOxOpen(false);
+              setReqOpen(false);
             }}
           >
             {workspace.kind === "db" ? "🗄" : "📁"}
@@ -2161,10 +2172,25 @@ export default function Conversation({
             onClick={() => {
               setOxOpen(true);
               setFilesOpen(false);
+              setReqOpen(false);
             }}
           >
             📋
           </button>
+          {workspace.kind === "collab" && (
+            <button
+              className="file-panel-tab"
+              title="展开需求与 Bug 面板（绑定测试工作区的数据 + 发起修复）"
+              onClick={() => {
+                setReqOpen(true);
+                setFilesOpen(false);
+                setOxOpen(false);
+                setBrowserOpen(false);
+              }}
+            >
+              🐛
+            </button>
+          )}
           <button
             className="file-panel-tab"
             title="展开浏览器直播面板（Agent 正在操作的页面）"
@@ -2172,6 +2198,7 @@ export default function Conversation({
               setBrowserOpen(true);
               setFilesOpen(false);
               setOxOpen(false);
+              setReqOpen(false);
             }}
           >
             🌐
@@ -2185,6 +2212,7 @@ export default function Conversation({
                 setFilesOpen(false);
                 setOxOpen(false);
                 setBrowserOpen(false);
+                setReqOpen(false);
               }}
             >
               🧪

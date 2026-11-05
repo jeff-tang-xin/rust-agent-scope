@@ -143,6 +143,18 @@ pub fn effective_workspace_root(
     resolve_workspace_root(data_dir, ws)
 }
 
+/// 是否有测试工作区绑定到该协同工作区：req_* 工具与闭环协议只在此时
+/// 注册/拼接——没绑定时这些工具读的是空数据，注册只会误导模型。
+/// 绑定/解绑后新装配的会话自动生效（build_agent 每次都重新判定）。
+pub(crate) fn has_test_bound_to(config: &StudioConfig, collab_id: &str) -> bool {
+    config.workspaces.iter().any(|w| {
+        w.kind == "test"
+            && w.bound_workspace_id
+                .as_deref()
+                .map_or(false, |b| b == collab_id)
+    })
+}
+
 /// 构建 OpenAI 兼容模型。
 fn build_model(provider: &ModelProviderConfig) -> Result<Arc<dyn Model>, String> {
     let mut model = OpenAIChatModel::new(&provider.api_key, &provider.model);
@@ -478,9 +490,13 @@ pub fn build_agent(
     }
     // 需求协作工具（协同专属：Solo/Team 两种运行方式都注册；ops/db/test 不注册）。
     // 打通协同↔测试闭环：讨论沉淀需求（req_create）、查需求与 Bug（req_list/
-    // req_detail）、修复后置状态（bug_set_status）。数据锚定生效工作区根下的
-    // .ox/testing/——测试工作区绑定协同工作区时两边读写同一份数据。
-    if matches!(mode, StudioMode::Solo | StudioMode::Team) {
+    // req_detail/bug_list）、修复后置状态（bug_set_status）。数据锚定生效工作区
+    // 根下的 .ox/testing/——测试工作区绑定协同工作区时两边读写同一份数据。
+    // **有测试绑定到本协同才注册**：没绑定时工具读的是空数据，注册只会
+    // 误导模型去调（绑定/解绑后新装配的会话自动生效）。
+    if matches!(mode, StudioMode::Solo | StudioMode::Team)
+        && has_test_bound_to(config, &ws.id)
+    {
         let req_ctx = crate::req_tool::ReqCtx {
             data_dir: data_dir.to_path_buf(),
             config: Arc::clone(&resources.config),
@@ -489,6 +505,7 @@ pub fn build_agent(
         toolkit.register(Arc::new(crate::req_tool::ReqCreate { ctx: req_ctx.clone() }));
         toolkit.register(Arc::new(crate::req_tool::ReqList { ctx: req_ctx.clone() }));
         toolkit.register(Arc::new(crate::req_tool::ReqDetail { ctx: req_ctx.clone() }));
+        toolkit.register(Arc::new(crate::req_tool::BugList { ctx: req_ctx.clone() }));
         toolkit.register(Arc::new(crate::req_tool::BugSetStatus { ctx: req_ctx }));
     }
     // 远程能力统一注册（ops/db 的类别默认 + 各类别的绑定开放，一套语义）：
@@ -547,7 +564,12 @@ pub fn build_agent(
         .collect();
     let mut builder = HarnessAgentBuilder::new()
         .name(&agent.name)
-        .sys_prompt(sys_prompt_for(agent, mode))
+        .sys_prompt(sys_prompt_for(
+            agent,
+            mode,
+            matches!(mode, StudioMode::Solo | StudioMode::Team)
+                && has_test_bound_to(config, &ws.id),
+        ))
         .model(build_model(provider)?)
         .toolkit(toolkit)
         .workspace_manager(Arc::clone(&workspace))
@@ -820,7 +842,7 @@ fn allowlist(bound: &[String]) -> Option<Vec<String>> {
 ///
 /// plan 场景层（[`default_prompt::SOLO_PLAN_PROMPT`]）不在此拼接——plan 由
 /// 用户手动开启，经 `PlanModeMiddleware` 在进入 plan 态时动态注入。
-fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
+fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode, has_req_loop: bool) -> String {
     let mut prompt = String::new();
     if !agent.description.is_empty() {
         prompt.push_str(&agent.description);
@@ -838,9 +860,9 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     };
     prompt.push_str("\n\n");
     prompt.push_str(&role_note);
-    // 需求-Bug 闭环协议：协同侧（solo/team）追加——与测试工作区共享需求/Bug
-    // 数据，req_* 工具只在协同面注册，协议也只对协同面拼接。
-    if matches!(mode, StudioMode::Solo | StudioMode::Team) {
+    // 需求-Bug 闭环协议：协同侧（solo/team）且**有测试工作区绑定到本协同**
+    // 时追加——与 req_* 工具同条件（工具没注册时协议只会引导模型调不存在的工具）。
+    if matches!(mode, StudioMode::Solo | StudioMode::Team) && has_req_loop {
         prompt.push_str("\n\n");
         prompt.push_str(crate::default_prompt::REQ_LOOP_PROMPT.trim());
     }
@@ -939,6 +961,45 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// req_* 工具的注册条件：有测试工作区绑定到该协同才 true；
+    /// 无绑定 / 绑定指向别的协同 / 非测试类别绑定都不算。
+    #[test]
+    fn has_test_bound_to_matches_only_bound_tests() {
+        let mk = |id: &str, kind: &str, bound: Option<&str>| WorkspaceConfig {
+            id: id.into(),
+            name: id.into(),
+            kind: kind.into(),
+            agent_id: "a".into(),
+            dir: String::new(),
+            members: vec![],
+            bound_servers: vec![],
+            bound_databases: vec![],
+            created_at: 0,
+            auto_resource: None,
+            bound_workspace_id: bound.map(|s| s.to_string()),
+        };
+        let mut config = StudioConfig::default();
+        config.workspaces.push(mk("ws-collab", "collab", None));
+        config.workspaces.push(mk("ws-collab-2", "collab", None));
+        // 未绑定 → false。
+        assert!(!has_test_bound_to(&config, "ws-collab"));
+        // 测试绑定到别的协同 → 本协同仍 false。
+        config
+            .workspaces
+            .push(mk("ws-test", "test", Some("ws-collab-2")));
+        assert!(!has_test_bound_to(&config, "ws-collab"));
+        // 测试绑定到本协同 → true。
+        config
+            .workspaces
+            .push(mk("ws-test-2", "test", Some("ws-collab")));
+        assert!(has_test_bound_to(&config, "ws-collab"));
+        // 非测试类别即使填了绑定 id 也不算（防御）。
+        config
+            .workspaces
+            .push(mk("ws-ops", "ops", Some("ws-collab")));
+        assert!(has_test_bound_to(&config, "ws-collab"));
     }
 
     #[test]
