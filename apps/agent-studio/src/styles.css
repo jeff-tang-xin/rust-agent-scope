@@ -522,7 +522,8 @@ body {
 
 .composer {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: var(--bg-raised);
@@ -530,8 +531,17 @@ body {
   flex-shrink: 0;
 }
 
+/* 状态行：计划模式徽章等，独立于输入行，不抢 textarea 宽度 */
+.composer-status { display: flex; }
+
+/* 输入行：图标钮 + 附件 + textarea + 发送/停止/清空 */
+.composer-row { display: flex; gap: 8px; }
+
 .composer textarea {
   flex: 1;
+  /* flex-basis 0 且 textarea 的自动最小宽度为 0（overflow 非 visible），
+     空间不足时会被挤成竖排窄条——给保底宽度 */
+  min-width: 120px;
   resize: none;
   min-height: 44px;
   max-height: 160px;

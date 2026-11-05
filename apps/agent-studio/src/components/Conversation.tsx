@@ -1989,6 +1989,23 @@ export default function Conversation({
         </button>
       )}
       <div className="composer">
+        {/* 计划模式徽章独立成行：测试工作区恒亮且文案长，与输入框同行会把
+            textarea（flex-basis 0 且无最小宽度）挤成竖排窄条。 */}
+        {planActive && (
+          <div className="composer-status">
+            <span
+              className="badge plan"
+              title={
+                isTestWorkspace
+                  ? "测试工作区固定使用计划模式（用例即计划），无需也无法切换"
+                  : "当前处于计划模式：先与我对齐方案，确认后再执行"
+              }
+            >
+              {isTestWorkspace ? "计划模式 · 测试固定" : "计划模式"}
+            </span>
+          </div>
+        )}
+        <div className="composer-row">
         {supportsPlan && (
           <button
             className={`btn ghost icon-only${planActive ? " plan-on" : ""}`}
@@ -1998,11 +2015,6 @@ export default function Conversation({
           >
             📋
           </button>
-        )}
-        {planActive && (
-          <span className="badge plan" style={{ alignSelf: "center" }}>
-            {isTestWorkspace ? "计划模式 · 测试固定" : "计划模式"}
-          </span>
         )}
         <label className="btn ghost attach-btn" title="添加附件（图片直接看；Excel/PDF/CSV 自动解析成文本；其他文件原样附带，≤8MB）">
           📎
@@ -2098,6 +2110,7 @@ export default function Conversation({
         >
           🗑
         </button>
+        </div>
       </div>
       {dragActive && <div className="drop-hint">松开以添加附件</div>}
       </div>
