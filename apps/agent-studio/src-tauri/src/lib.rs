@@ -10,6 +10,7 @@ mod db_exec;
 mod db_kind;
 mod default_prompt;
 mod factory;
+mod req_tool;
 mod session;
 mod ssh_tool;
 mod terminal_capture;

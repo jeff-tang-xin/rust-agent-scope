@@ -476,6 +476,21 @@ pub fn build_agent(
             ));
         }
     }
+    // 需求协作工具（协同专属：Solo/Team 两种运行方式都注册；ops/db/test 不注册）。
+    // 打通协同↔测试闭环：讨论沉淀需求（req_create）、查需求与 Bug（req_list/
+    // req_detail）、修复后置状态（bug_set_status）。数据锚定生效工作区根下的
+    // .ox/testing/——测试工作区绑定协同工作区时两边读写同一份数据。
+    if matches!(mode, StudioMode::Solo | StudioMode::Team) {
+        let req_ctx = crate::req_tool::ReqCtx {
+            data_dir: data_dir.to_path_buf(),
+            config: Arc::clone(&resources.config),
+            workspace_id: ws.id.clone(),
+        };
+        toolkit.register(Arc::new(crate::req_tool::ReqCreate { ctx: req_ctx.clone() }));
+        toolkit.register(Arc::new(crate::req_tool::ReqList { ctx: req_ctx.clone() }));
+        toolkit.register(Arc::new(crate::req_tool::ReqDetail { ctx: req_ctx.clone() }));
+        toolkit.register(Arc::new(crate::req_tool::BugSetStatus { ctx: req_ctx }));
+    }
     // 远程能力统一注册（ops/db 的类别默认 + 各类别的绑定开放，一套语义）：
     // - ops 类别默认开放 remote_shell；db 类别默认开放 db_query/db_dml；
     // - 其余类别（collab）绑定非空才开放对应工具；
@@ -823,6 +838,12 @@ fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode) -> String {
     };
     prompt.push_str("\n\n");
     prompt.push_str(&role_note);
+    // 需求-Bug 闭环协议：协同侧（solo/team）追加——与测试工作区共享需求/Bug
+    // 数据，req_* 工具只在协同面注册，协议也只对协同面拼接。
+    if matches!(mode, StudioMode::Solo | StudioMode::Team) {
+        prompt.push_str("\n\n");
+        prompt.push_str(crate::default_prompt::REQ_LOOP_PROMPT.trim());
+    }
     // .ox 数据规范：.ox/ 是系统数据区（记忆/黑板/会话/计划，路径系统锚定），
     // 模型自由写文件不得进入；业务代码之外的非业务文件放用户指定位置或系统临时目录。
     prompt.push_str(

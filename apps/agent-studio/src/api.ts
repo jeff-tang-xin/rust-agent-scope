@@ -216,6 +216,8 @@ export interface TestRequirement {
   images: string[];
   /** 需求澄清问答记录（"问：…／答：…"）；智能体信息不足先提问，回答后存回需求。 */
   clarifications: string[];
+  /** collab = 协同工作区沉淀（req_create）；test = 本侧自建。 */
+  origin: string;
   created_at: number;
 }
 
@@ -305,6 +307,8 @@ export interface TestBug {
   task_id: string;
   /** open / fixed / closed。 */
   status: string;
+  /** 修复说明（协同侧置 fixed 时写入：改了什么、根因、怎么修的）。 */
+  fix_note: string;
   created_at: number;
 }
 

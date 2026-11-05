@@ -238,7 +238,7 @@ fn testing_root(state: &AppState, workspace_id: &str) -> Result<PathBuf, String>
 }
 
 /// 读 JSON 文件；缺失/损坏按默认值（空表）处理——数据文件损坏不阻断面板打开。
-fn load_json<T: Default + serde::de::DeserializeOwned>(path: &Path) -> T {
+pub(crate) fn load_json<T: Default + serde::de::DeserializeOwned>(path: &Path) -> T {
     std::fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -246,7 +246,7 @@ fn load_json<T: Default + serde::de::DeserializeOwned>(path: &Path) -> T {
 }
 
 /// 原子写：先写 `.tmp` 再 rename（进程崩溃不留半个文件）。
-fn save_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
+pub(crate) fn save_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
     }
@@ -256,14 +256,14 @@ fn save_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> 
     std::fs::rename(&tmp, path).map_err(|e| format!("rename: {e}"))
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 

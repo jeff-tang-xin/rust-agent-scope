@@ -766,7 +766,7 @@ export default function TestWorkbench({
             data={data}
             busy={convBusy || runningRef.current}
             onNewReq={() =>
-              setReqForm({ id: "", title: "", content: "", data_profile: "", images: [], clarifications: [], created_at: 0 })
+              setReqForm({ id: "", title: "", content: "", data_profile: "", images: [], clarifications: [], origin: "test", created_at: 0 })
             }
             onEditReq={setReqForm}
             onDeleteReq={async (r) => {
@@ -1292,6 +1292,7 @@ export default function TestWorkbench({
                 case_id: tc.id,
                 task_id: t.id,
                 status: "open",
+                fix_note: "",
                 created_at: 0,
               };
               try {
@@ -1410,6 +1411,11 @@ function CasesTab({
               <div key={r.id} className="test-item">
                 <div className="test-item-main">
                   <div className="test-item-title" title={r.title}>
+                    {r.origin === "collab" && (
+                      <span className="test-origin-tag" title="来自协同工作区（req_create 沉淀）">
+                        协同
+                      </span>
+                    )}{" "}
                     {r.title}
                   </div>
                   <div className="test-item-sub">
@@ -3073,6 +3079,14 @@ function BugModal({
                   <div className="test-shot-name">{name}</div>
                 </div>
               ))}
+            </div>
+          </>
+        )}
+        {bug.fix_note.trim() && (
+          <>
+            <label className="lbl">修复说明（协同侧）</label>
+            <div className="test-bug-block md">
+              <TestMarkdown text={bug.fix_note} />
             </div>
           </>
         )}
