@@ -2,8 +2,10 @@
 //
 // 分工（对齐 src-tauri/src/testing.rs 头注）：数据 CRUD、Excel/XMind 导入
 // 解析、报告生成都在后端命令；本组件负责编排——
-// - 用例生成：把需求发给会话里的测试智能体（sendMessage），从回复末尾的
-//   ```json {"cases":[...]} 解析草稿，预览确认后批量导入；
+// - 用例生成：把需求发给会话里的测试智能体（sendMessage，需求附图随消息
+//   以 Image 块提供），从回复末尾的 ```json {"cases":[...]} 解析草稿，预览
+//   确认后批量导入；智能体判定信息不足时回复 {"clarifications":[...]}，
+//   弹澄清窗收集用户回答（存回需求）后重新生成；
 // - 任务执行：创建任务后逐用例发执行提示词，等 turn 结束取最后一条助手
 //   回复解析 {"result":...}，回写结果；fail/blocked 直接提交 Bug（不重试，
 //   对齐 TEST_PROMPT 的执行纪律）。
@@ -15,6 +17,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   api,
   onTurnFinished,
+  type AttachmentInput,
   type TestCase,
   type TestBug,
   type TestConfig,
@@ -75,6 +78,11 @@ function extractJsonBlock(text: string): Record<string, unknown> | null {
   }
   return null;
 }
+
+/** 用例生成结果：用例草稿，或智能体判定信息不足时的澄清问题（需求澄清协议）。 */
+type DraftResult =
+  | { kind: "cases"; cases: TestCase[] }
+  | { kind: "clarify"; questions: string[] };
 
 /** 从 AI 回复解析用例草稿（{"cases":[...]} 协议）。 */
 function parseGeneratedCases(obj: Record<string, unknown> | null): TestCase[] {
@@ -333,6 +341,10 @@ export default function TestWorkbench({
   const [runningTaskId, setRunningTaskId] = useState("");
   const [runProgress, setRunProgress] = useState("");
   const runningRef = useRef(false);
+  // 需求澄清：智能体判定信息不足时弹窗收集用户回答，答完带答案重新生成。
+  const [clarify, setClarify] = useState<{ req: TestRequirement; questions: string[] } | null>(
+    null,
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -404,15 +416,38 @@ export default function TestWorkbench({
 
   /** 发送一条消息。会话锁在「中断 → 立刻重发」时可能还没释放（后端 turn_chain
    *  收尾是异步的），遇到占用短暂重试，而不是把这一条判死。 */
-  const sendWithRetry = async (text: string) => {
+  const sendWithRetry = async (text: string, attachments?: AttachmentInput[]) => {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await api.sendMessage(workspace.id, runtimeMode, sessionId, text);
+        return await api.sendMessage(workspace.id, runtimeMode, sessionId, text, attachments);
       } catch (e) {
         if (!String(e).includes("already running") || attempt >= 10) throw e;
         await new Promise((r) => setTimeout(r, 300));
       }
     }
+  };
+
+  /** 需求附图 → 附件块（图片走 Image 块）：读回 base64，按扩展名给 media_type。 */
+  const loadRequirementImages = async (names: string[]): Promise<AttachmentInput[]> => {
+    const out: AttachmentInput[] = [];
+    for (const name of names) {
+      try {
+        const b64 = await api.testReadScreenshot(workspace.id, name);
+        const ext = name.split(".").pop()?.toLowerCase() ?? "png";
+        const mime =
+          ext === "jpg" || ext === "jpeg"
+            ? "image/jpeg"
+            : ext === "webp"
+              ? "image/webp"
+              : ext === "gif"
+                ? "image/gif"
+                : "image/png";
+        out.push({ name, media_type: mime, data_base64: b64 });
+      } catch {
+        // 单张图读不到（被手动清理）不阻断生成，提示词里已要求以文字为准。
+      }
+    }
+    return out;
   };
 
   /** 取会话最后一条助手回复文本。 */
@@ -426,24 +461,41 @@ export default function TestWorkbench({
 
   // ---------- 用例生成 / 导入 ----------
 
-  /** 让会话里的测试智能体按需求生成用例草稿（不落库，返回给调用方决定）。 */
-  const requestCaseDrafts = async (req: TestRequirement): Promise<TestCase[]> => {
+  /** 让会话里的测试智能体按需求生成用例草稿（不落库，返回给调用方决定）。
+   *  需求附图随消息发给智能体（Image 块）；智能体判定信息不足时回复
+   *  {"clarifications":[...]}，由调用方弹澄清窗，不报错。 */
+  const requestCaseDrafts = async (
+    req: TestRequirement,
+    extraAnswers: string[] = [],
+  ): Promise<DraftResult> => {
     if (convBusy || runningRef.current) {
       toast("error", "会话正在运行，请等待当前任务完成再生成用例");
-      return [];
+      return { kind: "cases", cases: [] };
     }
     try {
       onToast("info", `已把需求「${req.title}」发给测试智能体，等待生成…`);
       const dataProfile = req.data_profile.trim();
+      const clarifications = req.clarifications
+        .map((c) => c.trim())
+        .filter(Boolean)
+        .concat(extraAnswers.map((a) => a.trim()).filter(Boolean));
       const prompt = [
         `请根据以下需求设计测试用例，并按用例生成协议在回复末尾输出一个 \`\`\`json 代码块（{"cases":[...]}）。`,
         "",
         `需求标题：${req.title}`,
         `需求内容：`,
         req.content || "（无补充描述，按标题理解）",
+        ...(req.images.length > 0
+          ? [`需求附图（${req.images.length} 张，随本消息提供）：流程/页面操作以此为准。`]
+          : []),
         "",
         "被测系统数据现状：",
         dataProfile || "（未提供）",
+        ...(clarifications.length > 0
+          ? ["", "此前澄清（用户已确认，直接作为事实使用）：", ...clarifications.map((c, i) => `${i + 1}. ${c}`)]
+          : []),
+        "",
+        "信息不足时先澄清：如果需求文字、附图、数据现状都不足以说清「流程每一步在哪个页面、点什么、填什么」，不要臆造操作步骤——按需求澄清协议输出 {\"clarifications\":[...]}，一次只走一个协议。",
         "",
         "用例必须与真实情况一致（违反即视为无效用例）：",
         "1. 用例里出现的任何具体值——页码、条数、日期、编号、名称、金额、状态——都要能从上面的数据现状或需求描述里找到出处。",
@@ -451,28 +503,46 @@ export default function TestWorkbench({
         "3. 客观条件不足以支撑某个场景时（数据量、时间范围、权限、状态等），把「需要先具备什么」写进前置条件，或如实说明该场景当前不可测，不要假设条件成立。",
         "4. 只有专门验证某个反向场景（如查询不存在的数据、超出真实范围的取值）时，才使用超出真实范围的值，并在标题里写明该场景。",
       ].join("\n");
-      const turn = await api.sendMessage(workspace.id, runtimeMode, sessionId, prompt);
+      const attachments = await loadRequirementImages(req.images);
+      const turn = await sendWithRetry(prompt, attachments.length > 0 ? attachments : undefined);
       const { text, failure } = await awaitTurn(turn.turn_id);
       if (failure) toast("error", `生成用例失败：${failure}`);
-      const cases = parseGeneratedCases(extractJsonBlock(text)).map((c) => ({
+      const obj = extractJsonBlock(text);
+      // 澄清回复优先：智能体按协议回了问题，转交调用方弹窗，不算失败。
+      const rawClar = obj?.clarifications;
+      if (Array.isArray(rawClar)) {
+        const questions = rawClar.map(String).map((s) => s.trim()).filter(Boolean);
+        if (questions.length > 0) return { kind: "clarify", questions };
+      }
+      const cases = parseGeneratedCases(obj).map((c) => ({
         ...c,
         requirement_id: req.id,
       }));
       if (!cases.length && !failure) {
-        toast("error", "未能从回复解析出用例（缺少 {\"cases\":[...]} 代码块），可在会话里让智能体重试");
+        // 带上回复摘要：用户能直接看到智能体到底回了什么（而不是干巴巴的解析失败）。
+        const brief = text.trim().replace(/\s+/g, " ").slice(0, 160);
+        toast(
+          "error",
+          `未能从回复解析出用例（缺少 {"cases":[...]} 或 {"clarifications":[...]} 代码块）。回复摘要：${brief || "（空）"}——可在会话里让智能体重试`,
+        );
       }
-      return cases;
+      return { kind: "cases", cases };
     } catch (e) {
       toast("error", `生成用例失败：${String(e)}`);
-      return [];
+      return { kind: "cases", cases: [] };
     }
   };
 
-  /** 让会话里的测试智能体按需求生成用例 → 解析 → 预览确认。 */
-  const generateCases = async (req: TestRequirement) => {
-    const cases = await requestCaseDrafts(req);
-    if (!cases.length) return;
-    setImportPreview({ source: "ai", cases });
+  /** 让会话里的测试智能体按需求生成用例 → 解析 → 预览确认；
+   *  智能体要求澄清时弹澄清窗，用户回答后带着答案重新生成。 */
+  const generateCases = async (req: TestRequirement, extraAnswers: string[] = []) => {
+    const result = await requestCaseDrafts(req, extraAnswers);
+    if (result.kind === "clarify") {
+      setClarify({ req, questions: result.questions });
+      return;
+    }
+    if (!result.cases.length) return;
+    setImportPreview({ source: "ai", cases: result.cases });
   };
 
   /** AI 审查用例覆盖度与全面性（上传导入前的关卡）：返回结构化审查结论。 */
@@ -696,7 +766,7 @@ export default function TestWorkbench({
             data={data}
             busy={convBusy || runningRef.current}
             onNewReq={() =>
-              setReqForm({ id: "", title: "", content: "", data_profile: "", created_at: 0 })
+              setReqForm({ id: "", title: "", content: "", data_profile: "", images: [], clarifications: [], created_at: 0 })
             }
             onEditReq={setReqForm}
             onDeleteReq={async (r) => {
@@ -832,6 +902,7 @@ export default function TestWorkbench({
 
       {reqForm && (
         <ReqFormModal
+          workspaceId={workspace.id}
           initial={reqForm}
           onClose={() => setReqForm(null)}
           onSave={async (r) => {
@@ -839,6 +910,33 @@ export default function TestWorkbench({
               await api.testSaveRequirement(workspace.id, r);
               setReqForm(null);
               await reload();
+            } catch (e) {
+              toast("error", String(e));
+            }
+          }}
+        />
+      )}
+
+      {clarify && (
+        <ClarifyModal
+          req={clarify.req}
+          questions={clarify.questions}
+          onClose={() => setClarify(null)}
+          onSubmit={async (answers) => {
+            const { req, questions: qs } = clarify;
+            setClarify(null);
+            try {
+              // 问答存回需求：下次生成作为「已确认事实」带进提示词，不再重复问。
+              const merged = [
+                ...req.clarifications,
+                ...qs.map((q, i) => `问：${q}／答：${answers[i]?.trim() || "（未回答）"}`),
+              ];
+              const saved = await api.testSaveRequirement(workspace.id, {
+                ...req,
+                clarifications: merged,
+              });
+              await reload();
+              void generateCases(saved);
             } catch (e) {
               toast("error", String(e));
             }
@@ -869,6 +967,7 @@ export default function TestWorkbench({
           data={data}
           onClose={() => setTaskForm(null)}
           onGenerateCases={requestCaseDrafts}
+          onClarify={(req, questions) => setClarify({ req, questions })}
           onSave={async (t, autoRun, newCases) => {
             try {
               // AI 生成的用例先落库拿到 id，再与已有用例一起关联到任务。
@@ -1138,8 +1237,17 @@ export default function TestWorkbench({
         // 面板只能显示笼统的「解析失败」，看不出到底卡在哪一步。
         let failure = "";
         try {
+          // 用例所属需求的附图随执行消息发给智能体：执行时页面长什么样、
+          // 流程怎么走，图比文字可靠（与生成侧同一份图源）。
+          const reqImages = (() => {
+            const rid = tc.requirement_id;
+            if (!rid) return [];
+            return data.requirements.find((x) => x.id === rid)?.images ?? [];
+          })();
+          const attachments = await loadRequirementImages(reqImages);
           const turn = await sendWithRetry(
             execPrompt(t, tc, config, dataProfileOf(tc)),
+            attachments.length > 0 ? attachments : undefined,
           );
           const r = await awaitTurn(turn.turn_id);
           reply = r.text;
@@ -1909,15 +2017,60 @@ function ConfigFormModal({
 // ==================== 弹窗：需求表单 ====================
 
 function ReqFormModal({
+  workspaceId,
   initial,
   onClose,
   onSave,
 }: {
+  workspaceId: string;
   initial: TestRequirement;
   onClose: () => void;
   onSave: (r: TestRequirement) => void;
 }) {
   const [r, setR] = useState(initial);
+  // 附图预览（文件名 → data URL）：新图上传后与已有图统一走 testReadScreenshot 读回。
+  const [shots, setShots] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const next: Record<string, string> = {};
+      for (const name of r.images) {
+        try {
+          const b64 = await api.testReadScreenshot(workspaceId, name);
+          next[name] = `data:image/${name.split(".").pop()?.toLowerCase() || "png"};base64,${b64}`;
+        } catch {
+          // 图被手动清理：预览缺一张不阻断编辑。
+        }
+      }
+      if (alive) setShots(next);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [workspaceId, r.images]);
+
+  /** 选图/贴图：立即上传落盘拿文件名，push 进需求 images。 */
+  const addImages = async (files: File[]) => {
+    if (!files.length) return;
+    setUploading(true);
+    setUploadErr("");
+    try {
+      const names: string[] = [];
+      for (const f of files) {
+        const ext = (f.name.split(".").pop() || "png").toLowerCase();
+        const b64 = await fileToBase64(f);
+        names.push(await api.testSaveRequirementImage(workspaceId, b64, ext));
+      }
+      setR((prev) => ({ ...prev, images: [...prev.images, ...names] }));
+    } catch (e) {
+      setUploadErr(`图片上传失败：${String(e)}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="modal-mask" onClick={onClose}>
       <div className="modal test-modal" onClick={(e) => e.stopPropagation()}>
@@ -1938,6 +2091,42 @@ function ReqFormModal({
           onChange={(e) => setR({ ...r, content: e.target.value })}
           placeholder="粘贴需求文档或功能说明，智能体按此生成用例"
         />
+        <label className="lbl">需求附图（流程图 / 页面截图，生成用例时随消息发给智能体）</label>
+        {uploadErr && <div className="test-clarify-hint" style={{ color: "#c5221f" }}>{uploadErr}</div>}
+        <div className="test-req-images">
+          {r.images.map((name) => (
+            <div key={name} className="test-req-image">
+              {shots[name] ? (
+                <img src={shots[name]} alt={name} />
+              ) : (
+                <div className="test-req-image-loading">加载中…</div>
+              )}
+              <button
+                className="test-req-image-del"
+                title="移除附图"
+                onClick={() =>
+                  setR((prev) => ({ ...prev, images: prev.images.filter((x) => x !== name) }))
+                }
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <label className={`test-req-image-add${uploading ? " disabled" : ""}`}>
+            {uploading ? "上传中…" : "+ 贴图 / 选图"}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              style={{ display: "none" }}
+              disabled={uploading}
+              onChange={(e) => {
+                void addImages(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
         <label className="lbl">当前真实情况（生成用例的依据）</label>
         <textarea
           className="field test-area"
@@ -1953,6 +2142,23 @@ function ReqFormModal({
             "用例里的具体值都会以此为准；留空则退化成「取列表第一条」这类相对写法。"
           }
         />
+        {r.clarifications.length > 0 && (
+          <>
+            <label className="lbl">澄清记录（智能体提问与你的回答，生成时作为已确认事实）</label>
+            <textarea
+              className="field test-area"
+              rows={3}
+              value={r.clarifications.join("\n")}
+              onChange={(e) =>
+                setR({
+                  ...r,
+                  clarifications: e.target.value.split("\n").filter((s) => s.trim()),
+                })
+              }
+              placeholder="问：…／答：…"
+            />
+          </>
+        )}
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>
             取消
@@ -1963,6 +2169,58 @@ function ReqFormModal({
             onClick={() => onSave({ ...r, title: r.title.trim() })}
           >
             保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== 弹窗：需求澄清 ====================
+
+/** 需求澄清窗：智能体判定信息不足（说不清页面怎么操作）时收集用户回答，
+ *  回答存回需求后带着答案重新生成——而不是让智能体臆造操作步骤。 */
+function ClarifyModal({
+  req,
+  questions,
+  onClose,
+  onSubmit,
+}: {
+  req: TestRequirement;
+  questions: string[];
+  onClose: () => void;
+  onSubmit: (answers: string[]) => void;
+}) {
+  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ""));
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal test-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-title">需求澄清 · {req.title}</div>
+        <div className="test-clarify-hint">
+          智能体判定现有信息（需求文字、附图、数据现状）不足以写出可执行的用例——说不清流程每一步在哪个页面、点什么、填什么。请回答以下问题；回答会保存进需求，下次生成不再重复问。
+        </div>
+        {questions.map((q, i) => (
+          <div key={i}>
+            <label className="lbl">
+              {i + 1}. {q}
+            </label>
+            <textarea
+              className="field test-area"
+              rows={2}
+              value={answers[i]}
+              onChange={(e) =>
+                setAnswers((prev) => prev.map((a, j) => (j === i ? e.target.value : a)))
+              }
+              placeholder="回答（可留空）"
+            />
+          </div>
+        ))}
+        <div className="modal-actions">
+          <button className="btn ghost" onClick={onClose}>
+            取消
+          </button>
+          <button className="btn" onClick={() => onSubmit(answers)}>
+            提交并重新生成
           </button>
         </div>
       </div>
@@ -2092,6 +2350,7 @@ function TaskFormModal({
   onClose,
   onSave,
   onGenerateCases,
+  onClarify,
 }: {
   initial: {
     name: string;
@@ -2114,8 +2373,10 @@ function TaskFormModal({
     /** 本次由 AI 生成、待持久化并关联到任务的用例（用户已勾选确认）。 */
     newCases: TestCase[],
   ) => void;
-  /** 让会话里的测试智能体按需求生成用例草稿（未落库）。 */
-  onGenerateCases: (req: TestRequirement) => Promise<TestCase[]>;
+  /** 让会话里的测试智能体按需求生成用例草稿（未落库）；信息不足时返回澄清问题。 */
+  onGenerateCases: (req: TestRequirement) => Promise<DraftResult>;
+  /** 智能体要求澄清时上抛（澄清窗由工作台顶层渲染，避免弹窗嵌套）。 */
+  onClarify: (req: TestRequirement, questions: string[]) => void;
 }) {
   const [t, setT] = useState(initial);
   const [autoRun, setAutoRun] = useState(true);
@@ -2143,14 +2404,19 @@ function TaskFormModal({
   // 选中配置后地址取自配置（配置是唯一事实源），手填输入框禁用。
   const pickedConfig = data.configs.find((c) => c.id === t.config_id) ?? null;
 
-  /** 按选中的需求生成用例草稿（已存在的结果会被替换）。 */
+  /** 按选中的需求生成用例草稿（已存在的结果会被替换）；
+   *  智能体要求澄清时上抛给工作台顶层弹澄清窗。 */
   const generate = async (req: TestRequirement) => {
     setGenerating(true);
     try {
-      const cases = await onGenerateCases(req);
-      if (!cases.length) return;
-      setDrafts(cases);
-      setPickedDrafts(new Set(cases.map((_, i) => i)));
+      const result = await onGenerateCases(req);
+      if (result.kind === "clarify") {
+        onClarify(req, result.questions);
+        return;
+      }
+      if (!result.cases.length) return;
+      setDrafts(result.cases);
+      setPickedDrafts(new Set(result.cases.map((_, i) => i)));
     } finally {
       setGenerating(false);
     }

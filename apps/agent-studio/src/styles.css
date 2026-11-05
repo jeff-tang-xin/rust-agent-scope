@@ -2306,6 +2306,17 @@ select:focus:not(:focus-visible) {
 .test-req-row .btn { flex: none; padding: 2px 8px; font-size: 11.5px; }
 /* 需求行/用例区标题行里的 label 与右侧按钮同排：去掉 label 的上下留白。 */
 .test-req-row label.lbl { flex: 1; margin: 0; }
+/* 需求附图（表单贴图区） */
+.test-req-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.test-req-image { position: relative; width: 96px; height: 72px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg, #f6f7f9); }
+.test-req-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.test-req-image-loading { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 11px; color: var(--text-dim, #888); }
+.test-req-image-del { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 12px; line-height: 18px; cursor: pointer; }
+.test-req-image-add { display: flex; align-items: center; justify-content: center; width: 96px; height: 72px; border: 1px dashed var(--border); border-radius: 6px; font-size: 11.5px; color: var(--text-dim, #888); cursor: pointer; user-select: none; }
+.test-req-image-add:hover { border-color: var(--accent, #4285f4); color: var(--accent, #4285f4); }
+.test-req-image-add.disabled { opacity: 0.5; cursor: wait; }
+/* 需求澄清窗 */
+.test-clarify-hint { font-size: 12px; color: var(--text-dim, #666); background: rgba(249, 171, 0, 0.1); border: 1px solid rgba(249, 171, 0, 0.35); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.6; }
 /* AI 审查关卡 */
 .test-review-box {
   border: 1px solid var(--border);

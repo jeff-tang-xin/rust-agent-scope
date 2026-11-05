@@ -210,6 +210,10 @@ export interface TestRequirement {
   content: string;
   /** 被测系统当前的数据现状（数据量/时间范围等）；用例的分页与日期断言以此为准。 */
   data_profile: string;
+  /** 需求附图（流程图/页面截图），文件名（.ox/screenshots/ 下）；生成用例时随消息发给智能体。 */
+  images: string[];
+  /** 需求澄清问答记录（"问：…／答：…"）；智能体信息不足先提问，回答后存回需求。 */
+  clarifications: string[];
   created_at: number;
 }
 
@@ -503,6 +507,9 @@ export const api = {
     invoke<TestingData>("test_list_data", { workspaceId }),
   testSaveRequirement: (workspaceId: string, requirement: TestRequirement) =>
     invoke<TestRequirement>("test_save_requirement", { workspaceId, requirement }),
+  /** 需求附图落盘（.ox/screenshots/req-<ts>.<ext>），返回文件名。 */
+  testSaveRequirementImage: (workspaceId: string, dataBase64: string, ext: string) =>
+    invoke<string>("test_save_requirement_image", { workspaceId, dataBase64, ext }),
   testDeleteRequirement: (workspaceId: string, id: string) =>
     invoke<boolean>("test_delete_requirement", { workspaceId, id }),
   testSaveCase: (workspaceId: string, testCase: TestCase) =>

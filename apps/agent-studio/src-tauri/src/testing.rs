@@ -36,6 +36,15 @@ pub struct Requirement {
     /// 100 页」、数据是 2025 年的却断言 2026 年，都是凭空捏造的假用例。
     #[serde(default)]
     pub data_profile: String,
+    /// 需求附图（流程图/页面截图），文件名（`.ox/screenshots/` 下，复用
+    /// test_read_screenshot 读取）。生成用例时作为图片块随提示词发给智能体——
+    /// 文字说不清「页面怎么操作」时，图是唯一可靠的操作依据。
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// 需求澄清问答记录（"问：…／答：…"）。智能体判定信息不足时先提问，
+    /// 用户回答后存回需求，下次生成不再重复问。
+    #[serde(default)]
+    pub clarifications: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
 }
@@ -624,6 +633,35 @@ pub fn test_delete_config(
         save_json(&path, &items)?;
     }
     Ok(deleted)
+}
+
+/// 保存需求附图（需求表单贴图）：base64 解码写入 `.ox/screenshots/`，
+/// 返回文件名。与执行截图同目录，读取复用 test_read_screenshot。
+/// 扩展名白名单 + 只允许字母数字，防路径拼接注入。
+#[tauri::command]
+pub fn test_save_requirement_image(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    data_base64: String,
+    ext: String,
+) -> Result<String, String> {
+    let ext = ext.to_ascii_lowercase();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif") {
+        return Err(format!("不支持的图片格式: {ext}"));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.trim())
+        .map_err(|e| format!("图片 base64 解码失败: {e}"))?;
+    if bytes.is_empty() {
+        return Err("图片内容为空".into());
+    }
+    let root = testing_root(&state, &workspace_id)?;
+    let dir = root.parent().ok_or_else(|| "路径解析失败".to_string())?.join("screenshots");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建截图目录失败: {e}"))?;
+    let file_name = format!("req-{}.{ext}", now_ms());
+    std::fs::write(dir.join(&file_name), &bytes)
+        .map_err(|e| format!("写入图片失败: {e}"))?;
+    Ok(file_name)
 }
 
 /// 读执行截图（Bug/报告面板展示用）：返回 base64 PNG。文件名不允许路径
@@ -1440,6 +1478,8 @@ mod tests {
                 title: "登录功能".into(),
                 content: String::new(),
                 data_profile: String::new(),
+                images: Vec::new(),
+                clarifications: Vec::new(),
                 created_at: 0,
             }],
             configs: vec![],

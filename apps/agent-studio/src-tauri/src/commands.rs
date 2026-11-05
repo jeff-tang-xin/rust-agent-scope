@@ -28,7 +28,8 @@ use crate::testing::{
     test_build_bug_report, test_build_report, test_delete_bug, test_delete_case,
     test_delete_config, test_delete_requirement, test_delete_task, test_import_cases,
     test_list_data, test_parse_excel, test_parse_xmind, test_read_screenshot, test_save_bug,
-    test_save_case, test_save_config, test_save_requirement, test_save_task, test_update_task,
+    test_save_case, test_save_config, test_save_requirement, test_save_requirement_image,
+    test_save_task, test_update_task,
 };
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
@@ -2863,6 +2864,7 @@ pub fn run() {
             test_save_config,
             test_delete_config,
             test_read_screenshot,
+            test_save_requirement_image,
             test_parse_excel,
             test_parse_xmind,
             test_build_report,
