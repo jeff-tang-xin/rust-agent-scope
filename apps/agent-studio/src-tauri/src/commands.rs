@@ -29,7 +29,7 @@ use crate::testing::{
     test_delete_config, test_delete_requirement, test_delete_task, test_import_cases,
     test_list_data, test_parse_excel, test_parse_xmind, test_read_screenshot, test_save_bug,
     test_save_case, test_save_config, test_save_requirement, test_save_requirement_image,
-    test_save_task, test_update_task, test_run_task, test_archive_task,
+    test_save_task, test_update_task, test_run_task, test_run_active, test_archive_task,
 };
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
@@ -218,6 +218,8 @@ pub struct AppState {
     pub browser_session: Arc<crate::browser_tool::BrowserSession>,
     /// 活跃的测试任务看门狗（session_id → task_id）：test_run_task 防同
     /// 会话双任务，interrupt_turn 据此让看门狗退场（人接管狗不拉起）。
+    /// 挂载点有两处：点火（test_run_task）与 LLM 开工登记（test_start_task
+    /// 工具，覆盖对话触发路径）；交付登记（test_finish_task）移除条目退场。
     pub test_runs: Arc<Mutex<HashMap<String, String>>>,
 }
 
@@ -1193,6 +1195,19 @@ pub async fn send_message(
     confirm_results: Option<Vec<agentscope_core::event::ConfirmResult>>,
 ) -> Result<TurnInfo, String> {
     let handle = state.handle(&workspace_id, &mode)?;
+    // 测试监督上下文：仅测试工作区携带——turn 收尾认领「本 turn 内开工」
+    // 的任务（对话触发执行的看门狗挂载点）。其他模式没有测试数据面。
+    let test = if mode == "test" {
+        crate::testing::testing_root(&state, &workspace_id)?
+            .parent()
+            .map(|ox_root| crate::testing::TestWatchdogCtx {
+                handle: Arc::clone(&handle),
+                ox_root: ox_root.to_path_buf(),
+                runs: Arc::clone(&state.test_runs),
+            })
+    } else {
+        None
+    };
     start_turn(
         &app,
         &handle,
@@ -1201,6 +1216,7 @@ pub async fn send_message(
         message,
         attachments,
         confirm_results,
+        test,
     )
     .await
 }
@@ -1218,6 +1234,9 @@ pub(crate) async fn start_turn(
     message: String,
     attachments: Option<Vec<AttachmentInput>>,
     confirm_results: Option<Vec<agentscope_core::event::ConfirmResult>>,
+    // 测试监督上下文：send_message 传 Some（收尾认领对话触发的开工任务）；
+    // 点火（test_run_task）与看门狗续跑传 None——看门狗已在位。
+    test: Option<crate::testing::TestWatchdogCtx>,
 ) -> Result<TurnInfo, String> {
     let session = handle.session(session_id).await;
     // turn 互斥：guard 所有权 move 进事件循环 task，持锁到 turn 链结束。
@@ -1266,6 +1285,7 @@ pub(crate) async fn start_turn(
     };
 
     let turn_id = uuid::Uuid::new_v4().to_string();
+    let turn_started_ms = crate::testing::now_ms();
     let agent = Arc::clone(handle.agent.delegate());
     // plan 状态在 turn 链开始前查询一次：busy 期间 UI 锁定 plan 切换，
     // 整条链（含续轮）的注入标志一致。
@@ -1280,6 +1300,8 @@ pub(crate) async fn start_turn(
             workspace_id: workspace_id.to_string(),
             session_id: session_id.to_string(),
             plan_active,
+            test,
+            turn_started_ms,
         },
         turn_id.clone(),
         user_msg,
@@ -1451,6 +1473,11 @@ struct TurnChainCtx {
     session_id: String,
     /// plan 注入标志（busy 期间 UI 锁定 plan 切换，整条链一致）。
     plan_active: bool,
+    /// 测试监督上下文（send_message 构造；点火/看门狗续跑路径为 None）。
+    /// 收尾认领「本 turn 内开工」的测试任务并挂看门狗。
+    test: Option<crate::testing::TestWatchdogCtx>,
+    /// turn 链开始时刻（认领判据：started_at 晚于它 = 本链内开工）。
+    turn_started_ms: u64,
 }
 
 /// turn 链：跑一个 turn → 结算排队 steer → 有则自动续轮（新 turn_id），
@@ -1471,6 +1498,8 @@ async fn turn_chain(
         workspace_id,
         session_id,
         plan_active,
+        test,
+        turn_started_ms,
     } = ctx;
     loop {
         // plan 模式注入（对齐 Java system-reminder 投递思路：运行时约束以
@@ -1681,6 +1710,17 @@ async fn turn_chain(
             .collect::<Vec<_>>()
             .join("\n\n");
         if next_text.is_empty() {
+            // 认领本 turn 内开工的测试任务（对话触发路径的看门狗挂载点）：
+            // LLM 调了 test_start_task 登记 → turn 结束后监督自动跟上。
+            if let Some(test) = &test {
+                crate::testing::adopt_running_task(
+                    &app,
+                    test,
+                    &workspace_id,
+                    &session_id,
+                    turn_started_ms,
+                );
+            }
             let _ = app.emit(
                 "turn-finished",
                 TurnFinished {
@@ -2976,6 +3016,7 @@ pub fn run() {
             test_save_task,
             test_update_task,
             test_run_task,
+            test_run_active,
             test_archive_task,
             test_delete_task,
             test_save_bug,

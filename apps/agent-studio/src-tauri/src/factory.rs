@@ -536,11 +536,20 @@ pub fn build_agent(
             toolkit.register(Arc::new(crate::api_tool::ApiRequest::new()));
             // 测试状态自回写面：执行编排交给 LLM（test_run_task 一次性下发
             // 待跑用例），用例状态与 Bug 由 LLM 执行过程中调工具直接落库。
+            // 开工/交付登记（test_start_task/test_finish_task）让执行有显式
+            // 协议：turn 收尾据 started_at 识别对话触发的执行并挂看门狗，
+            // 交付（paused）让看门狗区分「正常暂停」与「失联」。
             let store = crate::testing_tools::TestingStore::new(&memory_workspace.root());
             toolkit.register(Arc::new(crate::testing_tools::TestUpdateCase::new(
                 store.clone(),
             )));
-            toolkit.register(Arc::new(crate::testing_tools::TestSubmitBug::new(store)));
+            toolkit.register(Arc::new(crate::testing_tools::TestSubmitBug::new(
+                store.clone(),
+            )));
+            toolkit.register(Arc::new(crate::testing_tools::TestStartTask::new(
+                store.clone(),
+            )));
+            toolkit.register(Arc::new(crate::testing_tools::TestFinishTask::new(store)));
         }
         StudioMode::Db => {
             // 数据库工具面：无类别特有工具（db_query/db_dml 在 match 后统一注册）。
@@ -804,6 +813,18 @@ fn default_permission_context(
         }
     };
     ask_tools.dedup();
+    // 测试自回写工具免确认：写的是 .ox/testing 测试数据（设计上就是 LLM
+    // 自主回写，是执行协议的一部分），走默认 Ask 会把每条回写卡在 HITL
+    // 授权上——执行流被「agent is paused for confirmation」反复打断。
+    let test_autonomous_tools: &[&str] = match mode {
+        StudioMode::Test => &[
+            "test_update_case",
+            "test_submit_bug",
+            "test_start_task",
+            "test_finish_task",
+        ],
+        _ => &[],
+    };
     let mut context = PermissionContextState::default();
     // 只读工具免确认：名单由调用方在 toolkit move 前按 `Tool::is_read_only()`
     // 收集，新只读工具无需改这里。
@@ -815,6 +836,7 @@ fn default_permission_context(
         .iter()
         .map(String::as_str)
         .chain(DEVELOP_ALLOWLIST.iter().copied())
+        .chain(test_autonomous_tools.iter().copied())
     {
         if !ask_tools.contains(&name) {
             context.add_allow_rule(PermissionRule {

@@ -138,6 +138,13 @@ pub struct TestTask {
     pub status: String,
     #[serde(default)]
     pub results: Vec<CaseResult>,
+    /// 最近一次开工登记时刻（test_start_task 工具回写；turn 收尾据此
+    /// 识别「本 turn 内开工」的任务并挂看门狗——对话触发路径的挂载点）。
+    #[serde(default)]
+    pub started_at: u64,
+    /// 最近一次交付说明（test_finish_task 工具回写；paused 时前端展示）。
+    #[serde(default)]
+    pub pause_note: String,
     /// 已归档（列表默认隐藏，归档区查看；done 任务手动归档，防列表膨胀）。
     #[serde(default)]
     pub archived: bool,
@@ -565,6 +572,10 @@ pub struct TestRunStarted {
     pub targets: usize,
     /// 跳过数（已通过 / 待修 Bug 未处理）。
     pub skipped: usize,
+    /// true = 该任务本就在看门狗看护下执行（重复点火），本次未做任何事；
+    /// 前端据此恢复「执行中」显示而不是报错。
+    #[serde(default)]
+    pub already_running: bool,
 }
 
 /// 启动测试任务：筛出待跑用例一次性交给测试智能体（LLM 自主编排），
@@ -590,12 +601,22 @@ pub async fn test_run_task(
     force: bool,
 ) -> Result<TestRunStarted, String> {
     // 防重入：同一会话已有任务在看门狗看护下执行。
+    // 同一任务重复点火（刷新页面后点「继续执行」/手抖双击）是幂等场景——
+    // 返回 already_running 让前端恢复显示，不算错误；不同任务才是真冲突。
     {
         let runs = state
             .test_runs
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         if let Some(running) = runs.get(&session_id) {
+            if *running == task_id {
+                return Ok(TestRunStarted {
+                    turn_id: String::new(),
+                    targets: 0,
+                    skipped: 0,
+                    already_running: true,
+                });
+            }
             return Err(format!(
                 "该会话正在执行任务 `{running}`（看门狗看护中）；先停止或等它完成"
             ));
@@ -749,18 +770,28 @@ pub async fn test_run_task(
         prompt,
         (!attachments.is_empty()).then_some(attachments),
         None,
+        None,
     )
     .await;
 
     // 启动失败（会话忙等）：注销看门狗（它下轮巡检发现注册表里没有自己
-    // 就退场），返回错误。
+    // 就退场），返回错误。turn 忙常见于「用户停止后自己在对话里触发了执行」
+    // ——智能体本就在跑，提示无需重新点火而不是甩英文报错。
     if let Err(e) = &turn {
         state
             .test_runs
             .lock()
             .unwrap_or_else(|e2| e2.into_inner())
             .remove(&session_id);
-        return Err(e.clone());
+        let msg = e.clone();
+        if msg.contains("already running") {
+            return Err(
+                "会话正在对话中：智能体可能正在执行任务，无需重新点火，等它回写结果即可；\
+                 若是普通对话，请等它结束再执行任务"
+                    .into(),
+            );
+        }
+        return Err(msg);
     }
     let turn = turn.unwrap();
     let _ = app.emit(
@@ -782,7 +813,23 @@ pub async fn test_run_task(
         turn_id: turn.turn_id,
         targets: targets.len(),
         skipped: skipped_passed + skipped_open_bug,
+        already_running: false,
     })
+}
+
+/// 查询会话当前在看门狗看护下执行的任务（无则返回 null）。
+/// 前端加载/刷新后据此恢复「执行中」显示——编排循环活在后端，
+/// 刷新页面不中断执行，但前端的执行中状态是内存态，需要重新对齐。
+#[tauri::command]
+pub async fn test_run_active(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<String>, String> {
+    let runs = state
+        .test_runs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Ok(runs.get(&session_id).cloned())
 }
 
 /// 需求附图 → 附件块：读 `.ox/screenshots/<name>` 转 base64（与前端
@@ -841,9 +888,14 @@ fn build_exec_prompt(
         .unwrap_or_else(|| task.base_url.clone());
     let mut p = String::new();
     p.push_str(&format!(
-        "执行测试任务「{}」（共 {} 条用例，按顺序逐条执行）。\n\n",
+        "执行测试任务「{}」（task_id=`{}`，共 {} 条用例，按顺序逐条执行）。\n\n",
         task.name,
+        task.id,
         targets.len()
+    ));
+    p.push_str(&format!(
+        "工具回写（test_update_case / test_submit_bug / test_start_task / test_finish_task）的 task_id 参数一律传上面的 task_id（`{}`）——它是任务 id 不是任务名，传任务名会报「任务不存在」。\n\n",
+        task.id
     ));
     p.push_str(&format!(
         "被测系统地址：{}\n",
@@ -954,6 +1006,85 @@ struct TestWatchdog {
     runs: Arc<std::sync::Mutex<HashMap<String, String>>>,
 }
 
+/// turn 链携带的测试监督上下文（start_turn 由 send_message 构造传入；
+/// 点火与看门狗续跑路径传 None——它们自己已挂看门狗）。turn 收尾据此
+/// 认领「本 turn 内开工」的任务，覆盖对话触发执行的看门狗挂载。
+pub(crate) struct TestWatchdogCtx {
+    pub handle: Arc<AgentHandle>,
+    /// `.ox` 根（tasks.json 在 `<ox_root>/testing/` 下）。
+    pub ox_root: PathBuf,
+    pub runs: Arc<std::sync::Mutex<HashMap<String, String>>>,
+}
+
+/// turn 收尘认领：本 turn 内开工（test_start_task 登记 started_at）且尚无
+/// 看门狗的 running 任务 → 挂看门狗 + 广播 running。这是「对话触发执行」
+/// 的监督挂载点——用户在会话里让智能体跑任务，LLM 调开工登记，turn 结束
+/// 后监督自动跟上，与点火路径（test_run_task 自己挂）殊途同归。
+pub(crate) fn adopt_running_task(
+    app: &AppHandle,
+    ctx: &TestWatchdogCtx,
+    workspace_id: &str,
+    session_id: &str,
+    turn_started_ms: u64,
+) {
+    // 已有看门狗在跑（点火路径挂的）→ 不重复挂。
+    if ctx
+        .runs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(session_id)
+    {
+        return;
+    }
+    let tasks: Vec<TestTask> = load_json(&ctx.ox_root.join("testing").join("tasks.json"));
+    // 本 turn 期间开工的 running 任务（取最新一条；历史残留 running 的
+    // started_at 早于本 turn，不会被认领）。
+    let Some(task) = tasks
+        .iter()
+        .filter(|t| t.status == "running" && t.started_at >= turn_started_ms)
+        .max_by_key(|t| t.started_at)
+        .cloned()
+    else {
+        return;
+    };
+    if task
+        .results
+        .iter()
+        .all(|r| matches!(r.status.as_str(), "pass" | "fail" | "blocked" | "skipped" | "error"))
+    {
+        return; // 全部终态，无需监督
+    }
+    ctx.runs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(session_id.to_string(), task.id.clone());
+    let dog = TestWatchdog {
+        app: app.clone(),
+        handle: Arc::clone(&ctx.handle),
+        workspace_id: workspace_id.to_string(),
+        session_id: session_id.to_string(),
+        task_id: task.id.clone(),
+        task_name: task.name.clone(),
+        ox_root: ctx.ox_root.clone(),
+        runs: Arc::clone(&ctx.runs),
+    };
+    let (done, total, _) = dog.task_progress();
+    dog.emit(
+        "running",
+        Some("检测到执行开工，看门狗已接管保活".into()),
+        done,
+        total,
+    );
+    app_log(
+        "INFO",
+        &format!(
+            "测试看门狗认领开工任务 task={} session={session_id}（对话触发路径）",
+            task.id
+        ),
+    );
+    tokio::spawn(dog.run());
+}
+
 impl TestWatchdog {
     fn tasks_path(&self) -> PathBuf {
         self.ox_root.join("testing").join("tasks.json")
@@ -993,6 +1124,8 @@ impl TestWatchdog {
         let mut last_phase = String::new();
         let mut stalled: u32 = 0;
         let mut resumed_rounds: u32 = 0;
+        let mut kick_failures: u32 = 0;
+        const MAX_KICK_FAILURES: u32 = 3;
         let mut last_done: usize = self.done_count();
         let mut reason = String::new();
 
@@ -1024,6 +1157,27 @@ impl TestWatchdog {
                 reason = "任务已被删除".into();
                 break;
             };
+            // 正常交付暂停（LLM 调 test_finish_task 置 paused）：本轮执行
+            // 已按协议交付，不是失联——退场不踢，等用户对话或手动点火续跑。
+            if task.status == "paused" {
+                let (done, total, _) = self.task_progress();
+                self.emit(
+                    "paused",
+                    Some(format!(
+                        "任务「{}」已交付暂停：{}",
+                        self.task_name,
+                        if task.pause_note.is_empty() {
+                            "（无说明）".to_string()
+                        } else {
+                            task.pause_note.clone()
+                        }
+                    )),
+                    done,
+                    total,
+                );
+                reason = "LLM 已交付暂停".into();
+                break;
+            }
             let total = task.results.len();
             let done = task
                 .results
@@ -1064,6 +1218,7 @@ impl TestWatchdog {
                 stalled += 1;
             }
             if stalled > MAX_STALLED {
+                let (done, total, _) = self.task_progress();
                 self.emit(
                     "aborted",
                     Some(format!(
@@ -1072,11 +1227,13 @@ impl TestWatchdog {
                     done,
                     total,
                 );
+                self.mark_paused("连续巡检无进展，已停止保活");
                 reason = format!("续跑无进展放弃（{done}/{total}）");
                 break;
             }
             resumed_rounds += 1;
             if resumed_rounds > MAX_ROUNDS {
+                let (done, total, _) = self.task_progress();
                 self.emit(
                     "aborted",
                     Some(format!(
@@ -1085,6 +1242,7 @@ impl TestWatchdog {
                     done,
                     total,
                 );
+                self.mark_paused("自动续跑轮数超限，已停止保活");
                 reason = "续跑轮数超限".into();
                 break;
             }
@@ -1118,8 +1276,9 @@ impl TestWatchdog {
                 self.task_name,
                 remaining.join(", ")
             );
-            // 发送失败（会话忙/锁未释放）：不急着重试，下轮巡检再试——
-            // stalled 计数兜底，不会无限重试。
+            // 发送失败（模型服务连不上/网络断等环境问题）：连续计数，超过
+            // 阈值判定环境异常——放弃保活并置 paused（不是任务问题，是环境
+            // 问题，恢复后用户手动继续）。
             if crate::commands::start_turn(
                 &self.app,
                 &self.handle,
@@ -1128,14 +1287,35 @@ impl TestWatchdog {
                 msg,
                 None,
                 None,
+                None,
             )
             .await
             .is_err()
             {
+                kick_failures += 1;
                 app_log(
                     "WARN",
-                    &format!("测试看门狗续跑发送失败（下轮巡检重试）task={}", self.task_id),
+                    &format!(
+                        "测试看门狗续跑发送失败（{kick_failures}/{MAX_KICK_FAILURES}）task={}",
+                        self.task_id
+                    ),
                 );
+                if kick_failures >= MAX_KICK_FAILURES {
+                    let (done, total, _) = self.task_progress();
+                    self.emit(
+                        "aborted",
+                        Some(format!(
+                            "连续 {kick_failures} 次续跑发送失败（{done}/{total}），判定环境异常（模型服务/网络不可达），已停止保活。恢复后在任务面板手动继续"
+                        )),
+                        done,
+                        total,
+                    );
+                    self.mark_paused("环境异常：续跑发送连续失败");
+                    reason = "环境异常（续跑发送连续失败）".into();
+                    break;
+                }
+            } else {
+                kick_failures = 0;
             }
         }
         // 退出清理：注册表里还是自己才移除（防误删后来者）。
@@ -1155,6 +1335,20 @@ impl TestWatchdog {
     fn load_task(&self) -> Option<TestTask> {
         let tasks: Vec<TestTask> = load_json(&self.tasks_path());
         tasks.into_iter().find(|t| t.id == self.task_id)
+    }
+
+    /// 放弃保活时把任务置 paused（附原因）：不留 running 残留——turn 收尾
+    /// 的认领逻辑按 started_at 识别「本 turn 开工」，残留 running 会被误认领。
+    fn mark_paused(&self, note: &str) {
+        let path = self.tasks_path();
+        let mut tasks: Vec<TestTask> = load_json(&path);
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
+            if t.status == "running" {
+                t.status = "paused".into();
+                t.pause_note = note.to_string();
+                save_json(&path, &tasks);
+            }
+        }
     }
 
     fn task_progress(&self) -> (usize, usize, bool) {
@@ -2189,6 +2383,8 @@ mod tests {
                 requirement_ids: vec!["r1".into()],
                 case_ids: vec!["c1".into()],
                 status: "done".into(),
+                started_at: 0,
+                pause_note: String::new(),
                 results: vec![CaseResult {
                     case_id: "c1".into(),
                     status: "fail".into(),

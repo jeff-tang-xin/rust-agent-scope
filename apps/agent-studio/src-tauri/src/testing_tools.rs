@@ -160,8 +160,10 @@ to the next one. Results written only in your reply text are NOT saved."
             .unwrap_or_default();
 
         let mut tasks = self.store.load_tasks();
-        let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) else {
-            return Ok(ToolOutput::error(format!("任务 `{task_id}` 不存在")));
+        let Some(task) = find_task_mut(&mut tasks, task_id) else {
+            return Ok(ToolOutput::error(format!(
+                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名；执行提示词开头有）"
+            )));
         };
         let Some(ri) = task.results.iter().position(|r| r.case_id == case_id) else {
             return Ok(ToolOutput::error(format!(
@@ -296,7 +298,7 @@ of creating a duplicate. Call it right after test_update_case with status fail/b
 
         // 回填用例结果的 bug_id（fail/blocked 的结果挂着 Bug 才完整）。
         let mut tasks = self.store.load_tasks();
-        if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+        if let Some(task) = find_task_mut(&mut tasks, task_id) {
             if let Some(r) = task.results.iter_mut().find(|r| r.case_id == case_id) {
                 r.bug_id = bug_id.clone();
                 if let Err(e) = save_json(&self.store.tasks_path(), &tasks) {
@@ -307,6 +309,171 @@ of creating a duplicate. Call it right after test_update_case with status fail/b
         Ok(ToolOutput::ok(format!(
             "Bug 已提交：{bug_id}「{bug_title}」"
         )))
+    }
+}
+
+// ---------- test_start_task / test_finish_task ----------
+
+/// 按 id 精确查找任务；未命中再按名称唯一匹配（LLM 常把任务名当 id 传，
+/// 报「不存在」不如容错接住）。0 个或多个同名匹配返回 None。
+fn find_task_mut<'a>(tasks: &'a mut [TestTask], task_id: &str) -> Option<&'a mut TestTask> {
+    if let Some(pos) = tasks.iter().position(|t| t.id == task_id) {
+        return Some(&mut tasks[pos]);
+    }
+    let hits: Vec<usize> = tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.name == task_id)
+        .map(|(i, _)| i)
+        .collect();
+    if hits.len() == 1 {
+        Some(&mut tasks[hits[0]])
+    } else {
+        None
+    }
+}
+
+/// 开工登记：LLM 开始执行任务前调它——后端据此把任务置 running 并
+/// 记录开工时刻（turn 收尾据此识别「本 turn 内开工」的任务自动挂看门狗，
+/// 覆盖对话触发路径）。幂等：重复登记只刷新时刻。
+pub struct TestStartTask {
+    store: TestingStore,
+}
+
+impl TestStartTask {
+    pub fn new(store: TestingStore) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for TestStartTask {
+    fn name(&self) -> &str {
+        "test_start_task"
+    }
+
+    fn description(&self) -> &str {
+        "Register the start of a test-task execution round. Call it BEFORE running \
+any case of that task — the backend uses it to attach the watchdog (keep-alive) \
+and notify the UI. Idempotent: calling again just refreshes the start time."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "测试任务 id（执行提示词或对话上下文里给出）。"}
+            },
+            "required": ["task_id"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let task_id = input_str(&input, "task_id").unwrap_or("").trim();
+        if task_id.is_empty() {
+            return Ok(ToolOutput::error("task_id 不能为空"));
+        }
+        let mut tasks = self.store.load_tasks();
+        let Some(task) = find_task_mut(&mut tasks, task_id) else {
+            return Ok(ToolOutput::error(format!(
+                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名；执行提示词开头有）"
+            )));
+        };
+        if task.status == "done" {
+            return Ok(ToolOutput::error(format!(
+                "任务 `{}` 已完成（done），如需重跑请在任务面板操作",
+                task.name
+            )));
+        }
+        task.status = "running".into();
+        task.started_at = now_ms();
+        task.pause_note.clear();
+        let summary = progress_line(task);
+        let name = task.name.clone();
+        if let Err(e) = save_json(&self.store.tasks_path(), &tasks) {
+            return Ok(ToolOutput::error(e));
+        }
+        Ok(ToolOutput::ok(format!(
+            "开工已登记，任务 `{name}` 进入执行中。{summary}。逐条执行，每条完成立即 test_update_case 回写。"
+        )))
+    }
+}
+
+/// 交付登记：LLM 本轮执行结束（无论跑完多少条）必须调它——汇报进度与
+/// 暂停原因，后端据此把任务置 paused（正常交付暂停，看门狗不再踢续跑）。
+/// 全部用例已有结论时任务自动收尾为 done。
+pub struct TestFinishTask {
+    store: TestingStore,
+}
+
+impl TestFinishTask {
+    pub fn new(store: TestingStore) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for TestFinishTask {
+    fn name(&self) -> &str {
+        "test_finish_task"
+    }
+
+    fn description(&self) -> &str {
+        "Deliver the current execution round: call it when you stop working on the \
+task (turn ending), reporting progress and why you paused. REQUIRED even if you \
+finished nothing — silence makes the watchdog treat the run as lost and re-kick. \
+All cases concluded => task auto-closes as done."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "测试任务 id。"},
+                "note": {"type": "string", "description": "交付说明：本轮进度（如 12/33）、暂停原因（如接口 500 / 等待修复）、下一步建议。"}
+            },
+            "required": ["task_id", "note"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let task_id = input_str(&input, "task_id").unwrap_or("").trim();
+        let note = input_str(&input, "note").unwrap_or("").trim().to_string();
+        if task_id.is_empty() {
+            return Ok(ToolOutput::error("task_id 不能为空"));
+        }
+        if note.is_empty() {
+            return Ok(ToolOutput::error(
+                "note 不能为空：写清本轮进度与暂停原因（如「12/33，接口 500 暂停」）",
+            ));
+        }
+        let mut tasks = self.store.load_tasks();
+        let Some(task) = find_task_mut(&mut tasks, task_id) else {
+            return Ok(ToolOutput::error(format!(
+                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名；执行提示词开头有）"
+            )));
+        };
+        let all_done = task.results.iter().all(|r| is_terminal(&r.status));
+        if all_done {
+            task.status = "done".into();
+            task.finished_at = now_ms();
+        } else {
+            task.status = "paused".into();
+        }
+        task.pause_note = note.clone();
+        let summary = progress_line(task);
+        let name = task.name.clone();
+        let done = task.status == "done";
+        if let Err(e) = save_json(&self.store.tasks_path(), &tasks) {
+            return Ok(ToolOutput::error(e));
+        }
+        Ok(ToolOutput::ok(if done {
+            format!("交付已登记：任务「{name}」全部用例执行完毕，已收尾（done）。{summary}")
+        } else {
+            format!(
+                "交付已登记：任务「{name}」暂停（paused）。{summary}。暂停说明：{note}"
+            )
+        }))
     }
 }
 
@@ -331,6 +498,8 @@ mod tests {
             requirement_ids: vec![],
             case_ids: case_ids.iter().map(|s| s.to_string()).collect(),
             status: "running".into(),
+            started_at: 0,
+            pause_note: String::new(),
             results: case_ids
                 .iter()
                 .map(|cid| CaseResult {
@@ -452,5 +621,68 @@ mod tests {
         // 旧数据无 archived 字段 → default false（归档功能对旧任务零迁移）。
         let t: TestTask = serde_json::from_str("{\"id\":\"x\",\"name\":\"n\",\"status\":\"done\"}").unwrap();
         assert!(!t.archived);
+    }
+
+    #[tokio::test]
+    async fn start_then_finish_task_lifecycle() {
+        let store = store("lifecycle");
+        seed_task(&store, &["c1"]);
+        let start = TestStartTask::new(store.clone());
+        let finish = TestFinishTask::new(store.clone());
+
+        // 开工：pending → running + started_at 刷新。
+        let out = start.call(json!({"task_id": "t1"})).await.unwrap();
+        assert!(out.content.contains("开工已登记"), "{}", out.content);
+        let t = &store.load_tasks()[0];
+        assert_eq!(t.status, "running");
+        assert!(t.started_at > 0);
+
+        // 交付（未跑完）：→ paused + pause_note。
+        let out = finish
+            .call(json!({"task_id": "t1", "note": "0/1，接口服务 500 暂停"}))
+            .await
+            .unwrap();
+        assert!(out.content.contains("paused"), "{}", out.content);
+        let t = &store.load_tasks()[0];
+        assert_eq!(t.status, "paused");
+        assert!(t.pause_note.contains("500"));
+
+        // 再开工 → 交付（全部终态）→ done。
+        start.call(json!({"task_id": "t1"})).await.unwrap();
+        let mut tasks = store.load_tasks();
+        tasks[0].results[0].status = "pass".into();
+        save_json(&store.tasks_path(), &tasks).unwrap();
+        let out = finish
+            .call(json!({"task_id": "t1", "note": "1/1 全部通过"}))
+            .await
+            .unwrap();
+        assert!(out.content.contains("done"), "{}", out.content);
+        assert_eq!(store.load_tasks()[0].status, "done");
+
+        // done 任务不允许再开工。
+        let out = start.call(json!({"task_id": "t1"})).await.unwrap();
+        assert!(out.state == agentscope_core::message::ToolResultState::Error);
+    }
+
+    #[tokio::test]
+    async fn task_id_by_name_fallback() {
+        // LLM 常把任务名当 task_id 传：按 id 未命中时按名称唯一匹配接住。
+        let store = store("byname");
+        seed_task(&store, &["c1"]);
+        let update = TestUpdateCase::new(store.clone());
+
+        let out = update
+            .call(json!({"task_id": "冒烟任务", "case_id": "c1", "status": "pass", "actual": "ok"}))
+            .await
+            .unwrap();
+        assert!(out.content.contains("已回写") || out.content.contains("pass"), "{}", out.content);
+        assert_eq!(store.load_tasks()[0].results[0].status, "pass");
+
+        // 真不存在的还是报错。
+        let out = update
+            .call(json!({"task_id": "没有的任务", "case_id": "c1", "status": "pass"}))
+            .await
+            .unwrap();
+        assert!(out.state == agentscope_core::message::ToolResultState::Error);
     }
 }

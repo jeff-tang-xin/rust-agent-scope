@@ -289,9 +289,13 @@ export interface TestTask {
   config_id: string;
   requirement_ids: string[];
   case_ids: string[];
-  /** pending / running / done。 */
+  /** pending / running / paused / done。 */
   status: string;
   results: TestCaseResult[];
+  /** 最近一次开工登记时刻（test_start_task 回写；0 = 旧数据未登记）。 */
+  started_at: number;
+  /** 最近一次交付说明（test_finish_task 回写；paused 时展示）。 */
+  pause_note: string;
   /** 已归档（列表默认隐藏，归档区查看；done 任务手动归档，防列表膨胀）。 */
   archived: boolean;
   created_at: number;
@@ -323,6 +327,8 @@ export interface TestRunStarted {
   targets: number;
   /** 跳过数（已通过 / 待修 Bug 未处理）。 */
   skipped: number;
+  /** true = 任务本就在看门狗看护下执行（重复点火），本次未做任何事。 */
+  already_running: boolean;
 }
 
 /** 编排进度事件（`test-orchestration`）：看门狗与启动入口发的状态变化。 */
@@ -561,6 +567,9 @@ export const api = {
   /** 启动任务执行（LLM 自主编排 + 后端看门狗保活；执行/重跑/强制重跑同一入口）。 */
   testRunTask: (workspaceId: string, mode: string, sessionId: string, taskId: string, force: boolean) =>
     invoke<TestRunStarted>("test_run_task", { workspaceId, mode, sessionId, taskId, force }),
+  /** 查询会话当前在看门狗看护下执行的任务（无则 null）——刷新后恢复「执行中」显示。 */
+  testRunActive: (sessionId: string) =>
+    invoke<string | null>("test_run_active", { sessionId }),
   testArchiveTask: (workspaceId: string, taskId: string, archived: boolean) =>
     invoke<void>("test_archive_task", { workspaceId, taskId, archived }),
   testSaveBug: (workspaceId: string, bug: TestBug) =>

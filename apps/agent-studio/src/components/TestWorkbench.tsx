@@ -192,6 +192,7 @@ const fmtTime = (ms: number) =>
 const STATUS_LABEL: Record<string, string> = {
   pending: "待执行",
   running: "执行中",
+  paused: "已暂停",
   pass: "通过",
   fail: "失败",
   blocked: "阻塞",
@@ -205,6 +206,7 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_CLASS: Record<string, string> = {
   pending: "st-pending",
   running: "st-running",
+  paused: "st-pending",
   pass: "st-pass",
   fail: "st-fail",
   blocked: "st-blocked",
@@ -279,7 +281,13 @@ export default function TestWorkbench({
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+    // 刷新/重进后恢复「执行中」显示：编排循环活在后端（刷新不中断），
+    // 前端的执行中状态是内存态——按看门狗注册表对齐，避免任务明明在跑
+    // 却显示「继续执行」按钮、点了又被会话状态拦截的矛盾。
+    void api.testRunActive(sessionId).then((tid) => {
+      if (tid) setRunningTaskId(tid);
+    });
+  }, [reload, sessionId]);
 
   // 编排进度事件（test_run_task 启动 + 看门狗状态变化）：驱动任务卡片的
   // 执行中标记与进度文案；done/stopped/aborted 收尾并刷新数据。
@@ -287,10 +295,13 @@ export default function TestWorkbench({
     let off: (() => void) | undefined;
     void onTestOrchestration((p) => {
       if (p.workspace_id !== workspace.id) return;
-      if (p.phase === "done" || p.phase === "stopped" || p.phase === "aborted") {
+      if (p.phase === "done" || p.phase === "stopped" || p.phase === "aborted" || p.phase === "paused") {
         setRunningTaskId("");
         setRunProgress("");
-        onToast(p.phase === "aborted" ? "error" : "info", p.message ?? "任务已结束");
+        onToast(
+          p.phase === "aborted" ? "error" : "info",
+          p.message ?? (p.phase === "paused" ? "任务已交付暂停" : "任务已结束"),
+        );
         void reload();
         return;
       }
@@ -942,6 +953,8 @@ export default function TestWorkbench({
                 id: "",
                 status: "pending",
                 results: [],
+                started_at: 0,
+                pause_note: "",
                 archived: false,
                 created_at: 0,
                 finished_at: 0,
@@ -1047,10 +1060,6 @@ export default function TestWorkbench({
       toast("error", "已有任务在执行中");
       return;
     }
-    if (convBusy) {
-      toast("error", "会话正在运行，请等待或停止当前对话再执行任务");
-      return;
-    }
     // 全量重跑会覆盖全部已有结果，属不可逆操作，先确认再动。
     if (
       force &&
@@ -1063,6 +1072,12 @@ export default function TestWorkbench({
     try {
       const r = await api.testRunTask(workspace.id, runtimeMode, sessionId, task.id, force);
       setRunningTaskId(task.id);
+      if (r.already_running) {
+        // 任务本就在看门狗看护下执行（刷新后状态丢失 / 手抖双击）：幂等恢复显示。
+        onToast("info", "任务正在执行中，已恢复进度显示");
+        await reload();
+        return;
+      }
       const skipNote = r.skipped > 0 ? `（跳过 ${r.skipped} 条：已通过/待修 Bug 未处理）` : "";
       onToast("info", `已交给测试智能体执行 ${r.targets} 条用例${skipNote}，进展见实时视图与会话`);
       await reload();
@@ -1453,6 +1468,9 @@ function TasksTab({
                       : ""}
                     · {fmtTime(t.created_at)}
                   </div>
+                  {t.status === "paused" && t.pause_note && (
+                    <div className="test-progress">⏸ {t.pause_note}</div>
+                  )}
                   {running && runProgress && (
                     <div className="test-progress">▶ {runProgress}</div>
                   )}
