@@ -13,8 +13,9 @@ mod factory;
 mod api_tool;
 mod req_tool;mod session;
 mod ssh_tool;
-mod terminal_capture;
 mod team;
+mod testing_tools;
+mod terminal_capture;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

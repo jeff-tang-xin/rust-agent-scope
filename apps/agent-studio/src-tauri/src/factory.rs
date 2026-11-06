@@ -534,6 +534,13 @@ pub fn build_agent(
             toolkit.register(Arc::new(WebFetchTool::new()));
             toolkit.register(Arc::new(WebSearchTool::new()));
             toolkit.register(Arc::new(crate::api_tool::ApiRequest::new()));
+            // 测试状态自回写面：执行编排交给 LLM（test_run_task 一次性下发
+            // 待跑用例），用例状态与 Bug 由 LLM 执行过程中调工具直接落库。
+            let store = crate::testing_tools::TestingStore::new(&memory_workspace.root());
+            toolkit.register(Arc::new(crate::testing_tools::TestUpdateCase::new(
+                store.clone(),
+            )));
+            toolkit.register(Arc::new(crate::testing_tools::TestSubmitBug::new(store)));
         }
         StudioMode::Db => {
             // 数据库工具面：无类别特有工具（db_query/db_dml 在 match 后统一注册）。

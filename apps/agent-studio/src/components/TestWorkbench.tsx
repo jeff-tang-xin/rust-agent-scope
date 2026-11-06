@@ -1,14 +1,14 @@
 // 测试工作区右侧工作台面板：需求 / 用例 / 任务 / 报告与 Bug。
 //
 // 分工（对齐 src-tauri/src/testing.rs 头注）：数据 CRUD、Excel/XMind 导入
-// 解析、报告生成都在后端命令；本组件负责编排——
+// 解析、报告生成都在后端命令；编排权在后端——
 // - 用例生成：把需求发给会话里的测试智能体（sendMessage，需求附图随消息
 //   以 Image 块提供），从回复末尾的 ```json {"cases":[...]} 解析草稿，预览
 //   确认后批量导入；智能体判定信息不足时回复 {"clarifications":[...]}，
 //   弹澄清窗收集用户回答（存回需求）后重新生成；
-// - 任务执行：创建任务后逐用例发执行提示词，等 turn 结束取最后一条助手
-//   回复解析 {"result":...}，回写结果；fail/blocked 直接提交 Bug（不重试，
-//   对齐 TEST_PROMPT 的执行纪律）。
+// - 任务执行：前端只「点火」（test_run_task），之后 LLM 自主逐条执行 +
+//   看门狗保活，进度经 test-orchestration 事件驱动本组件显示；刷新页面
+//   不再中断执行。
 // 视图附加：用例流程图、任务甘特图（SVG 内联，无第三方依赖）、报告/Bug
 // 导出（系统保存对话框 + write_export_file，仅 .md）。
 
@@ -17,6 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   api,
+  onTestOrchestration,
   onTurnFinished,
   type AttachmentInput,
   type TestCase,
@@ -169,46 +170,6 @@ function parseCaseReview(obj: Record<string, unknown> | null): CaseReview | null
   };
 }
 
-/** 执行结果协议（TEST_PROMPT 的输出契约）。 */
-interface ExecOutcome {
-  result: "pass" | "fail" | "blocked";
-  actual: string;
-  steps: Array<{ no: number; status: string; note: string }>;
-  screenshots: string[];
-  bug: {
-    title?: string;
-    severity?: string;
-    steps?: string;
-    expected?: string;
-    actual?: string;
-  } | null;
-}
-
-function parseExecOutcome(obj: Record<string, unknown> | null): ExecOutcome | null {
-  if (!obj) return null;
-  const result = String(obj.result ?? "");
-  if (result !== "pass" && result !== "fail" && result !== "blocked") return null;
-  const rawSteps = Array.isArray(obj.steps) ? obj.steps : [];
-  return {
-    result,
-    actual: String(obj.actual ?? ""),
-    steps: rawSteps
-      .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
-      .map((s) => ({
-        no: Number(s.no ?? 0),
-        status: String(s.status ?? ""),
-        note: String(s.note ?? ""),
-      })),
-    screenshots: Array.isArray(obj.screenshots) ? obj.screenshots.map(String) : [],
-    bug:
-      obj.bug && typeof obj.bug === "object"
-        ? (obj.bug as ExecOutcome["bug"])
-        : null,
-  };
-}
-
-const nowMs = () => Date.now();
-
 /** AI 审查时一次性送进提示词的用例条数上限（超出按抽样审查并注明总数）。 */
 const REVIEW_MAX_CASES = 60;
 
@@ -254,50 +215,6 @@ const STATUS_CLASS: Record<string, string> = {
   closed: "st-pending",
 };
 
-/** 执行提示词（与 TEST_PROMPT 的结果输出协议呼应；纪律部分提示词里已带）。
- *  任务引用了测试配置时，地址与账号从配置注入——账号密码只配一次，多任务复用。
- *  `dataProfile` 是对应用例所属需求登记的数据现状：执行时取值必须据实（精准查询
- *  用真实存在的数据、分页页码与日期断言落在真实范围内），否则会把「数据不够」
- *  误报成功能 Bug。 */
-function execPrompt(
-  task: TestTask,
-  tc: TestCase,
-  config?: TestConfig | null,
-  dataProfile = "",
-): string {
-  const steps = tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
-  const baseUrl = config?.base_url || task.base_url;
-  const accounts = config?.accounts ?? [];
-  const accountLines =
-    accounts.length > 0
-      ? [
-          "测试账号（如需登录，按顺序尝试；全部失败记 blocked 并说明）：",
-          ...accounts.map(
-            (a, i) =>
-              `${i + 1}. 用户名：${a.username}  密码：${a.password}${a.note ? `（${a.note}）` : ""}`,
-          ),
-        ]
-      : [];
-  return [
-    "执行以下测试用例（被测系统以本工作区为准）：",
-    "",
-    `被测系统地址：${baseUrl || "（未填写，按用例步骤中的地址）"}`,
-    ...accountLines,
-    `用例标题：${tc.title}`,
-    `前置条件：${tc.precondition || "无"}`,
-    "测试步骤：",
-    steps || "（无步骤，按标题理解执行）",
-    `预期结果：${tc.expected}`,
-    ...(config?.notes ? [`环境约定：${config.notes}`] : []),
-    ...(dataProfile
-      ? ["被测系统当前真实情况（用例里的具体值都必须以此为准，不要臆造）：", dataProfile]
-      : []),
-    "",
-    "按测试工作区纪律执行：逐步执行并截图留证；某步失败或被阻塞时立即停止，不重试、不绕过。",
-    "完成后在回复末尾按结果输出协议输出一个 ```json 代码块。",
-  ].join("\n");
-}
-
 export default function TestWorkbench({
   workspace,
   sessionId,
@@ -329,6 +246,7 @@ export default function TestWorkbench({
     config_id: string;
     requirement_ids: string[];
     case_ids: string[];
+    archived: boolean;
   } | null>(null);
   const [importPreview, setImportPreview] = useState<{
     source: string;
@@ -341,10 +259,10 @@ export default function TestWorkbench({
   // 测试配置表单（可复用的环境 + 账号资产）。
   const [configForm, setConfigForm] = useState<TestConfig | null>(null);
 
-  // 编排器状态（同一时刻只跑一个任务）。
+  // 执行状态（同一时刻一个会话只跑一个任务；由 test-orchestration 事件驱动——
+  // 编排已交给后端：LLM 自主逐条执行 + 看门狗保活，前端只显示进度）。
   const [runningTaskId, setRunningTaskId] = useState("");
   const [runProgress, setRunProgress] = useState("");
-  const runningRef = useRef(false);
   // 需求澄清：智能体判定信息不足时弹窗收集用户回答，答完带答案重新生成。
   const [clarify, setClarify] = useState<{ req: TestRequirement; questions: string[] } | null>(
     null,
@@ -362,6 +280,30 @@ export default function TestWorkbench({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // 编排进度事件（test_run_task 启动 + 看门狗状态变化）：驱动任务卡片的
+  // 执行中标记与进度文案；done/stopped/aborted 收尾并刷新数据。
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    void onTestOrchestration((p) => {
+      if (p.workspace_id !== workspace.id) return;
+      if (p.phase === "done" || p.phase === "stopped" || p.phase === "aborted") {
+        setRunningTaskId("");
+        setRunProgress("");
+        onToast(p.phase === "aborted" ? "error" : "info", p.message ?? "任务已结束");
+        void reload();
+        return;
+      }
+      // started / running / waiting_confirm / resumed：进行中。
+      setRunningTaskId(p.task_id);
+      const base = `${p.done_count}/${p.total} 条已完成`;
+      setRunProgress(p.message ? `${base} · ${p.message}` : base);
+    }).then((f) => {
+      off = f;
+    });
+    return () => off?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id]);
 
   const toast = (kind: "info" | "error", text: string) => {
     if (kind === "error") setError(text);
@@ -472,7 +414,7 @@ export default function TestWorkbench({
     req: TestRequirement,
     extraAnswers: string[] = [],
   ): Promise<DraftResult> => {
-    if (convBusy || runningRef.current) {
+    if (convBusy || runningTaskId !== "") {
       toast("error", "会话正在运行，请等待当前任务完成再生成用例");
       return { kind: "cases", cases: [] };
     }
@@ -556,7 +498,7 @@ export default function TestWorkbench({
     cases: TestCase[],
     req: TestRequirement | null,
   ): Promise<CaseReview | null> => {
-    if (convBusy || runningRef.current) {
+    if (convBusy || runningTaskId !== "") {
       toast("error", "会话正在运行，请等待当前任务完成再审查");
       return null;
     }
@@ -770,7 +712,7 @@ export default function TestWorkbench({
         {tab === "cases" && (
           <CasesTab
             data={data}
-            busy={convBusy || runningRef.current}
+            busy={convBusy || runningTaskId !== ""}
             onNewReq={() =>
               setReqForm({ id: "", title: "", content: "", data_profile: "", images: [], clarifications: [], origin: "test", created_at: 0 })
             }
@@ -830,6 +772,7 @@ export default function TestWorkbench({
                 config_id: "",
                 requirement_ids: [],
                 case_ids: [],
+                archived: false,
               })
             }
             onEditTask={(t) =>
@@ -839,6 +782,7 @@ export default function TestWorkbench({
                 config_id: t.config_id,
                 requirement_ids: t.requirement_ids,
                 case_ids: t.case_ids,
+                archived: t.archived,
               })
             }
             onDeleteTask={async (t) => {
@@ -851,6 +795,15 @@ export default function TestWorkbench({
               }
             }}
             onRun={(t, force) => void runTask(t, force)}
+            onArchive={async (t, archived) => {
+              try {
+                await api.testArchiveTask(workspace.id, t.id, archived);
+                onToast("info", archived ? `任务「${t.name}」已归档` : `任务「${t.name}」已取消归档`);
+                await reload();
+              } catch (e) {
+                toast("error", String(e));
+              }
+            }}
             onGantt={setGanttTask}
             onCaseFlow={(cid) => setFlowCase(data.cases.find((c) => c.id === cid) ?? null)}
             onBugView={(bid) => {
@@ -989,6 +942,7 @@ export default function TestWorkbench({
                 id: "",
                 status: "pending",
                 results: [],
+                archived: false,
                 created_at: 0,
                 finished_at: 0,
               });
@@ -1082,8 +1036,14 @@ export default function TestWorkbench({
   // 停在 running。所以「中断 → 刷新 → 续跑」是必须支持的路径：任务状态是
   // running 时按钮显示「继续执行」，点它按用例结果续跑（已通过的跳过）。
 
+  // ---------- 任务执行（编排权在后端：LLM 自主逐条执行 + 看门狗保活） ----------
+  //
+  // 前端只负责「点火」：调 test_run_task 把任务交给测试智能体，之后进度靠
+  // test-orchestration 事件驱动。刷新页面/关窗口不再中断执行——编排循环
+  // 活在后端，重跑筛选（跳过已通过/待修 Bug）也由后端完成。
+
   async function runTask(task: TestTask, force = false) {
-    if (runningRef.current) {
+    if (runningTaskId !== "") {
       toast("error", "已有任务在执行中");
       return;
     }
@@ -1100,253 +1060,14 @@ export default function TestWorkbench({
     ) {
       return;
     }
-    runningRef.current = true;
-    setRunningTaskId(task.id);
     try {
-      // 上次执行被刷新/崩溃打断时，后端那个 turn 可能还在跑并占着会话锁，
-      // 后续每条消息都会被拒（"a turn is already running"）——这就是「刷新后
-      // 续不上」。先读最新任务，确认是中断残留再清一次：interrupt_turn 幂等，
-      // 没有运行中的 turn 时后端返回 false，无副作用。
-      const fresh = await api.testListData(workspace.id);
-      const t = fresh.tasks.find((x) => x.id === task.id);
-      if (!t) {
-        toast("error", "任务不存在（可能已被删除）");
-        return;
-      }
-      if (t.status === "running") {
-        try {
-          await api.interruptTurn(workspace.id, runtimeMode, sessionId);
-        } catch {
-          /* 没有可中断的 turn，忽略 */
-        }
-      }
-      const casesById = new Map(fresh.cases.map((c) => [c.id, c]));
-      // 用例所属需求的数据现状（执行时注入，避免模型自己去编查询值/页码/日期）。
-      const dataProfileOf = (c: TestCase) =>
-        fresh.requirements.find((r) => r.id === c.requirement_id)?.data_profile?.trim() ?? "";
-      // 任务引用的测试配置（环境 + 账号）；配置已删则回退任务自带 base_url。
-      const config = fresh.configs.find((c) => c.id === t.config_id) ?? null;
-      const results = t.results.map((r) => ({ ...r }));
-
-      // 每条用例最近一次 Bug（一条用例可能有多条历史 Bug，取创建时间最新的）。
-      // 重跑筛选与「不重复建 Bug」都依赖它。
-      const latestBugByCase = new Map<string, TestBug>();
-      for (const b of fresh.bugs) {
-        if (!b.case_id) continue;
-        const prev = latestBugByCase.get(b.case_id);
-        if (!prev || b.created_at >= prev.created_at) latestBugByCase.set(b.case_id, b);
-      }
-      /** 该用例是否还有「待处理」的 Bug（未修复 → 重跑没有意义，等修）。 */
-      const openBugOf = (caseId: string) => {
-        const b = latestBugByCase.get(caseId);
-        return b && b.status === "open" ? b : null;
-      };
-
-      // 重跑筛选用例：只跑「Bug 已修复（含已关闭）」和「还没跑过」的。
-      // - 无结果 / pending / running（上次中断残留）→ 跑；
-      // - pass → 跳过（已通过，重跑只会白烧一轮模型）；
-      // - fail / blocked / error → 看该用例最近一条 Bug：仍 open 就跳过，
-      //   已 fixed/closed（或无 Bug，如协议解析失败）才重跑。
-      const targets: string[] = [];
-      let skippedPassed = 0;
-      let skippedOpenBug = 0;
-      if (force) {
-        // 强制全量重跑：无视「已通过 / 待修 Bug」筛选，逐条重跑（已有结果被覆盖）。
-        targets.push(...t.case_ids);
-      } else {
-        for (const cid of t.case_ids) {
-          const st = results.find((x) => x.case_id === cid)?.status ?? "pending";
-          if (st === "pending" || st === "running") {
-            targets.push(cid);
-            continue;
-          }
-          if (st === "pass") {
-            skippedPassed += 1;
-            continue;
-          }
-          if (openBugOf(cid)) {
-            skippedOpenBug += 1;
-            continue;
-          }
-          targets.push(cid);
-        }
-      }
-      if (!targets.length) {
-        // 全部跳过仍要给任务收尾：上次被打断的任务若剩的都在等 Bug 修，
-        // 不置 done 就会永远显示「继续执行」。
-        if (t.status === "running") {
-          await api.testUpdateTask(workspace.id, {
-            ...t,
-            status: "done",
-            results,
-            finished_at: nowMs(),
-          });
-          await reload();
-        }
-        onToast(
-          "info",
-          t.case_ids.length
-            ? `没有需要执行的用例：已通过 ${skippedPassed} 条、待修 Bug 未处理 ${skippedOpenBug} 条（重跑只跑「已修复」与「未跑过」的用例；需要全跑请用「全量重跑」）`
-            : "任务没有关联用例，无法执行",
-        );
-        return;
-      }
-      const skipNote = [
-        skippedPassed > 0 ? `已通过 ${skippedPassed} 条` : "",
-        skippedOpenBug > 0 ? `待修 Bug 未处理 ${skippedOpenBug} 条` : "",
-      ]
-        .filter(Boolean)
-        .join("、");
-      if (skipNote) {
-        onToast("info", `本次跳过 ${skipNote}；将执行 ${targets.length} 条`);
-      }
-
-      let done = 0;
-      for (let i = 0; i < targets.length; i++) {
-        const cid = targets[i];
-        const ri = results.findIndex((r) => r.case_id === cid);
-        if (ri < 0) continue;
-        const tc = casesById.get(cid);
-        if (!tc) {
-          results[ri] = {
-            ...results[ri],
-            status: "error",
-            actual: "用例已被删除，无法执行",
-            finished_at: nowMs(),
-          };
-          done++;
-          continue;
-        }
-        setRunProgress(`${i + 1}/${targets.length}：${tc.title}`);
-        // 新一轮执行先清掉上一次的 Bug 关联与原始回复：本次还没结论，
-        // 留着旧 bug_id 会让「通过」的用例仍显示挂着 Bug。
-        results[ri] = {
-          ...results[ri],
-          status: "running",
-          started_at: nowMs(),
-          bug_id: "",
-          raw_reply: "",
-        };
-        await api.testUpdateTask(workspace.id, { ...t, status: "running", results });
-        await reload();
-
-        // 卡住是「看不出在等还是死了」的根源：每 5 秒把已等秒数写进进度，
-        // 用户才知道该继续等还是该中断。
-        const caseStart = Date.now();
-        const ticker = window.setInterval(() => {
-          const sec = Math.round((Date.now() - caseStart) / 1000);
-          setRunProgress(`${i + 1}/${targets.length}：${tc.title}（已等 ${sec}s）`);
-        }, 5000);
-
-        let reply = "";
-        // 本轮失败的真实原因（超时/发送失败/非正常结束）。以前一律吞成空串，
-        // 面板只能显示笼统的「解析失败」，看不出到底卡在哪一步。
-        let failure = "";
-        try {
-          // 用例所属需求的附图随执行消息发给智能体：执行时页面长什么样、
-          // 流程怎么走，图比文字可靠（与生成侧同一份图源）。
-          const reqImages = (() => {
-            const rid = tc.requirement_id;
-            if (!rid) return [];
-            return data.requirements.find((x) => x.id === rid)?.images ?? [];
-          })();
-          const attachments = await loadRequirementImages(reqImages);
-          const turn = await sendWithRetry(
-            execPrompt(t, tc, config, dataProfileOf(tc)),
-            attachments.length > 0 ? attachments : undefined,
-          );
-          const r = await awaitTurn(turn.turn_id);
-          reply = r.text;
-          failure = r.failure;
-        } catch (e) {
-          failure = `发送失败：${String(e)}`;
-        } finally {
-          window.clearInterval(ticker);
-        }
-        const outcome = parseExecOutcome(extractJsonBlock(reply));
-        if (outcome) {
-          results[ri] = {
-            ...results[ri],
-            status: outcome.result,
-            actual: outcome.actual,
-            steps: outcome.steps,
-            screenshots: outcome.screenshots,
-            raw_reply: reply,
-            finished_at: nowMs(),
-          };
-          // fail/blocked → 直接提交 Bug（需求 6：阻塞不重试）。
-          if (outcome.result !== "pass") {
-            // 同一用例已有「待处理」Bug 时不再新建：重跑会把同一问题刷成一堆
-            // 重复报告。Bug 已修复/已关闭后再次失败，说明是回归或新问题，才另建一条。
-            const existing = openBugOf(tc.id);
-            if (existing) {
-              results[ri].bug_id = existing.id;
-              onToast("info", `已存在待处理 Bug「${existing.title}」，本次不重复创建`);
-            } else {
-              const b = outcome.bug ?? {};
-              const bug: TestBug = {
-                id: "",
-                title: b.title?.trim() || `${tc.title}（${outcome.result === "blocked" ? "执行阻塞" : "用例失败"}）`,
-                severity: b.severity?.trim() || "P2",
-                steps:
-                  b.steps?.trim() ||
-                  tc.steps.map((s, si) => `${si + 1}. ${s}`).join("\n") ||
-                  tc.title,
-                expected: b.expected?.trim() || tc.expected,
-                actual: b.actual?.trim() || outcome.actual,
-                screenshots: outcome.screenshots,
-                case_id: tc.id,
-                task_id: t.id,
-                status: "open",
-                fix_note: "",
-                created_at: 0,
-              };
-              try {
-                const saved = await api.testSaveBug(workspace.id, bug);
-                results[ri].bug_id = saved.id;
-                // 新 Bug 立刻进索引：同一次任务里后面的用例不会重复建，
-                // 也保证本次后续重跑筛选看到的是最新状态。
-                latestBugByCase.set(tc.id, saved);
-                onToast("info", `已提交 Bug：${saved.title}`);
-              } catch (e) {
-                toast("error", `Bug 提交失败：${String(e)}`);
-              }
-            }
-          }
-        } else {
-          results[ri] = {
-            ...results[ri],
-            status: "error",
-            // 优先展示真实失败原因（超时/发送失败），否则才是协议解析问题。
-            actual: failure || "未能从回复解析出结果 JSON（协议见测试智能体提示词）",
-            raw_reply: reply,
-            finished_at: nowMs(),
-          };
-        }
-        done++;
-        // 跳过的不计入 total，否则任务永远收不了尾。
-        const isLast = done === targets.length;
-        await api.testUpdateTask(workspace.id, {
-          ...t,
-          status: isLast ? "done" : "running",
-          results,
-          finished_at: isLast ? nowMs() : 0,
-        });
-        await reload();
-      }
-      onToast(
-        "info",
-        `任务「${t.name}」执行完成：本次执行 ${targets.length} 条${
-          skippedPassed + skippedOpenBug > 0 ? `，跳过 ${skippedPassed + skippedOpenBug} 条` : ""
-        }`,
-      );
-    } catch (e) {
-      toast("error", `任务执行中断：${String(e)}`);
-    } finally {
-      runningRef.current = false;
-      setRunningTaskId("");
-      setRunProgress("");
+      const r = await api.testRunTask(workspace.id, runtimeMode, sessionId, task.id, force);
+      setRunningTaskId(task.id);
+      const skipNote = r.skipped > 0 ? `（跳过 ${r.skipped} 条：已通过/待修 Bug 未处理）` : "";
+      onToast("info", `已交给测试智能体执行 ${r.targets} 条用例${skipNote}，进展见实时视图与会话`);
       await reload();
+    } catch (e) {
+      toast("error", String(e));
     }
   }
 }
@@ -1661,6 +1382,7 @@ function TasksTab({
   onEditTask,
   onDeleteTask,
   onRun,
+  onArchive,
   onGantt,
   onCaseFlow,
   onBugView,
@@ -1672,10 +1394,15 @@ function TasksTab({
   onEditTask: (t: TestTask) => void;
   onDeleteTask: (t: TestTask) => void;
   onRun: (t: TestTask, force?: boolean) => void;
+  onArchive: (t: TestTask, archived: boolean) => void;
   onGantt: (t: TestTask) => void;
   onCaseFlow: (caseId: string) => void;
   onBugView: (bugId: string) => void;
 }) {
+  // 归档视图开关：默认只看活跃任务，归档的收进「已归档」折叠区。
+  const [showArchived, setShowArchived] = useState(false);
+  const active = data.tasks.filter((t) => !t.archived);
+  const archived = data.tasks.filter((t) => t.archived);
   if (data.tasks.length === 0) {
     return (
       <div className="test-body">
@@ -1699,14 +1426,14 @@ function TasksTab({
       {runningTaskId !== "" && <TestLiveView />}
       <div className="test-section">
         <div className="test-section-head">
-          <span className="test-section-title">测试任务（{data.tasks.length}）</span>
+          <span className="test-section-title">测试任务（{active.length}）</span>
           <span className="spacer" />
           <button className="btn" onClick={onNewTask}>
             + 任务
           </button>
         </div>
         <div className="test-list">
-          {data.tasks.map((t) => {
+          {active.map((t) => {
             const running = t.id === runningTaskId;
             const counts = countResults(t);
             return (
@@ -1769,12 +1496,12 @@ function TasksTab({
                     onClick={() => onRun(t)}
                     title={
                       running
-                        ? "执行中"
+                        ? "执行中（后端编排，刷新页面不影响）"
                         : t.status === "running"
-                          ? "上次执行被中断（刷新/关闭页面会中断编排）——点此从未完成的用例继续"
+                          ? "上次执行被中断——点此让智能体从未完成的用例继续"
                           : t.status === "done"
                             ? "重跑：只跑「Bug 已修复」和「还没跑过」的用例"
-                            : "执行（逐用例跑）"
+                            : "执行（智能体逐用例跑）"
                     }
                   >
                     {running
@@ -1799,6 +1526,15 @@ function TasksTab({
                   <button className="icon-btn" title="编辑" onClick={() => onEditTask(t)}>
                     ✎
                   </button>
+                  {t.status === "done" && (
+                    <button
+                      className="icon-btn"
+                      title="归档（从默认列表隐藏，可在已归档区找回）"
+                      onClick={() => onArchive(t, true)}
+                    >
+                      📦
+                    </button>
+                  )}
                   <button className="icon-btn" title="删除" onClick={() => onDeleteTask(t)}>
                     🗑
                   </button>
@@ -1807,6 +1543,50 @@ function TasksTab({
             );
           })}
         </div>
+        {archived.length > 0 && (
+          <div className="test-section" style={{ marginTop: 12 }}>
+            <div className="test-section-head">
+              <button className="link-btn" onClick={() => setShowArchived(!showArchived)}>
+                {showArchived ? "▾" : "▸"} 已归档（{archived.length}）
+              </button>
+            </div>
+            {showArchived && (
+              <div className="test-list">
+                {archived.map((t) => {
+                  const counts = countResults(t);
+                  return (
+                    <div key={t.id} className="test-item test-task">
+                      <div className="test-item-main">
+                        <div className="test-item-title" title={t.name}>
+                          <span className={`badge ${STATUS_CLASS[t.status] ?? ""}`}>
+                            {STATUS_LABEL[t.status] ?? t.status}
+                          </span>{" "}
+                          {t.name}
+                        </div>
+                        <div className="test-item-sub">
+                          {t.case_ids.length} 用例 · ✅{counts.pass} ❌{counts.fail} ⛔
+                          {counts.blocked} · {fmtTime(t.created_at)}
+                        </div>
+                      </div>
+                      <div className="test-item-actions">
+                        <button
+                          className="btn"
+                          title="取消归档（恢复到默认列表）"
+                          onClick={() => onArchive(t, false)}
+                        >
+                          取消归档
+                        </button>
+                        <button className="icon-btn" title="删除" onClick={() => onDeleteTask(t)}>
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

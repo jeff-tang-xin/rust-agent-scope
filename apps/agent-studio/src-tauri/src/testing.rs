@@ -8,18 +8,22 @@
 //! - `tasks.json`        测试任务（含逐用例执行结果）
 //! - `bugs.json`         Bug 报告
 //!
-//! 分工：用例生成与执行由**前端编排**（sendMessage(mode="test") + 解析
-//! agent 的结构化 JSON 回复，见 TestWorkbench），本模块只负责数据 CRUD、
-//! Excel/XMind 导入解析与报告生成——后端不做编排，保持命令面无状态。
+//! 分工：用例生成由前端编排（sendMessage(mode="test") + 解析 agent 的
+//! 结构化 JSON 回复，见 TestWorkbench），本模块负责数据 CRUD、Excel/XMind
+//! 导入解析与报告生成；**任务执行编排已交给 LLM**（`test_run_task` 一次性
+//! 下发待跑用例，LLM 调 `testing_tools` 自回写状态，后端监督者只保活）。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::AppState;
+use crate::commands::{app_log, AppState};
 use crate::factory;
+use crate::session::AgentHandle;
 
 // ---------- 数据结构 ----------
 
@@ -91,7 +95,7 @@ pub struct StepResult {
 }
 
 /// 用例执行结果（任务内逐用例一条）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CaseResult {
     pub case_id: String,
     /// pending | running | pass | fail | blocked | skipped
@@ -134,6 +138,9 @@ pub struct TestTask {
     pub status: String,
     #[serde(default)]
     pub results: Vec<CaseResult>,
+    /// 已归档（列表默认隐藏，归档区查看；done 任务手动归档，防列表膨胀）。
+    #[serde(default)]
+    pub archived: bool,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -228,7 +235,7 @@ pub struct TestingData {
 
 /// 测试数据根：`<workspace_root>/.ox/testing`。测试工作区绑定协同工作区时
 /// 跟随其目录——协同与测试读写同一份数据（打通的关键）。
-fn testing_root(state: &AppState, workspace_id: &str) -> Result<PathBuf, String> {
+pub(crate) fn testing_root(state: &AppState, workspace_id: &str) -> Result<PathBuf, String> {
     let config = state.snapshot();
     let ws = config
         .workspace(workspace_id)
@@ -513,6 +520,676 @@ pub fn test_update_task(
         None => return Err(format!("任务 `{}` 不存在", task.id)),
     }
     save_json(&path, &items)
+}
+
+/// 任务归档/取消归档（done 任务手动归档，列表默认只看未归档的）。
+#[tauri::command]
+pub fn test_archive_task(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    task_id: String,
+    archived: bool,
+) -> Result<(), String> {
+    let root = testing_root(&state, &workspace_id)?;
+    let path = root.join("tasks.json");
+    let mut items: Vec<TestTask> = load_json(&path);
+    match items.iter_mut().find(|t| t.id == task_id) {
+        Some(t) => t.archived = archived,
+        None => return Err(format!("任务 `{task_id}` 不存在")),
+    }
+    save_json(&path, &items)
+}
+
+// ---------- 任务执行：LLM 自主编排 + 后端监督保活 ----------
+
+/// 编排进度事件（`test-orchestration`）：前端测试面板据此更新进度与状态。
+/// 「每一步都在界面上体现」的载体——LLM 的工具调用卡片走 agent-event 流，
+/// 编排层的状态变化（等待授权/自动续跑/收尾）走本事件。
+#[derive(Debug, Clone, Serialize)]
+pub struct TestOrchestration {
+    pub workspace_id: String,
+    pub task_id: String,
+    /// started | waiting_confirm | resumed | done | stopped | aborted
+    pub phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// 已到终态的用例数 / 计划执行总数。
+    pub done_count: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TestRunStarted {
+    pub turn_id: String,
+    /// 本次交给 LLM 的用例数。
+    pub targets: usize,
+    /// 跳过数（已通过 / 待修 Bug 未处理）。
+    pub skipped: usize,
+}
+
+/// 启动测试任务：筛出待跑用例一次性交给测试智能体（LLM 自主编排），
+/// 并拉起后端看门狗保活。
+///
+/// 编排权在 LLM：逐条执行、每条完成调 `test_update_case` 回写状态、
+/// fail/blocked 调 `test_submit_bug` 提 Bug。后端不做逐条编排——
+/// 旧「前端逐条发消息 + 解析回复 JSON」模式在授权挂起时会撞墙刷屏
+/// （每条后续消息都报 invalid input），且页面一关编排就断。
+///
+/// 看门狗只做保活：轮询 session 状态，LLM 停转（模型 5xx / 步数耗尽）
+/// 而任务未完成时自动续跑；等授权（HITL 挂起）时原地等待用户裁决，
+/// 绝不代答。注册表 session_id → task_id：一个会话同时只跑一个任务，
+/// interrupt_turn 据此让看门狗退场（人接管，狗不拉起）。
+#[tauri::command]
+pub async fn test_run_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+    mode: String,
+    session_id: String,
+    task_id: String,
+    force: bool,
+) -> Result<TestRunStarted, String> {
+    // 防重入：同一会话已有任务在看门狗看护下执行。
+    {
+        let runs = state
+            .test_runs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(running) = runs.get(&session_id) {
+            return Err(format!(
+                "该会话正在执行任务 `{running}`（看门狗看护中）；先停止或等它完成"
+            ));
+        }
+    }
+
+    let root = testing_root(&state, &workspace_id)?;
+    let data = TestingData {
+        requirements: load_json(&root.join("requirements.json")),
+        cases: load_json(&root.join("cases.json")),
+        tasks: load_json(&root.join("tasks.json")),
+        bugs: load_json(&root.join("bugs.json")),
+        configs: load_json(&root.join("configs.json")),
+    };
+    let task = data
+        .tasks
+        .iter()
+        .find(|t| t.id == task_id)
+        .cloned()
+        .ok_or_else(|| format!("任务 `{task_id}` 不存在"))?;
+
+    // 筛待跑用例：force 全量重跑；否则只跑「没跑完的（pending/running，
+    // 含上次中断残留）」与「Bug 已修复的（回归验证）」——已通过的和
+    // 待修 Bug 未处理（修完再跑才有意义）的跳过。
+    let latest_bug_by_case: HashMap<String, Bug> = {
+        let mut m: HashMap<String, Bug> = HashMap::new();
+        for b in &data.bugs {
+            if b.case_id.is_empty() {
+                continue;
+            }
+            match m.get(&b.case_id) {
+                Some(prev) if prev.created_at >= b.created_at => {}
+                _ => {
+                    m.insert(b.case_id.clone(), b.clone());
+                }
+            }
+        }
+        m
+    };
+    let mut skipped_passed = 0usize;
+    let mut skipped_open_bug = 0usize;
+    let targets: Vec<TestCase> = task
+        .case_ids
+        .iter()
+        .filter_map(|cid| data.cases.iter().find(|c| &c.id == cid).cloned())
+        .filter(|c| {
+            if force {
+                return true;
+            }
+            let st = task
+                .results
+                .iter()
+                .find(|r| r.case_id == c.id)
+                .map(|r| r.status.as_str())
+                .unwrap_or("pending");
+            if matches!(st, "pending" | "running") {
+                return true;
+            }
+            if st == "pass" {
+                skipped_passed += 1;
+                return false;
+            }
+            match latest_bug_by_case.get(&c.id) {
+                Some(b) if b.status == "open" => {
+                    skipped_open_bug += 1;
+                    false
+                }
+                _ => true,
+            }
+        })
+        .collect();
+    if targets.is_empty() {
+        return Err(format!(
+            "没有需要执行的用例：已通过 {skipped_passed} 条、待修 Bug 未处理 {skipped_open_bug} 条（全量重跑请用「全量重跑」）"
+        ));
+    }
+
+    // 初始化结果槽：每条 target 一个 running 槽（LLM 只能更新这些槽）。
+    let now = now_ms();
+    let mut results: Vec<CaseResult> = Vec::new();
+    for r in &task.results {
+        if targets.iter().any(|c| c.id == r.case_id) {
+            results.push(CaseResult {
+                started_at: now,
+                bug_id: String::new(),
+                raw_reply: String::new(),
+                ..r.clone()
+            });
+        } else {
+            results.push(r.clone());
+        }
+    }
+    for c in &targets {
+        if !results.iter().any(|r| r.case_id == c.id) {
+            results.push(CaseResult {
+                case_id: c.id.clone(),
+                status: "running".into(),
+                started_at: now,
+                ..Default::default()
+            });
+        }
+    }
+    {
+        let path = root.join("tasks.json");
+        let mut items: Vec<TestTask> = load_json(&path);
+        if let Some(t) = items.iter_mut().find(|t| t.id == task_id) {
+            t.results = results;
+            t.status = "running".into();
+            t.finished_at = 0;
+        }
+        save_json(&path, &items)?;
+    }
+
+    // 执行提示词：任务/环境/账号/数据现状 + 待跑用例全量内容 + 执行协议。
+    let config = if task.config_id.is_empty() {
+        None
+    } else {
+        data.configs
+            .iter()
+            .find(|c| c.id == task.config_id)
+            .cloned()
+    };
+    let prompt = build_exec_prompt(&task, &targets, config.as_ref(), &data);
+    // 需求附图随消息发给智能体（执行时页面长什么样，图比文字可靠）。
+    let attachments = load_requirement_attachments(&root, &targets, &data);
+
+    let handle = state.handle(&workspace_id, &mode)?;
+    // 看门狗注册（session_id → task_id）后拉起：它每 3s 巡检 session 状态，
+    // 首条消息由下面 start_turn 同步发出，无事件竞态。
+    {
+        let mut runs = state.test_runs.lock().unwrap_or_else(|e| e.into_inner());
+        runs.insert(session_id.clone(), task_id.clone());
+    }
+    let dog = TestWatchdog {
+        app: app.clone(),
+        handle: Arc::clone(&handle),
+        workspace_id: workspace_id.clone(),
+        session_id: session_id.clone(),
+        task_id: task_id.clone(),
+        task_name: task.name.clone(),
+        ox_root: root.clone(),
+        runs: Arc::clone(&state.test_runs),
+    };
+    tokio::spawn(dog.run());
+
+    let turn = crate::commands::start_turn(
+        &app,
+        &handle,
+        &workspace_id,
+        &session_id,
+        prompt,
+        (!attachments.is_empty()).then_some(attachments),
+        None,
+    )
+    .await;
+
+    // 启动失败（会话忙等）：注销看门狗（它下轮巡检发现注册表里没有自己
+    // 就退场），返回错误。
+    if let Err(e) = &turn {
+        state
+            .test_runs
+            .lock()
+            .unwrap_or_else(|e2| e2.into_inner())
+            .remove(&session_id);
+        return Err(e.clone());
+    }
+    let turn = turn.unwrap();
+    let _ = app.emit(
+        "test-orchestration",
+        TestOrchestration {
+            workspace_id,
+            task_id,
+            phase: "started".into(),
+            message: Some(format!(
+                "已交给测试智能体执行 {} 条用例（跳过 {} 条）",
+                targets.len(),
+                skipped_passed + skipped_open_bug
+            )),
+            done_count: 0,
+            total: targets.len(),
+        },
+    );
+    Ok(TestRunStarted {
+        turn_id: turn.turn_id,
+        targets: targets.len(),
+        skipped: skipped_passed + skipped_open_bug,
+    })
+}
+
+/// 需求附图 → 附件块：读 `.ox/screenshots/<name>` 转 base64（与前端
+/// loadRequirementImages 同源；单张读不到不阻断执行）。
+fn load_requirement_attachments(
+    root: &Path,
+    targets: &[TestCase],
+    data: &TestingData,
+) -> Vec<crate::commands::AttachmentInput> {
+    let mut names: Vec<String> = Vec::new();
+    for c in targets {
+        if c.requirement_id.is_empty() {
+            continue;
+        }
+        if let Some(r) = data.requirements.iter().find(|r| r.id == c.requirement_id) {
+            for img in &r.images {
+                if !names.contains(img) {
+                    names.push(img.clone());
+                }
+            }
+        }
+    }
+    let shots = root.join("..").join("screenshots");
+    let mut out = Vec::new();
+    for name in names {
+        let ext = name.rsplit('.').next().unwrap_or("png").to_lowercase();
+        let media_type = match ext.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            _ => "image/png",
+        };
+        if let Ok(bytes) = std::fs::read(shots.join(&name)) {
+            use base64::Engine as _;
+            out.push(crate::commands::AttachmentInput {
+                name,
+                media_type: media_type.into(),
+                data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+            });
+        }
+    }
+    out
+}
+
+/// 执行提示词：任务/环境/账号/数据现状 + 待跑用例全量内容 + 执行协议。
+/// （旧模式这段在前端 execPrompt 逐条构造；编排交给 LLM 后一次下发全部。）
+fn build_exec_prompt(
+    task: &TestTask,
+    targets: &[TestCase],
+    config: Option<&TestConfig>,
+    data: &TestingData,
+) -> String {
+    let base_url = config
+        .map(|c| c.base_url.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| task.base_url.clone());
+    let mut p = String::new();
+    p.push_str(&format!(
+        "执行测试任务「{}」（共 {} 条用例，按顺序逐条执行）。\n\n",
+        task.name,
+        targets.len()
+    ));
+    p.push_str(&format!(
+        "被测系统地址：{}\n",
+        if base_url.is_empty() {
+            "（未填写，按用例步骤中的地址）"
+        } else {
+            &base_url
+        }
+    ));
+    if let Some(cfg) = config {
+        if !cfg.accounts.is_empty() {
+            p.push_str("测试账号（如需登录，按顺序尝试；全部失败记 blocked 并说明）：\n");
+            for (i, a) in cfg.accounts.iter().enumerate() {
+                p.push_str(&format!(
+                    "{}. 用户名：{}  密码：{}{}\n",
+                    i + 1,
+                    a.username,
+                    a.password,
+                    if a.note.is_empty() {
+                        String::new()
+                    } else {
+                        format!("（{}）", a.note)
+                    }
+                ));
+            }
+        }
+        if !cfg.notes.is_empty() {
+            p.push_str(&format!("环境约定：{}\n", cfg.notes));
+        }
+    }
+    // 数据现状（用例里的具体值必须以此为准）。
+    let mut profiles: Vec<String> = Vec::new();
+    for c in targets {
+        if c.requirement_id.is_empty() {
+            continue;
+        }
+        if let Some(r) = data.requirements.iter().find(|r| r.id == c.requirement_id) {
+            if !r.data_profile.is_empty() && !profiles.contains(&r.data_profile) {
+                profiles.push(r.data_profile.clone());
+            }
+        }
+    }
+    if !profiles.is_empty() {
+        p.push_str("\n被测系统当前真实情况（用例里的具体值都必须以此为准，不要臆造）：\n");
+        for pr in &profiles {
+            p.push_str(pr);
+            p.push('\n');
+        }
+    }
+    p.push_str("\n## 待执行用例\n");
+    for (i, c) in targets.iter().enumerate() {
+        p.push_str(&format!(
+            "\n### 用例 {} [case_id={}]（{}）\n",
+            i + 1,
+            c.id,
+            if c.priority.is_empty() { "P2" } else { &c.priority }
+        ));
+        p.push_str(&format!("标题：{}\n", c.title));
+        p.push_str(&format!(
+            "前置条件：{}\n",
+            if c.precondition.is_empty() { "无" } else { &c.precondition }
+        ));
+        p.push_str("测试步骤：\n");
+        if c.steps.is_empty() {
+            p.push_str("（无步骤，按标题理解执行）\n");
+        } else {
+            for (si, s) in c.steps.iter().enumerate() {
+                p.push_str(&format!("{}. {}\n", si + 1, s));
+            }
+        }
+        p.push_str(&format!("预期结果：{}\n", c.expected));
+    }
+    p.push_str(
+        "\n## 执行协议（状态只认工具回写）\n\
+1. 按顺序逐条执行：一条用例从第一步走到结论，状态回写后才开始下一条；不要并行穿插多条用例。\n\
+2. 每条用例执行完**立即调 test_update_case**（task_id 见上，case_id 见用例标题行）——只在回复里写结果等于没执行，任务面板不会更新。\n\
+3. fail/blocked：先 test_update_case 记状态，再调 test_submit_bug 提 Bug（工具自动防重复：同用例已有待处理 Bug 会返回既有条目，此时不要重复提交）。\n\
+4. 接口步骤用 api_request；页面步骤用浏览器工具（视觉驱动：截图 → 坐标操作），关键节点截图留证并把文件名写进 screenshots。\n\
+5. 某一步失败或被阻塞：立即停止该用例，不重试、不换路径、不绕过，如实记 fail/blocked。\n\
+6. 全部用例回写完毕后，回复一段汇总：每条用例一行「标题 → 结果」。\n",
+    );
+    p
+}
+
+/// 任务看门狗：轮询 session 状态保活，等授权时原地等待。
+///
+/// 测试任务跑在绑定 session 里，看门狗只看两个事实源：
+/// 1. **session 状态**（`is_running`）：在跑 = LLM 在干活，不干预；
+///    空闲 = LLM 停转（模型 5xx / 步数耗尽 / 正常结束但没跑完）。
+/// 2. **任务落库状态**（tasks.json，LLM 调工具回写即真相）：全部结果槽
+///    终态 = 任务完成；有 ASKING 挂起 = 等用户授权，绝不代答。
+///
+/// 空闲且未完成且无挂起 → 踢一脚续跑（保活；每个新 turn 重置步数预算，
+/// 顺带解决单轮 max_iters 不够长任务的问题）。上限：连续 5 次续跑无进展
+/// 放弃、总续跑 30 轮兜底——监督是让任务能跑完，不是无限重试机器人。
+/// 用户中断（interrupt_turn）会移除看门狗：人接管了，狗退场。
+struct TestWatchdog {
+    app: AppHandle,
+    handle: Arc<AgentHandle>,
+    workspace_id: String,
+    session_id: String,
+    task_id: String,
+    task_name: String,
+    /// `.ox` 根（读 tasks.json 判断任务状态）。
+    ox_root: PathBuf,
+    /// 活跃看门狗注册表（session_id → task_id）：interrupt_turn 据此退场，
+    /// test_run_task 据此防同 session 双任务。
+    runs: Arc<std::sync::Mutex<HashMap<String, String>>>,
+}
+
+impl TestWatchdog {
+    fn tasks_path(&self) -> PathBuf {
+        self.ox_root.join("testing").join("tasks.json")
+    }
+
+    /// 编排进度事件；`dedup` 相同 phase 不重复发（running/waiting_confirm
+    /// 是持续态，每 3s 巡检一次不能刷屏）。
+    fn emit(&self, phase: &str, message: Option<String>, done: usize, total: usize) {
+        let _ = self.app.emit(
+            "test-orchestration",
+            TestOrchestration {
+                workspace_id: self.workspace_id.clone(),
+                task_id: self.task_id.clone(),
+                phase: phase.into(),
+                message,
+                done_count: done,
+                total,
+            },
+        );
+    }
+
+    /// 会话是否在跑（LLM 执行中）。
+    async fn session_running(&self) -> bool {
+        self.handle
+            .session(&self.session_id)
+            .await
+            .is_running()
+            .await
+    }
+
+    /// 看门狗主循环：每 3s 巡检一次，直到任务完成 / 被中断 / 放弃。
+    async fn run(self) {
+        const POLL: std::time::Duration = std::time::Duration::from_secs(3);
+        const MAX_STALLED: u32 = 5;
+        const MAX_ROUNDS: u32 = 30;
+
+        let mut last_phase = String::new();
+        let mut stalled: u32 = 0;
+        let mut resumed_rounds: u32 = 0;
+        let mut last_done: usize = self.done_count();
+        let mut reason = String::new();
+
+        loop {
+            tokio::time::sleep(POLL).await;
+            // 注册表里自己还在吗？不在 = 用户已中断/停止（interrupt_turn
+            // 移除）——人接管了，狗退场，绝不把任务再踢起来。
+            let alive = self
+                .runs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&self.session_id)
+                == Some(&self.task_id);
+            if !alive {
+                reason = "任务已被手动中断或停止".into();
+                break;
+            }
+            // 在跑 = LLM 在干活，不干预。
+            if self.session_running().await {
+                if last_phase != "running" {
+                    let (done, total, _) = self.task_progress();
+                    self.emit("running", None, done, total);
+                    last_phase = "running".into();
+                }
+                continue;
+            }
+            // 空闲：查任务状态（LLM 工具回写即真相）。
+            let Some(task) = self.load_task() else {
+                reason = "任务已被删除".into();
+                break;
+            };
+            let total = task.results.len();
+            let done = task
+                .results
+                .iter()
+                .filter(|r| {
+                    matches!(r.status.as_str(), "pass" | "fail" | "blocked" | "skipped" | "error")
+                })
+                .count();
+            if task.status == "done" || (total > 0 && done == total) {
+                self.emit(
+                    "done",
+                    Some(format!("任务「{}」全部用例执行完毕", self.task_name)),
+                    done,
+                    total,
+                );
+                break;
+            }
+            // 等授权：会话有挂起的工具确认 → 原地等待用户裁决，绝不代答、
+            // 不续跑（批准/拒绝后 LLM 继续跑，看门狗下轮巡检自然跟进）。
+            if self.session_asking().await {
+                if last_phase != "waiting_confirm" {
+                    self.emit(
+                        "waiting_confirm",
+                        Some("智能体在等待工具授权——请在会话中批准或拒绝".into()),
+                        done,
+                        total,
+                    );
+                    last_phase = "waiting_confirm".into();
+                }
+                continue;
+            }
+            // 空闲 + 未完成 + 无挂起：LLM 停转了。先看任务状态有没有更新——
+            // 有进展说明在推进（失败只是暂时的），重置无进展计数。
+            if done > last_done {
+                stalled = 0;
+                last_done = done;
+            } else {
+                stalled += 1;
+            }
+            if stalled > MAX_STALLED {
+                self.emit(
+                    "aborted",
+                    Some(format!(
+                        "连续 {stalled} 次巡检毫无进展（{done}/{total}），已停止保活。请检查模型服务后在任务面板手动继续"
+                    )),
+                    done,
+                    total,
+                );
+                reason = format!("续跑无进展放弃（{done}/{total}）");
+                break;
+            }
+            resumed_rounds += 1;
+            if resumed_rounds > MAX_ROUNDS {
+                self.emit(
+                    "aborted",
+                    Some(format!(
+                        "自动续跑已达 {MAX_ROUNDS} 轮上限仍未完成（{done}/{total}），已停止保活。请查看会话排查后手动继续"
+                    )),
+                    done,
+                    total,
+                );
+                reason = "续跑轮数超限".into();
+                break;
+            }
+            let remaining: Vec<String> = task
+                .results
+                .iter()
+                .filter(|r| {
+                    !matches!(r.status.as_str(), "pass" | "fail" | "blocked" | "skipped" | "error")
+                })
+                .map(|r| r.case_id.clone())
+                .collect();
+            if remaining.is_empty() {
+                // 结果槽全部终态但任务状态没跟上（旧数据）——不续跑。
+                self.emit("done", Some("全部用例已有结论".into()), done, total);
+                break;
+            }
+            self.emit(
+                "resumed",
+                Some(format!(
+                    "检测到执行中断，自动续跑剩余 {} 条用例",
+                    remaining.len()
+                )),
+                done,
+                total,
+            );
+            last_phase = "resumed".into();
+            let msg = format!(
+                "任务「{}」尚未完成（执行中断）。请继续执行剩余用例（case_id：{}）。\
+                 纪律不变：按顺序逐条执行，每条完成立即调 test_update_case 回写状态，\
+                 fail/blocked 再调 test_submit_bug；此前已回写过结论的用例不要重跑。",
+                self.task_name,
+                remaining.join(", ")
+            );
+            // 发送失败（会话忙/锁未释放）：不急着重试，下轮巡检再试——
+            // stalled 计数兜底，不会无限重试。
+            if crate::commands::start_turn(
+                &self.app,
+                &self.handle,
+                &self.workspace_id,
+                &self.session_id,
+                msg,
+                None,
+                None,
+            )
+            .await
+            .is_err()
+            {
+                app_log(
+                    "WARN",
+                    &format!("测试看门狗续跑发送失败（下轮巡检重试）task={}", self.task_id),
+                );
+            }
+        }
+        // 退出清理：注册表里还是自己才移除（防误删后来者）。
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        if runs.get(&self.session_id) == Some(&self.task_id) {
+            runs.remove(&self.session_id);
+        }
+        drop(runs);
+        if !reason.is_empty() {
+            app_log(
+                "INFO",
+                &format!("测试看门狗退出 task={}: {reason}", self.task_id),
+            );
+        }
+    }
+
+    fn load_task(&self) -> Option<TestTask> {
+        let tasks: Vec<TestTask> = load_json(&self.tasks_path());
+        tasks.into_iter().find(|t| t.id == self.task_id)
+    }
+
+    fn task_progress(&self) -> (usize, usize, bool) {
+        match self.load_task() {
+            Some(t) => {
+                let total = t.results.len();
+                let done = t
+                    .results
+                    .iter()
+                    .filter(|r| {
+                        matches!(r.status.as_str(), "pass" | "fail" | "blocked" | "skipped" | "error")
+                    })
+                    .count();
+                (done, total, total > 0 && done == total)
+            }
+            None => (0, 0, false),
+        }
+    }
+
+    fn done_count(&self) -> usize {
+        self.task_progress().0
+    }
+
+    /// 会话是否有挂起的工具授权（HITL ASKING）。
+    async fn session_asking(&self) -> bool {
+        match self
+            .handle
+            .agent
+            .delegate()
+            .agent_state_for(Some(crate::commands::USER_ID), &self.session_id)
+        {
+            Ok(st) => !agentscope_core::message::asking_tool_calls(&st.context).is_empty(),
+            Err(_) => false,
+        }
+    }
 }
 
 /// 删除任务（执行结果与任务一起删；Bug 保留——bug 是独立资产）。
@@ -1529,6 +2206,7 @@ mod tests {
                 }],
                 created_at: 0,
                 finished_at: 0,
+                archived: false,
             }],
             bugs: vec![Bug {
                 id: "b1".into(),

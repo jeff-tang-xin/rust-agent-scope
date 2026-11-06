@@ -292,6 +292,8 @@ export interface TestTask {
   /** pending / running / done。 */
   status: string;
   results: TestCaseResult[];
+  /** 已归档（列表默认隐藏，归档区查看；done 任务手动归档，防列表膨胀）。 */
+  archived: boolean;
   created_at: number;
   finished_at: number;
 }
@@ -312,6 +314,27 @@ export interface TestBug {
   /** 修复说明（协同侧置 fixed 时写入：改了什么、根因、怎么修的）。 */
   fix_note: string;
   created_at: number;
+}
+
+/** test_run_task 返回：任务已交给测试智能体（LLM 自主编排 + 看门狗保活）。 */
+export interface TestRunStarted {
+  turn_id: string;
+  /** 本次交给 LLM 的用例数。 */
+  targets: number;
+  /** 跳过数（已通过 / 待修 Bug 未处理）。 */
+  skipped: number;
+}
+
+/** 编排进度事件（`test-orchestration`）：看门狗与启动入口发的状态变化。 */
+export interface TestOrchestrationPayload {
+  workspace_id: string;
+  task_id: string;
+  /** started | running | waiting_confirm | resumed | done | stopped | aborted */
+  phase: string;
+  message?: string;
+  /** 已到终态的用例数 / 计划执行总数。 */
+  done_count: number;
+  total: number;
 }
 
 /** 测试工作区全量数据（test_list_data 一次拉齐）。 */
@@ -370,6 +393,9 @@ export const api = {
   saveProvider: (provider: ModelProviderConfig) =>
     invoke<void>("save_provider", { provider }),
   deleteProvider: (name: string) => invoke<void>("delete_provider", { name }),
+  // Ollama 本地已装模型（设置页协议=ollama 时填充模型建议；失败由调用方降级手输）。
+  ollamaListModels: (baseUrl: string) =>
+    invoke<string[]>("ollama_list_models", { baseUrl }),
 
   listDatabases: () => invoke<DatabaseServerConfig[]>("list_databases"),
   saveDatabase: (database: DatabaseServerConfig) =>
@@ -532,6 +558,11 @@ export const api = {
     invoke<void>("test_update_task", { workspaceId, task }),
   testDeleteTask: (workspaceId: string, id: string) =>
     invoke<boolean>("test_delete_task", { workspaceId, id }),
+  /** 启动任务执行（LLM 自主编排 + 后端看门狗保活；执行/重跑/强制重跑同一入口）。 */
+  testRunTask: (workspaceId: string, mode: string, sessionId: string, taskId: string, force: boolean) =>
+    invoke<TestRunStarted>("test_run_task", { workspaceId, mode, sessionId, taskId, force }),
+  testArchiveTask: (workspaceId: string, taskId: string, archived: boolean) =>
+    invoke<void>("test_archive_task", { workspaceId, taskId, archived }),
   testSaveBug: (workspaceId: string, bug: TestBug) =>
     invoke<TestBug>("test_save_bug", { workspaceId, bug }),
   testDeleteBug: (workspaceId: string, id: string) =>
@@ -582,6 +613,11 @@ export function onAgentEvent(handler: (payload: AgentEventPayload) => void) {
 
 export function onTurnFinished(handler: (payload: TurnFinishedPayload) => void) {
   return listen<TurnFinishedPayload>("turn-finished", (e) => handler(e.payload));
+}
+
+/** 测试任务编排进度（test_run_task 启动 + 看门狗状态变化）。 */
+export function onTestOrchestration(handler: (payload: TestOrchestrationPayload) => void) {
+  return listen<TestOrchestrationPayload>("test-orchestration", (e) => handler(e.payload));
 }
 
 export function onTurnStarted(handler: (payload: TurnStartedPayload) => void) {

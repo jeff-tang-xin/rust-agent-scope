@@ -15,14 +15,66 @@ import {
 import AgentFormModal from "../components/AgentFormModal";
 import PasteButton from "../components/PasteButton";
 
-/** Provider 协议类型注册表：值与后端 build_model 的分发键一致。 */
-const PROVIDER_TYPES: { value: string; label: string; baseUrl: string; keyless?: boolean }[] = [
-  { value: "openai", label: "OpenAI 兼容（DeepSeek / vLLM / DashScope 兼容模式…）", baseUrl: "https://api.openai.com/v1" },
-  { value: "openai-official", label: "OpenAI 官方（Responses API）", baseUrl: "https://api.openai.com" },
-  { value: "anthropic", label: "Anthropic（Claude）", baseUrl: "https://api.anthropic.com" },
-  { value: "gemini", label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
-  { value: "dashscope", label: "DashScope 原生（通义千问）", baseUrl: "https://dashscope.aliyuncs.com" },
-  { value: "ollama", label: "Ollama（本地，无需 Key）", baseUrl: "http://localhost:11434", keyless: true },
+/** Provider 协议类型注册表：值与后端 build_model 的分发键一致。
+ * models：常用模型建议（datalist，仍可自由输入）；keyHint：Key 获取地址；
+ * desc：协议适用场景一行说明。 */
+const PROVIDER_TYPES: {
+  value: string;
+  label: string;
+  baseUrl: string;
+  keyless?: boolean;
+  models: string[];
+  keyHint?: string;
+  desc: string;
+}[] = [
+  {
+    value: "openai",
+    label: "OpenAI 兼容（DeepSeek / vLLM / DashScope 兼容模式…）",
+    baseUrl: "https://api.openai.com/v1",
+    models: ["deepseek-chat", "deepseek-reasoner", "qwen-plus", "glm-4-plus", "kimi-k2-instruct"],
+    keyHint: "platform.openai.com/api-keys（第三方网关在其各自控制台获取）",
+    desc: "任何实现 /chat/completions 的服务：DeepSeek、vLLM、OneAPI/NewAPI 网关、DashScope 兼容模式等。",
+  },
+  {
+    value: "openai-official",
+    label: "OpenAI 官方（Responses API）",
+    baseUrl: "https://api.openai.com",
+    models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "o4-mini"],
+    keyHint: "platform.openai.com/api-keys",
+    desc: "OpenAI 官方 Responses API（/v1/responses），与「OpenAI 兼容」的区别是走官方新协议。",
+  },
+  {
+    value: "anthropic",
+    label: "Anthropic（Claude）",
+    baseUrl: "https://api.anthropic.com",
+    models: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+    keyHint: "console.anthropic.com/settings/keys",
+    desc: "Claude 官方 Messages API；需要能直连 api.anthropic.com 的网络。",
+  },
+  {
+    value: "gemini",
+    label: "Google Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com",
+    models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
+    keyHint: "aistudio.google.com/apikey",
+    desc: "Google AI Studio 的 generateContent 协议；需要能直连 Google 服务的网络。",
+  },
+  {
+    value: "dashscope",
+    label: "DashScope 原生（通义千问）",
+    baseUrl: "https://dashscope.aliyuncs.com",
+    models: ["qwen3-coder-plus", "qwen-max", "qwen-plus", "qwen-turbo", "qwen3-vl-plus"],
+    keyHint: "bailian.console.aliyun.com → API-KEY 管理",
+    desc: "阿里云百炼原生协议（通义千问全系；国内直连）。兼容模式请选「OpenAI 兼容」。",
+  },
+  {
+    value: "ollama",
+    label: "Ollama（本地，无需 Key）",
+    baseUrl: "http://localhost:11434",
+    keyless: true,
+    models: ["qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b"],
+    desc: "本地推理服务（默认 http://localhost:11434），无需 API Key；可用「拉取本地模型」列出已装模型。",
+  },
 ];
 
 function emptyProvider(): ModelProviderConfig {
@@ -63,6 +115,9 @@ export default function SettingsPage({
 }) {
   const [providers, setProviders] = useState<ModelProviderConfig[]>([]);
   const [providerDraft, setProviderDraft] = useState<ModelProviderConfig | null>(null);
+  // Ollama 本地已装模型（协议=ollama 时点「拉取本地模型」填充，并入模型建议）。
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaStatus, setOllamaStatus] = useState("");
   const [databases, setDatabases] = useState<DatabaseServerConfig[]>([]);
   const [dbDraft, setDbDraft] = useState<DatabaseServerConfig | null>(null);
   const [servers, setServers] = useState<ServerConfig[]>([]);
@@ -315,6 +370,8 @@ export default function SettingsPage({
                     provider_type: next,
                     base_url: isPreset && meta ? meta.baseUrl : providerDraft.base_url,
                   });
+                  setOllamaModels([]);
+                  setOllamaStatus("");
                 }}
               >
                 {PROVIDER_TYPES.map((t) => (
@@ -323,6 +380,10 @@ export default function SettingsPage({
                   </option>
                 ))}
               </select>
+              <div className="desc" style={{ marginTop: 4 }}>
+                {PROVIDER_TYPES.find((t) => t.value === (providerDraft.provider_type || "openai"))
+                  ?.desc}
+              </div>
               <div className="row">
                 <div>
                   <div className="lbl-row">
@@ -344,12 +405,50 @@ export default function SettingsPage({
                     <PasteButton
                       onPaste={(t) => setProviderDraft({ ...providerDraft, model: t })}
                     />
+                    {(providerDraft.provider_type || "openai") === "ollama" && (
+                      <button
+                        className="btn ghost"
+                        style={{ padding: "0 8px" }}
+                        onClick={() => {
+                          setOllamaStatus("拉取中…");
+                          void api
+                            .ollamaListModels(providerDraft.base_url)
+                            .then((models) => {
+                              setOllamaModels(models);
+                              setOllamaStatus(
+                                models.length
+                                  ? `已拉取 ${models.length} 个本地模型`
+                                  : "本地未安装任何模型（先 ollama pull）",
+                              );
+                            })
+                            .catch((e) => setOllamaStatus(`拉取失败：${String(e)}（可手输模型名）`));
+                        }}
+                      >
+                        拉取本地模型
+                      </button>
+                    )}
                   </div>
                   <input
                     className="field"
                     value={providerDraft.model}
+                    list="provider-model-suggestions"
                     onChange={(e) => setProviderDraft({ ...providerDraft, model: e.target.value })}
                   />
+                  {ollamaStatus && (
+                    <div className="desc" style={{ marginTop: 2 }}>
+                      {ollamaStatus}
+                    </div>
+                  )}
+                  <datalist id="provider-model-suggestions">
+                    {[
+                      ...(PROVIDER_TYPES.find(
+                        (t) => t.value === (providerDraft.provider_type || "openai"),
+                      )?.models ?? []),
+                      ...ollamaModels,
+                    ].map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
               <div className="lbl-row">
@@ -386,6 +485,16 @@ export default function SettingsPage({
                     ? "API Key（Ollama 本地服务无需填写）"
                     : "API Key（仅存本地配置文件）"}
                 </label>
+                {!PROVIDER_TYPES.find((t) => t.value === (providerDraft.provider_type || "openai"))
+                  ?.keyless && (
+                  <span className="desc">
+                    获取：{
+                      PROVIDER_TYPES.find(
+                        (t) => t.value === (providerDraft.provider_type || "openai"),
+                      )?.keyHint
+                    }
+                  </span>
+                )}
                 <PasteButton
                   onPaste={(t) => setProviderDraft({ ...providerDraft, api_key: t })}
                 />

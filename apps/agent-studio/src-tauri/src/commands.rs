@@ -29,7 +29,7 @@ use crate::testing::{
     test_delete_config, test_delete_requirement, test_delete_task, test_import_cases,
     test_list_data, test_parse_excel, test_parse_xmind, test_read_screenshot, test_save_bug,
     test_save_case, test_save_config, test_save_requirement, test_save_requirement_image,
-    test_save_task, test_update_task,
+    test_save_task, test_update_task, test_run_task, test_archive_task,
 };
 
 /// 统一 user id（桌面单用户；对齐 service 的 owner 概念的最小形态）。
@@ -216,6 +216,9 @@ pub struct AppState {
     pub db_catalog: Arc<DbCatalog>,
     /// 全局共享浏览器会话（内置浏览器自动化工具；首次调用懒启动）。
     pub browser_session: Arc<crate::browser_tool::BrowserSession>,
+    /// 活跃的测试任务看门狗（session_id → task_id）：test_run_task 防同
+    /// 会话双任务，interrupt_turn 据此让看门狗退场（人接管狗不拉起）。
+    pub test_runs: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl AppState {
@@ -327,6 +330,38 @@ pub fn delete_provider(state: State<'_, AppState>, name: String) -> Result<(), S
     }
     config.providers.retain(|p| p.name != name);
     state.persist(&config)
+}
+
+/// 拉取 Ollama 本地已装模型列表（`GET {base_url}/api/tags`，3s 超时）。
+/// 设置页 Provider 表单在协议=ollama 时用它填充模型建议；失败返回 Err，
+/// 前端降级为手输。有界非交互：单次 GET，超时即返回。
+#[tauri::command]
+pub async fn ollama_list_models(base_url: String) -> Result<Vec<String>, String> {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("HTTP 客户端构建失败: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("无法连接 Ollama（{url}）: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Ollama 服务返回 {}", resp.status()));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("响应解析失败: {e}"))?;
+    Ok(v["models"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 // ---------- databases ----------
@@ -1158,20 +1193,46 @@ pub async fn send_message(
     confirm_results: Option<Vec<agentscope_core::event::ConfirmResult>>,
 ) -> Result<TurnInfo, String> {
     let handle = state.handle(&workspace_id, &mode)?;
-    let session = handle.session(&session_id).await;
+    start_turn(
+        &app,
+        &handle,
+        &workspace_id,
+        &session_id,
+        message,
+        attachments,
+        confirm_results,
+    )
+    .await
+}
+
+/// 启动一轮对话（send_message 的核心；test_run_task 的监督者续跑复用）。
+///
+/// turn 互斥、消息构造、turn_chain spawn 全在这里；调用方只拿 TurnInfo。
+/// `handle` 由调用方解析好（`state.handle(workspace_id, mode)`）——监督者
+/// task 里没有 State<'_, AppState> 可用，只能持有 Arc<AgentHandle>。
+pub(crate) async fn start_turn(
+    app: &AppHandle,
+    handle: &Arc<AgentHandle>,
+    workspace_id: &str,
+    session_id: &str,
+    message: String,
+    attachments: Option<Vec<AttachmentInput>>,
+    confirm_results: Option<Vec<agentscope_core::event::ConfirmResult>>,
+) -> Result<TurnInfo, String> {
+    let session = handle.session(session_id).await;
     // turn 互斥：guard 所有权 move 进事件循环 task，持锁到 turn 链结束。
     let turn_guard = session
         .try_begin_turn()
         .map_err(|_| "a turn is already running in this session".to_string())?;
     app_log(
         "INFO",
-        &format!("turn 开始 ws={workspace_id} session={session_id} mode={mode}"),
+        &format!("turn 开始 ws={workspace_id} session={session_id}"),
     );
     // 新链开始：清掉上一链可能残留的中断标志（interrupt 后链已死、标志
     // 未被收尾检查消费的场景），避免误杀本次 turn。
     session.clear_interrupted();
 
-    let text = merge_with_pending(handle.agent.delegate(), &session_id, &message);
+    let text = merge_with_pending(handle.agent.delegate(), session_id, &message);
     // 消息构造：文本块 + 附件块（图片走 Image，其余走 Data；对齐 Java 多模态块）。
     let mut blocks: Vec<ContentBlock> = Vec::new();
     if !text.is_empty() {
@@ -1208,7 +1269,7 @@ pub async fn send_message(
     let agent = Arc::clone(handle.agent.delegate());
     // plan 状态在 turn 链开始前查询一次：busy 期间 UI 锁定 plan 切换，
     // 整条链（含续轮）的注入标志一致。
-    let plan_active = handle.agent.is_plan_mode_active(Some(USER_ID), &session_id);
+    let plan_active = handle.agent.is_plan_mode_active(Some(USER_ID), session_id);
 
     tokio::spawn(turn_chain(
         app.clone(),
@@ -1216,8 +1277,8 @@ pub async fn send_message(
         Arc::clone(&session),
         turn_guard,
         TurnChainCtx {
-            workspace_id,
-            session_id: session_id.clone(),
+            workspace_id: workspace_id.to_string(),
+            session_id: session_id.to_string(),
             plan_active,
         },
         turn_id.clone(),
@@ -1229,7 +1290,7 @@ pub async fn send_message(
     app_log("INFO", &format!("turn 已启动 turn_id={turn_id}"));
     Ok(TurnInfo {
         turn_id,
-        session_id,
+        session_id: session_id.to_string(),
         status: "running",
     })
 }
@@ -1779,6 +1840,28 @@ pub async fn interrupt_turn(
         task.abort();
         // 返回前确认本地执行 future 已取消；不代表远端进程已被终止。
         let _ = task.await;
+    }
+    // 测试看门狗退场：该会话有任务在看护 → 注销并广播 stopped。用户手动
+    // 中断 = 人接管，看门狗绝不能把任务再踢起来。
+    if had {
+        let removed = state
+            .test_runs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&session_id);
+        if let Some(task_id) = removed {
+            let _ = _app.emit(
+                "test-orchestration",
+                crate::testing::TestOrchestration {
+                    workspace_id,
+                    task_id,
+                    phase: "stopped".into(),
+                    message: Some("任务已被手动中断".into()),
+                    done_count: 0,
+                    total: 0,
+                },
+            );
+        }
     }
     Ok(had)
 }
@@ -2815,11 +2898,13 @@ pub fn run() {
                 ssh_pool: Arc::new(SshPool::new()),
                 db_catalog,
                 browser_session: Arc::new(crate::browser_tool::BrowserSession::new()),
+                test_runs: Arc::new(Mutex::new(HashMap::new())),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_providers,
+            ollama_list_models,
             browser_preview_shot,
             save_provider,
             delete_provider,
@@ -2890,6 +2975,8 @@ pub fn run() {
             test_import_cases,
             test_save_task,
             test_update_task,
+            test_run_task,
+            test_archive_task,
             test_delete_task,
             test_save_bug,
             test_delete_bug,
