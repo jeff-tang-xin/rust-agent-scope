@@ -18,7 +18,9 @@ use serde_json::{json, Value};
 use agentscope_core::error::Result;
 use agentscope_core::tool::{Tool, ToolOutput};
 
-use crate::testing::{load_json, new_id, now_ms, save_json, Bug, StepResult, TestTask};
+use crate::testing::{
+    load_json, new_id, now_ms, save_json, Bug, CaseResult, StepResult, TestTask,
+};
 
 /// `.ox` 数据根（factory 装配时注入；数据文件在 `.ox/testing/` 下）。
 #[derive(Debug, Clone)]
@@ -64,6 +66,26 @@ fn progress_line(task: &TestTask) -> String {
         .filter(|r| is_terminal(&r.status))
         .count();
     format!("任务「{}」进度 {}/{}", task.name, done, total)
+}
+
+/// 执行图谱导航：按任务 case_ids 顺序找下一个未终态的结果槽。工具返回值
+/// 据此告诉 LLM「下一条跑什么」——把「任务id → caseIds」的执行图谱落到
+/// 每一步工具响应里，LLM 不用自己记进度，也不会跳步、漏步或重复执行。
+fn next_pending(task: &TestTask) -> Option<&CaseResult> {
+    task.case_ids
+        .iter()
+        .filter_map(|cid| task.results.iter().find(|r| &r.case_id == cid))
+        .find(|r| !is_terminal(&r.status))
+}
+
+/// 待跑用例的有序队列文本（开工登记时随返回值下发）。
+fn pending_queue(task: &TestTask) -> Vec<String> {
+    task.case_ids
+        .iter()
+        .filter_map(|cid| task.results.iter().find(|r| &r.case_id == cid))
+        .filter(|r| !is_terminal(&r.status))
+        .map(|r| format!("`{}`", r.case_id))
+        .collect()
 }
 
 // ---------- test_update_case ----------
@@ -162,7 +184,8 @@ to the next one. Results written only in your reply text are NOT saved."
         let mut tasks = self.store.load_tasks();
         let Some(task) = find_task_mut(&mut tasks, task_id) else {
             return Ok(ToolOutput::error(format!(
-                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名；执行提示词开头有）"
+                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名）。{}",
+                task_list_hint(&self.store)
             )));
         };
         let Some(ri) = task.results.iter().position(|r| r.case_id == case_id) else {
@@ -185,13 +208,42 @@ to the next one. Results written only in your reply text are NOT saved."
         }
         let summary = progress_line(task);
         let finished = all_done;
+        let next = next_pending(task).map(|r| r.case_id.clone());
+        // 跳步检测：回写的不是队列第一个未终态用例时提醒——串行是导航的
+        // 前提，一口气跑多条再批量回写会让「下一条」失去意义。不硬拒绝
+        // （指定顺序/补跑是合法场景），但每次跳步都显式拉回。
+        let skipped: Vec<String> = task
+            .case_ids
+            .iter()
+            .filter_map(|cid| task.results.iter().find(|r| &r.case_id == cid))
+            .take_while(|r| r.case_id != case_id)
+            .filter(|r| !is_terminal(&r.status))
+            .map(|r| format!("`{}`", r.case_id))
+            .collect();
+        let skip_warn = if skipped.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "⚠️ 你跳过了队列中更早的未回写用例：{}——若非有意跳过，请先回去执行它们。",
+                skipped.join("、")
+            )
+        };
         if let Err(e) = save_json(&self.store.tasks_path(), &tasks) {
             return Ok(ToolOutput::error(e));
         }
         Ok(ToolOutput::ok(if finished {
-            format!("用例 `{case_id}` 已记录为 {status}。{summary}——全部用例已执行完毕，任务收尾。")
+            format!(
+                "用例 `{case_id}` 已记录为 {status}。{summary}——全部用例已执行完毕，\
+                 **调 test_finish_task(task_id, note) 收尾交付**（note 写本轮执行汇总）。{skip_warn}"
+            )
         } else {
-            format!("用例 `{case_id}` 已记录为 {status}。{summary}，继续下一条。")
+            format!(
+                "用例 `{case_id}` 已记录为 {status}。{summary}。{skip_warn}\
+                 fail/blocked 时先 test_submit_bug 提 Bug 再继续。\
+                 **下一条：case_id=`{}`**——先执行它，结束后立即 test_update_case，\
+                 不要一次执行多条再批量回写。",
+                next.unwrap_or_default()
+            )
         }))
     }
 }
@@ -312,7 +364,111 @@ of creating a duplicate. Call it right after test_update_case with status fail/b
     }
 }
 
+// ---------- test_list_tasks ----------
+
+/// 任务清单：LLM 自助查询当前任务（task_id/名称/状态/进度）——执行前确认
+/// task_id 用。任务删除重建后 id 会变，凭会话历史里的旧 id 回写必然报
+/// 「不存在」；有清单工具后 LLM 可立即自查自愈，不用猜、不用问用户。
+pub struct TestListTasks {
+    store: TestingStore,
+}
+
+impl TestListTasks {
+    pub fn new(store: TestingStore) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for TestListTasks {
+    fn name(&self) -> &str {
+        "test_list_tasks"
+    }
+
+    fn description(&self) -> &str {
+        "List test tasks in this workspace with task_id / name / status / progress. \
+Call it to confirm the task_id BEFORE executing a task: task_id is the 32-char \
+task id, NOT the task name, and NOT any id seen earlier in conversation history."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "include_archived": {
+                    "type": "boolean",
+                    "description": "是否包含已归档任务，默认 false。"
+                }
+            },
+            "required": []
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let include_archived = input
+            .get("include_archived")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let mut tasks = self.store.load_tasks();
+        tasks.retain(|t| include_archived || !t.archived);
+        if tasks.is_empty() {
+            return Ok(ToolOutput::ok(
+                "当前没有测试任务（尚未创建或已全部归档）。",
+            ));
+        }
+        let lines: Vec<String> = tasks
+            .iter()
+            .map(|t| {
+                let (mut pass, mut fail, mut blocked) = (0u32, 0u32, 0u32);
+                for r in &t.results {
+                    match r.status.as_str() {
+                        "pass" => pass += 1,
+                        "fail" => fail += 1,
+                        "blocked" => blocked += 1,
+                        _ => {}
+                    }
+                }
+                let note = if t.status == "paused" && !t.pause_note.is_empty() {
+                    format!("；交付说明：{}", t.pause_note)
+                } else {
+                    String::new()
+                };
+                format!(
+                    "- task_id=`{}`「{}」状态={}，进度 {}/{}（pass {pass} / fail {fail} / blocked {blocked}）{}",
+                    t.id,
+                    t.name,
+                    t.status,
+                    pass + fail + blocked,
+                    t.results.len(),
+                    note
+                )
+            })
+            .collect();
+        Ok(ToolOutput::ok(format!(
+            "共 {} 个任务：\n{}",
+            lines.len(),
+            lines.join("\n")
+        )))
+    }
+}
+
 // ---------- test_start_task / test_finish_task ----------
+
+/// 错误提示附当前任务清单：LLM 手里的 task_id 过期（任务删除重建、会话
+/// 历史残留旧 id）时能立即换用正确 id 自愈，而不是反复重试同一参数。
+fn task_list_hint(store: &TestingStore) -> String {
+    let tasks: Vec<String> = store
+        .load_tasks()
+        .iter()
+        .filter(|t| !t.archived)
+        .map(|t| format!("task_id=`{}`「{}」（{}）", t.id, t.name, t.status))
+        .collect();
+    if tasks.is_empty() {
+        "当前没有未归档的测试任务（可能已被删除重建，请让用户在任务面板确认）".to_string()
+    } else {
+        format!("当前任务清单：{}", tasks.join("；"))
+    }
+}
 
 /// 按 id 精确查找任务；未命中再按名称唯一匹配（LLM 常把任务名当 id 传，
 /// 报「不存在」不如容错接住）。0 个或多个同名匹配返回 None。
@@ -376,7 +532,8 @@ and notify the UI. Idempotent: calling again just refreshes the start time."
         let mut tasks = self.store.load_tasks();
         let Some(task) = find_task_mut(&mut tasks, task_id) else {
             return Ok(ToolOutput::error(format!(
-                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名；执行提示词开头有）"
+                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名）。{}",
+                task_list_hint(&self.store)
             )));
         };
         if task.status == "done" {
@@ -390,11 +547,21 @@ and notify the UI. Idempotent: calling again just refreshes the start time."
         task.pause_note.clear();
         let summary = progress_line(task);
         let name = task.name.clone();
+        let queue = pending_queue(task);
         if let Err(e) = save_json(&self.store.tasks_path(), &tasks) {
             return Ok(ToolOutput::error(e));
         }
+        if queue.is_empty() {
+            return Ok(ToolOutput::ok(format!(
+                "开工已登记，任务 `{name}` 进入执行中。{summary}——没有待执行用例，直接调 test_finish_task(task_id, note) 交付。"
+            )));
+        }
         Ok(ToolOutput::ok(format!(
-            "开工已登记，任务 `{name}` 进入执行中。{summary}。逐条执行，每条完成立即 test_update_case 回写。"
+            "开工已登记，任务 `{name}` 进入执行中。{summary}。\
+             执行队列（按序逐条，一条回写后再取下一条，不要并行穿插）：{}。\
+             **下一条：case_id={}`——执行它，完成后立即 test_update_case。",
+            queue.join(" → "),
+            queue[0]
         )))
     }
 }
@@ -450,7 +617,8 @@ All cases concluded => task auto-closes as done."
         let mut tasks = self.store.load_tasks();
         let Some(task) = find_task_mut(&mut tasks, task_id) else {
             return Ok(ToolOutput::error(format!(
-                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名；执行提示词开头有）"
+                "任务 `{task_id}` 不存在（task_id 是任务 id——创建任务时生成的 32 位串，不是任务名）。{}",
+                task_list_hint(&self.store)
             )));
         };
         let all_done = task.results.iter().all(|r| is_terminal(&r.status));
@@ -464,6 +632,13 @@ All cases concluded => task auto-closes as done."
         let summary = progress_line(task);
         let name = task.name.clone();
         let done = task.status == "done";
+        let pending: Vec<String> = task
+            .case_ids
+            .iter()
+            .filter_map(|cid| task.results.iter().find(|r| &r.case_id == cid))
+            .filter(|r| !is_terminal(&r.status))
+            .map(|r| format!("`{}`（{}）", r.case_id, r.status))
+            .collect();
         if let Err(e) = save_json(&self.store.tasks_path(), &tasks) {
             return Ok(ToolOutput::error(e));
         }
@@ -471,7 +646,13 @@ All cases concluded => task auto-closes as done."
             format!("交付已登记：任务「{name}」全部用例执行完毕，已收尾（done）。{summary}")
         } else {
             format!(
-                "交付已登记：任务「{name}」暂停（paused）。{summary}。暂停说明：{note}"
+                "交付已登记：任务「{name}」暂停（paused）。{summary}。\
+                 未回写用例：{}。暂停说明：{note}。用户继续执行时从这些用例接着跑。",
+                if pending.is_empty() {
+                    "（无）".to_string()
+                } else {
+                    pending.join("、")
+                }
             )
         }))
     }
@@ -530,7 +711,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert!(out.content.contains("继续下一条"), "{}", out.content);
+        assert!(out.content.contains("下一条：case_id=`c2`"), "{}", out.content);
         let tasks = store.load_tasks();
         assert_eq!(tasks[0].results[0].status, "pass");
         assert_eq!(tasks[0].results[0].screenshots, vec!["s1.png"]);
@@ -678,11 +859,13 @@ mod tests {
         assert!(out.content.contains("已回写") || out.content.contains("pass"), "{}", out.content);
         assert_eq!(store.load_tasks()[0].results[0].status, "pass");
 
-        // 真不存在的还是报错。
+        // 真不存在的还是报错，且错误信息附当前任务清单（LLM 可自愈换 id）。
         let out = update
-            .call(json!({"task_id": "没有的任务", "case_id": "c1", "status": "pass"}))
+            .call(json!({"task_id": "没有的任务", "case_id": "c1", "status": "pass", "actual": "x"}))
             .await
             .unwrap();
         assert!(out.state == agentscope_core::message::ToolResultState::Error);
+        assert!(out.content.contains("当前任务清单"), "{}", out.content);
+        assert!(out.content.contains("冒烟任务"), "{}", out.content);
     }
 }

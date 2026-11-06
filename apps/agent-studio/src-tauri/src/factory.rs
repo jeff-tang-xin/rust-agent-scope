@@ -539,7 +539,12 @@ pub fn build_agent(
             // 开工/交付登记（test_start_task/test_finish_task）让执行有显式
             // 协议：turn 收尾据 started_at 识别对话触发的执行并挂看门狗，
             // 交付（paused）让看门狗区分「正常暂停」与「失联」。
+            // test_list_tasks 让 LLM 自助查任务清单——任务删除重建后 id 会变，
+            // 凭历史旧 id 回写报错时，查一次清单即可自愈。
             let store = crate::testing_tools::TestingStore::new(&memory_workspace.root());
+            toolkit.register(Arc::new(crate::testing_tools::TestListTasks::new(
+                store.clone(),
+            )));
             toolkit.register(Arc::new(crate::testing_tools::TestUpdateCase::new(
                 store.clone(),
             )));

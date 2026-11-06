@@ -1270,11 +1270,14 @@ impl TestWatchdog {
             );
             last_phase = "resumed".into();
             let msg = format!(
-                "任务「{}」尚未完成（执行中断）。请继续执行剩余用例（case_id：{}）。\
-                 纪律不变：按顺序逐条执行，每条完成立即调 test_update_case 回写状态，\
+                "任务「{}」（task_id=`{}`）尚未完成（执行中断）。请继续执行剩余用例（case_id：{}）。\
+                 纪律不变：回写与登记工具的 task_id 一律传 `{}`（不是任务名，也不是会话历史里出现过的其他 id），\
+                 每条完成立即调 test_update_case 回写状态，\
                  fail/blocked 再调 test_submit_bug；此前已回写过结论的用例不要重跑。",
                 self.task_name,
-                remaining.join(", ")
+                self.task_id,
+                remaining.join(", "),
+                self.task_id
             );
             // 发送失败（模型服务连不上/网络断等环境问题）：连续计数，超过
             // 阈值判定环境异常——放弃保活并置 paused（不是任务问题，是环境
