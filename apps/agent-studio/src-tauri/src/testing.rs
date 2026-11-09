@@ -975,7 +975,8 @@ fn build_exec_prompt(
 3. fail/blocked：先 test_update_case 记状态，再调 test_submit_bug 提 Bug（工具自动防重复：同用例已有待处理 Bug 会返回既有条目，此时不要重复提交）。\n\
 4. 接口步骤用 api_request；页面步骤用浏览器工具（视觉驱动：截图 → 坐标操作），关键节点截图留证并把文件名写进 screenshots。\n\
 5. 某一步失败或被阻塞：立即停止该用例，不重试、不换路径、不绕过，如实记 fail/blocked。\n\
-6. 全部用例回写完毕后，回复一段汇总：每条用例一行「标题 → 结果」。\n",
+6. 全部用例回写完毕后，回复一段汇总：每条用例一行「标题 → 结果」。\n\
+7. 输出纪律：思维链只输出核心决策节点（每个节点 1 个短句，禁止展开推导过程）；工具调用直接给出最终执行参数，中间校验步骤省略；回复末尾在第 6 条用例清单之后，按【完成项 / 遗留问题】两栏总结本轮（每条不超过 15 字）。\n",
     );
     p
 }
@@ -1145,10 +1146,14 @@ impl TestWatchdog {
             }
             // 在跑 = LLM 在干活，不干预。
             if self.session_running().await {
-                if last_phase != "running" {
-                    let (done, total, _) = self.task_progress();
+                let (done, total, _) = self.task_progress();
+                // 进度变化即推送：LLM 逐条回写 tasks.json，前端用例列表跟着
+                // 实时刷新（否则面板冻结在进入执行的时刻，必须手动刷新才能
+                // 看到进展）。同 phase 且进度没变不重发（防刷屏）。
+                if last_phase != "running" || done != last_done {
                     self.emit("running", None, done, total);
                     last_phase = "running".into();
+                    last_done = done;
                 }
                 continue;
             }

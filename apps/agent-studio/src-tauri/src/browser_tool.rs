@@ -108,14 +108,35 @@ impl BrowserSession {
         // 宽 1680 = 被测中台系统需要的 ~1600px + 滚动条/余量，保证页面
         // 按自然宽度渲染不被挤压（面板 contain 会自动缩小完整显示）；
         // 高 1200 让画面在面板里尽量撑满。
+        //
+        // user-data-dir 必须每次启动独立：chromiumoxide 默认固定用
+        // %TEMP%\chromiumoxide-runner，上次会话的浏览器进程若残留
+        // （studio 强退时 drop 未执行），新进程会因 Chrome 单实例机制
+        // 把参数转交给残留实例后立即退出（exit 21、stderr 空），之后
+        // 每次启动都撞同一把锁、永远起不来。每次换新目录天然绕开，
+        // 死亡重建（下方 *guard = None 后重入）也随之自愈。
+        let user_data_dir = std::env::temp_dir().join(format!(
+            "studio-browser-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ));
         let config = chromiumoxide::BrowserConfig::builder()
             .chrome_executable(exe)
+            .user_data_dir(&user_data_dir)
             .window_size(1680, 1200)
             .build()
             .map_err(|e| format!("浏览器配置失败: {e}"))?;
         let (browser, mut handler) = Browser::launch(config)
             .await
-            .map_err(|e| format!("启动浏览器失败: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "启动浏览器失败: {e}（若错误含 exit status 21 且 stderr 为空，\
+                     多为上次残留的浏览器进程占用了会话目录，重试即可换新目录启动）"
+                )
+            })?;
         // CDP 事件循环必须持续驱动，否则所有操作挂起。
         tokio::spawn(async move {
             while let Some(event) = handler.next().await {

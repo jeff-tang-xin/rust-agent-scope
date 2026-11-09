@@ -309,6 +309,10 @@ export default function TestWorkbench({
       setRunningTaskId(p.task_id);
       const base = `${p.done_count}/${p.total} 条已完成`;
       setRunProgress(p.message ? `${base} · ${p.message}` : base);
+      // 进度事件到达即拉最新任务数据：用例状态由 LLM 工具回写落库，事件是
+      // 「数据变了」的信号——不刷新的话用例列表冻结在进入执行的时刻。事件
+      // 只在进度变化时发（后端 dedup），reload 频率 = 回写频率，不会刷屏。
+      void reload();
     }).then((f) => {
       off = f;
     });
