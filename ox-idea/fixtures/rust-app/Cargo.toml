@@ -1,0 +1,16 @@
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+description = "OpenIDEA QA fixture: a tiny inventory CLI"
+
+# Standalone crate: not part of the OpenIDEA workspace.
+[workspace]
+
+[features]
+# `cargo test --features failing-tests` turns on an intentionally failing test.
+failing-tests = []
+
+[dependencies]
+
+[dev-dependencies]

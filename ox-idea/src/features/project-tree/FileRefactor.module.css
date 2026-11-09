@@ -1,0 +1,138 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+
+.subject {
+  color: var(--fg-emphasis);
+  font-size: var(--fs-ui);
+}
+
+.fieldLabel {
+  color: var(--fg);
+  font-size: var(--fs-ui);
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--fs-small);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.busy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: var(--fs-ui);
+}
+
+.previewSummary {
+  padding: 12px 14px 8px;
+  font-size: var(--fs-ui);
+  color: var(--fg-muted);
+}
+
+.previewList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 0 14px 10px;
+}
+
+.previewFile + .previewFile {
+  margin-top: 4px;
+}
+
+.previewFileRow {
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-ui);
+}
+
+.previewName {
+  color: var(--fg-emphasis);
+}
+
+.previewPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.previewCount {
+  flex: none;
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+}
+
+.previewOccurrences {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 28px;
+}
+
+.previewLineRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-row);
+}
+
+.previewLineNo {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-faint);
+}
+
+.previewCode {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-editor);
+}
+
+.previewOld {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+}
+
+.previewNew {
+  text-decoration: none;
+  background: var(--bg-search-match);
+  color: var(--fg-search-match);
+}

@@ -1,0 +1,19 @@
+id = "ocaml"
+name = "OCaml"
+extensions = ["ml", "mll", "mly"]
+block-comment = ["(*", "*)"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "OCaml"
+tree-sitter = "ocaml"
+
+[[language-servers]]
+name = "ocamllsp"
+command = "ocamllsp"
+root-markers = ["dune-project", "dune-workspace", "*.opam", "esy.json", "package.json"]
+install-hint = "opam install ocaml-lsp-server"
+
+[debugger]
+adapter = "ocamlearlybird"
+command = "ocamlearlybird"
+args = ["debug"]
+install-hint = "opam install earlybird"

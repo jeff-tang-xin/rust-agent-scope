@@ -1,0 +1,111 @@
+/* ProjectWidget popup: 24px action rows, two-line project rows, grey section headers. */
+.popup {
+  padding: 6px 0;
+  min-width: 320px;
+  max-width: min(640px, calc(100vw - 24px));
+}
+.inner {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.inner:focus-visible {
+  outline: none;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-list-row);
+  margin: 0 6px 4px;
+  padding: 0 8px;
+  border-radius: var(--radius-selection, 5px);
+  background: var(--bg-field, var(--bg-button));
+  box-shadow: inset 0 0 0 1px var(--focus-ring);
+  color: var(--fg-strong);
+  --icon-color: var(--fg-muted);
+}
+.group {
+  display: contents;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--h-list-row);
+  margin: 0 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-selection, 5px);
+  color: var(--fg-strong);
+  white-space: nowrap;
+  cursor: default;
+}
+.projectRow {
+  gap: 10px;
+  padding: 6px 8px;
+}
+.active {
+  background: var(--bg-tree-selected);
+}
+.actionIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.separator {
+  height: 1px;
+  margin: 5px 12px;
+  background: var(--border);
+}
+.header {
+  padding: 4px 16px 2px;
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.badge {
+  align-self: flex-start;
+  margin-top: 1px;
+}
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.empty {
+  padding: 6px 16px;
+  color: var(--fg-faint);
+}

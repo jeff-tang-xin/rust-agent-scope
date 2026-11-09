@@ -1,0 +1,828 @@
+/**
+ * The Project tool window: a virtualized, lazily loaded file tree with VCS
+ * colours (file decorations), inline create / rename, drag & drop moves,
+ * OS file drops and keyboard file operations.
+ */
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { createPortal } from "react-dom";
+import clsx from "clsx";
+import { revealRange, useEditorRegistry } from "@/editor/api";
+import { executeAction } from "@/platform/actions";
+import { tx, useTxTemplate } from "@/platform/i18n";
+import { isTauri } from "@/platform/ipc";
+import { nativeDropPoint } from "@/platform/nativeDrop";
+import type { RootFolder } from "@/platform/languageSettings";
+import { useDetectedRoots, useEffectiveRoots } from "@/platform/projectRoots";
+import { macStroke, strokeOf } from "@/platform/keymap";
+import { OWNS_FILE_DROP, prepareMenuGroups, useFileDecoration } from "@/workbench/contributions";
+import {
+  FILES_DRAG,
+  HighlightedText,
+  Icon,
+  Popup,
+  dragSession,
+  Tree,
+  acquirePopup,
+  fileIconName,
+  useFileIconRevision,
+  folderIconName,
+  themedFolderIconName,
+  showContextMenu,
+  SymbolBadge,
+  type DragSession,
+  type TreeHandle,
+  type TreeRowState,
+} from "@/ui";
+import { badgeKind } from "@/ui/symbolKind";
+import { contextMenuItems, menuGroupContext, newMenuItems } from "./contextMenu";
+import { openNewPopup } from "./newPopupModel";
+import { presentationIcon, useJvmPresentation } from "@/platform/filePresentation";
+import {
+  isModuleFolder,
+  moduleFolderIcon,
+  useProjectPresentation,
+  type BuildPresentation,
+} from "@/platform/projectPresentation";
+import { relativePath } from "@/platform/project";
+import { folderKind } from "./folderKind";
+import { useHomeDir } from "./home";
+import { keyLike, memberNodes, nodeKeyFor, visibleInfo, type ProjectNode } from "./model";
+import {
+  cancelEditing,
+  checkEditingName,
+  commitEditing,
+  copyPaths,
+  copySelection,
+  deleteSelection,
+  dropPaths,
+  importExternal,
+  openFile,
+  openMoveDialog,
+  openRenameDialog,
+  openSelection,
+  paste,
+  refreshOsClipboard,
+  targetFolder,
+  undoLastFileOperation,
+} from "./operations";
+import { isInside, nameOf, parentOf, splitExtension, tildify } from "./paths";
+import {
+  VIEW_MODES,
+  autoExpand,
+  clearRevealRequest,
+  loadDir,
+  loadOutline,
+  revealPath,
+  selectModel,
+  setDropTarget,
+  setExpanded,
+  toggleExpanded,
+  setSelection,
+  useProjectTree,
+  type Editing,
+} from "./store";
+import styles from "./ProjectView.module.css";
+
+function onClipboard(e: ReactClipboardEvent<HTMLDivElement>, action: string) {
+  // Inline editors (rename, new file) keep native clipboard behaviour.
+  if ((e.target as HTMLElement).closest("input, textarea")) return;
+  e.preventDefault();
+  void executeAction(action);
+}
+
+/** The mounted tree, for actions that move focus into it. */
+export const treeHandle: { current: TreeHandle | null } = { current: null };
+
+/** ⌘N in the project view: IDEA's "New" popup under the selected row. */
+export function showNewPopup(): boolean {
+  const lead = treeHandle.current?.leadKey();
+  const row = lead ? document.querySelector<HTMLElement>(`[data-project-key="${CSS.escape(lead)}"]`) : null;
+  const rect = (
+    row ?? document.querySelector<HTMLElement>('[data-project-view] [role="tree"]')
+  )?.getBoundingClientRect();
+  if (!rect) return false;
+  openNewPopup({ x: rect.left + 24, y: rect.bottom }, newMenuItems(targetFolder()));
+  return true;
+}
+
+const getKey = (n: ProjectNode) => n.key;
+const getLabel = (n: ProjectNode) => n.label;
+
+function iconFor(
+  node: ProjectNode,
+  roots: readonly RootFolder[],
+  root: string | null,
+  build: BuildPresentation,
+  detected: readonly RootFolder[],
+  expanded: boolean,
+  holdsOpen: boolean,
+): string {
+  if (node.placeholder) return node.placeholder === "dir" ? "folder" : "file";
+  if (node.icon) return node.icon;
+  if (node.dir) {
+    const kind = folderKind(node, roots, root, build, detected);
+    if (kind !== "plain") return folderIconName(kind);
+    const rel = root ? (node.path === root ? "" : relativePath(root, node.path)) : null;
+    // Modules outside the project are keyed by their absolute folder.
+    const key = rel !== null && build.modules.has(rel) ? rel : node.path;
+    const module = root ? moduleFolderIcon(key, node.root, build.modules) : null;
+    if (module) return module;
+    return node.root ? "module" : (themedFolderIconName(node.label, expanded, holdsOpen, node.path) ?? "folder");
+  }
+  return fileIconName(node.label, node.path);
+}
+
+// ---------------------------------------------------------------------------
+// Inline editor (new file / folder, rename)
+
+function InlineEditor({ editing, initial, onDone }: { editing: Editing; initial: string; onDone: () => void }) {
+  const [value, setValue] = useState(initial);
+  const [submitted, setSubmitted] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const finished = useRef(false);
+  const check = useMemo(() => checkEditingName(value), [value]);
+  const showError = check.error && (submitted || value !== initial) && !(editing.kind === "new" && !value);
+
+  useLayoutEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    // IDEA selects the name without its extension on rename.
+    const [stem] = editing.kind === "rename" ? splitExtension(initial) : [initial];
+    input.setSelectionRange(0, stem.length);
+  }, [editing.kind, initial]);
+
+  // Escape must cancel the edit instead of moving focus to the editor.
+  useEffect(() => acquirePopup(), []);
+
+  const finish = async (commit: boolean) => {
+    if (finished.current) return;
+    if (!commit) {
+      finished.current = true;
+      cancelEditing();
+      onDone();
+      return;
+    }
+    setSubmitted(true);
+    if (checkEditingName(value).error) return;
+    finished.current = true;
+    const ok = await commitEditing(value);
+    if (!ok) finished.current = false;
+  };
+
+  return (
+    <>
+      <input
+        ref={ref}
+        className={clsx(styles.inlineInput, showError && styles.inlineInvalid)}
+        value={value}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        aria-label={
+          editing.kind === "rename"
+            ? "New name"
+            : editing.pkg
+              ? "New package name"
+              : editing.nodeKind === "dir"
+                ? "New folder name"
+                : "New file name"
+        }
+        aria-invalid={showError ? true : undefined}
+        onChange={(e) => setValue(e.target.value)}
+        onMouseDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void finish(true);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            void finish(false);
+          }
+        }}
+        onBlur={() => {
+          // Like IDEA's New File popup, clicking elsewhere cancels creating; a rename commits.
+          if (editing.kind === "new") return void finish(false);
+          const valid = !checkEditingName(value).error && !!value.trim();
+          void finish(valid && value !== initial);
+        }}
+      />
+      {showError && (
+        <Popup
+          open
+          anchor={ref}
+          placement="bottom-start"
+          offset={2}
+          role="alert"
+          autoFocus={false}
+          restoreFocus={false}
+          closeOnOutsideClick={false}
+          onClose={() => void finish(false)}
+          className={styles.inlineError}
+        >
+          {check.error}
+        </Popup>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rows
+
+interface RowProps {
+  node: ProjectNode;
+  matches: number[] | null;
+  editing: Editing | null;
+  cut: boolean;
+  dropTarget: boolean;
+  detail: string | null;
+  onEditDone: () => void;
+  onClick: (node: ProjectNode, e: ReactMouseEvent) => void;
+  onDoubleClick: (node: ProjectNode, e: ReactMouseEvent) => void;
+  onPointerDown: (node: ProjectNode, e: ReactPointerEvent) => void;
+}
+
+const holdsOpenFile = (dir: string, files: readonly string[]) =>
+  files.some((f) => f.length > dir.length && f.startsWith(dir) && (f[dir.length] === "/" || f[dir.length] === "\\"));
+
+const Row = memo(function Row({
+  node,
+  matches,
+  editing,
+  cut,
+  dropTarget,
+  detail,
+  onEditDone,
+  onClick,
+  onDoubleClick,
+  onPointerDown,
+}: RowProps) {
+  // Memoised: redraw this row itself when the file icon theme changes.
+  useFileIconRevision();
+  const deco = useFileDecoration(node.path);
+  const roots = useEffectiveRoots();
+  const root = useProjectTree((s) => s.root);
+  const detected = useDetectedRoots();
+  const build = useProjectPresentation();
+  const file = useJvmPresentation(node.dir || node.placeholder ? "" : node.path, node.entry?.mtimeMs);
+  const expanded = useProjectTree((s) => node.dir && s.expanded.has(node.key));
+  const holdsOpen = useProjectTree((s) => node.dir && holdsOpenFile(node.path, s.openFiles));
+  const icon =
+    node.dir || node.placeholder || node.icon
+      ? iconFor(node, roots, root, build, detected, expanded, holdsOpen)
+      : presentationIcon(node.path, file, roots, root, build.spring);
+  const moduleFolder =
+    node.dir && !node.placeholder && !!root && isModuleFolder(relativePath(root, node.path), node.root, build.modules);
+  const isEditing =
+    !!editing && (node.placeholder ? editing.kind === "new" : editing.kind === "rename" && editing.key === node.key);
+  const faded = node.ignored || deco.faded;
+  // IDEA dims the icon of excluded folders only; git-ignored ones just get the ignored colour.
+  const dimIcon = node.excluded;
+  return (
+    <span
+      className={clsx(styles.content, cut && styles.cut, dropTarget && styles.dropTarget)}
+      data-project-path={node.placeholder ? undefined : node.path}
+      data-project-key={node.key}
+      data-dir={node.dir || undefined}
+      title={deco.tooltip}
+      onClick={(e) => onClick(node, e)}
+      onDoubleClick={(e) => onDoubleClick(node, e)}
+      onPointerDown={(e) => onPointerDown(node, e)}
+    >
+      <span className={styles.iconStack}>
+        <Icon
+          name={icon}
+          size={16}
+          className={clsx(styles.icon, node.dir && styles.folderIcon, dimIcon && styles.faded)}
+        />
+        {!!file?.runnable && icon !== "spring-boot" && icon !== "jvm-test" && (
+          <Icon name="runnable-mark" size={16} className={styles.runnable} />
+        )}
+      </span>
+      {isEditing && editing ? (
+        <InlineEditor
+          editing={editing}
+          initial={editing.kind === "rename" ? nameOf(editing.path) : ""}
+          onDone={onEditDone}
+        />
+      ) : (
+        <>
+          <HighlightedText
+            className={clsx(
+              styles.label,
+              node.root && styles.rootName,
+              // Only the project itself is bold (IDEA); contributed roots like Scratches are not.
+              node.root && !node.icon && styles.rootLabel,
+              // Maven / Gradle module folders are bold too, as in IDEA.
+              moduleFolder && styles.moduleLabel,
+              faded && !deco.color && styles.excluded,
+              deco.error && styles.error,
+            )}
+            style={deco.color ? { color: deco.color } : undefined}
+            text={node.label}
+            indices={matches}
+            tone="accent"
+          />
+          {detail && <span className={styles.detail}>{detail}</span>}
+          {deco.badge && <span className={styles.badge}>{deco.badge}</span>}
+        </>
+      )}
+    </span>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Member rows ("Show Members")
+
+/** A declaration of the file above: navigates to the symbol, no file operations. */
+const MemberRow = memo(function MemberRow({
+  node,
+  matches,
+  onClick,
+  onPointerDown,
+}: Pick<RowProps, "node" | "matches" | "onClick" | "onPointerDown">) {
+  const item = node.member!;
+  return (
+    <span
+      className={styles.content}
+      data-project-key={node.key}
+      onClick={(e) => onClick(node, e)}
+      onPointerDown={(e) => onPointerDown(node, e)}
+    >
+      <SymbolBadge kind={badgeKind(item.kind)} className={styles.icon} />
+      <HighlightedText className={styles.label} text={item.name} indices={matches} tone="accent" />
+      {item.detail && <span className={styles.detail}>{item.detail}</span>}
+    </span>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Drag & drop
+
+interface DragState {
+  paths: string[];
+  label: string;
+  x: number;
+  y: number;
+  copy: boolean;
+}
+
+const DRAG_THRESHOLD = 4;
+
+/** Folder under a viewport point inside `container` (a file row resolves to its folder). */
+function folderAt(container: HTMLElement | null, x: number, y: number): { key: string; path: string } | null {
+  if (!container) return null;
+  const el = document.elementFromPoint(x, y);
+  if (!el || !container.contains(el)) return null;
+  const row = el.closest("[data-row]");
+  const content =
+    (row ?? el).querySelector<HTMLElement>("[data-project-path]") ?? el.closest<HTMLElement>("[data-project-path]");
+  if (!content) return null;
+  const path = content.dataset.projectPath!;
+  if (content.dataset.dir) return { key: content.dataset.projectKey!, path };
+  const parent = parentOf(path);
+  const model = selectModel(useProjectTree.getState());
+  const key = model.keyOfPath.get(parent);
+  return key ? { key, path: model.byKey.get(key)?.path ?? parent } : null;
+}
+
+// ---------------------------------------------------------------------------
+
+export function ProjectView() {
+  const txTemplate = useTxTemplate();
+  // Rows compute their file icons while rendering: redraw when the icon theme changes.
+  useFileIconRevision();
+  const root = useProjectTree((s) => s.root);
+  const model = useProjectTree(selectModel);
+  const expanded = useProjectTree((s) => s.expanded);
+  const selected = useProjectTree((s) => s.selected);
+  const editing = useProjectTree((s) => s.editing);
+  const clipboard = useProjectTree((s) => s.clipboard);
+  const dropTarget = useProjectTree((s) => s.dropTarget);
+  const revealRequest = useProjectTree((s) => s.revealRequest);
+  const options = useProjectTree((s) => s.options);
+  const home = useHomeDir((s) => s.home);
+  const handle = useRef<TreeHandle | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const revealing = useRef(false);
+
+  const info = useMemo(() => visibleInfo(model, expanded), [model, expanded]);
+  const mode = useProjectTree((s) => s.mode);
+  const unity = useProjectTree((s) => s.unity);
+  const outlines = useProjectTree((s) => s.outlines);
+  const showMembers = options.showMembers;
+
+  // Member rows per file, rebuilt only when an outline loads or drops.
+  const outlineRows = useMemo(() => {
+    const map = new Map<string, ProjectNode[]>();
+    for (const [p, items] of outlines) map.set(p, memberNodes(p, items));
+    return map;
+  }, [outlines]);
+
+  // Open Files / All Changed Files: show new files' folders expanded.
+  useEffect(() => autoExpand(model), [model]);
+
+  // Load folders that are expanded (restored state, reveal, chains) but not read yet.
+  useEffect(() => {
+    for (const p of info.pending) void loadDir(p);
+  }, [info.pending]);
+
+  // Restored file expansion and enabling Show Members also need outlines.
+  useEffect(() => {
+    if (!showMembers) return;
+    for (const key of expanded) {
+      const node = model.byKey.get(key);
+      if (node && !node.dir && !node.placeholder && !node.group && !outlines.has(node.path))
+        void loadOutline(node.path);
+    }
+  }, [showMembers, expanded, model, outlines]);
+
+  const setTreeHandle = useCallback((h: TreeHandle | null) => {
+    handle.current = h;
+    treeHandle.current = h;
+  }, []);
+
+  // Select a revealed path once its row exists.
+  useEffect(() => {
+    if (!revealRequest) return;
+    const { path, focus, seq } = revealRequest;
+    const exact = model.keyOfPath.get(path);
+    const loadingAncestors = info.pending.some((p) => p === path || isInside(path, p));
+    if (!exact && loadingAncestors) return;
+    const key = exact ?? nodeKeyFor(model, path);
+    clearRevealRequest(seq);
+    if (!key || !info.visible.has(key)) return;
+    revealing.current = true;
+    handle.current?.reveal(key);
+    revealing.current = false;
+    if (focus) handle.current?.focus();
+  }, [revealRequest, model, info]);
+
+  // Autoscroll from source: follow the active editor.
+  const activePath = useEditorRegistry((s) => s.active?.ctx.path ?? null);
+  useEffect(() => {
+    if (options.autoscrollFromSource && activePath) revealPath(activePath, false);
+  }, [activePath, options.autoscrollFromSource]);
+
+  const isExpandable = useCallback(
+    (n: ProjectNode) =>
+      n.dir
+        ? !n.placeholder
+        : n.member
+          ? n.member.children.length > 0
+          : // A file whose outline came back empty (unsupported or no members) has nothing to show.
+            showMembers && !n.placeholder && (outlines.get(n.path)?.length ?? 1) > 0,
+    [showMembers, outlines],
+  );
+
+  const loadChildren = useCallback(
+    (n: ProjectNode) => (n.member ? Promise.resolve() : n.dir ? loadDir(n.path) : loadOutline(n.path)),
+    [],
+  );
+
+  const getChildren = useCallback(
+    (n: ProjectNode) =>
+      n.member ? memberNodes(n.path, n.member.children) : n.dir ? model.children.get(n.key) : outlineRows.get(n.path),
+    [model, outlineRows],
+  );
+
+  const onExpandedChange = useCallback((next: Set<string>, node: ProjectNode, open: boolean) => {
+    // Expanding a compacted chain opens every folder in it, so it stays open if the chain breaks.
+    if (open) for (const p of node.chain) next.add(keyLike(node.key, p));
+    setExpanded(next);
+  }, []);
+
+  const onSelectionChange = useCallback((next: Set<string>, lead: ProjectNode | null) => {
+    setSelection(next, lead?.key ?? null);
+    const { options: o } = useProjectTree.getState();
+    if (revealing.current || !o.autoscrollToSource || !lead || lead.dir || lead.placeholder || next.size !== 1) return;
+    if (lead.member) {
+      void revealRange(
+        lead.path,
+        { start: lead.member.selection_range.start },
+        { preview: o.previewTab, focus: false },
+      );
+    } else void openFile(lead.path, { preview: o.previewTab, focus: false });
+  }, []);
+
+  const onActivate = useCallback((node: ProjectNode) => {
+    if (node.member) {
+      void revealRange(node.path, { start: node.member.selection_range.start }, { focus: true });
+    } else if (!node.dir && !node.placeholder) void openFile(node.path, { focus: true });
+  }, []);
+
+  const onContextMenu = useCallback((node: ProjectNode | null, sel: Set<string>, e: ReactMouseEvent) => {
+    const m = selectModel(useProjectTree.getState());
+    if (!node) {
+      const rootNode = m.roots[0];
+      if (!rootNode) return;
+      setSelection(new Set([rootNode.key]), rootNode.key);
+      showContextMenu(e, contextMenuItems([rootNode]));
+      return;
+    }
+    const nodes = [...sel].map((k) => m.byKey.get(k)).filter((n): n is ProjectNode => !!n && !n.placeholder);
+    const target = nodes.length ? nodes : [node];
+    if (target.every((n) => n.group) || target.some((n) => n.member)) return;
+    // Contributed groups may read the file first (bounded wait).
+    const at = { x: e.clientX, y: e.clientY };
+    void prepareMenuGroups("projectView", menuGroupContext(target)).then(() =>
+      showContextMenu(at, contextMenuItems(target)),
+    );
+  }, []);
+
+  const focusTree = useCallback(() => requestAnimationFrame(() => handle.current?.focus()), []);
+
+  // A pointer drag that ends on the row it started from still clicks it.
+  const dragged = useRef(false);
+
+  const onRowClick = useCallback((node: ProjectNode, e: ReactMouseEvent) => {
+    if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (node.placeholder || dragged.current) return;
+    const { options: o, editing: ed } = useProjectTree.getState();
+    if (ed) return;
+    if (e.detail > 1 && !(node.dir && o.singleClickExpand && e.detail % 2 === 1)) return;
+    if (node.dir) {
+      if (o.singleClickExpand) toggleExpanded(node);
+      return;
+    }
+    if (!o.singleClickOpen && !o.previewTab) return;
+    const opts = { preview: o.singleClickOpen ? undefined : true, focus: false };
+    if (node.member) void revealRange(node.path, { start: node.member.selection_range.start }, opts);
+    else void openFile(node.path, opts);
+  }, []);
+
+  // Pointer-driven drag & drop (HTML5 DnD is unreliable inside the Tauri webview).
+  // The single click already toggled the folder; double-click must not toggle it back.
+  const onRowDoubleClick = useCallback((node: ProjectNode, e: ReactMouseEvent) => {
+    if (node.dir && !node.placeholder && useProjectTree.getState().options.singleClickExpand) e.stopPropagation();
+  }, []);
+
+  const onRowPointerDown = useCallback((node: ProjectNode, e: ReactPointerEvent) => {
+    if (e.button === 0) dragged.current = false;
+    if (
+      e.button !== 0 ||
+      node.member ||
+      node.root ||
+      node.placeholder ||
+      node.readOnly ||
+      useProjectTree.getState().editing
+    )
+      return;
+    const before = useProjectTree.getState().selected;
+    const lead = useProjectTree.getState().lead;
+    const startX = e.clientX,
+      startY = e.clientY;
+    let active = false;
+    let paths: string[] = [];
+    // Files and folders can be dropped on the agent composer as references; an
+    // editor opens only files, so folders carry the trailing slash `findDirs`
+    // uses and the editor leaves them out.
+    let files: DragSession | null = null;
+    const move = (ev: PointerEvent) => {
+      // A press with no button held is a reordered macOS tap, not a drag (see pointerDrag.ts).
+      if (!(ev.buttons & 1)) {
+        if (!active) cleanup();
+        return;
+      }
+      if (!active) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_THRESHOLD) return;
+        active = true;
+        dragged.current = true;
+        const m = selectModel(useProjectTree.getState());
+        const keys = before.has(node.key) ? [...before] : [node.key];
+        if (before.has(node.key)) setSelection(before, lead);
+        const nodes = keys.map((k) => m.byKey.get(k)).filter((n): n is ProjectNode => !!n && !n.root && !n.placeholder);
+        paths = nodes.map((n) => n.path);
+        if (!paths.length) return cleanup();
+        files = dragSession({
+          type: FILES_DRAG,
+          payload: nodes.map((n) => (n.dir ? `${n.path}/` : n.path)).join("\n"),
+        });
+      }
+      const target = folderAt(containerRef.current, ev.clientX, ev.clientY);
+      const valid = target && !paths.some((p) => target.path === p || isInside(target.path, p));
+      setDropTarget(valid ? target.key : null);
+      if (target) files?.cancel();
+      else files?.move(ev.clientX, ev.clientY);
+      setDrag({
+        paths,
+        label: paths.length === 1 ? nameOf(paths[0]!) : tx`${paths.length} items`,
+        x: ev.clientX,
+        y: ev.clientY,
+        copy: ev.altKey,
+      });
+    };
+    const up = (ev: PointerEvent) => {
+      const target = active ? folderAt(containerRef.current, ev.clientX, ev.clientY) : null;
+      const valid = target && !paths.some((p) => target.path === p || isInside(target.path, p));
+      const session = files;
+      files = null;
+      cleanup();
+      if (active && valid) void dropPaths(paths, target.path, ev.altKey);
+      else if (active && !target) session?.drop(ev.clientX, ev.clientY);
+    };
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape" && active) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        cleanup();
+      }
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cleanup);
+      window.removeEventListener("keydown", key, true);
+      files?.cancel();
+      setDropTarget(null);
+      setDrag(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cleanup);
+    window.addEventListener("keydown", key, true);
+  }, []);
+
+  // Files dropped from the OS (Tauri drag-drop events carry real paths).
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          const p = event.payload;
+          if (p.type === "leave") return setDropTarget(null);
+          const { x, y } = nativeDropPoint(p.position);
+          const target = folderAt(containerRef.current, x, y);
+          if (p.type === "drop") {
+            setDropTarget(null);
+            if (target && p.paths.length) void importExternal(p.paths, target.path);
+          } else {
+            setDropTarget(target?.key ?? null);
+          }
+        })
+        .then((u) => {
+          if (disposed) u();
+          else unlisten = u;
+        }),
+    );
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Reconcile external files and expired Copy/Cut state when returning from another app.
+  useEffect(() => {
+    void refreshOsClipboard();
+    const refresh = () => void refreshOsClipboard();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).tagName === "INPUT") return;
+    const stroke = strokeOf(e.nativeEvent);
+    let handled = true;
+    switch (stroke && macStroke(stroke)) {
+      case "Delete":
+      case "Meta+Backspace":
+        void deleteSelection();
+        break;
+      case "Shift+F6":
+        void openRenameDialog();
+        break;
+      case "F6":
+        openMoveDialog();
+        break;
+      case "Meta+Z":
+        handled = undoLastFileOperation();
+        break;
+      case "Meta+C":
+        copySelection(false);
+        break;
+      case "Meta+X":
+        copySelection(true);
+        break;
+      case "Meta+V":
+        void paste();
+        break;
+      case "Shift+Meta+C":
+        void copyPaths("absolute");
+        break;
+      case "F4":
+      case "Meta+Down":
+        openSelection();
+        break;
+      case "Meta+N":
+      case "Ctrl+Enter":
+      case "Alt+Insert":
+        showNewPopup();
+        break;
+      default:
+        handled = false;
+    }
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  const cutPaths = useMemo(() => new Set(clipboard?.cut ? clipboard.paths : []), [clipboard]);
+
+  const renderNode = useCallback(
+    (node: ProjectNode, state: TreeRowState) =>
+      node.member ? (
+        <MemberRow node={node} matches={state.matches} onClick={onRowClick} onPointerDown={onRowPointerDown} />
+      ) : (
+        <Row
+          node={node}
+          matches={state.matches}
+          editing={editing}
+          cut={cutPaths.has(node.path)}
+          dropTarget={dropTarget === node.key}
+          detail={node.detail ?? (node.root && !node.icon ? tildify(node.path, home) : null)}
+          onEditDone={focusTree}
+          onClick={onRowClick}
+          onDoubleClick={onRowDoubleClick}
+          onPointerDown={onRowPointerDown}
+        />
+      ),
+    [editing, cutPaths, dropTarget, home, focusTree, onRowClick, onRowDoubleClick, onRowPointerDown],
+  );
+
+  if (!root) return null;
+
+  return (
+    <div
+      ref={containerRef}
+      className={styles.view}
+      data-project-view=""
+      {...OWNS_FILE_DROP}
+      onKeyDown={onKeyDown}
+      // The native Edit menu may take ⌘C/⌘X/⌘V before the keymap sees them; it then sends DOM clipboard events.
+      onCopy={(e) => onClipboard(e, "project.copy")}
+      onCut={(e) => onClipboard(e, "project.cut")}
+      onPaste={(e) => onClipboard(e, "project.paste")}
+    >
+      {mode === "unity" && unity && !unity.projects.length && (
+        <div className={styles.unityNotice} role="status">
+          {tx`C# project files are missing. In Unity, select an external script editor in Preferences > External Tools, then regenerate project files.`}
+        </div>
+      )}
+      {!model.roots.length && (
+        <div className={styles.empty}>
+          {txTemplate(`Nothing to show in ${VIEW_MODES.find(([id]) => id === mode)?.[1] ?? "this view"}`)}
+        </div>
+      )}
+      <Tree<ProjectNode>
+        horizontalScroll
+        aria-label="Project"
+        focusContext="projectViewFocus"
+        handleRef={setTreeHandle}
+        roots={model.roots}
+        getKey={getKey}
+        getLabel={getLabel}
+        getDirectory={(node) => (node.group || node.placeholder ? null : targetFolder(node))}
+        getChildren={getChildren}
+        isExpandable={isExpandable}
+        loadChildren={loadChildren}
+        renderNode={renderNode}
+        rowClassName={(n) => (n.excluded ? styles.excludedRow : undefined)}
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+        selected={selected}
+        onSelectionChange={onSelectionChange}
+        onActivate={onActivate}
+        onContextMenu={onContextMenu}
+      />
+      {drag &&
+        createPortal(
+          <div className={styles.dragGhost} style={{ left: drag.x + 12, top: drag.y + 8 }} aria-hidden>
+            <Icon name={drag.paths.length > 1 ? "list" : fileIconName(drag.label)} size={14} />
+            <span>{drag.label}</span>
+            {drag.copy && <Icon name="plus" size={12} />}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}

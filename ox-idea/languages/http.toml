@@ -1,0 +1,7 @@
+id = "http"
+name = "HTTP Request"
+extensions = ["http", "rest"]
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+# Highlighted by the HTTP Client feature's mode (legacy CodeMirror `HTTP` mode as fallback).
+ui-mode = "HTTP"

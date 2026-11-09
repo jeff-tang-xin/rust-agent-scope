@@ -1,0 +1,144 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 420px;
+}
+.profileRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  margin-bottom: 8px;
+}
+.profileSelect {
+  min-width: 220px;
+}
+.profileRow > span {
+  flex: none;
+  white-space: nowrap;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.search {
+  flex: 1;
+  max-width: 320px;
+  margin-right: 4px;
+}
+.split {
+  flex: 1;
+  min-width: 520px;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+.treeWrap {
+  flex: 3;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border);
+  padding: 2px 0;
+}
+.empty {
+  padding: 8px 12px;
+  color: var(--fg-subtle);
+}
+.row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.groupName {
+  font-weight: 600;
+}
+.off {
+  color: var(--fg-subtle);
+}
+.level {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.check {
+  display: inline-flex;
+  flex: none;
+}
+.details {
+  flex: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 4px;
+  overflow: auto;
+}
+.description {
+  margin: 0;
+  color: var(--fg);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.severityRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 0 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.options legend {
+  float: left;
+  width: 100%;
+  padding: 0 0 4px;
+  color: var(--fg-muted);
+}
+.levelSelect {
+  min-width: 160px;
+}
+.profileLevel {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.nameBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.nameRow {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.nameError {
+  color: var(--danger);
+  font-size: var(--fs-small);
+  padding-left: 68px;
+}

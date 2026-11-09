@@ -1,0 +1,195 @@
+/**
+ * Git Log presentation options (IDEA's Graph Options and View Options menus),
+ * persisted across sessions.
+ */
+import { create } from "zustand";
+import { useContext } from "react";
+import { LogOptionsContext } from "./logContext";
+
+export type LogSort = "date" | "topo" | "standard";
+
+export interface LogOptions {
+  sort: LogSort;
+  firstParent: boolean;
+  noMerges: boolean;
+  collapseLinear: boolean;
+  compactRefs: boolean;
+  tagNames: boolean;
+  longEdges: boolean;
+  commitTimestamp: boolean;
+  refsOnLeft: boolean;
+  showAuthor: boolean;
+  showDate: boolean;
+  showHash: boolean;
+  showSignature: boolean;
+  showGitHubChecks: boolean;
+  /** The row naming the columns, where they are resized and reordered. */
+  showColumnHeaders: boolean;
+  highlightMine: boolean;
+  highlightMerges: boolean;
+  highlightCurrentBranch: boolean;
+  /** The Branches pane on the left of the log. */
+  showBranches: boolean;
+  /** Changed files grouped by directory (else a flat list). */
+  groupByDirectory: boolean;
+  /** Selecting a changed file shows its diff in the editor's preview tab. */
+  diffPreview: boolean;
+  /** Changed files show how many lines the commit added and deleted. */
+  showLineStats: boolean;
+  showDetails: boolean;
+  showRepository: boolean;
+  showOnlyAffected: boolean;
+  changesFromParents: boolean;
+  diffLocation: "editor" | "right" | "bottom";
+  columnOrder: string[];
+  columnWidths: Record<string, number>;
+  linearizeMerges: boolean;
+}
+
+/** IDEA's defaults. */
+export const DEFAULT_LOG_OPTIONS: LogOptions = {
+  sort: "date",
+  firstParent: false,
+  noMerges: false,
+  collapseLinear: false,
+  compactRefs: true,
+  tagNames: false,
+  longEdges: false,
+  commitTimestamp: false,
+  refsOnLeft: false,
+  showAuthor: true,
+  showDate: true,
+  showHash: false,
+  showSignature: false,
+  showGitHubChecks: false,
+  showColumnHeaders: false,
+  highlightMine: true,
+  highlightMerges: true,
+  highlightCurrentBranch: true,
+  showBranches: true,
+  groupByDirectory: true,
+  diffPreview: true,
+  showLineStats: false,
+  showDetails: true,
+  showRepository: true,
+  showOnlyAffected: false,
+  changesFromParents: false,
+  diffLocation: "editor",
+  columnOrder: ["author", "date", "hash"],
+  columnWidths: {},
+  linearizeMerges: false,
+};
+
+/** Options that change which commits the backend returns (a reload is needed). */
+export const QUERY_OPTIONS: ReadonlyArray<keyof LogOptions> = ["sort", "firstParent", "noMerges"];
+
+const KEY = "openidea.vcs.logOptions";
+
+export function parseLogOptions(raw: unknown): LogOptions {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const out = { ...DEFAULT_LOG_OPTIONS };
+  for (const k of Object.keys(out) as Array<keyof LogOptions>) {
+    if (k === "sort")
+      out.sort = o.sort === "standard" || o.sort === "topo" || o.sort === "date" ? o.sort : DEFAULT_LOG_OPTIONS.sort;
+    else if (k === "diffLocation")
+      out.diffLocation = o.diffLocation === "right" || o.diffLocation === "bottom" ? o.diffLocation : "editor";
+    else if (k === "columnOrder")
+      out.columnOrder = Array.isArray(o.columnOrder)
+        ? [...new Set(o.columnOrder.filter((v): v is string => typeof v === "string"))]
+        : [...DEFAULT_LOG_OPTIONS.columnOrder];
+    else if (k === "columnWidths" && o.columnWidths && typeof o.columnWidths === "object")
+      out.columnWidths = Object.fromEntries(
+        Object.entries(o.columnWidths).filter(
+          (entry): entry is [string, number] =>
+            typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] >= 40 && entry[1] <= 800,
+        ),
+      );
+    else if (typeof o[k] === "boolean") (out as Record<string, unknown>)[k] = o[k];
+  }
+  return out;
+}
+
+function load(): LogOptions {
+  try {
+    const raw = localStorage.getItem(KEY);
+    return parseLogOptions(raw ? JSON.parse(raw) : null);
+  } catch {
+    return { ...DEFAULT_LOG_OPTIONS };
+  }
+}
+
+export const rootLogOptions = create<LogOptions>(() => load());
+export const useLogOptions = Object.assign(function useScopedLogOptions<T = LogOptions>(
+  selector?: (state: LogOptions) => T,
+): T {
+  const scoped = useContext(LogOptionsContext);
+  return rootLogOptions((state) => (selector ? selector(scoped ?? state) : ((scoped ?? state) as T)));
+}, rootLogOptions);
+
+// Settings › Version Control › Log edits them from the Settings window too.
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (e) => {
+    if (e.key === KEY) useLogOptions.setState(load());
+  });
+
+export const logOptions = () => useLogOptions.getState();
+
+export type RefKind = "head" | "local" | "remote" | "tag";
+
+export interface RefLabel {
+  kind: RefKind;
+  /** Empty for a tag shown without its name. */
+  text: string;
+  title: string;
+}
+
+/**
+ * Reference labels of a commit row. `refs` are decorations (`HEAD`, `main`,
+ * `origin/main`, `tag: v1`); `remoteNames` the remote-tracking branch names.
+ * Compact: a local branch absorbs its remote-tracking branches (`origin & main`) and
+ * HEAD is left out next to other references. Without tag names, tags are one icon.
+ */
+export function refLabels(
+  refs: readonly string[],
+  opts: { compact: boolean; tagNames: boolean },
+  remoteNames: ReadonlySet<string>,
+): RefLabel[] {
+  const isRemote = (r: string) => (remoteNames.size ? remoteNames.has(r) : r.includes("/"));
+  const tags = refs.filter((r) => r.startsWith("tag: ")).map((r) => r.slice(5));
+  const branches = refs.filter((r) => r !== "HEAD" && !r.startsWith("tag: "));
+  const out: RefLabel[] = [];
+  if (refs.includes("HEAD") && (!opts.compact || !branches.length))
+    out.push({ kind: "head", text: "HEAD", title: "HEAD" });
+  const locals = branches.filter((b) => !isRemote(b));
+  const remotes = branches.filter(isRemote);
+  const absorbed = new Set<string>();
+  for (const l of locals) {
+    const tracking = opts.compact ? remotes.filter((r) => r.endsWith(`/${l}`)) : [];
+    tracking.forEach((r) => absorbed.add(r));
+    const prefixes = tracking.map((r) => r.slice(0, -l.length - 1));
+    out.push({
+      kind: "local",
+      text: prefixes.length ? `${prefixes.join(", ")} & ${l}` : l,
+      title: [l, ...tracking].join(", "),
+    });
+  }
+  for (const r of remotes) if (!absorbed.has(r)) out.push({ kind: "remote", text: r, title: r });
+  if (tags.length) {
+    if (opts.tagNames) out.push(...tags.map((t) => ({ kind: "tag" as const, text: t, title: t })));
+    else out.push({ kind: "tag", text: "", title: tags.join(", ") });
+  }
+  return out;
+}
+
+/** Updates options and persists them; returns whether the log has to be reloaded. */
+export function setLogOptions(patch: Partial<LogOptions>): boolean {
+  const before = useLogOptions.getState();
+  useLogOptions.setState(patch);
+  const after = useLogOptions.getState();
+  try {
+    localStorage.setItem(KEY, JSON.stringify(after));
+  } catch {
+    // Storage unavailable: the options last for this session.
+  }
+  return QUERY_OPTIONS.some((k) => before[k] !== after[k]);
+}

@@ -1,0 +1,10 @@
+id = "toy"
+name = "Toy"
+extensions = ["toy"]
+filenames = ["Toyfile"]
+first-line = "^#!.*\\btoy\\b"
+line-comment = "#"
+block-comment = ["(*", "*)"]
+indent = { tab-size = 2, insert-spaces = true }
+# Borrow an existing CodeMirror mode for instant highlighting.
+ui-mode = "Properties files"

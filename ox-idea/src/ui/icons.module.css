@@ -1,0 +1,62 @@
+.icon {
+  flex: none;
+  display: block;
+}
+
+.mono {
+  color: var(--icon-color, currentColor);
+}
+
+/* Coloured icons carry both variants; the light one shows only in the light theme. */
+.light {
+  display: none;
+}
+
+:global(:root[data-theme="light"]) .light {
+  display: inline;
+}
+
+:global(:root[data-theme="light"]) .dark {
+  display: none;
+}
+
+.symbol {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  line-height: 1;
+  color: var(--fg-subtle);
+}
+
+:global(:root[data-oi-icon-filter]) .icon {
+  filter: var(--oi-icon-filter);
+}
+
+:global(:root[data-oi-icon-opacity]) .icon {
+  opacity: var(--oi-icon-opacity);
+}
+
+.icon [data-themed="true"][fill] {
+  fill: var(--oi-icon-accent, var(--accent));
+}
+
+.icon [data-themed="true"][stroke] {
+  stroke: var(--oi-icon-accent, var(--accent));
+}
+
+:global(:root[data-oi-accent]) .icon [data-tint="true"][fill] {
+  fill: var(--oi-icon-accent);
+}
+
+:global(:root[data-oi-accent]) .icon [data-tint="true"][stroke] {
+  stroke: var(--oi-icon-accent);
+}
+
+:global(:root[data-oi-tree-icon-size]) :global([role="tree"]) .icon {
+  width: var(--oi-tree-icon-size);
+  height: var(--oi-tree-icon-size);
+}

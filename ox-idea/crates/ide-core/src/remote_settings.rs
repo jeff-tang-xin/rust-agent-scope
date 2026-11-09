@@ -1,0 +1,245 @@
+//! Settings of remote work: SSH configurations, SFTP deployment and run
+//! targets (SSH, Docker, Compose). The fields hang off `Settings` in `settings.rs`.
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+/// How an SSH connection authenticates.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum SshAuth {
+    Password,
+    /// A private key file, optionally protected by a passphrase.
+    KeyPair,
+    /// `~/.ssh/config` (HostName, User, Port, IdentityFile, ProxyJump) and the SSH agent.
+    #[default]
+    OpenSsh,
+}
+
+/// Tools › SSH Configurations.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SshSettings {
+    pub configs: Vec<SshConfiguration>,
+}
+
+/// A named SSH host, shared by terminals, deployment, run targets and data sources.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SshConfiguration {
+    pub id: String,
+    pub name: String,
+    /// Host name, or a `Host` alias of `~/.ssh/config` with [`SshAuth::OpenSsh`].
+    pub host: String,
+    pub port: Option<u16>,
+    pub user: String,
+    pub auth: SshAuth,
+    /// Private key for [`SshAuth::KeyPair`]; `~/` is the home directory.
+    pub key_file: String,
+    /// Keep the password / key passphrase in the saved passwords.
+    pub save_secret: bool,
+}
+
+impl SshConfiguration {
+    /// `user@host:port` with what is known (the name when the host is empty).
+    pub fn label(&self) -> String {
+        let host = self.host.trim();
+        if host.is_empty() {
+            return self.name.clone();
+        }
+        let mut s = String::new();
+        if !self.user.trim().is_empty() {
+            s.push_str(self.user.trim());
+            s.push('@');
+        }
+        s.push_str(host);
+        if let Some(p) = self.port {
+            s.push_str(&format!(":{p}"));
+        }
+        s
+    }
+}
+
+/// When local changes are uploaded to the default deployment server.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum AutoUpload {
+    #[default]
+    Never,
+    /// Files saved with Save / Save All (⌘S).
+    OnExplicitSave,
+    /// Every save, including autosave and external changes.
+    Always,
+}
+
+/// Build, Execution, Deployment › Deployment (and its Options page).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeploymentSettings {
+    pub servers: Vec<DeploymentServer>,
+    /// Server used by Upload / Download / Sync and automatic upload; empty = none.
+    pub default_server: String,
+    pub auto_upload: AutoUpload,
+    /// Delete remote files when their local file is deleted (automatic upload).
+    pub delete_remote: bool,
+    /// Keep local modification times on uploaded files.
+    pub preserve_timestamps: bool,
+    /// File names never uploaded or downloaded (`*` and `?` wildcards; `;`-separated in the UI).
+    pub exclude: Vec<String>,
+}
+
+impl Default for DeploymentSettings {
+    fn default() -> Self {
+        Self {
+            servers: Vec::new(),
+            default_server: String::new(),
+            auto_upload: AutoUpload::Never,
+            delete_remote: false,
+            preserve_timestamps: true,
+            exclude: [".git", ".svn", ".hg", ".idea", ".openidea", ".DS_Store", "*.pyc", "__pycache__"]
+                .map(String::from)
+                .to_vec(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DeploymentType {
+    #[default]
+    Sftp,
+    Local,
+}
+
+/// A deployment filesystem and how project folders map onto it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeploymentServer {
+    pub kind: DeploymentType,
+    pub id: String,
+    pub name: String,
+    /// [`SshConfiguration::id`].
+    pub ssh_config: String,
+    /// Absolute remote folder the mappings are relative to; empty = the login directory.
+    pub root_path: String,
+    /// Web server URL of the root (Open in Browser on the deployed file).
+    pub web_url: String,
+    pub mappings: Vec<DeploymentMapping>,
+    /// Remote paths (relative to the root) never touched.
+    pub excluded_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeploymentMapping {
+    /// Project-relative folder, or absolute inside the project; empty = the project root.
+    pub local: String,
+    /// Remote folder, relative to the server root (a leading `/` is the root too).
+    pub deployment: String,
+    /// Web path, relative to the server's URL.
+    pub web: String,
+}
+
+/// Where a run target runs configurations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RunTargetKind {
+    /// Another machine over SSH, the project synchronised to its folder.
+    #[default]
+    Ssh,
+    /// A new container of an image (`docker run --rm`), the project bind-mounted.
+    Docker,
+    /// A new container of a Compose service (`docker compose run --rm`).
+    Compose,
+}
+
+/// Build, Execution, Deployment › Run Targets: run configurations on another machine
+/// or in a container.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RunTarget {
+    pub kind: RunTargetKind,
+    pub id: String,
+    pub name: String,
+    /// [`SshConfiguration::id`] (SSH).
+    pub ssh_config: String,
+    /// Remote folder the project is synchronised to and run from (SSH).
+    pub project_root: String,
+    /// Upload changed project files before each run (SSH).
+    pub sync_before_run: bool,
+    /// Interpreters on the target; empty = the one on the remote `PATH`.
+    pub python: String,
+    pub node: String,
+    pub java: String,
+    /// Id of a Docker connection of the Services tool window (Docker, Compose);
+    /// empty = the CLI's own daemon.
+    pub docker_connection: String,
+    /// Image to run (Docker).
+    pub image: String,
+    /// Compose files, relative to the project; empty = the project's default one (Compose).
+    pub compose_files: Vec<String>,
+    /// Service to run (Compose).
+    pub service: String,
+    /// Where the project is in the container; empty = `/workspaces/<folder>` (Docker),
+    /// the service's bind mount of the project (Compose).
+    pub container_root: String,
+    /// Published ports, as `docker run --publish` takes them (`8000:8000`).
+    pub ports: Vec<String>,
+    /// More options for `docker run` / `docker compose run`, shell-like quoted.
+    pub run_options: String,
+    /// Run as the image's user instead of the project folder's owner (Linux).
+    pub image_user: bool,
+}
+
+/// A plugin-owned argv wrapper for project runs (API 1.4).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRunTarget {
+    pub id: String,
+    pub name: String,
+    pub program: String,
+    pub args: Vec<String>,
+    pub workdir_args: Vec<String>,
+    pub container_root: Option<String>,
+    pub commands: Vec<(String, Vec<String>)>,
+}
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::*;
+
+    #[test]
+    fn deployment_type_defaults_and_round_trips() {
+        let legacy: DeploymentServer =
+            serde_json::from_str(r#"{"id":"existing","sshConfig":"ssh","rootPath":"/srv"}"#).unwrap();
+        assert_eq!(legacy.kind, DeploymentType::Sftp);
+        assert_eq!(legacy.ssh_config, "ssh");
+        for kind in [DeploymentType::Sftp, DeploymentType::Local] {
+            let server = DeploymentServer { kind, ..legacy.clone() };
+            assert_eq!(
+                serde_json::from_str::<DeploymentServer>(&serde_json::to_string(&server).unwrap()).unwrap(),
+                server
+            );
+        }
+    }
+
+    #[test]
+    fn run_target_kind_defaults_to_ssh_and_round_trips() {
+        let legacy: RunTarget =
+            serde_json::from_str(r#"{"id":"t","name":"Build box","sshConfig":"ssh","projectRoot":"/srv"}"#).unwrap();
+        assert_eq!((legacy.kind, legacy.ssh_config.as_str()), (RunTargetKind::Ssh, "ssh"));
+        let docker = RunTarget {
+            kind: RunTargetKind::Compose,
+            docker_connection: "local".into(),
+            compose_files: vec!["compose.dev.yaml".into()],
+            service: "web".into(),
+            ports: vec!["8000:8000".into()],
+            image_user: true,
+            ..legacy
+        };
+        let json = serde_json::to_value(&docker).unwrap();
+        assert_eq!(json["kind"], "compose");
+        assert_eq!(json["composeFiles"], serde_json::json!(["compose.dev.yaml"]));
+        assert_eq!(serde_json::from_value::<RunTarget>(json).unwrap(), docker);
+    }
+}

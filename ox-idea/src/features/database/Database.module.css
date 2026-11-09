@@ -1,0 +1,1356 @@
+/* ---- Grid ---------------------------------------------------------------- */
+.grid {
+  position: relative;
+  height: 100%;
+  overflow: auto;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  background: var(--bg-editor);
+  color: var(--fg-editor);
+}
+.gridInner {
+  position: relative;
+  min-width: 100%;
+}
+.gridRow {
+  display: grid;
+  height: 24px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.gridHeader {
+  position: sticky;
+  z-index: 1;
+  background: var(--bg-island);
+  border-bottom: 1px solid var(--border);
+}
+.headerCell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--fg-strong);
+}
+.sortable {
+  cursor: pointer;
+}
+.sortable:hover {
+  background: var(--bg-hover);
+}
+.headerName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.headerIcon {
+  flex: none;
+  color: var(--fg-secondary);
+}
+.headerSort {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-muted);
+}
+.cellNumber {
+  justify-content: flex-end;
+}
+.resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.rowNumber {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 6px;
+  color: var(--fg-line-number);
+  background: var(--bg-editor-gutter);
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+.cell {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+.cellSelected {
+  background: var(--bg-editor-selection);
+}
+.cellModified {
+  color: var(--gutter-modified);
+}
+.rowDeleted .cell {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+.rowInserted .cell {
+  color: var(--gutter-added);
+}
+.null {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.lineBreak {
+  color: var(--fg-muted);
+}
+.cellEditor {
+  min-width: 0;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid var(--focus-ring);
+  background: var(--bg-input);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+
+/* ---- Tool windows ------------------------------------------------------------ */
+.view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--h-header);
+  padding: 0 6px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+.spacer {
+  flex: 1;
+}
+.fill {
+  flex: 1;
+  min-height: 0;
+}
+/* Gives way before the name does. */
+.treeDetail {
+  color: var(--fg-muted);
+  margin-left: 6px;
+  min-width: 0;
+  flex-shrink: 100;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* IDEA: counts after folders, column types in a smaller grey face, key rows in grey. */
+.treeCount {
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+}
+.treeType {
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+  letter-spacing: 0.02em;
+}
+.keyLabel {
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+.treeError {
+  color: var(--danger);
+}
+.nodeIcon {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+/* On the data source icon's bottom-right corner, like IDEA's. */
+.connectedDot {
+  position: absolute;
+  right: -2px;
+  bottom: -1px;
+  width: 4px;
+  height: 4px;
+  box-sizing: content-box;
+  border-radius: 50%;
+  background: var(--db-connected);
+  border: 0.5px solid var(--db-connected-ring);
+}
+/* The schema count of a data source (IDEA draws it in a small frame). */
+.treeBadge {
+  padding: 0 4px;
+  line-height: 14px;
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+.textTool {
+  flex: none;
+  height: 20px;
+  padding: 0 3px;
+  border-radius: var(--radius-small);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--fg-strong);
+}
+.textTool:not(:disabled):hover {
+  background: var(--bg-toolbar-hover);
+}
+.textTool:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.textTool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dbView {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dbToolbar {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+.dbToolbarSep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.treeFilter {
+  flex: 1;
+  min-width: 80px;
+  max-width: 280px;
+  margin-left: 4px;
+}
+.treeHost {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.treeHost > * {
+  flex: 1;
+  min-height: 0;
+}
+.nodeRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.tinted {
+  flex: 1;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: var(--radius-control, 4px);
+  background: color-mix(in srgb, var(--db-tint) var(--tint-strength), transparent);
+}
+.nodeLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Results. */
+.error {
+  margin: 0;
+  padding: 8px;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Console toolbar panel above SQL editors. */
+.consoleBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--h-header);
+  padding: 0 8px;
+  background: var(--bg-editor);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  color: var(--fg-secondary);
+}
+
+/* Inline statement errors in consoles. */
+:global(.cm-openidea-db-error) {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--danger);
+  text-underline-offset: 3px;
+}
+
+/* Table editor. */
+/* The table editor's WHERE | ORDER BY row (IDEA). */
+.filterBar {
+  display: flex;
+  flex: none;
+  height: var(--h-header);
+  border-bottom: 1px solid var(--border);
+}
+.filterField {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--fg-muted);
+}
+.filterField + .filterField {
+  border-left: 1px solid var(--border);
+}
+.filterField > input {
+  flex: 1;
+  min-width: 0;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.notice {
+  padding: 4px 8px;
+  font-size: var(--fs-small);
+  color: var(--fg-secondary);
+  background: var(--bg-editor-banner);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Dialogs. */
+.form {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 14px;
+  overflow-wrap: anywhere;
+}
+.form > * {
+  min-width: 0;
+}
+.formLabel {
+  color: var(--fg-secondary);
+  text-align: right;
+}
+.dialogText {
+  padding: 14px;
+  max-width: 420px;
+  line-height: 1.5;
+}
+.formHint {
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+}
+.paramInput {
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-weight: var(--fw-code);
+}
+.formRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+/* Data source dialog. */
+.formSection {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-strong);
+}
+.formSection::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.formWide {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.portInput {
+  width: 80px;
+}
+.secondsInput {
+  width: 72px;
+}
+.narrowSelect {
+  min-width: 140px;
+}
+.segmented {
+  display: inline-flex;
+  justify-self: start;
+  border-radius: var(--radius-control, 4px);
+  box-shadow: inset 0 0 0 1px var(--border-button);
+}
+.segmented button {
+  height: var(--h-field, 28px);
+  padding: 0 14px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+.segmented button[aria-pressed="true"] {
+  background: var(--bg-tab-selected);
+  box-shadow: inset 0 0 0 1px var(--border-tab-selected);
+  color: var(--fg-strong);
+}
+.segmented button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.textArea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control, 4px);
+  background: var(--bg-input);
+  color: var(--fg-editor, var(--fg-strong));
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  line-height: 1.5;
+}
+.textArea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.linkButton {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.linkButton:hover {
+  text-decoration: underline;
+}
+.colorValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.colorSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.namePicker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nameList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+  padding-left: 22px;
+}
+.propertyTable {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.propertyHead,
+.propertyRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 24px;
+  align-items: center;
+  gap: 6px;
+}
+.propertyHead {
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+}
+.testResult {
+  grid-column: 1 / -1;
+  font-size: var(--fs-small);
+  min-height: 16px;
+  word-break: break-word;
+}
+.ok {
+  color: var(--success);
+}
+.bad {
+  color: var(--danger);
+}
+
+:global(.cm-openidea-db-doc) {
+  margin: 0;
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-weight: var(--fw-code);
+  font-size: var(--fs-code);
+  color: var(--fg-editor, var(--fg-strong));
+  white-space: pre;
+}
+
+/* ---- Console output and results (Services › Database) ---------------------- */
+.toolbarSeparator {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+  flex: none;
+}
+.output {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px;
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-weight: var(--fw-code);
+  font-size: var(--fs-code);
+  line-height: 1.5;
+  color: var(--fg-editor, var(--fg-strong));
+  background: var(--bg-editor);
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: default;
+}
+.outputLine {
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+.outputTime {
+  color: var(--link);
+}
+.outputPrompt {
+  color: var(--fg-secondary);
+}
+.outputStatement {
+  color: var(--fg-editor, var(--fg-strong));
+}
+.outputError,
+.outputError .outputTime {
+  color: var(--danger);
+}
+.gridHost {
+  position: relative;
+}
+.resultSource {
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+  padding-right: 4px;
+}
+
+/* Console run feedback: timing after a statement, gutter check / error, error banner. */
+:global(.cm-openidea-db-timing) {
+  margin-left: 1.5em;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--fs-small);
+  user-select: none;
+}
+:global(.cm-openidea-db-gutter) {
+  width: 16px;
+}
+:global(.cm-openidea-db-gutter .cm-gutterElement) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+:global(.cm-openidea-db-run-ok svg) {
+  color: var(--success);
+}
+:global(.cm-openidea-db-banner) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 6px 0 10px;
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-editor));
+  border-top: 1px solid var(--border);
+  color: var(--fg-strong);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+}
+:global(.cm-openidea-db-banner-text) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:global(.cm-openidea-db-banner-close) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+/* Parameter info in `VALUES (…)`. */
+:global(.cm-openidea-db-params) {
+  padding: 4px 8px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  color: var(--fg-secondary);
+}
+:global(.cm-openidea-db-param-current) {
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+.dialogTabs {
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Object dialogs (Rename, Confirm Drop, Modify Table) and Quick Documentation. */
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  min-width: 440px;
+}
+.dialogLead {
+  line-height: 1.5;
+}
+.formLabelLeft {
+  color: var(--fg-secondary);
+}
+.previewBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.previewTitle {
+  font-size: var(--fs-small);
+  color: var(--fg-secondary);
+}
+/* SQL types (INT, VARCHAR) read as keywords, as in the SQL editor. */
+.sqlPreview :global(.tok-typeName),
+.codeText :global(.tok-typeName) {
+  color: var(--syn-keyword);
+}
+.sqlPreview {
+  margin: 0;
+  padding: 8px 10px;
+  min-height: 48px;
+  max-height: 220px;
+  overflow: auto;
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-weight: var(--fw-code);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--fg-editor);
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.modifyBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.modifyMain {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 240px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  overflow: hidden;
+}
+.modifyColumns {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+.modifyToolbar {
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.modifyList {
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
+}
+.modifyItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  cursor: default;
+  white-space: nowrap;
+}
+.modifyItem:hover {
+  background: var(--bg-hover);
+}
+.modifyItem[aria-selected="true"] {
+  background: var(--bg-selected);
+}
+.modifyItem[data-dropped] .nodeLabel {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+.modifyProps {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-content: start;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px;
+  overflow: auto;
+}
+.quickDoc {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.quickDocRows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.quickDocRows > div {
+  display: flex;
+  gap: 6px;
+}
+.quickDocRows dt {
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.quickDocRows dd {
+  margin: 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.quickDocLinks {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Result views: grid + Record / Value / Aggregates panel. */
+.dataView {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.dataView > .fill {
+  min-width: 0;
+}
+.headerFilter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.headerFilter:hover {
+  background: var(--bg-hover);
+}
+.headerFilterOn {
+  color: var(--accent);
+}
+.filterPill {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--bg-popup);
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+  box-shadow: var(--shadow-popup);
+}
+.filterPillClear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+/* Go to Column (ColumnsPopup.tsx). */
+.columnsPopup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 320px;
+  padding: 8px;
+}
+.columnsList {
+  height: min(320px, 50vh);
+}
+.columnsRow {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.filterPopup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 280px;
+  padding: 8px;
+}
+.filterValues {
+  max-height: 260px;
+  overflow: auto;
+}
+.filterValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--h-row);
+}
+.filterValue > :first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filterCount {
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+}
+.filterEmpty {
+  padding: 12px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.filterButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sidePanel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+}
+.sidePanelHead {
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.sidePanelBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.recordFields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+.recordField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recordLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-secondary);
+}
+.valueView {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.valueText {
+  flex: 1;
+  min-height: 120px;
+  resize: none;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-input);
+  color: var(--fg-strong);
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-size: var(--fs-code);
+}
+.valueText:focus,
+.recordText:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+}
+.recordText {
+  resize: vertical;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-input);
+  color: var(--fg-strong);
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-size: var(--fs-code);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.aggregates {
+  width: 100%;
+  border-collapse: collapse;
+}
+.aggregates th,
+.aggregates td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: normal;
+}
+.aggregates th {
+  color: var(--fg-secondary);
+  width: 40%;
+}
+.aggregates td {
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  word-break: break-all;
+}
+
+/* Chart. */
+.chartBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-header);
+  padding: 0 8px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+.chartHost {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.chartSettings {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+}
+.chartGrid {
+  stroke: var(--border);
+}
+.chartAxis {
+  stroke: var(--fg-muted);
+}
+.chartTick {
+  fill: var(--fg-muted);
+  font-size: 10px;
+}
+.chartAxisName {
+  fill: var(--fg-secondary);
+  font-size: var(--fs-small);
+}
+.chartBarMark {
+  fill: var(--chart-series);
+  fill-opacity: 0.9;
+}
+.chartBarMark:hover {
+  fill-opacity: 1;
+}
+.chartLine {
+  fill: none;
+  stroke: var(--chart-series);
+  stroke-width: 2;
+}
+.chartDot {
+  fill: var(--chart-series);
+}
+
+/* Query plan. */
+.planView {
+  display: flex;
+  min-height: 0;
+}
+.planTree {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.planHeader,
+.planRow {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 1fr;
+  gap: 12px;
+  width: 100%;
+}
+.planHeader {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-secondary);
+}
+.planOperation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.planParams {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-secondary);
+}
+.planProperties {
+  flex: none;
+  width: 320px;
+  align-self: flex-start;
+  border-collapse: collapse;
+  border-left: 1px solid var(--border);
+}
+.planProperties th,
+.planProperties td {
+  padding: 4px 8px;
+  text-align: left;
+  font-weight: normal;
+  border-bottom: 1px solid var(--border);
+  word-break: break-word;
+}
+.planProperties th {
+  color: var(--fg-secondary);
+}
+
+/* Export / history / import dialogs. */
+.exportDialog {
+  display: flex;
+  gap: 16px;
+  height: 420px;
+  padding: 14px;
+}
+.exportOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  flex: none;
+}
+.exportOptions .formLabel,
+.exportPreview .formLabel {
+  text-align: left;
+}
+.exportPreview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.exportPreviewText,
+.historyPreview {
+  flex: 1;
+  min-height: 0;
+}
+.codePreview {
+  display: flex;
+  align-items: flex-start;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-editor);
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-size: var(--fs-code);
+  line-height: 1.6;
+}
+.codeGutter {
+  position: sticky;
+  left: 0;
+  flex: none;
+  min-width: 36px;
+  min-height: 100%;
+  padding: 8px 10px 8px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-editor);
+  color: var(--fg-muted);
+  text-align: right;
+  user-select: none;
+}
+.codeText {
+  flex: 1;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--fg-editor, var(--fg-strong));
+  font: inherit;
+  white-space: pre;
+  user-select: text;
+}
+.historyDialog {
+  display: flex;
+  gap: 12px;
+  height: 440px;
+  padding: 14px;
+}
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  flex: none;
+  min-height: 0;
+}
+.historyItem {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  min-width: 0;
+}
+.historyText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--openidea-editor-font, var(--font-mono));
+}
+.importPreview {
+  max-height: 200px;
+  margin: 0 14px 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.importPreview table {
+  border-collapse: collapse;
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-size: var(--fs-code);
+}
+.importPreview td {
+  padding: 2px 8px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.importHeader td {
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+
+.sqlCompletion {
+  width: 300px;
+  max-height: 240px;
+  padding: 4px;
+}
+.sqlCompletionOption {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 8px;
+  text-align: left;
+}
+.sqlCompletionOption[aria-selected="true"],
+.sqlCompletionOption:hover {
+  background: var(--bg-toolbar-selected);
+}
+.sqlCompletionOption span {
+  flex: 1;
+}
+.sqlCompletionOption small {
+  color: var(--fg-muted);
+}
+
+.sqlInputWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.sqlInputWrap > input {
+  width: 100%;
+  position: relative;
+}
+.sqlInputText {
+  color: transparent !important;
+  caret-color: var(--fg-strong);
+}
+/* The input's own glyphs are transparent so the highlight layer below paints them; without
+   this the selection would be an empty highlight. */
+.sqlInputText::selection {
+  background: var(--bg-editor-selection);
+  color: var(--fg-strong);
+}
+.sqlHighlight {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: pre;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  color: var(--fg-strong);
+}
+/* The input's scroll width includes room for the caret; match it so both stop at the same scrollLeft. */
+.sqlHighlight::after {
+  content: "";
+  flex: none;
+  width: 2px;
+}
+
+/* Wrap large values instead of laying megabytes out as one line. */
+.largeCellEditor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: min(60vh, 480px);
+  padding: 8px;
+  font: inherit;
+  color: inherit;
+  background: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: vertical;
+}
+
+/* The grid beside the Record / Value / Aggregates panel, under its search bar. */
+.dataMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* IDEA's search bar above a result grid. */
+.gridSearch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-ui);
+}
+.gridSearchField {
+  flex: 0 1 360px;
+  min-width: 160px;
+}
+.gridSearchCount {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+  padding: 0 6px;
+  white-space: nowrap;
+  min-width: 56px;
+}
+.gridSearchNone {
+  color: var(--danger);
+}
+.cellMatch {
+  background: var(--bg-text-search-result);
+}
+.cellMatchCurrent {
+  background: var(--bg-text-search-result-current);
+}
+
+/* IDEA's floating pager at the bottom of a result: |< < 1-500 of 501+ > >| and the page size. */
+.resultPager {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--border-popup, var(--border));
+  border-radius: var(--radius-small);
+  background: var(--bg-popup, var(--bg-elev));
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+  box-shadow: var(--shadow-popup, none);
+  white-space: nowrap;
+}
+.resultPagerRange {
+  padding: 0 6px;
+}
+.resultPagerCount {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.resultPagerCount:disabled {
+  color: inherit;
+  cursor: default;
+}

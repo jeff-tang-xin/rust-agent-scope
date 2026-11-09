@@ -1,0 +1,221 @@
+.bar {
+  height: var(--h-titlebar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 10px;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  color: var(--fg-strong);
+}
+/* Room for the native macOS traffic lights (Overlay title bar). */
+.overlay {
+  padding-left: max(82px, calc(82px / var(--titlebar-zoom, 1)));
+  /* Keep the gear on the icon-only right stripe's centre line, including compact mode. */
+  padding-right: calc(var(--stripe-outer-padding) + (var(--stripe-icon-button) - var(--titlebar-tool-button)) / 2);
+}
+/* Native full screen moves the window buttons out of the bar. */
+.overlayFullscreen {
+  padding-left: 10px;
+}
+/* Welcome window: plain title on the frame colour with a hairline, like IntelliJ's welcome frame. */
+.minimal {
+  background: var(--bg-elev);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+/* Dialog window (Settings): the title sits on the dialog surface, no hairline. */
+.dialogBar {
+  background: var(--bg-dialog, var(--bg-elev));
+  box-shadow: none;
+}
+/* IDEA's compact header (Distraction Free, toolbar hidden): the window title, centred. */
+.compactHeader {
+  --h-titlebar: var(--h-compact-header);
+}
+.overlay.compactHeader {
+  padding-right: max(82px, calc(82px / var(--titlebar-zoom, 1)));
+}
+.overlayFullscreen.compactHeader {
+  padding-right: 10px;
+}
+.compactTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  font-size: var(--fs-ui);
+  color: var(--fg-secondary);
+  cursor: default;
+}
+.windowTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  color: var(--fg-strong);
+  cursor: default;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Main toolbar dropdown widgets. */
+.widget {
+  height: 30px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: var(--radius-popup);
+  color: var(--fg-strong);
+  font-size: var(--fs-ui);
+}
+.widget {
+  gap: 6px;
+}
+.widget:hover,
+.widget[aria-expanded="true"] {
+  background: var(--bg-toolbar-hover);
+}
+.widgetText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chevron {
+  flex: none;
+  color: var(--fg-muted);
+}
+.avatar {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-small);
+  background: linear-gradient(135deg, var(--project-color), var(--project-color-end));
+  color: var(--fg-button-primary);
+  --icon-color: currentColor;
+  font-size: var(--fs-tiny);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.drag {
+  flex: 1;
+  align-self: stretch;
+  min-width: 24px;
+}
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+}
+.tool {
+  width: var(--titlebar-tool-button);
+  height: var(--titlebar-tool-button);
+  border-radius: var(--radius-popup);
+  color: var(--fg-secondary);
+}
+
+/* Frameless window (Windows, Linux): caption buttons sit flush with the right and top edges. */
+.frameless {
+  padding-right: 0;
+}
+.mainMenuButton {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-popup);
+  background: transparent;
+  color: var(--fg-secondary);
+}
+.mainMenuButton:focus-visible,
+.menuTitle:focus-visible,
+.caption:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+/* Preserve the menu's natural width while allowing its slot to yield to toolbar controls. */
+.mainMenuSlot {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 34px;
+  height: 30px;
+  overflow: hidden;
+}
+.mainMenuSlot ~ .item,
+.mainMenuSlot ~ .tools {
+  flex-shrink: 0;
+}
+.menuMeasure {
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+.menuPresentation {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+/* The main menu titles. */
+.menuBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.menuTitle {
+  height: 28px;
+  padding: 0 7px;
+  border-radius: var(--radius-popup);
+  background: transparent;
+  color: var(--fg-strong);
+  font-size: var(--fs-ui);
+}
+.menuTitle:hover,
+.menuTitleOpen {
+  background: var(--bg-toolbar-hover);
+}
+.captions {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  margin-left: 8px;
+}
+.caption {
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-strong);
+}
+.caption:hover {
+  background: var(--bg-toolbar-hover);
+}
+.captionClose:hover {
+  background: var(--caption-close-hover);
+  color: var(--fg-caption-close-hover);
+}
+.captionClose:active {
+  background: var(--caption-close-pressed);
+  color: var(--fg-caption-close-hover);
+}

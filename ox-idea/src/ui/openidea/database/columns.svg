@@ -1,0 +1,4 @@
+<!-- OpenIDEA: several columns at once (a box split into columns) -->
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="1.5" y="2.5" width="13" height="11" rx="1" stroke="#6C707E"/><path d="M5.5 3V13M8 3V13M10.5 3V13" stroke="#6C707E"/>
+</svg>

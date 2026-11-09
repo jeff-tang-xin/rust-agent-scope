@@ -1,0 +1,1505 @@
+//! Language server / debug adapter installer.
+//!
+//! A registry of installable tools keyed by the server / adapter `name` used
+//! in `languages/*.toml`, detection (managed tools dir, then `PATH`), and
+//! installers that never need `sudo`: everything goes to
+//! `<app-data>/tools/<name>/` (npm packages to `<app-data>/tools/node_modules`),
+//! except toolchain-managed components (`rustup component`, `pip --user`).
+//!
+//! Language servers find managed tools once [`extend_process_path`] has put
+//! [`tools_bin_dirs`] on the process `PATH` at startup.
+//!
+//! GitHub API downloads prefer `GITHUB_TOKEN`, then `GH_TOKEN`, then the active
+//! `github.com` account from `gh auth token --hostname github.com`. The CLI is
+//! optional; absent credentials retain anonymous downloads. Tokens are passed
+//! to curl over stdin, never stored in tool manifests or command arguments, and
+//! are not sent to other download origins. CLI lookup is cancellable and bounded.
+
+pub mod archive;
+mod bundled;
+pub mod formatter;
+pub mod jdk;
+pub mod platform;
+mod process;
+pub mod registry;
+pub mod server;
+pub mod sources;
+
+use ide_core::error::ErrorKind;
+use ide_core::{CancellationToken, IdeError, IdeResult};
+use ide_language::LanguageConfig;
+use parking_lot::Mutex;
+use platform::{Os, Platform};
+pub use process::progress_event;
+pub use process::{Emit, Http, run_streamed};
+use process::{run_collect, run_quiet};
+pub use registry::{Method, ReleaseSource, TOOLS, ToolKind, ToolSpec};
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolStatus {
+    /// Installed by the IDE (managed tools dir or a toolchain component it manages).
+    Installed,
+    /// Found on the system `PATH`.
+    OnPath,
+    /// The executable chosen in settings.
+    Custom,
+    Missing,
+}
+
+/// UI-facing state of one tool.
+#[derive(Clone, Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInfo {
+    /// Server / adapter name from `languages/*.toml`.
+    pub name: String,
+    pub display_name: String,
+    pub kind: ToolKind,
+    /// The executable the IDE launches.
+    pub command: String,
+    /// Names of the languages using this tool.
+    pub languages: Vec<String>,
+    pub status: ToolStatus,
+    pub path: Option<ide_core::IpcPath>,
+    pub version: Option<String>,
+    /// How it gets installed, e.g. `npm`, `GitHub release`; `None` when not installable.
+    pub install_method: Option<String>,
+    pub can_install: bool,
+    /// Why install is impossible right now (missing npm, no build for this platform, …).
+    pub unavailable_reason: Option<String>,
+    pub can_uninstall: bool,
+    /// Manual install instructions from the language definition.
+    pub install_hint: Option<String>,
+    pub homepage: Option<String>,
+    /// Why the executable chosen in settings cannot be used (status is then `Missing`).
+    pub custom_error: Option<String>,
+    /// A language server's arguments from its language definition.
+    pub default_args: Vec<String>,
+    /// A language server's `initializationOptions` from its language definition, as JSON text.
+    pub default_initialization_options: Option<String>,
+    /// The interchangeable servers this one belongs to, in preference order: a
+    /// server and the `fallback` ones after it. Empty when it has none.
+    pub alternatives: Vec<String>,
+}
+
+/// Streamed install progress.
+#[derive(Clone, Debug, Serialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum InstallEvent {
+    /// One line of installer output.
+    Line { text: String },
+    /// Download progress; `fraction` is 0..1 when the size is known.
+    Progress { fraction: Option<f64>, message: String },
+}
+
+#[derive(Serialize, Deserialize)]
+struct Manifest {
+    version: Option<String>,
+    source: Option<String>,
+}
+
+const MANIFEST: &str = ".openidea-tool.json";
+
+/// `typescript@6` → `typescript`, `@vue/language-server` unchanged.
+fn npm_name(spec: &str) -> &str {
+    match spec[1..].find('@') {
+        Some(i) => &spec[..i + 1],
+        None => spec,
+    }
+}
+
+pub fn tools_dir(app_data: &Path) -> PathBuf {
+    app_data.join("tools")
+}
+
+/// Where a [`registry::Method::PipTarget`] tool's package lives (`<tools>/<name>/lib`).
+pub fn python_lib_dir(tools_root: &Path, name: &str) -> PathBuf {
+    tools_root.join(name).join("lib")
+}
+
+/// Every directory a managed tool's executables can live in (existing or not,
+/// so a `PATH` computed at startup also covers tools installed later).
+pub fn tools_bin_dirs(app_data: &Path) -> Vec<PathBuf> {
+    bin_dirs_in(&tools_dir(app_data), Platform::current())
+}
+
+fn bin_dirs_in(root: &Path, platform: Platform) -> Vec<PathBuf> {
+    let mut dirs = vec![root.join("node_modules").join(".bin")];
+    for spec in TOOLS {
+        if let Some(d) = managed_bin_dir(root, spec, platform)
+            && !dirs.contains(&d)
+        {
+            dirs.push(d);
+        }
+    }
+    dirs
+}
+
+fn managed_bin_dir(root: &Path, spec: &ToolSpec, platform: Platform) -> Option<PathBuf> {
+    match spec.fallback.unwrap_or(spec.method) {
+        Method::Npm { .. } => Some(root.join("node_modules").join(".bin")),
+        Method::Go { .. } | Method::Gem { .. } | Method::DotnetTool { .. } | Method::Release { .. } => {
+            Some(root.join(spec.name).join("bin"))
+        }
+        Method::PipVenv { .. } => {
+            Some(root.join(spec.name).join("venv").join(if platform.os == Os::Windows { "Scripts" } else { "bin" }))
+        }
+        Method::Bundled { .. }
+        | Method::Rustup { .. }
+        | Method::PipUser { .. }
+        | Method::PipTarget { .. }
+        | Method::GemActive { .. } => None,
+    }
+}
+
+/// Prepends [`tools_bin_dirs`] to this process's `PATH` so language servers,
+/// debug adapters and terminals find managed tools, and appends the Windows user
+/// `PATH` entries a process may not inherit, for agent detection and for what the
+/// tools found there run in turn. Call once at startup, before other threads start
+/// (it mutates the process environment).
+pub fn extend_process_path(app_data: &Path) {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let extended = path_with_tools(app_data, &ide_core::process::with_user_path(&current));
+    if extended != current {
+        // SAFETY: documented to run at startup before any other thread reads the environment.
+        unsafe { std::env::set_var("PATH", extended) };
+    }
+}
+
+/// `path` (a `PATH` value) with [`tools_bin_dirs`] in front, those it lacks, and the
+/// mise / asdf shims when their shell hook didn't put them there.
+pub fn path_with_tools(app_data: &Path, path: &std::ffi::OsStr) -> OsString {
+    let path = &ide_core::version_managers::path_with_shims(&ide_core::version_managers::managers(), path);
+    let mut dirs = tools_bin_dirs(app_data);
+    let current: Vec<PathBuf> = if path.is_empty() { Vec::new() } else { std::env::split_paths(path).collect() };
+    dirs.retain(|d| !current.contains(d));
+    if dirs.is_empty() {
+        return path.to_owned();
+    }
+    dirs.extend(current);
+    std::env::join_paths(dirs).unwrap_or_else(|_| path.to_owned())
+}
+
+/// An in-flight install another request can join: extra callers subscribe to
+/// its event stream, share its cancellation (any caller cancels it) and wait
+/// for the same result instead of failing with "already being installed".
+/// A second Settings window (its own JS state) hits this when it re-installs
+/// while a first window's install is still running.
+struct InstallSlot {
+    cancel: CancellationToken,
+    listeners: Mutex<Vec<mpsc::SyncSender<InstallEvent>>>,
+    result: std::sync::OnceLock<IdeResult<ToolInfo>>,
+}
+
+impl InstallSlot {
+    fn broadcast(&self, e: InstallEvent) {
+        self.listeners.lock().retain(|tx| tx.try_send(e.clone()).is_ok());
+    }
+
+    fn finish(&self, result: IdeResult<ToolInfo>) {
+        let _ = self.result.set(result);
+        self.listeners.lock().clear();
+    }
+}
+
+static INSTALLING: Mutex<Option<HashMap<String, Arc<InstallSlot>>>> = Mutex::new(None);
+
+/// Mutual exclusion for work that cannot be joined (JDK downloads, uninstalls):
+/// a second caller while the name is busy fails fast.
+static EXCLUSIVE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+pub(crate) struct InstallGuard(String);
+
+impl InstallGuard {
+    pub(crate) fn acquire(name: &str) -> IdeResult<Self> {
+        let mut set = EXCLUSIVE.lock();
+        if !set.get_or_insert_with(HashSet::new).insert(name.to_string()) {
+            return Err(IdeError::new(ErrorKind::AlreadyExists, format!("{name} is already being installed")));
+        }
+        Ok(Self(name.to_string()))
+    }
+}
+
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        if let Some(set) = EXCLUSIVE.lock().as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Marks `name` as installing (the slot is removed when the owner finishes) or
+/// returns the existing slot to join.
+fn install_slot(name: &str, cancel: &CancellationToken) -> Result<Arc<InstallSlot>, Arc<InstallSlot>> {
+    let mut map = INSTALLING.lock();
+    let map = map.get_or_insert_with(HashMap::new);
+    match map.get(name) {
+        Some(slot) => Err(slot.clone()),
+        None => {
+            let slot = Arc::new(InstallSlot {
+                // The owner's token: its own Cancel and a joined caller's both stop the run.
+                cancel: cancel.clone(),
+                listeners: Mutex::new(Vec::new()),
+                result: std::sync::OnceLock::new(),
+            });
+            map.insert(name.to_string(), slot.clone());
+            Ok(slot)
+        }
+    }
+}
+
+fn release_install_slot(name: &str, slot: &Arc<InstallSlot>) {
+    let mut map = INSTALLING.lock();
+    // Only the owner removes its slot (a replaced one is not ours).
+    if let Some(map) = map.as_mut()
+        && map.get(name).is_some_and(|s| Arc::ptr_eq(s, slot))
+    {
+        map.remove(name);
+    }
+}
+
+/// Follows a running install: forwards its events to `emit`, lets `cancel`
+/// cancel it, and waits for its result.
+fn join_install(slot: &Arc<InstallSlot>, cancel: &CancellationToken, emit: Emit) -> IdeResult<ToolInfo> {
+    // Fast path: already done.
+    if let Some(r) = slot.result.get() {
+        return r.clone();
+    }
+    let (tx, rx) = mpsc::sync_channel::<InstallEvent>(256);
+    slot.listeners.lock().push(tx);
+    emit(InstallEvent::Line { text: "Joined the install already in progress…".into() });
+    // Re-check: the install may have finished between the fast path and subscribing.
+    if let Some(r) = slot.result.get() {
+        // Drain whatever was queued so the listener vector drops our sender.
+        while let Ok(e) = rx.try_recv() {
+            emit(e);
+        }
+        return r.clone();
+    }
+    loop {
+        // Events wake the loop; a timeout wakes it for cancellation/result checks.
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(e) => emit(e),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            // `finish` cleared the listeners: the channel closed, the result is up.
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        if cancel.is_cancelled() {
+            slot.cancel.cancel();
+        }
+        if let Some(r) = slot.result.get() {
+            // Drain events emitted before the result landed so the log stays ordered.
+            while let Ok(e) = rx.try_recv() {
+                emit(e);
+            }
+            return r.clone();
+        }
+    }
+    slot.result.get().cloned().unwrap_or_else(|| Err(IdeError::internal("install finished without a result")))
+}
+
+/// Which languages use which tool, from the language definitions.
+#[derive(Default)]
+struct Usage {
+    languages: Vec<String>,
+    command: Option<String>,
+    kind: Option<ToolKind>,
+    install_hint: Option<String>,
+    args: Vec<String>,
+    initialization_options: Option<String>,
+    alternatives: Vec<String>,
+}
+
+fn usages(langs: &[LanguageConfig]) -> BTreeMap<String, Usage> {
+    let mut map: BTreeMap<String, Usage> = BTreeMap::new();
+    let mut add = |name: &str, command: &str, kind: ToolKind, hint: Option<&String>, lang: &str| {
+        let u = map.entry(name.to_string()).or_default();
+        if !u.languages.iter().any(|l| l == lang) {
+            u.languages.push(lang.to_string());
+        }
+        u.command.get_or_insert_with(|| command.to_string());
+        u.kind.get_or_insert(kind);
+        if u.install_hint.is_none() {
+            u.install_hint = hint.cloned();
+        }
+    };
+    for l in langs {
+        if let Some(f) = &l.formatter {
+            add(&f.tool, &f.tool, ToolKind::Formatter, None, &l.name);
+        }
+        for s in &l.language_servers {
+            add(&s.name, &s.command, ToolKind::LanguageServer, s.install_hint.as_ref(), &l.name);
+        }
+    }
+    let servers: HashSet<&str> = langs.iter().flat_map(|l| &l.language_servers).map(|s| s.name.as_str()).collect();
+    for l in langs {
+        if let Some(d) = &l.debugger {
+            // An adapter named like a server but launched differently (ElixirLS's
+            // `elixir-ls-debugger`) is a tool of its own, listed by its command.
+            let name =
+                if servers.contains(d.adapter.as_str()) && d.command != d.adapter { &d.command } else { &d.adapter };
+            add(name, &d.command, ToolKind::Debugger, d.install_hint.as_ref(), &l.name);
+        }
+    }
+    for (plugin, host) in registry::PLUGIN_HOSTS {
+        let languages = map.get(*host).map(|u| u.languages.clone()).unwrap_or_default();
+        map.entry(plugin.to_string()).or_default().languages = languages;
+    }
+    // A server's defaults come from the first definition using it.
+    for s in langs.iter().flat_map(|l| &l.language_servers).rev() {
+        if let Some(u) = map.get_mut(&s.name) {
+            u.args = s.args.clone();
+            u.initialization_options =
+                s.initialization_options.as_ref().and_then(|v| serde_json::to_value(v).ok()).map(|v| v.to_string());
+        }
+    }
+    for l in langs {
+        let servers = &l.language_servers;
+        for (i, head) in servers.iter().enumerate().filter(|(_, s)| !s.fallback) {
+            let chain: Vec<String> = std::iter::once(head)
+                .chain(servers[i + 1..].iter().take_while(|s| s.fallback))
+                .map(|s| s.name.clone())
+                .collect();
+            if chain.len() < 2 {
+                continue;
+            }
+            for name in &chain {
+                if let Some(u) = map.get_mut(name).filter(|u| u.alternatives.is_empty()) {
+                    u.alternatives = chain.clone();
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Extracts the first version-looking token (`1.2.3`, `v0.16.1`, `2024-12-18`) from tool output.
+pub fn parse_version(text: &str) -> Option<String> {
+    for token in text.split(|c: char| c.is_whitespace() || matches!(c, ',' | '(' | ')' | '"' | '\'' | ';')) {
+        let t = token.trim_start_matches(['v', 'V']).trim_end_matches(['.', ':']);
+        let t = t.strip_prefix("version").unwrap_or(t);
+        if t.starts_with(|c: char| c.is_ascii_digit())
+            && t.contains(['.', '-'])
+            && t.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'))
+            && t.chars().filter(|c| c.is_ascii_digit()).count() >= 2
+        {
+            return Some(t.to_string());
+        }
+    }
+    None
+}
+
+/// A Windows App Execution Alias (`%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe`).
+fn is_app_execution_alias(path: &Path) -> bool {
+    path.parent().and_then(Path::file_name).is_some_and(|d| d.eq_ignore_ascii_case("WindowsApps"))
+}
+
+/// A tool whose "command" is a plugin jar (e.g. a jdtls bundle) rather than an executable.
+fn is_bundle(command: &str) -> bool {
+    command.ends_with(".jar")
+}
+
+/// Path of an app-provided or installed plugin jar. Embedded jars are materialized on demand.
+pub fn managed_bundle(app_data: &Path, name: &str) -> Option<PathBuf> {
+    let spec = registry::find(name)?;
+    if matches!(spec.method, Method::Bundled { .. }) {
+        return bundled::install(&tools_dir(app_data), spec).ok();
+    }
+    let jar = spec.commands.first().filter(|c| is_bundle(c))?;
+    let path = tools_dir(app_data).join(spec.name).join("bin").join(jar);
+    path.is_file().then_some(path)
+}
+
+/// Installer and detector over one tools directory.
+pub struct Tools {
+    root: PathBuf,
+    /// Search path for system tools (excludes our own dirs).
+    system_path: OsString,
+    /// `PATH` handed to installer child processes.
+    child_path: OsString,
+    platform: Platform,
+    /// Executables chosen in settings, by command.
+    custom: BTreeMap<String, PathBuf>,
+    /// Executables found outside the search path (app bundles), by command.
+    found: BTreeMap<String, PathBuf>,
+    version_timeout: Duration,
+    /// The project the tools are used for: tools that install into "the active runtime" (gems) run here,
+    /// so a version manager picks the project's Ruby.
+    work_dir: Option<PathBuf>,
+}
+
+impl Tools {
+    /// Tools under `<app_data>/tools` using [`ide_core::tool_path::search_path`].
+    pub fn new(app_data: &Path) -> Self {
+        Self::with_paths(tools_dir(app_data), ide_core::tool_path::search_path(), Platform::current())
+    }
+
+    pub fn with_paths(root: PathBuf, search_path: OsString, platform: Platform) -> Self {
+        let ours = bin_dirs_in(&root, platform);
+        let system: Vec<PathBuf> = std::env::split_paths(&search_path).filter(|d| !ours.contains(d)).collect();
+        let system_path = std::env::join_paths(&system).unwrap_or_default();
+        let child_path = std::env::join_paths(ours.iter().chain(system.iter())).unwrap_or_default();
+        Self {
+            root,
+            system_path,
+            child_path,
+            platform,
+            custom: BTreeMap::new(),
+            found: BTreeMap::new(),
+            version_timeout: Duration::from_secs(4),
+            work_dir: None,
+        }
+    }
+
+    /// Reports the executables chosen in settings (command → path) as the tools' location.
+    pub fn with_custom_paths(mut self, custom: BTreeMap<String, PathBuf>) -> Self {
+        self.custom = custom;
+        self
+    }
+
+    /// Reports executables located outside the search path (command → path) as on the PATH.
+    pub fn with_found_paths(mut self, found: BTreeMap<String, PathBuf>) -> Self {
+        self.found = found;
+        self
+    }
+
+    /// Runs per-project installs (see [`registry::Method::GemActive`]) in `dir`.
+    pub fn with_work_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.work_dir = dir.filter(|d| d.is_dir());
+        self
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// [`Tools::command`] in the project directory.
+    fn command_in_project(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut cmd = self.command(program);
+        if let Some(dir) = &self.work_dir {
+            cmd.current_dir(dir);
+        }
+        cmd
+    }
+
+    fn which(&self, cmd: &str) -> Option<PathBuf> {
+        ide_core::tool_path::find_command(cmd, &self.system_path, &self.root)
+    }
+
+    fn which_any(&self, cmds: &[&str]) -> Option<PathBuf> {
+        cmds.iter().find_map(|c| self.which(c))
+    }
+
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut cmd = Command::new(program);
+        ide_core::process::prepare(&mut cmd).env("PATH", &self.child_path);
+        cmd
+    }
+
+    /// `python` started in an empty private directory: Python puts the working directory
+    /// first on `sys.path` for `-c` / `-m`, and the IDE's own (inherited from wherever it
+    /// was launched, e.g. a project) could hold modules that shadow the standard library,
+    /// pip or the tool being probed. Not `-I`: that also hides `pip install --user` packages.
+    fn python_command(&self, python: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut cmd = self.command(python);
+        let dir = self.root.join(".python-cwd");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            cmd.current_dir(dir);
+        }
+        cmd
+    }
+
+    /// The interpreter that installs and probes Python tools. Windows installs `python.exe`
+    /// and the `py` launcher, not `python3.exe`; its `WindowsApps` entries are App Execution
+    /// Aliases that only open the Store unless the Store's Python is installed, so they count
+    /// only when they run.
+    fn python(&self) -> Option<PathBuf> {
+        if self.platform.os != Os::Windows {
+            return self.which_any(&["python3", "python"]);
+        }
+        ["python", "py", "python3"]
+            .into_iter()
+            .flat_map(|command| {
+                std::env::split_paths(&self.system_path).filter_map(move |dir| {
+                    if dir.as_os_str().is_empty() {
+                        return None;
+                    }
+                    let search = std::env::join_paths([dir]).ok()?;
+                    ide_core::tool_path::find_command(command, &search, &self.root)
+                })
+            })
+            .find(|p| {
+                !is_app_execution_alias(p) || {
+                    let mut c = self.python_command(p);
+                    c.arg("--version");
+                    run_quiet(c, Duration::from_secs(5)).is_some_and(|(ok, _)| ok)
+                }
+            })
+    }
+
+    /// Executable `cmd` inside `dir`, honouring Windows suffixes.
+    fn exe_in(&self, dir: &Path, cmd: &str) -> Option<PathBuf> {
+        let candidates: Vec<String> = if self.platform.os == Os::Windows {
+            ["exe", "cmd", "bat"].iter().map(|e| format!("{cmd}.{e}")).chain([cmd.to_string()]).collect()
+        } else {
+            vec![cmd.to_string()]
+        };
+        candidates.into_iter().map(|c| dir.join(c)).find(|p| p.is_file())
+    }
+
+    fn manifest(&self, name: &str) -> Option<Manifest> {
+        let dir = self.root.join(name);
+        let bytes = std::fs::read(dir.join(MANIFEST)).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    fn write_manifest(&self, name: &str, m: &Manifest) -> IdeResult<()> {
+        let dir = self.root.join(name);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join(MANIFEST), serde_json::to_vec_pretty(m).unwrap_or_default())?;
+        Ok(())
+    }
+
+    fn npm_package_version(&self, pkg: &str) -> Option<String> {
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(self.root.join("node_modules").join(pkg).join("package.json")).ok()?)
+                .ok()?;
+        json.get("version")?.as_str().map(String::from)
+    }
+
+    /// Whether an installed npm tool other than `tool` also installs `package`.
+    fn npm_dependency_in_use(&self, tool: &str, package: &str) -> bool {
+        TOOLS.iter().any(|t| match t.method {
+            Method::Npm { packages } if t.name != tool => {
+                packages.iter().skip(1).any(|p| npm_name(p) == package)
+                    && self.npm_package_version(npm_name(packages[0])).is_some()
+            }
+            _ => false,
+        })
+    }
+
+    fn query_version(&self, spec: &ToolSpec, found: &Path) -> Option<String> {
+        let (cmd, args) = spec.version?;
+        let sibling = found.parent().and_then(|d| self.exe_in(d, cmd));
+        let program = sibling.or_else(|| self.which(cmd))?;
+        let mut c = self.command(program);
+        c.args(args);
+        let (ok, out) = run_quiet(c, self.version_timeout)?;
+        if !ok {
+            return None;
+        }
+        parse_version(&out)
+    }
+
+    /// The installer that owns this tool: a managed copy is refreshed and removed by the
+    /// fallback that made it, even if the primary installer has appeared since.
+    fn install_method(&self, spec: &ToolSpec) -> Method {
+        let Some(fallback) = spec.fallback else { return spec.method };
+        let managed = managed_bin_dir(&self.root, spec, self.platform)
+            .and_then(|dir| self.exe_in(&dir, spec.commands[0]))
+            .is_some();
+        if managed || self.method_missing(spec.method).is_some() { fallback } else { spec.method }
+    }
+
+    /// [`Method::label`], naming the installer that will actually run: a virtualenv is
+    /// made with uv when it is on `PATH` (see `install_venv`).
+    fn method_label(&self, method: Method) -> &'static str {
+        match method {
+            Method::PipVenv { .. } if self.which("uv").is_some() => "uv (virtualenv)",
+            m => m.label(),
+        }
+    }
+
+    /// Requirement check for installing `spec` right now.
+    fn unavailable_reason(&self, spec: &ToolSpec) -> Option<String> {
+        self.method_missing(self.install_method(spec))
+            .or_else(|| spec.needs.iter().find(|(cmd, _)| self.which(cmd).is_none()).map(|(_, why)| why.to_string()))
+    }
+
+    /// What the install method itself lacks (npm, a build for this platform, …).
+    fn method_missing(&self, method: Method) -> Option<String> {
+        let need = |ok: bool, msg: &str| (!ok).then(|| msg.to_string());
+        match method {
+            Method::Bundled { .. } => None,
+            Method::Rustup { .. } => need(self.which("rustup").is_some(), "rustup is required (https://rustup.rs)"),
+            Method::Npm { .. } => need(
+                self.which_any(&["npm", "pnpm"]).is_some(),
+                "npm or pnpm is required: install Node.js (https://nodejs.org)",
+            ),
+            Method::Go { .. } => need(self.which("go").is_some(), "Go is required (https://go.dev/dl)"),
+            Method::Gem { .. } | Method::GemActive { .. } => {
+                need(self.which("gem").is_some(), "Ruby is required (https://www.ruby-lang.org)")
+            }
+            Method::DotnetTool { .. } => {
+                need(self.which("dotnet").is_some(), ".NET SDK is required (https://dotnet.microsoft.com/download)")
+            }
+            Method::PipVenv { .. } => need(
+                self.which("uv").is_some() || self.python().is_some(),
+                "Python 3 or uv is required (https://www.python.org)",
+            ),
+            Method::PipUser { .. } | Method::PipTarget { .. } => {
+                need(self.python().is_some(), "Python 3 is required (https://www.python.org)")
+            }
+            Method::Release { assets, .. } => {
+                let p = self.platform;
+                let has_rule = assets.iter().any(|r| {
+                    r.os == p.os && (r.arch.is_none_or(|a| a == p.arch) || (p.os == Os::Mac && r.arch.is_some()))
+                });
+                if !has_rule {
+                    return Some(format!("No prebuilt release for {:?} {:?}", p.os, p.arch));
+                }
+                need(self.which("curl").is_some(), "curl is required to download tools")
+            }
+        }
+    }
+
+    fn info_for(&self, name: &str, usage: Option<&Usage>) -> Option<ToolInfo> {
+        let spec = registry::find(name);
+        let languages = usage.map(|u| u.languages.clone()).unwrap_or_default();
+        let install_hint = usage.and_then(|u| u.install_hint.clone());
+        let Some(spec) = spec else {
+            let u = usage?;
+            let command = u.command.clone()?;
+            let path = self.which(&command).or_else(|| self.found.get(&command).cloned());
+            return Some(ToolInfo {
+                name: name.to_string(),
+                display_name: name.to_string(),
+                kind: u.kind.unwrap_or(ToolKind::LanguageServer),
+                status: if path.is_some() { ToolStatus::OnPath } else { ToolStatus::Missing },
+                command,
+                languages,
+                path: path.map(Into::into),
+                version: None,
+                install_method: None,
+                can_install: false,
+                unavailable_reason: None,
+                can_uninstall: false,
+                install_hint,
+                homepage: None,
+                custom_error: None,
+                default_args: u.args.clone(),
+                default_initialization_options: u.initialization_options.clone(),
+                alternatives: u.alternatives.clone(),
+            })
+            .map(|info| self.apply_custom(info, None));
+        };
+        let (status, path, version) = self.detect(spec);
+        let unavailable_reason = self.unavailable_reason(spec);
+        let bundled = matches!(spec.method, Method::Bundled { .. });
+        let can_uninstall = status == ToolStatus::Installed && !bundled;
+        Some(ToolInfo {
+            name: spec.name.to_string(),
+            display_name: spec.display.to_string(),
+            kind: spec.kind,
+            command: usage.and_then(|u| u.command.clone()).unwrap_or_else(|| spec.commands[0].to_string()),
+            languages,
+            status,
+            path: path.map(Into::into),
+            version,
+            install_method: Some(self.method_label(self.install_method(spec)).to_string()),
+            can_install: unavailable_reason.is_none() && !bundled,
+            unavailable_reason,
+            can_uninstall,
+            install_hint,
+            homepage: Some(spec.homepage.to_string()),
+            custom_error: None,
+            default_args: usage.map(|u| u.args.clone()).unwrap_or_default(),
+            default_initialization_options: usage.and_then(|u| u.initialization_options.clone()),
+            alternatives: usage.map(|u| u.alternatives.clone()).unwrap_or_default(),
+        })
+        .map(|info| self.apply_custom(info, Some(spec)))
+    }
+
+    /// Overrides the detected location with the executable chosen in settings.
+    fn apply_custom(&self, mut info: ToolInfo, spec: Option<&ToolSpec>) -> ToolInfo {
+        let Some(path) = self.custom.get(&info.command) else { return info };
+        if !path.is_file() {
+            info.status = ToolStatus::Missing;
+            info.custom_error = Some(format!("{} does not exist", path.display()));
+            info.path = None;
+            info.version = None;
+            return info;
+        }
+        info.version = spec.and_then(|spec| {
+            let (cmd, args) = spec.version?;
+            // The version command is the tool itself, whatever the chosen file is called.
+            let program =
+                if cmd == spec.commands[0] { path.clone() } else { path.parent().and_then(|d| self.exe_in(d, cmd))? };
+            let mut c = self.command(program);
+            c.args(args);
+            let (ok, out) = run_quiet(c, self.version_timeout)?;
+            if ok { parse_version(&out) } else { None }
+        });
+        info.status = ToolStatus::Custom;
+        info.path = Some(path.clone().into());
+        info
+    }
+
+    fn detect(&self, spec: &ToolSpec) -> (ToolStatus, Option<PathBuf>, Option<String>) {
+        if let Method::Bundled { version, .. } = spec.method {
+            return match bundled::install(&self.root, spec) {
+                Ok(path) => (ToolStatus::Installed, Some(path), Some(version.to_owned())),
+                Err(_) => (ToolStatus::Missing, None, None),
+            };
+        }
+        let main = spec.commands[0];
+        let managed = managed_bin_dir(&self.root, spec, self.platform).and_then(|d| self.exe_in(&d, main));
+        if let Some(path) = managed {
+            let version = match spec.method {
+                Method::Npm { packages } => self.npm_package_version(npm_name(packages[0])),
+                _ => self.manifest(spec.name).and_then(|m| m.version),
+            }
+            .or_else(|| self.query_version(spec, &path));
+            return (ToolStatus::Installed, Some(path), version);
+        }
+        match self.install_method(spec) {
+            Method::Rustup { .. } => {
+                let Some(path) = self.which(main) else { return (ToolStatus::Missing, None, None) };
+                // The rustup proxy exists even without the component; it only answers when installed.
+                let mut c = self.command(&path);
+                c.arg("--version");
+                match run_quiet(c, Duration::from_secs(5)) {
+                    Some((true, out)) => (ToolStatus::Installed, Some(path), parse_version(&out)),
+                    _ => (ToolStatus::Missing, None, None),
+                }
+            }
+            Method::PipTarget { module, .. } => {
+                let lib = python_lib_dir(&self.root, spec.name);
+                if lib.join(module).join("__init__.py").is_file() {
+                    let version = self.manifest(spec.name).and_then(|m| m.version);
+                    return (ToolStatus::Installed, Some(lib), version);
+                }
+                // Importable by the default interpreter (pip install --user / a system package).
+                let Some(python) = self.python() else { return (ToolStatus::Missing, None, None) };
+                let mut c = self.python_command(&python);
+                c.args(["-c", &format!("import {module}; print({module}.__version__)")]);
+                match run_quiet(c, Duration::from_secs(5)) {
+                    Some((true, out)) => (ToolStatus::OnPath, Some(python), parse_version(&out)),
+                    _ => (ToolStatus::Missing, None, None),
+                }
+            }
+            Method::PipUser { module, .. } => {
+                let Some(python) = self.python() else { return (ToolStatus::Missing, None, None) };
+                let mut c = self.python_command(&python);
+                c.args(["-c", &format!("import {module}; print({module}.__version__)")]);
+                match run_quiet(c, Duration::from_secs(5)) {
+                    Some((true, out)) => (ToolStatus::Installed, Some(python), parse_version(&out)),
+                    _ => (ToolStatus::Missing, None, None),
+                }
+            }
+            Method::GemActive { gem } => {
+                // Installed for the Ruby active in the project, not merely a shim of some other version's.
+                let Some(gem_cmd) = self.which("gem") else { return (ToolStatus::Missing, None, None) };
+                let mut c = self.command_in_project(&gem_cmd);
+                c.args(["list", "--exact", gem]);
+                match run_quiet(c, Duration::from_secs(10)) {
+                    Some((true, out)) if out.contains(&format!("{gem} (")) => {
+                        // Homebrew's Ruby keeps its gem bindir off PATH: ask the Ruby where it is.
+                        match self.gem_executable(main) {
+                            Some(path) => (ToolStatus::OnPath, Some(path), parse_version(&out)),
+                            None => (ToolStatus::Missing, None, None),
+                        }
+                    }
+                    _ => (ToolStatus::Missing, None, None),
+                }
+            }
+            _ => match self.which(main) {
+                Some(path) => {
+                    let version = self.query_version(spec, &path);
+                    (ToolStatus::OnPath, Some(path), version)
+                }
+                None => (ToolStatus::Missing, None, None),
+            },
+        }
+    }
+
+    /// Status of every registry tool plus every other server / adapter the
+    /// language definitions mention, sorted by display name.
+    pub fn list(&self, langs: &[LanguageConfig]) -> Vec<ToolInfo> {
+        let usage = usages(langs);
+        let mut names: Vec<String> = TOOLS.iter().map(|t| t.name.to_string()).collect();
+        for name in usage.keys() {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        let next = AtomicUsize::new(0);
+        let results: Mutex<Vec<ToolInfo>> = Mutex::new(Vec::with_capacity(names.len()));
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(name) = names.get(i) else { break };
+                        if let Some(info) = self.info_for(name, usage.get(name)) {
+                            results.lock().push(info);
+                        }
+                    }
+                });
+            }
+        });
+        let mut out = results.into_inner();
+        out.sort_by_key(|a| a.display_name.to_lowercase());
+        out
+    }
+
+    pub fn info(&self, name: &str, langs: &[LanguageConfig]) -> IdeResult<ToolInfo> {
+        let usage = usages(langs);
+        self.info_for(name, usage.get(name)).ok_or_else(|| IdeError::not_found(format!("unknown tool `{name}`")))
+    }
+
+    /// Installs (or reinstalls / updates) `name`, streaming output to `emit`.
+    /// A second call for a name already installing joins that run: it gets the
+    /// same live events and result instead of an "already installing" error,
+    /// and cancelling either request cancels the shared run.
+    pub fn install(
+        &self,
+        name: &str,
+        langs: &[LanguageConfig],
+        cancel: &CancellationToken,
+        emit: Emit,
+    ) -> IdeResult<ToolInfo> {
+        let spec = registry::find(name).ok_or_else(|| {
+            let hint = usages(langs).get(name).and_then(|u| u.install_hint.clone());
+            IdeError::unavailable(match hint {
+                Some(h) => format!("{name} cannot be installed automatically. {h}"),
+                None => format!("{name} cannot be installed automatically"),
+            })
+        })?;
+        if let Some(reason) = self.unavailable_reason(spec) {
+            return Err(IdeError::unavailable(reason));
+        }
+        let slot = match install_slot(name, cancel) {
+            Ok(slot) => slot,
+            Err(slot) => return join_install(&slot, cancel, emit),
+        };
+        // The install uses the slot's token: every caller's cancel reaches it.
+        let cancel = &slot.cancel;
+        // Fan the events out to joined callers as well as this request's emit.
+        let fan = |e: InstallEvent| {
+            emit(e.clone());
+            slot.broadcast(e);
+        };
+        let emit = &fan as Emit;
+        let result = (|| {
+            std::fs::create_dir_all(&self.root)?;
+            let method = self.install_method(spec);
+            emit(InstallEvent::Line {
+                text: format!("Installing {} via {}…", spec.display, self.method_label(method)),
+            });
+            match method {
+                Method::Bundled { .. } => {
+                    bundled::install(&self.root, spec)?;
+                }
+                Method::Rustup { component } => {
+                    let mut c = self.command(self.which("rustup").expect("checked"));
+                    c.args(["component", "add", component]);
+                    run_streamed(c, cancel, emit)?;
+                }
+                Method::Npm { packages } => self.install_npm(packages, cancel, emit)?,
+                Method::Go { module } => self.install_go(spec, module, cancel, emit)?,
+                Method::Gem { gem } => self.install_gem(spec, gem, cancel, emit)?,
+                Method::GemActive { gem } => self.install_gem_active(gem, cancel, emit)?,
+                Method::DotnetTool { package } => self.install_dotnet_tool(spec, package, cancel, emit)?,
+                Method::PipVenv { package } => self.install_venv(spec, package, cancel, emit)?,
+                Method::PipUser { package, .. } => self.install_pip_user(package, cancel, emit)?,
+                Method::PipTarget { package, .. } => self.install_pip_target(spec, package, cancel, emit)?,
+                Method::Release { source, assets, locate } => {
+                    self.install_release(spec, source, assets, locate, cancel, emit)?
+                }
+            }
+            let info = self.info(name, langs)?;
+            if info.status == ToolStatus::Missing {
+                return Err(IdeError::new(
+                    ErrorKind::Io,
+                    format!("installer finished but `{}` was not found afterwards", spec.commands[0]),
+                ));
+            }
+            emit(InstallEvent::Line {
+                text: format!("{} {} installed", spec.display, info.version.as_deref().unwrap_or(""))
+                    .replace("  ", " "),
+            });
+            Ok(info)
+        })();
+        release_install_slot(name, &slot);
+        slot.finish(result.clone());
+        result
+    }
+
+    fn npm_manager(&self) -> IdeResult<(PathBuf, bool)> {
+        let npm = self.which("npm");
+        let pnpm = self.which("pnpm");
+        let use_pnpm = self.root.join("pnpm-lock.yaml").exists() && pnpm.is_some() || npm.is_none();
+        match (use_pnpm, npm, pnpm) {
+            (true, _, Some(p)) => Ok((p, true)),
+            (false, Some(n), _) => Ok((n, false)),
+            _ => Err(IdeError::unavailable("npm or pnpm is required: install Node.js (https://nodejs.org)")),
+        }
+    }
+
+    fn ensure_package_json(&self) -> IdeResult<()> {
+        let pj = self.root.join("package.json");
+        if !pj.exists() {
+            std::fs::write(pj, "{\n  \"name\": \"openidea-tools\",\n  \"private\": true\n}\n")?;
+        }
+        Ok(())
+    }
+
+    fn install_npm(&self, packages: &[&str], cancel: &CancellationToken, emit: Emit) -> IdeResult<()> {
+        let (manager, pnpm) = self.npm_manager()?;
+        self.ensure_package_json()?;
+        let mut c = self.command(manager);
+        let specs = packages.iter().map(|p| if npm_name(p) == *p { format!("{p}@latest") } else { p.to_string() });
+        if pnpm {
+            c.arg("add").arg("--dir").arg(&self.root).args(specs);
+        } else {
+            c.args(["install", "--no-fund", "--no-audit", "--loglevel=http", "--prefix"]).arg(&self.root).args(specs);
+        }
+        c.current_dir(&self.root);
+        run_streamed(c, cancel, emit).map(drop)
+    }
+
+    fn install_go(&self, spec: &ToolSpec, module: &str, cancel: &CancellationToken, emit: Emit) -> IdeResult<()> {
+        let dir = self.root.join(spec.name);
+        let bin = dir.join("bin");
+        let _ = std::fs::remove_dir_all(&bin);
+        std::fs::create_dir_all(&bin)?;
+        let mut c = self.command(self.which("go").expect("checked"));
+        c.args(["install", "-v", module]).env("GOBIN", &bin).current_dir(&dir);
+        if let Err(e) = run_streamed(c, cancel, emit) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+        let version = self.exe_in(&bin, spec.commands[0]).and_then(|exe| {
+            let mut c = self.command(self.which("go")?);
+            c.args(["version", "-m"]).arg(exe);
+            let (_, out) = run_quiet(c, Duration::from_secs(10))?;
+            out.lines().find_map(|l| {
+                let mut parts = l.split_whitespace();
+                (parts.next() == Some("mod"))
+                    .then(|| parts.nth(1))
+                    .flatten()
+                    .map(|v| v.trim_start_matches('v').to_string())
+            })
+        });
+        self.write_manifest(spec.name, &Manifest { version, source: Some(module.to_string()) })
+    }
+
+    /// Where the project's Ruby installs gem executables (`Gem.bindir`, `Gem.user_dir`'s `bin`).
+    fn gem_bin_dirs(&self) -> Vec<PathBuf> {
+        let Some(ruby) = self.which("ruby") else { return Vec::new() };
+        let mut c = self.command_in_project(ruby);
+        c.args(["-e", ide_core::tool_path::RUBY_GEM_BIN_SCRIPT]);
+        match run_quiet(c, Duration::from_secs(10)) {
+            Some((true, out)) => ide_core::tool_path::gem_bin_dirs(&out),
+            _ => Vec::new(),
+        }
+    }
+
+    /// An installed gem's executable: on the search path, else in one of the Ruby's gem bin directories.
+    fn gem_executable(&self, cmd: &str) -> Option<PathBuf> {
+        self.which(cmd).or_else(|| self.gem_bin_dirs().iter().find_map(|d| self.exe_in(d, cmd)))
+    }
+
+    /// `gem install` into the active Ruby, then makes version-manager shims see the new executable.
+    fn install_gem_active(&self, gem: &str, cancel: &CancellationToken, emit: Emit) -> IdeResult<()> {
+        let mut c = self.command_in_project(self.which("gem").expect("checked"));
+        c.args(["install", "--no-document", gem]);
+        run_streamed(c, cancel, emit)?;
+        // mise / asdf / rbenv list executables in shims written at install time; a gem installed
+        // afterwards has none until they are regenerated. Best effort: the tool may not be installed.
+        for (manager, args) in
+            [("mise", &["reshim"][..]), ("asdf", &["reshim", "ruby"][..]), ("rbenv", &["rehash"][..])]
+        {
+            if let Some(path) = self.which(manager) {
+                let mut c = self.command_in_project(path);
+                c.args(args);
+                let _ = run_quiet(c, Duration::from_secs(30));
+            }
+        }
+        Ok(())
+    }
+
+    fn install_gem(&self, spec: &ToolSpec, gem: &str, cancel: &CancellationToken, emit: Emit) -> IdeResult<()> {
+        let dir = self.root.join(spec.name);
+        let _ = std::fs::remove_dir_all(&dir);
+        let home = dir.join("gems");
+        std::fs::create_dir_all(&home)?;
+        let mut c = self.command(self.which("gem").expect("checked"));
+        c.args(["install", "--no-document", "--install-dir"]).arg(&home).arg("--bindir").arg(home.join("bin")).arg(gem);
+        let result = run_streamed(c, cancel, emit).and_then(|_| {
+            // RubyGems' stubs only find their gems through GEM_HOME / GEM_PATH.
+            let env = [("GEM_HOME", home.as_path()), ("GEM_PATH", home.as_path())];
+            for cmd in spec.commands {
+                let stub = self
+                    .exe_in(&home.join("bin"), cmd)
+                    .ok_or_else(|| IdeError::new(ErrorKind::Io, format!("gem {gem} did not install `{cmd}`")))?;
+                archive::env_wrapper(&dir.join("bin"), cmd, &stub, &env)?;
+            }
+            Ok(())
+        });
+        if let Err(e) = result {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+        // `gems/gems/<gem>-<version>/`
+        let version = std::fs::read_dir(home.join("gems")).ok().and_then(|entries| {
+            entries.flatten().find_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.strip_prefix(&format!("{gem}-"))
+                    .filter(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+                    .map(String::from)
+            })
+        });
+        self.write_manifest(spec.name, &Manifest { version, source: Some(format!("rubygems:{gem}")) })
+    }
+
+    fn install_dotnet_tool(
+        &self,
+        spec: &ToolSpec,
+        package: &str,
+        cancel: &CancellationToken,
+        emit: Emit,
+    ) -> IdeResult<()> {
+        let dir = self.root.join(spec.name);
+        let _ = std::fs::remove_dir_all(&dir);
+        let tool = dir.join("tool");
+        std::fs::create_dir_all(&tool)?;
+        let dotnet = self.which("dotnet").expect("checked");
+        let mut c = self.command(&dotnet);
+        c.args(["tool", "install", package, "--tool-path"]).arg(&tool);
+        let result = run_streamed(c, cancel, emit).and_then(|_| {
+            // The tool's apphost looks for .NET in the default location only; a
+            // Homebrew / user-local SDK must be named through DOTNET_ROOT.
+            let root = self.dotnet_root(&dotnet);
+            for cmd in spec.commands {
+                let exe = self
+                    .exe_in(&tool, cmd)
+                    .ok_or_else(|| IdeError::new(ErrorKind::Io, format!("{package} did not install `{cmd}`")))?;
+                match &root {
+                    Some(root) => archive::env_wrapper(&dir.join("bin"), cmd, &exe, &[("DOTNET_ROOT", root)])?,
+                    None => archive::link_executable(&dir.join("bin"), cmd, &exe)?,
+                };
+            }
+            Ok(())
+        });
+        if let Err(e) = result {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+        // `Package Id      Version      Commands` table.
+        let mut c = self.command(&dotnet);
+        c.args(["tool", "list", "--tool-path"]).arg(&tool);
+        let version = run_quiet(c, Duration::from_secs(20)).and_then(|(_, out)| {
+            out.lines().find_map(|l| {
+                let mut cols = l.split_whitespace();
+                cols.next().filter(|id| id.eq_ignore_ascii_case(package))?;
+                cols.next().map(String::from)
+            })
+        });
+        self.write_manifest(spec.name, &Manifest { version, source: Some(format!("nuget:{package}")) })
+    }
+
+    /// The .NET install `dotnet` runs from: `Microsoft.NETCore.App 9.0.1 [<root>/shared/Microsoft.NETCore.App]`.
+    fn dotnet_root(&self, dotnet: &Path) -> Option<PathBuf> {
+        let mut c = self.command(dotnet);
+        c.arg("--list-runtimes");
+        let (_, out) = run_quiet(c, Duration::from_secs(20))?;
+        let line = out.lines().find(|l| l.starts_with("Microsoft.NETCore.App "))?;
+        let shared = line.rsplit_once('[')?.1.trim_end().strip_suffix(']')?;
+        Path::new(shared).parent()?.parent().map(Path::to_path_buf)
+    }
+
+    fn install_venv(&self, spec: &ToolSpec, package: &str, cancel: &CancellationToken, emit: Emit) -> IdeResult<()> {
+        let dir = self.root.join(spec.name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let venv = dir.join("venv");
+        let python = venv.join(if self.platform.os == Os::Windows { "Scripts/python.exe" } else { "bin/python" });
+        let result = (|| {
+            if let Some(uv) = self.which("uv") {
+                let mut c = self.command(&uv);
+                c.arg("venv").arg(&venv);
+                run_streamed(c, cancel, emit)?;
+                let mut c = self.command(&uv);
+                c.args(["pip", "install", "--python"]).arg(&python).arg(package);
+                run_streamed(c, cancel, emit)?;
+            } else {
+                let mut c = self.python_command(self.python().expect("checked"));
+                c.args(["-m", "venv"]).arg(&venv);
+                run_streamed(c, cancel, emit)?;
+                let mut c = self.python_command(&python);
+                c.args(["-m", "pip", "install", "--upgrade", "--disable-pip-version-check", package]);
+                run_streamed(c, cancel, emit)?;
+            }
+            IdeResult::Ok(())
+        })();
+        if let Err(e) = result {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+        let version = self
+            .exe_in(&venv.join(if self.platform.os == Os::Windows { "Scripts" } else { "bin" }), spec.commands[0])
+            .and_then(|p| self.query_version(spec, &p));
+        self.write_manifest(spec.name, &Manifest { version, source: Some(format!("pypi:{package}")) })
+    }
+
+    fn install_pip_user(&self, package: &str, cancel: &CancellationToken, emit: Emit) -> IdeResult<()> {
+        let python = self.python().expect("checked");
+        let pip = |extra: &[&str]| {
+            let mut c = self.python_command(&python);
+            c.args(["-m", "pip", "install", "--user", "--upgrade", "--disable-pip-version-check"])
+                .args(extra)
+                .arg(package);
+            run_collect(c, cancel, emit)
+        };
+        let (ok, out, status) = pip(&[])?;
+        if ok {
+            return Ok(());
+        }
+        if out.contains("externally-managed-environment") {
+            emit(InstallEvent::Line {
+                text: "This Python is externally managed; installing into the user site with --break-system-packages"
+                    .into(),
+            });
+            let (ok, _, status) = pip(&["--break-system-packages"])?;
+            if ok {
+                return Ok(());
+            }
+            return Err(IdeError::new(ErrorKind::Io, format!("pip install {package} failed ({status})")));
+        }
+        Err(IdeError::new(ErrorKind::Io, format!("pip install {package} failed ({status})")))
+    }
+
+    /// The universal (`py3-none-any`) wheel, so the copy works with every interpreter
+    /// version a project selects, not just the one that installed it.
+    fn install_pip_target(
+        &self,
+        spec: &ToolSpec,
+        package: &str,
+        cancel: &CancellationToken,
+        emit: Emit,
+    ) -> IdeResult<()> {
+        let dir = self.root.join(spec.name);
+        let _ = std::fs::remove_dir_all(&dir);
+        let lib = python_lib_dir(&self.root, spec.name);
+        std::fs::create_dir_all(&lib)?;
+        let mut c = self.python_command(self.python().expect("checked"));
+        c.args(["-m", "pip", "install", "--disable-pip-version-check", "--no-deps", "--upgrade", "--target"])
+            .arg(&lib)
+            .args(["--only-binary=:all:", "--platform", "any", "--implementation", "py"])
+            .arg(package);
+        if let Err(e) = run_streamed(c, cancel, emit) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+        let version = std::fs::read_dir(&lib).ok().and_then(|entries| {
+            entries.flatten().find_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let rest = name.strip_suffix(".dist-info")?.strip_prefix(package)?.strip_prefix('-')?;
+                Some(rest.to_owned())
+            })
+        });
+        self.write_manifest(spec.name, &Manifest { version, source: Some(format!("pypi:{package}")) })
+    }
+
+    fn resolve_release(
+        &self,
+        http: &Http,
+        source: ReleaseSource,
+        assets: &[platform::AssetRule],
+        cancel: &CancellationToken,
+    ) -> IdeResult<sources::Download> {
+        match source {
+            ReleaseSource::GitHub { repo } => match http.get_text(&sources::github_latest_url(repo), cancel) {
+                Ok(json) => sources::github_pick(&json, assets, self.platform),
+                Err(e) if e.kind == ErrorKind::Cancelled => Err(e),
+                // Without a token the API allows 60 requests an hour per IP address, often used
+                // up behind a shared one (403/429); the release's web pages have no such limit.
+                Err(api) => self.resolve_github_web(http, repo, assets, cancel).map_err(|web| {
+                    if web.kind == ErrorKind::Cancelled {
+                        return web;
+                    }
+                    tracing::warn!("GitHub release lookup for {repo} failed: {api}; web pages: {web}");
+                    IdeError::new(
+                        api.kind,
+                        format!(
+                            "{}\nDownload it from {} and set its Path in Settings › Languages & Frameworks › Language Servers.",
+                            api.message,
+                            sources::github_latest_page(repo)
+                        ),
+                    )
+                }),
+            },
+            ReleaseSource::HashiCorp { product } => {
+                let json = http.get_text(&sources::hashicorp_latest_url(product), cancel)?;
+                sources::hashicorp_pick(&json, assets, self.platform)
+            }
+            ReleaseSource::EclipseJdtls => {
+                let index = http.get_text(sources::JDTLS_MILESTONES, cancel)?;
+                let version = sources::jdtls_latest_milestone(&index)
+                    .ok_or_else(|| IdeError::new(ErrorKind::Protocol, "no JDT LS milestone found"))?;
+                let latest = http.get_text(&format!("{}{version}/latest.txt", sources::JDTLS_MILESTONES), cancel)?;
+                sources::jdtls_download(&version, &latest)
+            }
+            ReleaseSource::OpenVsx { namespace, extension } => {
+                let json = http.get_text(&sources::openvsx_latest_url(namespace, extension), cancel)?;
+                let json = match sources::openvsx_platform_url(&json, assets, self.platform)? {
+                    Some(url) => http.get_text(&url, cancel)?,
+                    None => json,
+                };
+                sources::openvsx_pick(&json, assets, self.platform)
+            }
+            ReleaseSource::MavenCentral { group, artifact } => {
+                let xml = http.get_text(&sources::maven_metadata_url(group, artifact), cancel)?;
+                sources::maven_pick(group, artifact, &xml)
+            }
+        }
+    }
+
+    /// [`resolve_release`](Self::resolve_release) for a GitHub release, from its web pages.
+    fn resolve_github_web(
+        &self,
+        http: &Http,
+        repo: &str,
+        assets: &[platform::AssetRule],
+        cancel: &CancellationToken,
+    ) -> IdeResult<sources::Download> {
+        let page = http.effective_url(&sources::github_latest_page(repo), cancel)?;
+        let tag = sources::github_tag_from_url(&page)
+            .ok_or_else(|| IdeError::unavailable(format!("{repo} has no published release")))?;
+        let list = http.get_text(&sources::github_assets_page(repo, &tag), cancel)?;
+        match sources::github_pick_web(repo, &tag, &list, None, assets, self.platform) {
+            Err(e) if e.kind == ErrorKind::Unavailable => {
+                let notes = http.get_text(&sources::github_tag_page(repo, &tag), cancel)?;
+                sources::github_pick_web(repo, &tag, &list, Some(&notes), assets, self.platform)
+            }
+            result => result,
+        }
+    }
+
+    fn install_release(
+        &self,
+        spec: &ToolSpec,
+        source: ReleaseSource,
+        assets: &[platform::AssetRule],
+        locate: &[&str],
+        cancel: &CancellationToken,
+        emit: Emit,
+    ) -> IdeResult<()> {
+        let http = Http::new(&self.system_path)?;
+        emit(InstallEvent::Line { text: "Resolving the latest release…".into() });
+        let dl = self.resolve_release(&http, source, assets, cancel)?;
+        emit(InstallEvent::Line { text: format!("Downloading {} ({})", dl.name, dl.url) });
+        let staging = self.root.join(format!(".staging-{}", spec.name));
+        let _ = std::fs::remove_dir_all(&staging);
+        std::fs::create_dir_all(&staging)?;
+        let result = self.download_and_unpack(spec, &http, &dl, locate, &staging, cancel, emit);
+        let _ = std::fs::remove_dir_all(&staging);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn download_and_unpack(
+        &self,
+        spec: &ToolSpec,
+        http: &Http,
+        dl: &sources::Download,
+        locate: &[&str],
+        staging: &Path,
+        cancel: &CancellationToken,
+        emit: Emit,
+    ) -> IdeResult<()> {
+        let archive = fetch_verified(http, dl, staging, cancel, emit)?;
+        emit(InstallEvent::Line { text: "Extracting…".into() });
+        let pkg = staging.join("pkg");
+        let kind = archive::ArchiveKind::from_name(&dl.name);
+        let main = spec.commands[0];
+        let exe_name = self.platform.exe(main);
+        match kind {
+            archive::ArchiveKind::Gz | archive::ArchiveKind::Raw => {
+                archive::extract(&archive, kind, &pkg.join("bin"), &exe_name, cancel)?
+            }
+            _ => archive::extract(&archive, kind, &pkg, &exe_name, cancel)?,
+        }
+        let names: Vec<String> = locate
+            .iter()
+            .flat_map(|n| {
+                if self.platform.os == Os::Windows && !n.contains('.') {
+                    vec![format!("{n}.exe"), format!("{n}.cmd"), format!("{n}.bat")]
+                } else {
+                    vec![n.to_string()]
+                }
+            })
+            .collect();
+        let found = archive::locate(&pkg, &names)
+            .ok_or_else(|| IdeError::new(ErrorKind::Io, format!("`{main}` was not found in {}", dl.name)))?;
+        let rel = found.strip_prefix(&pkg).expect("inside pkg").to_path_buf();
+        let final_dir = self.root.join(spec.name);
+        if final_dir.exists() {
+            std::fs::remove_dir_all(&final_dir)?;
+        }
+        std::fs::rename(&pkg, &final_dir)?;
+        let target = final_dir.join(&rel);
+        let bin = final_dir.join("bin");
+        if is_bundle(main) {
+            // A plugin jar loaded by another tool: a stable name, no launcher script.
+            std::fs::create_dir_all(&bin)?;
+            if target != bin.join(main) {
+                std::fs::copy(&target, bin.join(main))?;
+            }
+        } else {
+            archive::make_executable(&target)?;
+            if self.exe_in(&bin, main).as_deref() != Some(target.as_path()) {
+                archive::link_executable(&bin, main, &target)?;
+            }
+        }
+        // Downloads made by the IDE itself are not quarantined, but archives may carry the flag.
+        clear_quarantine(&final_dir);
+        self.write_manifest(spec.name, &Manifest { version: Some(dl.version.clone()), source: Some(dl.url.clone()) })
+    }
+
+    /// Removes a tool the IDE installed.
+    pub fn uninstall(&self, name: &str, langs: &[LanguageConfig]) -> IdeResult<ToolInfo> {
+        let spec = registry::find(name).ok_or_else(|| IdeError::not_found(format!("unknown tool `{name}`")))?;
+        // Uninstalling mid-install would tear down the directory under the running installer.
+        if INSTALLING.lock().as_ref().is_some_and(|m| m.contains_key(name)) {
+            return Err(IdeError::new(ErrorKind::AlreadyExists, format!("{name} is already being installed")));
+        }
+        let _guard = InstallGuard::acquire(&format!("uninstall-{name}"))?;
+        let cancel = CancellationToken::new();
+        let quiet = |_: InstallEvent| {};
+        match self.install_method(spec) {
+            // App-owned resources remain available for every project/window.
+            Method::Bundled { .. } => {}
+            Method::Rustup { component } => {
+                let rustup = self.which("rustup").ok_or_else(|| IdeError::unavailable("rustup not found"))?;
+                let mut c = self.command(rustup);
+                c.args(["component", "remove", component]);
+                run_streamed(c, &cancel, &quiet)?;
+            }
+            Method::PipUser { package, .. } => {
+                let python = self.python().ok_or_else(|| IdeError::unavailable("python3 not found"))?;
+                let pip = |extra: &[&str]| {
+                    let mut c = self.python_command(&python);
+                    c.args(["-m", "pip", "uninstall", "-y", "--disable-pip-version-check"]).args(extra).arg(package);
+                    run_collect(c, &cancel, &quiet)
+                };
+                let (ok, out, status) = pip(&[])?;
+                if !ok {
+                    let retried =
+                        out.contains("externally-managed-environment") && pip(&["--break-system-packages"])?.0;
+                    if !retried {
+                        return Err(IdeError::new(ErrorKind::Io, format!("pip uninstall {package} failed ({status})")));
+                    }
+                }
+            }
+            Method::Npm { packages } => {
+                if self.root.join("node_modules").exists() {
+                    // Shared dependencies (`typescript`) stay while another installed tool needs them.
+                    let packages: Vec<&str> = packages
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, p)| *i == 0 || !self.npm_dependency_in_use(spec.name, npm_name(p)))
+                        .map(|(_, p)| npm_name(p))
+                        .collect();
+                    let (manager, pnpm) = self.npm_manager()?;
+                    let mut c = self.command(manager);
+                    if pnpm {
+                        c.arg("remove").arg("--dir").arg(&self.root).args(&packages);
+                    } else {
+                        c.args(["uninstall", "--no-fund", "--no-audit", "--prefix"]).arg(&self.root).args(&packages);
+                    }
+                    c.current_dir(&self.root);
+                    run_streamed(c, &cancel, &quiet)?;
+                }
+            }
+            Method::GemActive { gem } => {
+                if let Some(gem_cmd) = self.which("gem") {
+                    let mut c = self.command_in_project(&gem_cmd);
+                    c.args(["uninstall", "--all", "--executables", "--ignore-dependencies", gem]);
+                    run_streamed(c, &cancel, &quiet)?;
+                }
+                // A copy an older version installed under the tools directory.
+                let dir = self.root.join(spec.name);
+                if dir.exists() {
+                    std::fs::remove_dir_all(&dir)?;
+                }
+            }
+            Method::Go { .. }
+            | Method::Gem { .. }
+            | Method::DotnetTool { .. }
+            | Method::PipVenv { .. }
+            | Method::PipTarget { .. }
+            | Method::Release { .. } => {
+                let dir = self.root.join(spec.name);
+                if dir.exists() {
+                    std::fs::remove_dir_all(&dir)?;
+                }
+            }
+        }
+        self.info(name, langs)
+    }
+}
+
+/// Downloads `dl` into `staging` and checks its SHA-256 when one is published;
+/// returns the downloaded file.
+fn fetch_verified(
+    http: &Http,
+    dl: &sources::Download,
+    staging: &Path,
+    cancel: &CancellationToken,
+    emit: Emit,
+) -> IdeResult<PathBuf> {
+    let archive = staging.join(&dl.name);
+    http.download(&dl.url, &archive, dl.size, cancel, emit)?;
+    let expected = match (&dl.sha256, &dl.checksum_url) {
+        (Some(h), _) => Some(h.clone()),
+        (None, Some(url)) => match http.get_text(url, cancel) {
+            Ok(text) => sources::parse_checksum(&text, &dl.name),
+            Err(e) if e.kind == ErrorKind::Cancelled => return Err(e),
+            Err(_) => None,
+        },
+        (None, None) => None,
+    };
+    match expected {
+        Some(expected) => {
+            let actual = sources::sha256_file(&archive)?;
+            if actual != expected {
+                return Err(IdeError::new(
+                    ErrorKind::Io,
+                    format!("checksum mismatch for {}: expected {expected}, got {actual}", dl.name),
+                ));
+            }
+            emit(InstallEvent::Line { text: "Checksum verified (SHA-256)".into() });
+        }
+        None => emit(InstallEvent::Line { text: "No checksum published; skipping verification".into() }),
+    }
+    if cancel.is_cancelled() {
+        return Err(IdeError::cancelled());
+    }
+    Ok(archive)
+}
+
+/// Removes the quarantine flag archives may carry, so macOS runs what was unpacked.
+fn clear_quarantine(dir: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(dir).output();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = dir;
+}
+
+#[cfg(test)]
+mod tests;

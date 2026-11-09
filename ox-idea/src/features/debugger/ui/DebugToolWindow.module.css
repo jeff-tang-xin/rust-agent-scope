@@ -1,0 +1,322 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.emptyWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.sessionTabs {
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+
+.toolbar {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px 0 4px;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tool {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+
+.sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 5px;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.tab {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-small);
+  color: var(--fg);
+  font-size: var(--fs-ui);
+  white-space: nowrap;
+}
+.tab:hover {
+  background: var(--bg-toolbar-hover);
+}
+.tabActive,
+.tabActive:hover {
+  background: var(--bg-toolbar-selected);
+  color: var(--fg-strong);
+}
+.tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.split {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* frames */
+.frames {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px 0;
+}
+
+.threadSelect {
+  margin: 0 8px 4px;
+}
+
+.frameList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  padding: 0 4px;
+}
+
+.frame {
+  height: var(--h-row);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-small);
+  text-align: left;
+  font-size: var(--fs-ui);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.frame:hover {
+  background: var(--bg-tree-hover);
+}
+.frameSelected,
+.frameSelected:hover {
+  background: var(--bg-tree-selected-inactive);
+}
+.frameList:focus-within .frameSelected {
+  background: var(--bg-tree-selected);
+}
+.frameLibrary .frameName {
+  color: var(--fg-muted);
+}
+
+.frameIcon {
+  flex: none;
+}
+
+.frameName {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frameFile {
+  flex: 1;
+  min-width: 0;
+  /* ", File.java:12" hugs the name, cancelling the row gap. */
+  margin-left: -6px;
+  color: var(--fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hiddenFrames {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.note {
+  padding: 4px 12px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-ui);
+}
+
+/* variables */
+.variables {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.evalField {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.repl {
+  height: 28px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt {
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+}
+
+.evalInput {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--fg-strong);
+  font: var(--fs-ui) var(--font-mono);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.evalInput::placeholder {
+  color: var(--fg-subtle);
+  font-family: var(--font-ui);
+}
+.evalInput:disabled {
+  cursor: default;
+}
+
+/* console */
+/* The Console tab: actions in a vertical strip on the left, as in the Run window. */
+.consoleArea {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.consoleToolbar {
+  flex: none;
+  width: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-right: 1px solid var(--border);
+}
+.console {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.consoleOutput {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  cursor: default;
+  -webkit-user-select: text;
+  user-select: text;
+  outline: none;
+  color: var(--fg);
+}
+
+.consoleInner {
+  position: relative;
+  width: 100%;
+  cursor: text;
+}
+
+/* Find matches in the console output. */
+.findMatch {
+  border-radius: 2px;
+}
+
+.link {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--link-hover);
+  text-decoration-color: currentColor;
+}
+
+/* Soft-Wrap off: long lines scroll horizontally. */
+.noWrap {
+  white-space: pre;
+  word-break: normal;
+}
+
+.out {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 100%;
+  color: var(--fg);
+}
+.cat-stderr {
+  color: var(--danger);
+}
+.cat-console,
+.cat-system {
+  color: var(--fg-subtle);
+}
+.cat-important {
+  color: var(--accent);
+}
+.cat-input {
+  color: var(--fg-secondary);
+}
+.cat-result {
+  color: var(--fg-emphasis);
+}
+
+.repl {
+  margin: 0 14px 2px;
+  border-bottom: 0;
+  border-top: 1px solid var(--border);
+}

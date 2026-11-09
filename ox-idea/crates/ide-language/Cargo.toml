@@ -1,0 +1,66 @@
+[package]
+name = "ide-language"
+description = "Language registry (languages/*.toml), detection, and tree-sitter powered outline/folding/symbol tags"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+ide-extension.workspace = true
+ide-text.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+toml.workspace = true
+tree-sitter.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+regex-lite = "0.1"
+blake3.workspace = true
+tree-sitter-language = "0.1"
+
+# Bundled grammars (all built on `tree-sitter-language`, ABI <= 15).
+tree-sitter-rust = "0.24.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-java = "0.23.5"
+tree-sitter-kotlin-ng = "1.1.0"
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-c-sharp = "0.23.5"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-php = "0.25.1"
+tree-sitter-json = "0.24.8"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-bash = "0.25.1"
+tree-sitter-html = "0.23.2"
+tree-sitter-css = "0.25.0"
+tree-sitter-scala = "0.26.3"
+tree-sitter-swift = "0.7.4"
+tree-sitter-lua = "0.5.0"
+tree-sitter-md = "0.5.3"
+tree-sitter-zig = "1.1.2"
+tree-sitter-elixir = "0.3.5"
+tree-sitter-ocaml = "0.26.0"
+tree-sitter-hcl = "1.1.0"
+tree-sitter-nix = "0.3.0"
+tree-sitter-proto = "0.6.0"
+tree-sitter-make = "1.1.1"
+tree-sitter-cmake = "0.7.4"
+tree-sitter-xml = "0.7.0"
+tree-sitter-haskell = "0.24.1"
+tree-sitter-dart = "0.2.0"
+tree-sitter-graphql = "0.3.0"
+tree-sitter-gdscript = "6.1.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+tempfile.workspace = true
+
+[[bench]]
+name = "syntax"
+harness = false

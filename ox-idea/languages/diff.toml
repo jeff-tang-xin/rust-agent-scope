@@ -1,0 +1,6 @@
+id = "diff"
+name = "Diff"
+extensions = ["diff", "patch", "rej"]
+first-line = "^(diff --git |--- |Index: )"
+indent = { tab-size = 4, insert-spaces = false }
+ui-mode = "diff"

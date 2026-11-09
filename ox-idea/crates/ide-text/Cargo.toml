@@ -1,0 +1,24 @@
+[package]
+name = "ide-text"
+description = "Rope-backed documents, change sets and UTF-16/byte coordinate conversion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+# Only `\n` may count as a line break: documents are normalized to `\n`, and
+# CodeMirror / LSP do not treat VT, FF, NEL, U+2028 or U+2029 as line breaks.
+# Hence no `unicode_lines` / `cr_lines` (a test guards against feature unification).
+ropey = { version = "1.6", default-features = false, features = ["simd"] }
+serde.workspace = true
+similar = { version = "2.7", default-features = false }
+specta.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "text"
+harness = false

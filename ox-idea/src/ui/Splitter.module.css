@@ -1,0 +1,71 @@
+.group {
+  min-width: 0;
+  min-height: 0;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.handle {
+  position: relative;
+  flex: none;
+  background: var(--border);
+  outline: none;
+  transition: background var(--dur) var(--ease);
+}
+.handle[aria-orientation="vertical"] {
+  width: 1px;
+  cursor: col-resize;
+}
+.handle[aria-orientation="horizontal"] {
+  height: 1px;
+  cursor: row-resize;
+}
+.handle::after {
+  content: "";
+  position: absolute;
+  z-index: var(--z-panel);
+}
+.handle[aria-orientation="vertical"]::after {
+  inset: 0 -3px;
+}
+.handle[aria-orientation="horizontal"]::after {
+  inset: -3px 0;
+}
+.handle[data-separator="hover"],
+.handle:focus-visible {
+  background: var(--border-strong);
+}
+.handle[data-separator="active"] {
+  background: var(--border-strong);
+}
+.handle[data-separator="disabled"] {
+  cursor: default;
+}
+
+.invisible,
+.invisible[data-separator] {
+  background: none;
+}
+.invisible[aria-orientation="vertical"] {
+  width: 0;
+}
+.invisible[aria-orientation="horizontal"] {
+  height: 0;
+}
+/* Islands gaps: nothing is drawn while dragging; keyboard focus still shows. */
+.invisible:focus-visible::after {
+  background: color-mix(in srgb, var(--focus-ring) 55%, transparent);
+}
+.handle[data-separator="disabled"]::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .handle {
+    transition: none;
+  }
+}

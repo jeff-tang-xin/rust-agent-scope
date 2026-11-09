@@ -1,0 +1,14 @@
+id = "scala"
+name = "Scala"
+extensions = ["scala", "sc", "sbt", "mill"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Scala"
+tree-sitter = "scala"
+
+[[language-servers]]
+name = "metals"
+command = "metals"
+root-markers = ["build.sbt", "build.sc", "build.mill", "project.scala", "pom.xml", "build.gradle"]
+install-hint = "cs install metals (Coursier: https://get-coursier.io)"

@@ -1,0 +1,26 @@
+[package]
+name = "ide-agent"
+description = "Coding agents over the Agent Client Protocol: tasks, sessions, worktrees and their timelines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+encoding_rs.workspace = true
+ide-vfs.workspace = true
+ide-core.workspace = true
+ide-mcp.workspace = true
+ide-jsonrpc.workspace = true
+ide-vcs.workspace = true
+ide-tools = { path = "../ide-tools" }
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+dunce.workspace = true
+uuid.workspace = true
+tempfile.workspace = true
+which = "8"

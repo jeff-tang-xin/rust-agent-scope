@@ -1,0 +1,532 @@
+/** Deployment actions: upload / download / delete / sync / open the deployed URL. */
+import { executeAction, registerActions } from "@/platform/actions";
+import { attachDocument, editorsFor } from "@/editor/api";
+import { getContext } from "@/platform/context";
+import {
+  call,
+  commands,
+  isCancelled,
+  isTauri,
+  nextRequestId,
+  type TransferReport,
+  type SyncEntry,
+  type SyncStep,
+} from "@/platform/ipc";
+import { tx, txTemplate, useTxTemplate } from "@/platform/i18n";
+import { openExternalUrl } from "@/platform/openUrl";
+import { relativePath, useProject } from "@/platform/project";
+import type { AutoUploadValid, DeploymentServerValid } from "@/platform/remoteSettings";
+import { workflowSettings } from "@/platform/workflowSettings";
+import { notifications, projectViewSelection, toolWindowService } from "@/workbench/contributions";
+import { chooseItem } from "@/workbench/inputDialogs";
+import { confirm } from "@/workbench/messages";
+import { initialSyncChoices, resolveServer, serverLabel, summarizeReport, targetPaths } from "./model";
+import { withSsh } from "./ssh";
+import { REMOTE_HOST_WINDOW, patchSync, useDeployment } from "./store";
+import styles from "./Deployment.module.css";
+import { showDeploymentComparison } from "./windowBridge";
+
+const GROUP = "tools";
+const CATEGORY = "Deployment";
+const errorText = (e: unknown) => txTemplate(e instanceof Error ? e.message : String(e));
+const projectRoot = () => useProject.getState().project?.root ?? null;
+const deployment = () => workflowSettings().deployment;
+
+/** The files an action works on (menu argument, project view selection or the editor's file). */
+export function actionTargets(arg: unknown): string[] {
+  const editorPath = getContext().editorPath;
+  return targetPaths(arg, {
+    part: useDeployment.getState().part,
+    selection: projectViewSelection(),
+    editorPath: typeof editorPath === "string" ? editorPath : null,
+    projectRoot: projectRoot(),
+  });
+}
+
+function notifyNoServers() {
+  notifications().notify({
+    level: "warning",
+    title: "No deployment server configured",
+    group: GROUP,
+    key: "deployment.noServer",
+    actions: [{ label: "Configure…", run: () => void executeAction("deployment.configure") }],
+  });
+}
+
+function notifyNoTargets() {
+  notifications().notify({
+    level: "info",
+    title: "Select files in the Project view or open a file in the editor",
+    group: GROUP,
+    key: "deployment.noTarget",
+  });
+}
+
+async function serverCoverage(paths: string[]) {
+  try {
+    return await call(commands.deployCoverage(paths));
+  } catch (e) {
+    notifications().notify({
+      level: "error",
+      title: "Cannot check deployment mappings",
+      body: errorText(e),
+      group: GROUP,
+    });
+    return null;
+  }
+}
+
+function notifyNoCoverage(server?: DeploymentServerValid, skipped?: TransferReport["errors"]) {
+  notifications().notify({
+    level: "warning",
+    title: server
+      ? txTemplate(`No selected paths can be deployed to ${serverLabel(server)}`)
+      : "No deployment server covers the selected paths",
+    body: skipped?.length ? <ReportBody report={{ files: 0, skipped: skipped.length, errors: skipped }} /> : undefined,
+    group: GROUP,
+    key: "deployment.noCoverage",
+    actions: [{ label: "Configure…", run: () => void executeAction("deployment.configure") }],
+  });
+}
+
+/** Keep the chooser visible even when only one server covers the selection. */
+async function pickServer(title: string, paths: string[]): Promise<DeploymentServerValid | null> {
+  const configured = deployment().servers;
+  if (!configured.length) {
+    notifyNoServers();
+    return null;
+  }
+  const coverage = await serverCoverage(paths);
+  if (!coverage) return null;
+  const servers = configured.filter((server) => coverage.some((c) => c.server === server.id && c.paths.length));
+  if (!servers.length) {
+    // One server: say why, as an explicit upload to it would.
+    if (configured.length === 1)
+      notifyNoCoverage(configured[0], coverage.find((c) => c.server === configured[0]!.id)?.skipped);
+    else {
+      const skipped = configured.flatMap((server) =>
+        (coverage.find((c) => c.server === server.id)?.skipped ?? []).map((error) => ({
+          ...error,
+          message: `${serverLabel(server)}: ${error.message}`,
+        })),
+      );
+      notifyNoCoverage(undefined, skipped);
+    }
+    return null;
+  }
+  const labels = servers.map(serverLabel);
+  const picked = await chooseItem({ title, items: labels });
+  return picked === null ? null : (servers[labels.indexOf(picked)] ?? null);
+}
+
+async function defaultServer(title: string, paths: string[]): Promise<DeploymentServerValid | null> {
+  return resolveServer(deployment(), null) ?? pickServer(title, paths);
+}
+
+function ReportBody({ report }: { report: TransferReport }) {
+  const txt = useTxTemplate();
+  const root = projectRoot();
+  const shown = report.errors.slice(0, 10);
+  return (
+    <div className={styles.report}>
+      {report.skipped > 0 && <div>{txt(`Skipped: ${report.skipped}`)}</div>}
+      {shown.length > 0 && (
+        <ul className={styles.reportErrors}>
+          {shown.map((e, i) => (
+            <li key={i}>
+              <span className={styles.mono}>{root ? relativePath(root, e.path) : e.path}</span>: {txt(e.message)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {report.errors.length > shown.length && <div>{txt(`and ${report.errors.length - shown.length} more`)}</div>}
+    </div>
+  );
+}
+
+export function showReport(
+  report: TransferReport,
+  verb: "upload" | "download" | "delete" | "sync",
+  server: DeploymentServerValid,
+) {
+  const s = summarizeReport(report, verb, serverLabel(server));
+  notifications().notify({
+    level: s.level,
+    title: s.title.replace("{n}", String(s.params.n)).replace("{server}", s.params.server),
+    body: report.errors.length || report.skipped ? <ReportBody report={report} /> : undefined,
+    group: GROUP,
+    key: `deployment.${verb}`,
+  });
+}
+
+function showFailure(title: string, server: DeploymentServerValid, e: unknown) {
+  if (isCancelled(e)) return;
+  notifications().notify({
+    level: "error",
+    title: title.replace("{server}", serverLabel(server)),
+    body: errorText(e),
+    group: GROUP,
+    key: "deployment.failure",
+  });
+}
+
+async function transfer(direction: "upload" | "download", server: DeploymentServerValid | null, paths: string[]) {
+  if (!server) return;
+  const coverage = (await serverCoverage(paths))?.find((c) => c.server === server.id);
+  if (!coverage) return;
+  if (!coverage.paths.length) return notifyNoCoverage(server, coverage.skipped);
+  const request = nextRequestId();
+  try {
+    const report = await withSsh(server.kind === "sftp" ? server.sshConfig : "", () =>
+      call(
+        direction === "upload"
+          ? commands.deployUpload(paths, server.id, request)
+          : commands.deployDownload(paths, server.id, request),
+      ),
+    );
+    showReport(report, direction, server);
+  } catch (e) {
+    showFailure(direction === "upload" ? "Cannot upload to {server}" : "Cannot download from {server}", server, e);
+  }
+}
+
+/** Downloads the remote counterparts of `paths` (Remote Host › Download to Project). */
+export function downloadPaths(server: DeploymentServerValid, paths: string[]) {
+  return transfer("download", server, paths);
+}
+
+async function deleteRemote(paths: string[]) {
+  const server = await defaultServer("Delete from Server", paths);
+  if (!server) return;
+  const coverage = (await serverCoverage(paths))?.find((c) => c.server === server.id);
+  if (!coverage) return;
+  if (!coverage.paths.length) return notifyNoCoverage(server, coverage.skipped);
+  const root = projectRoot();
+  const names = paths.map((p) => (root ? relativePath(root, p) || "/" : p));
+  const ok = await confirm({
+    title: "Delete from Server",
+    message: txTemplate(
+      names.length === 1
+        ? `Delete the remote copy of ${names[0]} from ${serverLabel(server)}?`
+        : `Delete the remote copies of ${names.length} items from ${serverLabel(server)}?`,
+    ),
+    ok: "Delete",
+    icon: "warning",
+  });
+  if (!ok) return;
+  try {
+    const report = await withSsh(server.kind === "sftp" ? server.sshConfig : "", () =>
+      call(commands.deployDeleteRemote(paths, server.id)),
+    );
+    showReport(report, "delete", server);
+  } catch (e) {
+    showFailure("Cannot delete from {server}", server, e);
+  }
+}
+
+/** Compares every covered selection with `server`. */
+/** Sync with Deployed to: its own window on desktop (the browser build keeps the in-page dialog). */
+async function openComparison(server: DeploymentServerValid, paths: string[]) {
+  if (!isTauri()) return openSync(server, paths);
+  try {
+    await showDeploymentComparison(server.id, paths);
+  } catch (error) {
+    showFailure("Cannot open comparison for {server}", server, error);
+  }
+}
+
+export async function openSync(server: DeploymentServerValid, paths: string[]) {
+  const coverage = (await serverCoverage(paths))?.find((c) => c.server === server.id);
+  if (!coverage) return;
+  if (!coverage.paths.length) return notifyNoCoverage(server, coverage.skipped);
+  const request = nextRequestId();
+  useDeployment.setState({
+    sync: {
+      server: server.id,
+      serverName: serverLabel(server),
+      paths,
+      skipped: coverage.skipped,
+      request,
+      entries: null,
+      error: null,
+      choices: {},
+      hideSame: true,
+      running: false,
+    },
+  });
+  try {
+    const groups = await withSsh(server.kind === "sftp" ? server.sshConfig : "", async () => {
+      const entries = [];
+      for (const path of coverage.paths) {
+        if (useDeployment.getState().sync?.request !== request) break;
+        entries.push(...(await call(commands.deployCompare(path, server.id, request))));
+      }
+      return entries;
+    });
+    const entries = [...new Map(groups.map((entry) => [entry.path, entry])).values()];
+    if (useDeployment.getState().sync?.request !== request) return;
+    patchSync({ entries, choices: initialSyncChoices(entries), request: null });
+  } catch (e) {
+    if (useDeployment.getState().sync?.request !== request) return;
+    if (isCancelled(e)) useDeployment.setState({ sync: null });
+    else patchSync({ error: errorText(e), request: null });
+  }
+}
+
+/** Closes the Sync dialog, cancelling a running comparison. */
+export function closeSync() {
+  const request = useDeployment.getState().sync?.request;
+  if (request != null) void commands.cancelRequest(request);
+  useDeployment.setState({ sync: null });
+}
+
+export type SyncRunMode = "all" | "selected";
+
+export async function runSync(steps: SyncStep[], mode: SyncRunMode = "all") {
+  const sync = useDeployment.getState().sync;
+  const server = sync && deployment().servers.find((s) => s.id === sync.server);
+  if (!sync || !server || !steps.length) return;
+  const request = nextRequestId();
+  patchSync({ running: true, request, error: null });
+  try {
+    // The embedded diff can edit the local side. Flush those live documents
+    // before uploading, so the server receives the content the user reviewed.
+    const root = projectRoot();
+    for (const step of steps) {
+      if (step.action !== "upload" || !root) continue;
+      const path = `${root.replace(/\/$/, "")}/${step.path}`;
+      if (!editorsFor(path).length) continue;
+      const document = await attachDocument(path);
+      try {
+        await document.save();
+      } finally {
+        document.release();
+      }
+    }
+    if (useDeployment.getState().sync?.request !== request) return;
+    const report = await withSsh(server.kind === "sftp" ? server.sshConfig : "", () =>
+      call(commands.deploySync(steps, server.id, request)),
+    );
+    if (useDeployment.getState().sync?.request !== request) return;
+    if (mode === "selected" && root) {
+      const refreshed = new Map<string, SyncEntry>();
+      const checked = new Set<string>();
+      const refreshErrors: string[] = [];
+      for (const step of steps) {
+        if (useDeployment.getState().sync?.request !== request) return;
+        try {
+          const entries = await withSsh(server.kind === "sftp" ? server.sshConfig : "", () =>
+            call(commands.deployCompare(`${root.replace(/\/$/, "")}/${step.path}`, server.id, request)),
+          );
+          checked.add(step.path);
+          const entry = entries.find((entry) => entry.path === step.path);
+          if (entry) refreshed.set(step.path, entry);
+        } catch (error) {
+          if (isCancelled(error)) throw error;
+          refreshErrors.push(`${step.path}: ${errorText(error)}`);
+        }
+      }
+      const current = useDeployment.getState().sync;
+      if (current?.request !== request) return;
+      const failed = new Set(report.errors.map((error) => error.path));
+      // A skipped or interrupted batch does not identify every completed file.
+      const completed = report.skipped === 0 && report.files === steps.length - failed.size;
+      const choices = { ...current.choices };
+      if (completed) for (const step of steps) if (!failed.has(step.path)) choices[step.path] = "skip";
+      const entries =
+        current.entries?.flatMap((entry) => {
+          if (!checked.has(entry.path)) return [entry];
+          const updated = refreshed.get(entry.path);
+          if (updated) return [updated];
+          delete choices[entry.path];
+          return [];
+        }) ?? null;
+      patchSync({
+        entries,
+        choices,
+        running: false,
+        request: null,
+        error:
+          [
+            ...report.errors.map((error) => `${error.path}: ${error.message}`),
+            ...refreshErrors.map((error) => tx`Could not refresh comparison: ${error}`),
+          ].join("\n") || null,
+      });
+    } else {
+      useDeployment.setState({ sync: null });
+      report.skipped += sync.skipped.length;
+    }
+    showReport(report, "sync", server);
+    return report;
+  } catch (e) {
+    if (useDeployment.getState().sync?.request !== request) return;
+    if (isCancelled(e)) patchSync({ running: false, request: null });
+    else patchSync({ running: false, request: null, error: errorText(e) });
+  }
+}
+
+async function openInBrowser(paths: string[]) {
+  const path = paths[0];
+  if (!path) return notifyNoTargets();
+  try {
+    const info = await call(commands.deployInfo(path, null));
+    if (!info?.webUrl) {
+      notifications().notify({
+        level: "info",
+        title: info ? "No web server URL for this file" : "This file is not mapped to the default server",
+        group: GROUP,
+        key: "deployment.openInBrowser",
+        actions: [{ label: "Configure…", run: () => void executeAction("deployment.configure") }],
+      });
+      return;
+    }
+    await openExternalUrl(info.webUrl);
+  } catch (e) {
+    notifications().notify({ level: "error", title: "Cannot open in browser", body: errorText(e), group: GROUP });
+  }
+}
+
+export function autoUploadOn(): boolean {
+  return deployment().autoUpload !== "never";
+}
+
+async function setAutoUpload(value: AutoUploadValid) {
+  try {
+    const settings = await call(commands.settingsSet("project", "deployment.autoUpload", JSON.stringify(value)));
+    useProject.setState({ settings });
+  } catch (e) {
+    notifications().notify({
+      level: "error",
+      title: "Cannot change automatic upload",
+      body: errorText(e),
+      group: GROUP,
+    });
+  }
+}
+
+/** Runs `fn` with the targets, or explains how to pick some. */
+const withTargets = (fn: (paths: string[]) => unknown) => (c: { arg?: unknown }) => {
+  const paths = actionTargets(c.arg);
+  if (!paths.length) return notifyNoTargets();
+  void fn(paths);
+};
+
+export function registerDeploymentActions(): () => void {
+  const when = "projectOpen";
+  return registerActions([
+    {
+      id: "deployment.uploadToDefault",
+      title: "Upload to Default Server",
+      description: "Upload the selected files and folders to the default deployment server",
+      category: CATEGORY,
+      icon: "export",
+      when,
+      keywords: ["deploy", "sftp", "upload", "remote"],
+      run: withTargets(async (paths) => transfer("upload", await defaultServer("Upload to", paths), paths)),
+    },
+    {
+      id: "deployment.uploadTo",
+      title: "Upload to…",
+      description: "Upload the selected files and folders to a deployment server",
+      category: CATEGORY,
+      when,
+      keywords: ["deploy", "sftp", "upload", "remote"],
+      run: withTargets(async (paths) => transfer("upload", await pickServer("Upload to", paths), paths)),
+    },
+    {
+      id: "deployment.downloadFromDefault",
+      title: "Download from Default Server",
+      description: "Replace the selected files and folders with their copies on the default deployment server",
+      category: CATEGORY,
+      when,
+      keywords: ["deploy", "sftp", "download", "remote"],
+      run: withTargets(async (paths) => transfer("download", await defaultServer("Download from", paths), paths)),
+    },
+    {
+      id: "deployment.downloadFrom",
+      title: "Download from…",
+      description: "Replace the selected files and folders with their copies on a deployment server",
+      category: CATEGORY,
+      when,
+      keywords: ["deploy", "sftp", "download", "remote"],
+      run: withTargets(async (paths) => transfer("download", await pickServer("Download from", paths), paths)),
+    },
+    {
+      id: "deployment.syncWith",
+      title: "Sync with Deployed to…",
+      description: "Compare local files with a deployment server and synchronize them",
+      category: CATEGORY,
+      when,
+      keywords: ["deploy", "sftp", "compare", "synchronize", "remote", "diff"],
+      run: ({ arg }) => {
+        const paths = actionTargets(arg);
+        const target = paths[0] ?? projectRoot();
+        if (!target) return;
+        const targets = paths.length ? paths : [target];
+        void pickServer("Sync with Deployed to", targets).then((server) => server && openComparison(server, targets));
+      },
+    },
+    {
+      id: "deployment.syncWithDefault",
+      title: "Sync with Deployed to Default Server",
+      description: "Compare local files with the default deployment server and synchronize them",
+      category: CATEGORY,
+      when,
+      keywords: ["deploy", "sftp", "compare", "synchronize", "remote", "diff"],
+      run: withTargets(async (paths) => {
+        const server = await defaultServer("Sync with Deployed to", paths);
+        if (server) await openComparison(server, paths);
+      }),
+    },
+    {
+      id: "deployment.deleteFromServer",
+      title: "Delete from Server",
+      description: "Delete the remote copies of the selected files and folders on the default server",
+      category: CATEGORY,
+      icon: "trash",
+      when,
+      keywords: ["deploy", "sftp", "remove", "remote"],
+      run: withTargets(deleteRemote),
+    },
+    {
+      id: "deployment.toggleAutoUpload",
+      title: "Automatic Upload",
+      description: "Upload changed files to the default server automatically",
+      category: CATEGORY,
+      when,
+      keywords: ["deploy", "sftp", "auto upload", "on save", "toggle"],
+      toggled: autoUploadOn,
+      run: () => setAutoUpload(autoUploadOn() ? "never" : "always"),
+    },
+    {
+      id: "deployment.browseRemoteHost",
+      title: "Browse Remote Host",
+      description: "Show the files of a deployment server in the Remote Host tool window",
+      category: CATEGORY,
+      icon: "web",
+      when,
+      keywords: ["deploy", "sftp", "remote host", "server files"],
+      run: () => toolWindowService().show(REMOTE_HOST_WINDOW, true),
+    },
+    {
+      id: "deployment.openInBrowser",
+      title: "Open in Browser (Deployed)",
+      description: "Open the deployed URL of the file on the default server's web server",
+      category: CATEGORY,
+      icon: "web",
+      when,
+      keywords: ["deploy", "web server", "url", "browser"],
+      run: withTargets(openInBrowser),
+    },
+    {
+      id: "deployment.configure",
+      title: "Deployment Configuration…",
+      description: "Edit the deployment servers and options",
+      category: CATEGORY,
+      icon: "settings",
+      when,
+      keywords: ["deploy", "sftp", "servers", "settings"],
+      run: () => void executeAction("file.settings", "build.deployment"),
+    },
+  ]);
+}

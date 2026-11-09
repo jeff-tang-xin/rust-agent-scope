@@ -1,0 +1,26 @@
+id = "rust"
+name = "Rust"
+extensions = ["rs"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Rust"
+tree-sitter = "rust"
+scratch-template = '''
+fn main() {
+    $END$
+}
+'''
+
+[[language-servers]]
+name = "rust-analyzer"
+command = "rust-analyzer"
+root-markers = ["Cargo.toml", "rust-project.json"]
+install-hint = "rustup component add rust-analyzer"
+
+[debugger]
+adapter = "codelldb"
+command = "codelldb"
+args = ["--port", "${port}"]
+transport = "tcp"
+install-hint = "Install CodeLLDB in Settings › Languages & Frameworks › Language Servers"

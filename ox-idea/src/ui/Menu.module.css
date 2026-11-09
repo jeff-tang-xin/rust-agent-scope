@@ -1,0 +1,80 @@
+/* PopupMenu: 6px vertical insets, 24px items with inset rounded selection, shortcuts right-aligned in secondary text. */
+.popup {
+  padding: 6px 0;
+  min-width: 180px;
+  max-width: 420px;
+}
+.menu {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-list-row);
+  margin: 0 6px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-selection, 5px);
+  color: var(--fg-strong);
+  text-align: left;
+  white-space: nowrap;
+  outline: none;
+}
+.item:focus-visible {
+  outline: none;
+}
+.active {
+  background: var(--bg-tree-selected);
+}
+.disabled {
+  color: var(--fg-faint);
+  cursor: default;
+}
+.danger {
+  color: var(--danger);
+}
+.icon {
+  width: 16px;
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut {
+  margin-left: 24px;
+  font-family: var(--font-keys);
+  font-size: var(--fs-ui);
+  color: var(--fg-muted);
+}
+.subArrow {
+  color: var(--fg-muted);
+  margin-left: 8px;
+  margin-right: -2px;
+}
+.separator {
+  height: 1px;
+  margin: 4px 14px;
+  background: var(--border-popup);
+}
+.header {
+  height: var(--h-list-row);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+}
+
+/* Settings › Appearance › "Display icons in menu items" off: keep the column, drop the icon. */
+:global(:root[data-menu-icons="off"]) .icon[data-menu-icon] > * {
+  display: none;
+}

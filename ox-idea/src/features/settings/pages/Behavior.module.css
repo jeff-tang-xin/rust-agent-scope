@@ -1,0 +1,154 @@
+/* Rows under the Theme row (IDEA indents them under the label column). */
+.indented {
+  display: flex;
+  flex-direction: column;
+  padding-left: 20px;
+}
+.inline {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 0 4px;
+  border-radius: var(--radius-row);
+}
+.matched {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+.note {
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+.popupBody {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 14px;
+}
+
+/* Inline option groups, with custom font controls wrapping together. */
+.fontRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: var(--radius-row);
+}
+.fontInput {
+  width: 220px;
+}
+/* Custom font block (IDEA Appearance): labels share one column, so the UI font,
+   fallback and Size controls all start at the same x. */
+.customFontRow {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  row-gap: 4px;
+  min-height: 28px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: var(--radius-row);
+}
+.customFontRow > .fontLabel {
+  padding-top: 3px;
+  white-space: nowrap;
+}
+.customFontRow > .fontCheck {
+  white-space: nowrap;
+}
+.fontControl {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.sizeInput {
+  width: 64px;
+}
+.disabled {
+  color: var(--fg-subtle);
+}
+.pathInput {
+  width: 320px;
+}
+.patternInput {
+  width: 160px;
+}
+.preview {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two-column checkbox grid (UI Options, Tool Windows). */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 24px;
+}
+.column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.radios {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.radio {
+  display: inline-flex;
+  flex: none;
+  white-space: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+.radio input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th {
+  white-space: nowrap;
+  text-align: left;
+  font-weight: normal;
+  color: var(--fg-muted);
+  height: var(--h-list-row);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.table td {
+  white-space: nowrap;
+  height: 32px;
+  padding: 0 8px;
+}
+.table tbody tr:hover {
+  background: var(--bg-tree-hover);
+}
+.center {
+  text-align: center;
+}
+
+.iconPacks {
+  display: grid;
+  grid-template-columns: repeat(var(--icon-pack-columns, 1), minmax(0, 1fr));
+  gap: 6px 24px;
+  padding: 2px 0;
+}
+
+.iconLabel {
+  padding: 2px 0;
+}
+
+.iconHint {
+  padding: 0 0 2px 20px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  line-height: 1.4;
+}

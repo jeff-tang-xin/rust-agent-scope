@@ -1,0 +1,15 @@
+id = "haskell"
+name = "Haskell"
+extensions = ["hs", "hs-boot", "hsig"]
+line-comment = "--"
+block-comment = ["{-", "-}"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Haskell"
+tree-sitter = "haskell"
+
+[[language-servers]]
+name = "haskell-language-server"
+command = "haskell-language-server-wrapper"
+args = ["--lsp"]
+root-markers = ["hie.yaml", "stack.yaml", "cabal.project", "*.cabal", "package.yaml"]
+install-hint = "ghcup install hls"

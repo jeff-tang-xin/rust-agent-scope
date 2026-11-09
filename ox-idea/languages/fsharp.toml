@@ -1,0 +1,21 @@
+id = "fsharp"
+name = "F#"
+extensions = ["fs", "fsi", "fsx"]
+line-comment = "//"
+block-comment = ["(*", "*)"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "F#"
+
+[[language-servers]]
+name = "fsautocomplete"
+command = "fsautocomplete"
+root-markers = ["*.sln", "*.fsproj", "global.json"]
+install-hint = "dotnet tool install --global fsautocomplete"
+# Otherwise it waits for the client to load the project through `fsharp/workspaceLoad`.
+initialization-options = { AutomaticWorkspaceInit = true }
+
+[debugger]
+adapter = "netcoredbg"
+command = "netcoredbg"
+args = ["--interpreter=vscode"]
+install-hint = "Install netcoredbg (.NET debugger) in Settings › Languages & Frameworks › Language Servers"

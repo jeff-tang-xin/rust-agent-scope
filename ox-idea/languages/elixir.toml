@@ -1,0 +1,19 @@
+id = "elixir"
+name = "Elixir"
+extensions = ["ex", "exs"]
+filenames = ["mix.lock"]
+first-line = "^#!.*\\belixir\\b"
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+tree-sitter = "elixir"
+
+[[language-servers]]
+name = "elixir-ls"
+command = "elixir-ls"
+root-markers = ["mix.exs"]
+install-hint = "Install ElixirLS (https://github.com/elixir-lsp/elixir-ls/releases) and expose language_server.sh as `elixir-ls`"
+
+[debugger]
+adapter = "elixir-ls-debugger"
+command = "elixir-ls-debugger"
+install-hint = "Install ElixirLS and expose debug_adapter.sh as `elixir-ls-debugger`"

@@ -1,0 +1,14 @@
+id = "clojure"
+name = "Clojure"
+extensions = ["clj", "cljs", "cljc", "cljd", "edn", "bb"]
+filenames = ["deps.edn", "project.clj", "bb.edn"]
+first-line = "^#!.*\\b(bb|clojure|clj)\\b"
+line-comment = ";"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Clojure"
+
+[[language-servers]]
+name = "clojure-lsp"
+command = "clojure-lsp"
+root-markers = ["deps.edn", "project.clj", "shadow-cljs.edn", "bb.edn", "build.boot"]
+install-hint = "brew install clojure-lsp/brew/clojure-lsp-native"

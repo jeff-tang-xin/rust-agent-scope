@@ -1,0 +1,15 @@
+id = "terraform"
+name = "Terraform"
+extensions = ["tf", "tofu", "tftest.hcl"]
+filenames = [".terraformrc", "terraform.rc"]
+line-comment = "#"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+tree-sitter = "hcl"
+
+[[language-servers]]
+name = "terraform-ls"
+command = "terraform-ls"
+args = ["serve"]
+root-markers = [".terraform", ".terraform.lock.hcl"]
+install-hint = "brew install hashicorp/tap/terraform-ls (https://github.com/hashicorp/terraform-ls)"

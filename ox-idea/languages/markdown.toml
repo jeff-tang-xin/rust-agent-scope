@@ -1,0 +1,15 @@
+id = "markdown"
+name = "Markdown"
+formatter = { tool = "prettier", parser = "markdown", range = false }
+extensions = ["md", "markdown", "mdown", "mkd", "mkdn", "mdwn", "mdx", "ronn", "workbook"]
+block-comment = ["<!--", "-->"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Markdown"
+tree-sitter = "markdown"
+
+[[language-servers]]
+name = "marksman"
+command = "marksman"
+args = ["server"]
+root-markers = [".marksman.toml"]
+install-hint = "brew install marksman (https://github.com/artempyanykh/marksman/releases)"

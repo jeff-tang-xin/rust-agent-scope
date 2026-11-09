@@ -1,0 +1,13 @@
+id = "ocaml.interface"
+name = "OCaml Interface"
+extensions = ["mli"]
+block-comment = ["(*", "*)"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "OCaml"
+tree-sitter = "ocaml_interface"
+
+[[language-servers]]
+name = "ocamllsp"
+command = "ocamllsp"
+root-markers = ["dune-project", "dune-workspace", "*.opam", "esy.json", "package.json"]
+install-hint = "opam install ocaml-lsp-server"

@@ -1,0 +1,15 @@
+id = "groovy"
+name = "Groovy"
+extensions = ["groovy", "gradle", "gvy", "gy", "gsh"]
+filenames = ["Jenkinsfile"]
+first-line = "^#!.*\\bgroovy\\b"
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Groovy"
+
+[[language-servers]]
+name = "groovy-language-server"
+command = "groovy-language-server"
+root-markers = ["build.gradle", "settings.gradle", "pom.xml"]
+install-hint = "Build https://github.com/GroovyLanguageServer/groovy-language-server and expose it as `groovy-language-server`"

@@ -1,0 +1,450 @@
+//! The remote protocol end to end: a server on one side of an in-memory pipe,
+//! a JSON-RPC client on the other.
+
+use ide_host::rpc::{self, ChannelMessage, Dispatcher, EventMessage, Invoke, ServerInfo};
+use ide_host::{Host, HostConfig};
+use ide_jsonrpc::{Handler, Peer};
+use parking_lot::Mutex;
+use serde_json::{Value, json};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+
+#[derive(Default)]
+struct Client {
+    channels: Mutex<Vec<ChannelMessage>>,
+    events: Mutex<Vec<EventMessage>>,
+}
+
+impl Handler for Client {
+    fn on_notification(&self, method: &str, params: Value) {
+        match method {
+            "channel" => self.channels.lock().push(serde_json::from_value(params).unwrap()),
+            "event" => self.events.lock().push(serde_json::from_value(params).unwrap()),
+            _ => {}
+        }
+    }
+    fn on_request(&self, method: &str, _: Value) -> Result<Value, (i64, String)> {
+        Err((ide_jsonrpc::codes::METHOD_NOT_FOUND, method.to_owned()))
+    }
+}
+
+async fn invoke(peer: &Peer, cmd: &str, args: Value) -> Result<Value, ide_core::IdeError> {
+    let call = Invoke { window: "main".into(), cmd: cmd.into(), args };
+    peer.request::<_, Value>("invoke", call, None).await.map_err(rpc::error_from_reply)
+}
+
+async fn until(what: &str, mut done: impl FnMut() -> bool) {
+    for _ in 0..500 {
+        if done() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serves_projects_files_documents_search_and_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("demo");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/main.py"), "print('needle')\n").unwrap();
+    let base = tmp.path().join("server");
+
+    let peer_slot = Arc::new(OnceLock::new());
+    let sink_peer = peer_slot.clone();
+    let host = Arc::new(Host::new(HostConfig {
+        config_dir: base.join("config"),
+        data_dir: base.join("data"),
+        local_data_dir: base.join("data"),
+        languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+        syntax: Arc::default(),
+        sink_for: Box::new(move |w| rpc::event_sink(sink_peer.clone(), Some(w.to_owned()))),
+        owner: |w| w,
+        runtime: tokio::runtime::Handle::current(),
+        project_environment: false,
+    }));
+    let (client_io, server_io) = tokio::io::duplex(1 << 20);
+    let (sr, sw) = tokio::io::split(server_io);
+    tokio::spawn(rpc::serve(host, Dispatcher::standard(), peer_slot, sr, sw));
+    let (cr, cw) = tokio::io::split(client_io);
+    let client = Arc::new(Client::default());
+    let peer = Peer::connect(cr, cw, client.clone());
+
+    let info: ServerInfo = peer.request("initialize", json!({ "version": rpc::PROTOCOL_VERSION }), None).await.unwrap();
+    assert_eq!(info.protocol, rpc::PROTOCOL_VERSION);
+
+    let opened = invoke(&peer, "open_project", json!({ "path": project })).await.unwrap();
+    assert_eq!(opened["name"], "demo");
+    assert_eq!(opened["trusted"], false);
+    invoke(&peer, "index_status", json!({})).await.unwrap();
+    assert_eq!(invoke(&peer, "lsp_servers", json!({})).await.unwrap(), json!([]));
+    invoke(&peer, "lsp_resend_diagnostics", json!({})).await.unwrap();
+    let files = invoke(&peer, "find_files", json!({"query": "main", "limit": 10})).await.unwrap();
+    assert!(files.is_array());
+    for command in ["build_sync", "run_start", "sdk_locate_tools", "notebook_execute", "debug_start"] {
+        let error = invoke(&peer, command, json!({})).await.unwrap_err();
+        assert!(error.message.contains("Restricted Mode"), "{command}: {error:?}");
+    }
+    let call = Invoke { window: "unknown".into(), cmd: "coverage_collect".into(), args: json!({}) };
+    assert!(peer.request::<_, Value>("invoke", call, None).await.is_err());
+    // Manual workspace edits remain available in Restricted Mode, like doc/fs
+    // editing. They do not ask a language server to execute project commands.
+    let manual = project.join("src/manual.txt");
+    std::fs::write(&manual, "old").unwrap();
+    let edit = json!({ "files": [{ "kind": "edit", "path": manual, "edits": [{
+        "range": { "start": { "line": 0, "col": 0 }, "end": { "line": 0, "col": 3 } },
+        "new_text": "new"
+    }] }] });
+    let edit = invoke(&peer, "prepare_workspace_edit", json!({ "edit": edit })).await.unwrap();
+    assert_eq!(edit["preconditions"].as_array().unwrap().len(), 1);
+    invoke(&peer, "apply_workspace_edit", json!({ "edit": edit })).await.unwrap();
+    until("workspace edit history", || {
+        client.events.lock().iter().any(|event| matches!(event.event, ide_core::IdeEvent::WorkspaceEditApplied { .. }))
+    })
+    .await;
+    let undo_id = client
+        .events
+        .lock()
+        .iter()
+        .find_map(|event| match &event.event {
+            ide_core::IdeEvent::WorkspaceEditApplied { id, .. } => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&manual).unwrap(), "new");
+    invoke(&peer, "undo_workspace_edit", json!({ "id": undo_id })).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&manual).unwrap(), "old");
+    invoke(&peer, "redo_workspace_edit", json!({ "id": undo_id })).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&manual).unwrap(), "new");
+    assert_eq!(invoke(&peer, "project_current", json!({})).await.unwrap()["trusted"], false);
+    for command in ["lsp_execute_command", "lsp_apply_code_action"] {
+        let error = invoke(&peer, command, json!({})).await.unwrap_err();
+        assert!(error.message.contains("Restricted Mode"), "{command}: {error:?}");
+    }
+    invoke(&peer, "project_trust_set", json!({"path": project, "trusted": true, "folder": false})).await.unwrap();
+    let current = invoke(&peer, "project_current", json!({})).await.unwrap();
+    assert_eq!(current["name"], "demo");
+
+    let entries = invoke(&peer, "fs_read_dir", json!({ "path": project })).await.unwrap();
+    assert!(entries.as_array().unwrap().iter().any(|e| e["name"] == "src"), "{entries}");
+
+    // Directory comparisons, streamed progress and confirmed copies share the remote filesystem.
+    let left = project.join("compare-left");
+    let right = project.join("compare-right");
+    std::fs::create_dir_all(&left).unwrap();
+    std::fs::create_dir_all(&right).unwrap();
+    std::fs::write(left.join("中文.bin"), [0, 255, 1]).unwrap();
+    std::fs::write(right.join("中文.bin"), [0, 254, 1]).unwrap();
+    assert_eq!(invoke(&peer, "fs_entry_kind", json!({"path": left})).await.unwrap(), "dir");
+    assert_eq!(invoke(&peer, "fs_entry_kind", json!({"path": left.join("中文.bin")})).await.unwrap(), "file");
+    let compare_args =
+        |request| json!({"left": left, "right": right, "request": request, "onProgress": {"$channel": 520}});
+    let rows = invoke(&peer, "fs_compare_directories", compare_args(520)).await.unwrap();
+    assert_eq!(rows[0]["status"], "different");
+    assert!(client.channels.lock().iter().any(|c| c.id == 520 && c.data["compared"] == 1));
+    let copy_args =
+        |overwrite| json!({"sourceRoot": left, "destinationRoot": right, "path": "中文.bin", "overwrite": overwrite});
+    let error = invoke(&peer, "fs_copy_merge", copy_args(false)).await.unwrap_err();
+    assert_eq!(error.kind, ide_core::error::ErrorKind::AlreadyExists);
+    invoke(&peer, "fs_copy_merge", copy_args(true)).await.unwrap();
+    let rows = invoke(&peer, "fs_compare_directories", compare_args(521)).await.unwrap();
+    assert_eq!(rows[0]["status"], "equal");
+    invoke(&peer, "cancel_request", json!({"id": 522})).await.unwrap();
+    let error = invoke(&peer, "fs_compare_directories", compare_args(522)).await.unwrap_err();
+    assert_eq!(error.kind, ide_core::error::ErrorKind::Cancelled);
+    let error = invoke(
+        &peer,
+        "fs_copy_merge",
+        json!({"sourceRoot": left, "destinationRoot": right, "path": "../escape", "overwrite": true}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind, ide_core::error::ErrorKind::InvalidInput);
+
+    // JVM icons use the same read-only protocol as local windows.
+    let java = project.join("src/Foo.java");
+    let kotlin = project.join("src/Singleton.kt");
+    std::fs::write(&java, "abstract class Foo {}").unwrap();
+    std::fs::write(&kotlin, "object Singleton {}").unwrap();
+    let icons = invoke(&peer, "jvm_file_presentations", json!({ "paths": [java, kotlin] })).await.unwrap();
+    assert_eq!(icons[0]["presentation"]["kind"], "abstractClass");
+    assert_eq!(icons[1]["presentation"]["kind"], "object");
+    // Replacing a file invalidates its cached metadata, including same-size writes.
+    std::fs::write(&java, "interface Foo {}     ").unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&java)
+        .unwrap()
+        .set_modified(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap();
+    let icons = invoke(&peer, "jvm_file_presentations", json!({ "paths": [java] })).await.unwrap();
+    assert_eq!(icons[0]["presentation"]["kind"], "interface");
+    let oversized = invoke(&peer, "jvm_file_presentations", json!({ "paths": vec![java.clone(); 65] })).await;
+    assert!(oversized.is_err());
+
+    // Edit and save a document.
+    let file = project.join("src/main.py");
+    let doc = invoke(&peer, "doc_open", json!({ "path": file })).await.unwrap();
+    let id = doc["id"].clone();
+    let version = doc["version"].as_u64().unwrap();
+    let changes = json!({ "changes": [{ "from": 16, "to": 16, "insert": "print('more')\n" }] });
+    invoke(&peer, "doc_edit", json!({ "doc": id, "baseVersion": version, "changes": changes })).await.unwrap();
+    invoke(&peer, "doc_save", json!({ "doc": id })).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "print('needle')\nprint('more')\n");
+
+    let outside = tmp.path().join("outside.txt");
+    std::fs::write(&outside, "original\n").unwrap();
+    let external = invoke(&peer, "doc_open", json!({ "path": outside })).await.unwrap();
+    std::fs::write(&outside, "external change\n").unwrap();
+    invoke(&peer, "doc_sync_from_disk", json!({})).await.unwrap();
+    let snapshot = invoke(&peer, "doc_snapshot", json!({ "doc": external["id"] })).await.unwrap();
+    assert_eq!(snapshot["text"], "external change\n");
+
+    // Commands shared with the desktop shell (camelCase argument names, as Tauri takes them).
+    invoke(&peer, "doc_set_line_ending", json!({ "doc": id, "lineEnding": "crLf" })).await.unwrap();
+    invoke(&peer, "doc_save", json!({ "doc": id })).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "print('needle')\r\nprint('more')\r\n");
+    let settings = invoke(
+        &peer,
+        "settings_set",
+        json!({ "scope": "project", "key": "deployment.autoUpload",
+        "value": "\"always\"" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(settings["deployment"]["autoUpload"], "always");
+    assert!(std::fs::read_to_string(project.join(".openidea/settings.toml")).unwrap().contains("autoUpload"));
+    invoke(&peer, "vcs_init", json!({ "dir": project })).await.unwrap();
+    until("git repository", || project.join(".git").is_dir()).await;
+
+    // A Docker run configuration's environment comes from the host its command runs on.
+    let env =
+        invoke(&peer, "docker_run_env", json!({ "endpoint": { "kind": "socket", "path": "/run/user/1/docker.sock" } }))
+            .await
+            .unwrap();
+    assert_eq!(env["DOCKER_HOST"], "unix:///run/user/1/docker.sock");
+
+    // Real project-host ignore writes travel through the remote command dispatcher.
+    assert!(Dispatcher::standard().commands().contains(&"vcs_add_to_ignore"));
+    let ignore_root = dunce::canonicalize(&project).unwrap();
+    // Not `.tmp`: a machine's global excludes file (often `*.tmp`) already
+    // ignores those, so the backend never writes the entry anywhere.
+    for (name, destination) in [("shared.ignore-me", "gitignore"), ("private.ignore-me", "localExclude")] {
+        let path = ignore_root.join(name);
+        std::fs::write(&path, "temporary").unwrap();
+        invoke(&peer, "vcs_add_to_ignore", json!({ "paths": [path], "destination": destination })).await.unwrap();
+        let entries = invoke(&peer, "fs_read_dir", json!({ "path": ignore_root })).await.unwrap();
+        let entry = entries.as_array().unwrap().iter().find(|e| e["name"] == name).unwrap();
+        assert_eq!(entry["ignored"], true);
+        assert_eq!(entry["excluded"], false);
+    }
+    assert!(std::fs::read_to_string(project.join(".gitignore")).unwrap().contains("/shared.ignore-me"));
+    assert!(std::fs::read_to_string(project.join(".git/info/exclude")).unwrap().contains("/private.ignore-me"));
+    let outside = tmp.path().join("outside.ignore-me");
+    std::fs::write(&outside, "keep").unwrap();
+    assert!(
+        invoke(&peer, "vcs_add_to_ignore", json!({ "paths": [outside], "destination": "gitignore" })).await.is_err()
+    );
+
+    // Unknown commands and bad arguments come back as IdeErrors.
+    let e = invoke(&peer, "window_minimize", json!({})).await.unwrap_err();
+    assert!(e.message.contains("not available remotely"), "{e:?}");
+    let e = invoke(&peer, "doc_save", json!({ "doc": "nope" })).await.unwrap_err();
+    assert_eq!(e.kind, ide_core::error::ErrorKind::InvalidInput, "{e:?}");
+
+    // Find in Files streams through a channel.
+    let query = json!({ "pattern": "needle", "isRegex": false, "caseSensitive": false, "wholeWord": false,
+        "include": [], "exclude": [], "scope": { "kind": "project" }, "maxMatches": 0 });
+    invoke(&peer, "search_start", json!({ "request": 7, "query": query, "onEvent": { "$channel": 1 } })).await.unwrap();
+    let found = client.channels.lock().iter().filter(|c| c.id == 1).map(|c| c.data.clone()).collect::<Vec<_>>();
+    assert!(found.iter().any(|d| d["type"] == "file"), "{found:?}");
+    assert_eq!(found.last().unwrap()["type"], "done");
+
+    // A run's output streams through a channel and its exit is an event.
+    let config = json!({ "id": "echo", "name": "echo", "kind": "shell", "command": "echo", "args": ["remote-hi"],
+        "cwd": null, "env": {}, "detected": false, "isTest": false, "debugAdapter": null });
+    invoke(&peer, "run_start", json!({ "config": config, "onOutput": { "$channel": 2 } })).await.unwrap();
+    until("run exit", || client.events.lock().iter().any(|e| e.event_type() == "runExited")).await;
+    let out: String = client
+        .channels
+        .lock()
+        .iter()
+        .filter(|c| c.id == 2)
+        .filter_map(|c| c.data["text"].as_str().map(str::to_owned))
+        .collect();
+    assert!(out.contains("remote-hi"), "{out}");
+    assert_eq!(
+        client.events.lock().iter().find(|e| e.event_type() == "runExited").unwrap().window.as_deref(),
+        Some("main")
+    );
+}
+
+trait EventType {
+    fn event_type(&self) -> String;
+}
+
+impl EventType for EventMessage {
+    fn event_type(&self) -> String {
+        serde_json::to_value(&self.event).unwrap()["type"].as_str().unwrap_or_default().to_owned()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_deployment_runs_on_the_project_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    let target = tmp.path().join("mounted");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&target).unwrap();
+    let project = dunce::canonicalize(project).unwrap();
+    let file = project.join("local.txt");
+    std::fs::write(&file, "host file").unwrap();
+    let slot = Arc::new(OnceLock::new());
+    let sink_slot = slot.clone();
+    let host = Arc::new(Host::new(HostConfig {
+        config_dir: tmp.path().join("config"),
+        data_dir: tmp.path().join("data"),
+        local_data_dir: tmp.path().join("data"),
+        languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+        syntax: Arc::default(),
+        sink_for: Box::new(move |w| rpc::event_sink(sink_slot.clone(), Some(w.to_owned()))),
+        owner: |w| w,
+        runtime: tokio::runtime::Handle::current(),
+        project_environment: false,
+    }));
+    let dispatcher = Dispatcher::standard();
+    for cmd in [
+        "deploy_coverage",
+        "deploy_upload",
+        "deploy_download",
+        "deploy_delete_remote",
+        "deploy_compare",
+        "deploy_sync",
+        "deploy_info",
+        "deploy_server_root",
+        "deploy_test_connection",
+        "remote_list",
+        "remote_open",
+        "remote_of",
+        "remote_delete",
+        "remote_mkdir",
+        "remote_rename",
+        "db_sources",
+        "db_save_sources",
+        "db_set_password",
+        "db_test",
+        "db_set_ssh_secret",
+        "db_trust_ssh_host",
+        "db_connected",
+        "db_connect",
+        "db_set_manual_commit",
+        "db_finish_transaction",
+        "db_disconnect",
+        "db_databases",
+        "db_schemas",
+        "db_tables",
+        "db_table_details",
+        "db_ddl",
+        "db_schema_objects",
+        "db_object_ddl",
+        "db_explain",
+        "db_history",
+        "db_remove_history",
+        "db_completion",
+        "db_statements",
+        "db_execute",
+        "db_table_page",
+        "db_apply_edits",
+        "db_console_path",
+    ] {
+        assert!(dispatcher.commands().contains(&cmd), "missing host command {cmd}");
+    }
+    let (client_io, server_io) = tokio::io::duplex(1 << 20);
+    let (sr, sw) = tokio::io::split(server_io);
+    tokio::spawn(rpc::serve(host, dispatcher, slot, sr, sw));
+    let (cr, cw) = tokio::io::split(client_io);
+    let peer = Peer::connect(cr, cw, Arc::new(Client::default()));
+    invoke(&peer, "project_trust_set", json!({"path": project, "trusted": true, "folder": false})).await.unwrap();
+    invoke(&peer, "open_project", json!({"path": project})).await.unwrap();
+    let deployment = json!({"servers": [{"id":"local", "kind":"local", "rootPath":target}], "defaultServer":"local"});
+    invoke(&peer, "settings_set", json!({"scope":"project", "key":"deployment", "value":deployment.to_string()}))
+        .await
+        .unwrap();
+    let coverage = invoke(&peer, "deploy_coverage", json!({"paths":[file]})).await.unwrap();
+    assert_eq!(coverage[0]["server"], "local");
+    assert_eq!(coverage[0]["paths"], json!([ide_core::IpcPath::from(&file)]));
+    invoke(&peer, "deploy_test_connection", json!({"connection":{"kind":"local"}, "path":target})).await.unwrap();
+    let report = invoke(&peer, "deploy_upload", json!({"paths":[file], "request":1001})).await.unwrap();
+    assert_eq!(report["files"], 1, "{report}");
+    assert_eq!(std::fs::read_to_string(target.join("local.txt")).unwrap(), "host file");
+    let entries = invoke(&peer, "remote_list", json!({"connection":{"kind":"local"}, "path":target})).await.unwrap();
+    assert_eq!(entries[0]["name"], "local.txt");
+    std::fs::write(target.join("local.txt"), "host download").unwrap();
+    let report = invoke(&peer, "deploy_download", json!({"paths":[file], "request":1002})).await.unwrap();
+    assert_eq!(report["files"], 1);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "host download");
+    invoke(&peer, "deploy_delete_remote", json!({"paths":[file]})).await.unwrap();
+    assert!(!target.join("local.txt").exists());
+    invoke(&peer, "close_project", json!({})).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn properties_conversion_through_remote_dispatch_without_a_remote_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("properties-project");
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("messages.properties");
+    std::fs::write(&path, r"value=\u4F60\u597D\uD83D\uDE00!").unwrap();
+    let peer_slot = Arc::new(OnceLock::new());
+    let host = Arc::new(Host::new(HostConfig {
+        config_dir: tmp.path().join("config"),
+        data_dir: tmp.path().join("data"),
+        local_data_dir: tmp.path().join("data"),
+        languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+        syntax: Arc::default(),
+        sink_for: Box::new(|_| Arc::new(ide_core::NullSink)),
+        owner: |w| w,
+        runtime: tokio::runtime::Handle::current(),
+        project_environment: false,
+    }));
+    let (client_io, server_io) = tokio::io::duplex(1 << 20);
+    let (sr, sw) = tokio::io::split(server_io);
+    tokio::spawn(rpc::serve(host, Dispatcher::standard(), peer_slot, sr, sw));
+    let (cr, cw) = tokio::io::split(client_io);
+    let peer = Peer::connect(cr, cw, Arc::new(Client::default()));
+    invoke(&peer, "open_project", json!({"path":root})).await.unwrap();
+    let settings = invoke(&peer, "settings_get", json!({})).await.unwrap();
+    assert_eq!(settings["editor"]["encodings"]["nativeToAscii"], false);
+    let opened = invoke(&peer, "doc_open", json!({"path":path})).await.unwrap();
+    let doc = opened["id"].clone();
+    invoke(&peer, "settings_set", json!({"scope":"project", "key":"editor.encodings.nativeToAscii", "value":"true"}))
+        .await
+        .unwrap();
+    let mut snap = Value::Null;
+    for _ in 0..500 {
+        snap = invoke(&peer, "doc_snapshot", json!({"doc":doc})).await.unwrap();
+        if snap["text"] == "value=你好😀!" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(snap["text"], "value=你好😀!");
+    assert_eq!(snap["dirty"], false);
+    invoke(
+        &peer,
+        "doc_edit",
+        json!({"doc":doc, "baseVersion":snap["version"],
+        "changes":{"changes":[{"from":10,"to":11,"insert":"界"}]}}),
+    )
+    .await
+    .unwrap();
+    invoke(&peer, "doc_save", json!({"doc":doc})).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), r"value=\u4F60\u597D\uD83D\uDE00\u754C");
+    invoke(&peer, "doc_set_encoding", json!({"doc":doc,"encoding":"utf-8","reload":true})).await.unwrap();
+    let reloaded = invoke(&peer, "doc_snapshot", json!({"doc":doc})).await.unwrap();
+    assert_eq!(reloaded["text"], "value=你好😀界");
+    assert_eq!(reloaded["dirty"], false);
+    invoke(&peer, "close_project", json!({})).await.unwrap();
+    peer.kill();
+}

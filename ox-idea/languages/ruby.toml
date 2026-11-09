@@ -1,0 +1,32 @@
+id = "ruby"
+name = "Ruby"
+extensions = ["rb", "rake", "gemspec", "ru", "rbi", "jbuilder", "podspec"]
+filenames = ["Gemfile", "Rakefile", "Podfile", "Vagrantfile", "Brewfile", "Guardfile", "Fastfile", "Appfile", "Capfile", "Dangerfile", "Steepfile", ".irbrc", ".pryrc"]
+first-line = "^#!.*\\bruby\\b"
+line-comment = "#"
+block-comment = ["=begin", "=end"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Ruby"
+tree-sitter = "ruby"
+
+[[language-servers]]
+name = "ruby-lsp"
+command = "ruby-lsp"
+root-markers = ["Gemfile", ".ruby-version", ".rubocop.yml"]
+install-hint = "gem install ruby-lsp"
+
+[[language-servers]]
+name = "solargraph"
+# Alternative: used only when the server above is not installed.
+fallback = true
+command = "solargraph"
+args = ["stdio"]
+root-markers = ["Gemfile", ".solargraph.yml"]
+install-hint = "gem install solargraph"
+
+[debugger]
+adapter = "rdbg"
+command = "rdbg"
+args = ["-O", "--port", "${port}", "-c"]
+transport = "tcp"
+install-hint = "gem install debug"

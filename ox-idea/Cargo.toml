@@ -1,0 +1,139 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "src-tauri"]
+# Plugins and the guest SDK build for wasm32-wasip2 in their own workspaces.
+exclude = ["sdk", "plugins"]
+
+[workspace.package]
+version = "0.1.39"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+authors = ["OpenIDEA contributors"]
+
+[workspace.dependencies]
+# internal
+ide-core = { path = "crates/ide-core" }
+ide-vfs = { path = "crates/ide-vfs" }
+ide-text = { path = "crates/ide-text" }
+ide-language = { path = "crates/ide-language" }
+ide-index = { path = "crates/ide-index" }
+ide-syntax = { path = "crates/ide-syntax" }
+ide-search = { path = "crates/ide-search" }
+ide-jsonrpc = { path = "crates/ide-jsonrpc" }
+ide-lsp = { path = "crates/ide-lsp" }
+ide-dap = { path = "crates/ide-dap" }
+ide-vcs = { path = "crates/ide-vcs" }
+ide-terminal = { path = "crates/ide-terminal" }
+ide-run = { path = "crates/ide-run" }
+ide-workspace = { path = "crates/ide-workspace" }
+ide-sdk = { path = "crates/ide-sdk" }
+ide-build = { path = "crates/ide-build" }
+ide-analysis = { path = "crates/ide-analysis" }
+ide-coverage = { path = "crates/ide-coverage" }
+ide-profiler = { path = "crates/ide-profiler" }
+ide-http = { path = "crates/ide-http" }
+ide-db = { path = "crates/ide-db" }
+ide-web = { path = "crates/ide-web" }
+ide-spell = { path = "crates/ide-spell" }
+ide-agent = { path = "crates/ide-agent" }
+ide-clipboard = { path = "crates/ide-clipboard" }
+ide-fonts = { path = "crates/ide-fonts" }
+ide-ssh = { path = "crates/ide-ssh" }
+ide-remote = { path = "crates/ide-remote" }
+ide-host = { path = "crates/ide-host" }
+ide-mcp = { path = "crates/ide-mcp" }
+ide-notebook = { path = "crates/ide-notebook" }
+ide-extension = { path = "crates/ide-extension" }
+ide-plugin = { path = "crates/ide-plugin" }
+ide-cli = { path = "crates/ide-cli" }
+
+# serialization & IPC typing
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+toml_edit = "0.25"
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "0.0.12"
+
+# async & concurrency
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+parking_lot = "0.12"
+rayon = "1"
+dashmap = "6"
+futures = "0.3"
+
+# errors & diagnostics
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# text & fs
+ropey = "1.6"
+encoding_rs = "0.8"
+chardetng = "0.1"
+ignore = "0.4"
+base64 = "0.22"
+globset = "0.4"
+notify = "8"
+trash = "5"
+blake3 = "1"
+dunce = "1"
+dirs = "6"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+# search, index, language
+grep-searcher = "0.1"
+grep-regex = "0.1"
+regex-syntax = "0.8"
+grep-matcher = "0.1"
+nucleo-matcher = "0.3"
+redb = "4"
+tree-sitter = "0.25"
+
+# protocols & integrations
+jupyter-zmq-client = { version = "=2.0.0", default-features = false, features = ["tokio-runtime", "ring"] }
+jupyter-protocol = "=2.0.3"
+zeromq = { version = "0.6", default-features = false, features = ["tokio-runtime", "tcp-transport"] }
+lsp-types = "0.97"
+gix = { version = "0.89", default-features = false }
+portable-pty = "0.9"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "charset", "socks", "gzip", "deflate", "brotli"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "sqlite", "postgres", "mysql"] }
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "sql-browser-tokio"] }
+oracle = { version = "0.6", default-features = false }
+bb8 = "0.9"
+uuid = { version = "1", features = ["v4"] }
+# OS credential stores
+keyring = "4.2"
+keyring-core = "1"
+
+# testing
+insta = { version = "1", features = ["yaml"] }
+proptest = "1"
+tempfile = "3"
+
+[profile.dev]
+# Keep debug builds snappy while giving dependencies decent speed.
+opt-level = 0
+# Full debug info is most of target/. Line tables keep file:line in our backtraces, but a
+# debugger can't show locals; re-enable with `--config profile.dev.debug=true`.
+debug = "line-tables-only"
+[profile.dev.package."*"]
+opt-level = 2
+# Dependency frames keep function names only. Re-enable one with
+# `--config 'profile.dev.package.<crate>.debug=true'`.
+debug = false
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+# Unwind, so a panic fails one task or command instead of quitting the IDE.
+panic = "unwind"
+# Keep the symbol table: crash reports and logged backtraces name functions.
+strip = "debuginfo"

@@ -1,0 +1,16 @@
+id = "lua"
+name = "Lua"
+extensions = ["lua", "luau", "rockspec"]
+filenames = [".luacheckrc"]
+first-line = "^#!.*\\blua(jit)?[0-9.]*\\b"
+line-comment = "--"
+block-comment = ["--[[", "]]"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Lua"
+tree-sitter = "lua"
+
+[[language-servers]]
+name = "lua-language-server"
+command = "lua-language-server"
+root-markers = [".luarc.json", ".luarc.jsonc", ".luacheckrc", ".stylua.toml", "stylua.toml"]
+install-hint = "brew install lua-language-server (https://luals.github.io/#install)"

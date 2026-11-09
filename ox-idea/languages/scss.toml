@@ -1,0 +1,15 @@
+id = "scss"
+name = "SCSS"
+formatter = { tool = "prettier", parser = "scss", range = false }
+extensions = ["scss"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "SCSS"
+
+[[language-servers]]
+name = "vscode-css-language-server"
+command = "vscode-css-language-server"
+args = ["--stdio"]
+initialization-options = { provideFormatter = true, css = {}, scss = {}, less = {} }
+install-hint = "npm i -g vscode-langservers-extracted"

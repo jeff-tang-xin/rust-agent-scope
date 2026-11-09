@@ -1,0 +1,211 @@
+/** Pure helpers: task grouping, entry updates, labels. */
+import type { AgentEntry, AgentStatus, AgentSubagentStatus, AgentTask } from "@/bindings";
+
+export const SESSION_KIND = "agent-session";
+export const HOME_KIND = "agent-home";
+export const HOME_KEY = "agent:new";
+export const TOOL_WINDOW = "agents";
+/** MIME of a dragged agent task (a tree row or the docked conversation bar): the payload is the task id. */
+export const TASK_DRAG = "application/x-openidea-agent-task";
+/** Settings › Tools › Agents: the ACP Registry. */
+export const REGISTRY_PAGE = "tools.agents";
+
+export const sessionKey = (task: string) => `agent:${task}`;
+
+/** Key of a conversation in the entries store: the task's own, or its subagent `subagent`'s. */
+export const entriesKey = (task: string, subagent: string | null) => (subagent ? `${task}/${subagent}` : task);
+
+export type SubagentEntry = Extract<AgentEntry, { type: "subagent" }>;
+
+/** The card of subagent `id` in its parent's `entries`. */
+export const findSubagent = (entries: AgentEntry[] | undefined, id: string) =>
+  entries?.find((e): e is SubagentEntry => e.type === "subagent" && e.id === id);
+
+export const subagentWorking = (s: AgentSubagentStatus) => s === "running" || s === "needsInput";
+
+/** "Explore", else what it was started for. */
+export const subagentTitle = (e: SubagentEntry) => e.title ?? e.description ?? "Subagent";
+
+export function subagentStatusLabel(s: AgentSubagentStatus): string {
+  switch (s) {
+    case "running":
+      return "Running";
+    case "needsInput":
+      return "Needs input";
+    case "done":
+      return "Done";
+    case "cancelled":
+      return "Stopped";
+    case "failed":
+      return "Failed";
+  }
+}
+
+const PROVIDER_ICONS = new Set([
+  "claude",
+  "codex",
+  "gemini",
+  "copilot",
+  "cursor",
+  "opencode",
+  "qwen",
+  "kimi",
+  "goose",
+  "auggie",
+  "kiro",
+  "vibe",
+]);
+
+/** The agent's logo; custom agents get the generic agents icon. */
+export const providerIcon = (provider: string) =>
+  PROVIDER_ICONS.has(provider) ? `agent-${provider}` : "toolwindow-agents";
+
+export interface TaskGroup {
+  status: "needsInput" | "failed" | "limited" | "running" | "ready" | "archived";
+  label: string;
+  tasks: AgentTask[];
+}
+
+/** Groups in attention order: what waits for the user comes first. */
+const GROUPS: Array<[TaskGroup["status"], string, AgentStatus[]]> = [
+  ["needsInput", "Needs Input", ["needsInput"]],
+  ["failed", "Failed", ["failed"]],
+  ["limited", "Usage Limit", ["limited"]],
+  ["running", "Running", ["running", "starting"]],
+  ["ready", "Ready to Review", ["ready"]],
+  ["archived", "Archived", ["archived"]],
+];
+
+export function groupTasks(tasks: Iterable<AgentTask>): TaskGroup[] {
+  const sorted = [...tasks].sort((a, b) => (b.updatedMs ?? 0) - (a.updatedMs ?? 0));
+  return GROUPS.map(([status, label, members]) => ({
+    status,
+    label,
+    tasks: sorted.filter((t) => members.includes(t.status)),
+  })).filter((g) => g.tasks.length > 0);
+}
+
+export const isBusy = (s: AgentStatus) => s === "running" || s === "starting" || s === "needsInput";
+
+/** `entries` with `entry` at `index` (appended when `index` is the length; gaps wait for a reload). */
+export function upsertEntry(entries: AgentEntry[], index: number, entry: AgentEntry): AgentEntry[] | null {
+  if (index > entries.length) return null;
+  const next = entries.slice();
+  next[index] = entry;
+  return next;
+}
+
+/** "agent/fix-lexer" → "fix-lexer". */
+export const branchLabel = (branch: string | null) => (branch ?? "").replace(/^agent\//, "");
+
+export function statusLabel(s: AgentStatus): string {
+  switch (s) {
+    case "starting":
+      return "Starting";
+    case "running":
+      return "Running";
+    case "needsInput":
+      return "Needs input";
+    case "ready":
+      return "Ready";
+    case "failed":
+      return "Failed";
+    case "limited":
+      return "Usage limit";
+    case "archived":
+      return "Archived";
+  }
+}
+
+/** Index of each turn-starting message in `entries`: its turn's number (messages steered into a running turn don't start one). */
+export function turnNumbers(entries: AgentEntry[]): Map<number, number> {
+  const out = new Map<number, number>();
+  entries.forEach((e, i) => {
+    if (e.type === "user" && !e.steered) out.set(i, out.size);
+  });
+  return out;
+}
+
+export interface ReplyTurn {
+  turn: number;
+  prompt: Extract<AgentEntry, { type: "user" }>;
+  steered: boolean;
+}
+
+export interface ReplyTimes {
+  sentMs: number | null;
+  doneMs: number | null;
+}
+
+/** When the turn behind each agent reply was asked and finished, by entry index. */
+export function replyTimes(entries: AgentEntry[]): Map<number, ReplyTimes> {
+  const out = new Map<number, ReplyTimes>();
+  let current: Extract<AgentEntry, { type: "user" }> | null = null;
+  entries.forEach((entry, i) => {
+    if (entry.type === "user" && !entry.steered) current = entry;
+    else if (entry.type === "agent" && current)
+      out.set(i, { sentMs: current.sentMs ?? null, doneMs: current.doneMs ?? null });
+  });
+  return out;
+}
+
+/** Only the last reply of a turn offers actions that change the conversation. */
+export function replyTurns(entries: AgentEntry[]): Map<number, ReplyTurn> {
+  const out = new Map<number, ReplyTurn>();
+  let current: ReplyTurn | null = null;
+  let previous: number | null = null;
+  let turn = 0;
+  entries.forEach((entry, i) => {
+    if (entry.type === "user") {
+      if (!entry.steered) {
+        current = { turn: turn++, prompt: entry, steered: false };
+        previous = null;
+      } else if (current) current.steered = true;
+    } else if (entry.type === "agent" && entry.text.trim() && current) {
+      if (previous !== null) out.delete(previous);
+      out.set(i, current);
+      previous = i;
+    }
+  });
+  return out;
+}
+
+export function replyOperations(task: AgentTask, reply: ReplyTurn | undefined, turnCount: number) {
+  const idle = task.status !== "archived" && !isBusy(task.status) && !!reply;
+  const latest = reply?.turn === turnCount - 1;
+  const { fork = false, rollback = false } = task.capabilities ?? {};
+  return {
+    regenerate:
+      idle &&
+      latest &&
+      rollback &&
+      !reply.steered &&
+      !!reply.prompt.text.trim() &&
+      reply.prompt.attachments.length === (reply.prompt.images?.length ?? 0),
+    fork: idle && fork && (rollback || latest),
+  };
+}
+
+/** "3m", "2h", "5d" since `ms`. */
+export function age(ms: number, now = Date.now()): string {
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 60) return "now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
+/** The status change worth a notification, if any. */
+export function attentionChange(
+  prev: AgentStatus | undefined,
+  next: AgentStatus,
+): "finished" | "failed" | "input" | null {
+  if (prev === next || prev === undefined) return null;
+  if (next === "needsInput") return "input";
+  if (!isBusy(prev)) return null;
+  if (next === "ready") return "finished";
+  if (next === "failed" || next === "limited") return "failed";
+  return null;
+}

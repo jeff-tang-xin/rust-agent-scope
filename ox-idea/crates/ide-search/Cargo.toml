@@ -1,0 +1,28 @@
+[package]
+name = "ide-search"
+description = "Find / Replace in Files built on the ripgrep engine crates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+ide-vfs.workspace = true
+serde.workspace = true
+specta.workspace = true
+grep-searcher.workspace = true
+grep-regex.workspace = true
+grep-matcher.workspace = true
+ignore.workspace = true
+globset.workspace = true
+tracing.workspace = true
+memchr = "2"
+
+[dev-dependencies]
+tempfile.workspace = true
+insta.workspace = true
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "search"
+harness = false

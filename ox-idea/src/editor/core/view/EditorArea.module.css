@@ -1,0 +1,321 @@
+.area {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.group {
+  flex: 1;
+}
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+}
+.inactivePane :global(.cm-cursorLayer) {
+  opacity: 0.4;
+}
+.tabs {
+  flex: none;
+  border-bottom: 1px solid var(--border-editor-tabs, var(--border));
+}
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  isolation: isolate;
+}
+/*
+ * Kept-alive tabs share the content box; hiding one only skips its rendering, not its layout.
+ * Nothing inherited changes (pointer-events, inert): that would restyle the whole conversation.
+ */
+.kept {
+  position: absolute;
+  inset: 0;
+}
+.keptHidden {
+  content-visibility: hidden;
+  z-index: -1;
+}
+.host {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+.host > :global(.cm-editor) {
+  position: absolute;
+  inset: 0;
+}
+.loading {
+  flex: 1;
+}
+.kind {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+/* Tabs' trailing slot may shrink to 0; keep the action buttons whole. */
+.tabs > :has(> .tabActions) {
+  flex: none;
+}
+.tabActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 8px;
+}
+.pin {
+  color: var(--fg-muted);
+  margin-left: -2px;
+}
+.dupe {
+  color: var(--fg-faint);
+  margin-left: 4px;
+}
+.banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  background: var(--bg-editor-banner, color-mix(in srgb, var(--accent) 7%, var(--bg-editor, var(--bg-elev))));
+  border-bottom: 1px solid var(--border-editor-tabs, var(--border));
+  color: var(--fg-strong);
+}
+.bannerIcon {
+  color: var(--fg-muted);
+}
+/* Library class notice (IDEA's yellowish decompiled-file bar). */
+.libraryBanner {
+  background: var(--bg-feedback-warning);
+  border-bottom-color: var(--border-feedback-warning);
+}
+.virtualBannerText {
+  min-width: 0;
+  padding: 8px 0;
+}
+.bannerText {
+  flex: none;
+  white-space: nowrap;
+}
+.bannerDetail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+.bannerSpacer {
+  flex: 1;
+}
+
+/* Find / replace bar */
+.find {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(220px, 420px) auto 1fr;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 6px;
+  padding: 6px 8px 6px 10px;
+  background: var(--bg-editor-inline, var(--bg-elev));
+  border-bottom: 1px solid var(--border-editor-tabs, var(--border));
+}
+.findExpandable {
+  grid-template-columns: auto minmax(220px, 420px) auto 1fr;
+}
+.findExpand {
+  grid-column: 1;
+  grid-row: 1;
+}
+.findExpandable .findField {
+  grid-column: 2;
+}
+.findField {
+  min-width: 0;
+}
+.findButtons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.findCount {
+  font-size: var(--fs-ui);
+  color: var(--fg-subtle);
+  padding: 0 8px 0 4px;
+  min-width: 56px;
+  white-space: nowrap;
+}
+.findCountNone {
+  color: var(--danger);
+}
+.findClose {
+  justify-self: end;
+}
+.replaceButtons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Go to line */
+.gotoBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+.gotoHint {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+
+/* Status bar */
+.status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+.crumbButton {
+  flex: none;
+  max-width: 240px;
+  gap: 5px;
+}
+.crumbButton:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.crumbIcon {
+  flex: none;
+}
+.crumbLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statusSep {
+  flex: none;
+  color: var(--fg-faint);
+  margin: 0 1px;
+}
+.lock {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* tab drag & drop target on the editor */
+.dropZone {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  inset: 0;
+}
+.drop-left {
+  right: 50%;
+}
+.drop-right {
+  left: 50%;
+}
+.drop-top {
+  bottom: 50%;
+}
+.drop-bottom {
+  top: 50%;
+}
+
+/* Settings › Editor › General › Editor Tabs */
+.tabsHidden {
+  display: none;
+}
+.tabRows {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tabsBottom > .tabs,
+.tabsBottom > .tabRows {
+  order: 1;
+}
+.tabsBottom .tabs {
+  border-bottom: none;
+  border-top: 1px solid var(--border-editor-tabs, var(--border));
+}
+/* Tabs on the left / right of the editor (a column). */
+.tabsVertical {
+  flex-direction: row;
+}
+.tabsVertical > .tabs,
+.tabsVertical > .tabRows {
+  width: max-content;
+  min-width: 140px;
+  max-width: 260px;
+  border-bottom: none;
+  border-right: 1px solid var(--border-editor-tabs, var(--border));
+}
+.tabsVertical .tabRows > .tabs {
+  min-height: 0;
+  border-bottom: none;
+}
+.tabsVertical .tabRows > .tabs + .tabs {
+  flex: 1 1 auto;
+  border-top: 1px solid var(--border-editor-tabs, var(--border));
+}
+.tabsRight > .tabs,
+.tabsRight > .tabRows {
+  order: 1;
+  border-right: none;
+  border-left: 1px solid var(--border-editor-tabs, var(--border));
+}
+
+/* Breadcrumbs inside the editor (top or bottom of the text) */
+.codeCrumbs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 8px;
+  overflow: hidden;
+  background: var(--bg-editor, var(--bg-island));
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+}
+.codeCrumbsTop {
+  border-bottom: 1px solid var(--border-editor-tabs, var(--border));
+}
+.codeCrumbsBottom {
+  border-top: 1px solid var(--border-editor-tabs, var(--border));
+}
+
+/* Contributed editor banners (registerEditorBanner): text, then right-aligned links. */
+.bannerLink {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.bannerLink:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}

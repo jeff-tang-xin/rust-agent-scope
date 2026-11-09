@@ -1,0 +1,464 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.fieldLabel {
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+}
+.error {
+  color: var(--danger);
+  font-size: var(--fs-small);
+}
+.hint {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+.section {
+  padding: 10px 14px 4px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.radioRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--fg);
+  cursor: default;
+}
+.radioRow input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.radioText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fileList {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+.fileRow {
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fileRow:hover {
+  background: var(--bg-hover);
+}
+.fileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fileDir {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grow {
+  flex: 1;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.commitRow {
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+.commitHash {
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.commitSubject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+.commitMeta {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.empty {
+  padding: 12px;
+  color: var(--fg-faint);
+  text-align: center;
+}
+.boxList {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+/* Push dialogs: the list fills the body so a resizable window shows more rows. */
+.pushDialog > [data-dialog-body] {
+  display: flex;
+  flex-direction: column;
+}
+.pushTreeWrap {
+  flex: 1;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+}
+.pushListWrap {
+  flex: 1;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 0 14px 14px;
+}
+/* Push dialog: commits above their changed files, split by a draggable divider; the pair fills the body. */
+.pushSplit {
+  flex: 1;
+  min-height: min(540px, 60vh);
+}
+/* The panel's own `height: 100%` doesn't resolve against a flex-basis height in WebKit: stretch instead. */
+.pushSplit .pushSplitPanel {
+  height: auto;
+  align-self: stretch;
+}
+.pushSplitPanel > .pushListWrap {
+  min-height: 0;
+  padding-bottom: 8px;
+}
+/* Push dialogs: the outgoing commits' changed files below the commits, the diff beside them. */
+.pushChanges {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 8px;
+}
+.pushChanges .comparison {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  padding: 0 14px 14px;
+}
+.pushChangesTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 0 14px 6px;
+  color: var(--fg-subtle);
+}
+.pushGrouping {
+  margin-left: auto;
+}
+.pushCommitDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 96px;
+  margin: 0 14px 8px;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pushCommitMessage {
+  color: var(--fg-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.todoList {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  white-space: normal;
+}
+.linkButton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.linkButton:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+/* Operation in progress (rebase, merge…) above the Commit tool window's changes. */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-banner-warning, color-mix(in srgb, var(--warning) 12%, transparent));
+  color: var(--fg);
+  font-size: var(--fs-small);
+}
+.bannerText {
+  flex: 1 0 auto;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linkButton:disabled {
+  color: var(--fg-faint);
+  cursor: default;
+  text-decoration: none;
+}
+.textarea {
+  resize: vertical;
+  min-height: 48px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: var(--radius-small);
+  background: var(--bg-input);
+  color: var(--fg);
+  font: inherit;
+}
+.textarea:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+}
+/* Interactive rebase dialog. */
+.rebaseList {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+.rebaseRow {
+  min-height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.rebaseRow:hover {
+  background: var(--bg-hover);
+}
+.rebaseAction {
+  width: 120px;
+  flex: none;
+}
+.rebaseMessage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+/* Push dialog: the editable target branch. */
+.targetInput {
+  width: 220px;
+  margin-left: 6px;
+}
+.choiceList {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+/* Pull / Merge / Rebase dialogs. */
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.optionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+/* Manage Remotes / Worktrees lists. */
+.manageBar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.manageRow {
+  width: 100%;
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: default;
+}
+.manageRow:hover {
+  background: var(--bg-hover);
+}
+.manageRowSelected,
+.manageRowSelected:hover {
+  background: var(--bg-list-selected);
+}
+/* Worktrees dialog: the tree needs a height of its own inside the auto-sized body. */
+.worktreeListDialog {
+  height: 340px;
+  min-height: 0;
+}
+/* Worktrees tree rows: the worktree name keeps its width, the path is what gets cut short. */
+.worktreeIcon {
+  flex: none;
+  margin-right: 2px;
+  color: var(--fg-muted);
+}
+.worktreeLabel {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktreeDetail {
+  min-width: 0;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+}
+
+.comparisonDialog > [data-dialog-body] {
+  display: flex;
+  flex-direction: column;
+}
+.comparisonDialog .comparison {
+  flex: 1 1 auto;
+}
+.comparisonWindow {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-dialog, var(--bg-elev));
+  color: var(--fg);
+}
+/* Linux: frameless X11 windows have no shadow, so mark the edge in CSS (like the Settings window). */
+.comparisonWindowEdge {
+  position: relative;
+}
+.comparisonWindowEdge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--border-window);
+}
+.comparisonWindowLoading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-muted);
+}
+.comparisonWindowBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.comparisonWindowBody[hidden] {
+  display: none;
+}
+.comparisonWindowBody > .comparisonWindow {
+  flex: 1;
+}
+.comparisonWindowBody > .comparison {
+  flex: 1 1 auto;
+}
+.comparisonWindowFooter {
+  display: flex;
+  justify-content: flex-end;
+  flex: none;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.comparison {
+  display: flex;
+  height: min(520px, 65vh);
+  min-height: 180px;
+  padding: 0 12px 12px;
+  gap: 10px;
+}
+.comparisonTree {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+}
+.comparisonWithDiff .comparisonTree {
+  flex: 0 0 30%;
+}
+.comparisonDiff {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.compareNotice {
+  padding: 6px 14px;
+  color: var(--fg-subtle);
+  overflow-wrap: anywhere;
+}
+.compareToolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 14px;
+}
+.compareToolbar > input {
+  flex: 1;
+  min-width: 140px;
+}
+.compareAdded {
+  color: var(--vcs-added);
+  font-variant-numeric: tabular-nums;
+}
+.compareRemoved {
+  color: var(--vcs-deleted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .comparisonWithDiff {
+    flex-direction: column;
+    height: 65vh;
+  }
+  .comparisonWithDiff .comparisonTree {
+    flex: 0 0 30%;
+    min-height: 90px;
+  }
+}

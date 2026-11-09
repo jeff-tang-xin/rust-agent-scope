@@ -1,0 +1,68 @@
+id = "java"
+name = "Java"
+extensions = ["java"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Java"
+tree-sitter = "java"
+scratch-template = '''
+class Scratch {
+    public static void main(String[] args) {
+        $END$
+    }
+}
+'''
+
+# Microsoft java-debug runs inside jdtls as a bundle (`initializationOptions.bundles`,
+# added when installed); sessions start with `vscode.java.startDebugSession` and the
+# client connects to the returned port (`debugServer`).
+[debugger]
+adapter = "java-debug"
+command = "com.microsoft.java.debug.plugin.jar"
+transport = "tcp"
+install-hint = "Install Microsoft java-debug (Settings › Languages & Frameworks › Language Servers › Java Debugger)"
+
+[[language-servers]]
+name = "jdtls"
+command = "jdtls"
+root-markers = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.xml", ".project"]
+install-hint = "Install Eclipse JDT Language Server (brew install jdtls, or https://github.com/eclipse-jdtls/eclipse.jdt.ls); requires JDK 21+"
+
+[language-servers.initialization-options]
+bundles = []
+
+[language-servers.initialization-options.extendedClientCapabilities]
+# Library classes open as `jdt://` virtual documents (`java/classFileContents`).
+classFileContentsSupport = true
+resolveAdditionalTextEditsSupport = true
+
+[language-servers.initialization-options.settings.java]
+autobuild = { enabled = true }
+contentProvider = { preferred = "fernflowerContentProvider" }
+maven = { downloadSources = true, updateSnapshots = false }
+eclipse = { downloadSources = true }
+references = { includeDecompiledSources = true }
+signatureHelp = { enabled = true }
+symbols = { includeGeneratedCode = true }
+configuration = { updateBuildConfiguration = "automatic" }
+project = { referencedLibraries = ["lib/**/*.jar"] }
+# Generated code (implement methods, getters, toString…) indents like the editor (`indent` above).
+format = { insertSpaces = true, tabSize = 4 }
+# Calls complete as `name()` with the caret inside and parameter info, not guessed arguments;
+# JDK internals (`sun.*`, `com.sun.*`, `jdk.*`) and AWT's `List` stay out of completion and auto-import.
+completion = { guessMethodArguments = "off", filteredTypes = ["java.awt.List", "com.sun.*", "sun.*", "jdk.*", "org.graalvm.*", "io.micrometer.shaded.*"] }
+
+[language-servers.initialization-options.settings.java.import]
+# Keep Eclipse metadata (.project, .classpath, .settings) out of the project.
+generatesMetadataFilesAtProjectRoot = false
+exclusions = ["**/node_modules/**", "**/.metadata/**", "**/archetype-resources/**", "**/META-INF/maven/**"]
+maven = { enabled = true }
+gradle = { enabled = true, wrapper = { enabled = true } }
+
+[[language-servers]]
+name = "kmp-lsp"
+fallback = true
+command = "kmp-lsp"
+root-markers = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.xml", ".project"]
+install-hint = "Install kmp-lsp in Settings › Languages & Frameworks › Language Servers (https://github.com/Hessesian/kmp-lsp)"

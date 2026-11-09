@@ -1,0 +1,12 @@
+id = "go.mod"
+name = "Go Module"
+filenames = ["go.mod"]
+line-comment = "//"
+indent = { tab-size = 4, insert-spaces = false }
+ui-mode = "GoMod"
+
+[[language-servers]]
+name = "gopls"
+command = "gopls"
+root-markers = ["go.work", "go.mod"]
+install-hint = "go install golang.org/x/tools/gopls@latest"

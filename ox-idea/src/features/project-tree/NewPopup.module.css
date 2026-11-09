@@ -1,0 +1,69 @@
+/* IDEA's New popup: search field over a list of file kinds. */
+.popup {
+  width: 280px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 4px;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-row);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-popup);
+  margin-bottom: 4px;
+}
+.searchIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.input {
+  flex: 1;
+  min-width: 0;
+}
+.list {
+  max-height: 420px;
+  height: auto;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.icon {
+  width: 16px;
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-emphasis);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.active .label {
+  color: var(--fg-strong);
+}
+.shortcut {
+  flex: none;
+  margin-left: 16px;
+  font-family: var(--font-keys);
+  color: var(--fg-muted);
+}
+.separator {
+  flex: 1;
+  height: 1px;
+  background: var(--border-popup);
+}
+.empty {
+  padding: 6px 10px;
+  color: var(--fg-faint);
+  font-size: var(--fs-small);
+}

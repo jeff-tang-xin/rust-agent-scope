@@ -1,0 +1,100 @@
+.root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tabs {
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.summary {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.title {
+  color: var(--fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  flex: none;
+  color: var(--fg-faint);
+}
+.spacer {
+  flex: 1;
+}
+.tree {
+  flex: 1;
+  min-height: 0;
+}
+.empty {
+  color: var(--fg-faint);
+}
+.node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.icon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: var(--fs-small);
+}
+.lineNo {
+  flex: none;
+  min-width: 28px;
+  color: var(--fg-gutter);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  text-align: right;
+}
+.code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: var(--font-mono);
+}
+.nodeWrap {
+  display: contents;
+}
+.excluded .label,
+.excluded .code {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.split {
+  flex: 1;
+  min-height: 0;
+}
+.splitPanel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}

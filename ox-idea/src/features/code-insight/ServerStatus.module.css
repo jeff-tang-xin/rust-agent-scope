@@ -1,0 +1,85 @@
+.dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  margin-right: 6px;
+  display: inline-block;
+}
+.ok {
+  background: var(--success);
+}
+.busy {
+  background: var(--accent);
+  animation: pulse 1.2s var(--ease) infinite alternate;
+}
+.error {
+  background: var(--danger);
+}
+.idle {
+  background: var(--fg-faint);
+}
+@keyframes pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .busy {
+    animation: none;
+  }
+}
+.panel {
+  width: 340px;
+  padding: 6px 0;
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+}
+.header {
+  padding: 2px 12px 6px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.server {
+  padding: 4px 12px;
+}
+.server + .server {
+  border-top: 1px solid var(--border-popup);
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+}
+.name {
+  color: var(--fg-emphasis);
+  margin-right: 8px;
+}
+.status {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.spacer {
+  flex: 1;
+}
+.meta {
+  padding-left: 12px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.message {
+  margin-top: 4px;
+  padding-left: 12px;
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.install {
+  font-family: var(--font-mono);
+  color: var(--fg);
+  -webkit-user-select: text;
+  user-select: text;
+}

@@ -1,0 +1,14 @@
+id = "toml"
+name = "TOML"
+extensions = ["toml"]
+filenames = ["Cargo.lock", "Pipfile", "poetry.lock", "uv.lock", "pdm.lock", "Gopkg.lock"]
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "TOML"
+tree-sitter = "toml"
+
+[[language-servers]]
+name = "taplo"
+command = "taplo"
+args = ["lsp", "stdio"]
+install-hint = "cargo install taplo-cli --locked --features lsp (or npm i -g @taplo/cli)"

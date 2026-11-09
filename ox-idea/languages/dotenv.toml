@@ -1,0 +1,7 @@
+id = "dotenv"
+name = ".env"
+extensions = ["env"]
+filenames = [".env", ".env.*", ".flaskenv"]
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Properties files"

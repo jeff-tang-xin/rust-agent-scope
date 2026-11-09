@@ -1,0 +1,12 @@
+id = "latex"
+name = "LaTeX"
+extensions = ["tex", "ltx", "sty", "cls", "dtx", "ins", "bbx", "cbx"]
+line-comment = "%"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "LaTeX"
+
+[[language-servers]]
+name = "texlab"
+command = "texlab"
+root-markers = [".latexmkrc", "latexmkrc", ".texlabroot", "texlabroot", "Tectonic.toml"]
+install-hint = "cargo install --locked texlab (or brew install texlab)"

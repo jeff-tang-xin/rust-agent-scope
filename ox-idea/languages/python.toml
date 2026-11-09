@@ -1,0 +1,66 @@
+id = "python"
+name = "Python"
+formatter = { tool = "ruff", parser = "python", range = true }
+extensions = ["py", "pyi", "pyw"]
+filenames = ["SConstruct", "SConscript"]
+first-line = "^#!.*\\bpython[0-9.]*\\b"
+line-comment = "#"
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Python"
+tree-sitter = "python"
+
+[[language-servers]]
+name = "basedpyright"
+command = "basedpyright-langserver"
+args = ["--stdio"]
+root-markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json"]
+install-hint = "pip install basedpyright (or: uv tool install basedpyright)"
+
+# basedpyright defaults to "recommended", which flags unannotated attributes and
+# every unknown type. "standard" reports real problems; a project's own
+# `[tool.basedpyright]` / pyrightconfig.json still takes precedence.
+[language-servers.initialization-options.settings.basedpyright.analysis]
+typeCheckingMode = "standard"
+# Off whenever analysis settings are sent without it: `src/` layouts would stop resolving.
+autoSearchPaths = true
+
+[[language-servers]]
+name = "pyright"
+# Alternative: used only when the server above is not installed.
+fallback = true
+command = "pyright-langserver"
+args = ["--stdio"]
+root-markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json"]
+install-hint = "npm i -g pyright (or: pip install pyright)"
+
+[[language-servers]]
+name = "ty"
+fallback = true
+command = "ty"
+args = ["server"]
+root-markers = ["ty.toml", "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"]
+install-hint = "uv tool install ty (or: pip install ty)"
+
+[[language-servers]]
+name = "pyrefly"
+fallback = true
+command = "pyrefly"
+args = ["lsp"]
+root-markers = ["pyrefly.toml", "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"]
+install-hint = "uv tool install pyrefly (or: pip install pyrefly)"
+
+# Lint, format, organize imports and fix all next to the type checker, in
+# projects configured for Ruff (formatting is Ruff's alone: basedpyright has none).
+[[language-servers]]
+name = "ruff"
+command = "ruff"
+args = ["server"]
+root-markers = ["ruff.toml", ".ruff.toml", "pyproject.toml#tool.ruff"]
+require-root-marker = true
+install-hint = "pip install ruff (or: uv tool install ruff)"
+
+[debugger]
+adapter = "debugpy"
+command = "python3"
+args = ["-m", "debugpy.adapter"]
+install-hint = "pip install debugpy"

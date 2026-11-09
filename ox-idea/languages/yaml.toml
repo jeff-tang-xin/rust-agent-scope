@@ -1,0 +1,16 @@
+id = "yaml"
+name = "YAML"
+formatter = { tool = "prettier", parser = "yaml", range = false }
+extensions = ["yaml", "yml"]
+filenames = [".clang-format", ".clang-tidy", ".clangd", ".gemrc", "pnpm-lock.yaml", "CITATION.cff"]
+first-line = "^%YAML"
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "YAML"
+tree-sitter = "yaml"
+
+[[language-servers]]
+name = "yaml-language-server"
+command = "yaml-language-server"
+args = ["--stdio"]
+install-hint = "npm i -g yaml-language-server"

@@ -1,0 +1,230 @@
+.view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.toolbar {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+.sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 6px 2px 10px;
+  font-size: var(--fs-small);
+  color: var(--fg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.warning {
+  color: var(--warning);
+}
+.bannerTitle {
+  flex: none;
+  color: var(--fg);
+}
+.bannerText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.split {
+  flex: 1;
+  min-height: 0;
+}
+.tree {
+  height: 100%;
+}
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--fg-muted);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+}
+.icon {
+  flex: none;
+}
+.label {
+  flex: 0 1 auto;
+  min-width: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+.selectedLabel {
+  color: var(--fg-strong);
+}
+.dim {
+  color: var(--fg-subtle);
+}
+.detail {
+  flex: 0 100 auto;
+  min-width: 0;
+  color: var(--fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hint {
+  margin-top: 6px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.detailPane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.detailBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.log {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 10px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  line-height: var(--lh-code);
+  color: var(--fg-editor);
+  background: var(--bg-editor);
+  white-space: pre;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: default;
+}
+.log > div {
+  cursor: text;
+}
+.json {
+  white-space: pre;
+}
+.stderr {
+  color: var(--danger);
+}
+
+/* Dialogs */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.fieldLabel {
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+}
+/* Dockerfile / Compose gutter run icons */
+.gutter {
+  width: 14px;
+}
+.gutter :global(.cm-gutterElement) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.marker {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 6px;
+}
+.fieldRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.okText {
+  color: var(--success);
+}
+
+/* Services tree host */
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--fg-muted);
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--link-hover);
+}
+.shortcut {
+  color: var(--fg-subtle);
+}
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  padding: 12px;
+  margin: 0;
+}
+.facts dt {
+  color: var(--fg-secondary);
+}
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.detailActions {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+
+.hostTabs {
+  min-width: 0;
+  border: 0;
+  background: none;
+}

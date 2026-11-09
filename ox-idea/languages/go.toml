@@ -1,0 +1,29 @@
+id = "go"
+name = "Go"
+extensions = ["go"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = false }
+ui-mode = "Go"
+tree-sitter = "go"
+scratch-template = '''
+package main
+
+func main() {
+	$END$
+}
+'''
+
+[[language-servers]]
+name = "gopls"
+command = "gopls"
+initialization-options = { semanticTokens = true }
+root-markers = ["go.work", "go.mod"]
+install-hint = "go install golang.org/x/tools/gopls@latest"
+
+[debugger]
+adapter = "delve"
+command = "dlv"
+args = ["dap", "--listen", "127.0.0.1:${port}"]
+transport = "tcp"
+install-hint = "go install github.com/go-delve/delve/cmd/dlv@latest"

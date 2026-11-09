@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package acme.notes.v1;
+
+message Note {
+  int64 id = 1;
+  string title = 2;
+  string body = 3;
+}
+
+message ListNotesRequest {
+  string query = 1;
+  int32 page_size = 2;
+}
+
+message ListNotesResponse {
+  repeated Note notes = 1;
+}
+
+service Notes {
+  rpc ListNotes(ListNotesRequest) returns (ListNotesResponse);
+}

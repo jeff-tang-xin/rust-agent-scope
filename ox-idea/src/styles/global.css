@@ -1,0 +1,260 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "./tokens.css";
+
+/* Monochrome icons default to the theme icon grey; callers override for selected / disabled. */
+:root {
+  --icon-color: var(--fg-icon);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-frame);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+html[data-selection-lock] *:not([data-selection-scope], [data-selection-scope] *) {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  /* Desktop convention: controls keep the arrow; only links get the hand. */
+  cursor: default;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Radio buttons drawn like the Checkbox primitive (IntelliJ Islands). */
+input[type="radio"] {
+  appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--bg-checkbox, var(--bg-button));
+  box-shadow: inset 0 0 0 1px var(--border-checkbox, var(--control-off));
+  cursor: default;
+  transition:
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+input[type="radio"]:checked {
+  background: radial-gradient(circle, var(--fg-button-primary) 0 2.5px, transparent 3px), var(--bg-button-primary);
+  box-shadow: none;
+}
+input[type="radio"]:disabled {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+input[type="radio"]:disabled:checked {
+  background: radial-gradient(circle, var(--fg-faint) 0 2.5px, transparent 3px), var(--border);
+}
+input[type="radio"]:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
+}
+
+a {
+  color: var(--link);
+}
+a:hover {
+  color: var(--link-hover);
+}
+
+/* Focus rings mark controls only, as in IDEA: lists, trees, tables, menus, popups and other
+   focusable containers show focus through their selected row instead of a frame. Text fields
+   never get one, whatever their role (a search box is a combobox): their frame shows focus, and
+   an outline here draws a second box inside it. `:where` keeps this at the specificity of a bare
+   `:focus-visible`, so a component's own focus style always wins. */
+:focus-visible {
+  outline: none;
+}
+:where(
+    button,
+    a[href],
+    input:is(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="color"],
+      [type="file"],
+      [type="button"],
+      [type="submit"],
+      [type="reset"]
+    ),
+    select,
+    summary,
+    [role="button"],
+    [role="link"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="switch"],
+    [role="tab"],
+    [role="combobox"],
+    [role="slider"],
+    [role="spinbutton"]
+  ):not(
+    :where(
+      input:not(
+        [type="checkbox"],
+        [type="radio"],
+        [type="range"],
+        [type="color"],
+        [type="file"],
+        [type="button"],
+        [type="submit"],
+        [type="reset"]
+      ),
+      textarea,
+      [contenteditable="true"],
+      [contenteditable=""]
+    )
+  ):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* A control the user only clicked keeps no ring once a keystroke turns on keyboard modality
+   (`platform/pointerFocus.ts`); `!important` covers the components' own focus rings. */
+[data-pointer-focus]:focus-visible {
+  outline: none !important;
+}
+
+::selection {
+  background: var(--bg-editor-selection);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Syntax colours for read-only previews and result lines: the `tok-*` classes
+   CodeMirror's `classHighlighter` emits (`codeHighlighter`/`tokenSpans`). One
+   shared set instead of a copy per view module; editor tooltips have the same
+   colours scoped to their DOM in editor/lsp/theme.ts. The main editor is
+   unaffected: it colours itself with the inline `HighlightStyle` in
+   editor/core/cm/highlight.ts. */
+.tok-keyword,
+.tok-modifier,
+.tok-controlKeyword,
+.tok-operatorKeyword {
+  color: var(--syn-keyword);
+}
+.tok-string,
+.tok-string2 {
+  color: var(--syn-string);
+}
+.tok-number,
+.tok-bool,
+.tok-atom {
+  color: var(--syn-number);
+}
+.tok-typeName,
+.tok-className,
+.tok-namespace {
+  color: var(--syn-type);
+}
+.tok-comment {
+  color: var(--syn-comment);
+  font-style: var(--syn-comment-style);
+}
+.tok-meta,
+.tok-macroName {
+  color: var(--syn-annotation);
+}
+.tok-propertyName {
+  color: var(--syn-property);
+}
+.tok-variableName.tok-definition {
+  color: var(--syn-function);
+}
+.tok-punctuation,
+.tok-operator {
+  color: var(--syn-punct);
+}
+.tok-invalid {
+  color: var(--syn-invalid);
+}
+
+/* macOS-style overlay scrollbars (ScrollBar.Mac.thumbColor / hoverThumbColor) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+  min-height: 32px;
+  min-width: 32px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* An outer scroller whose scrollbar the editor's overview lane draws (cm/lanes.ts `overviewLaneIn`). */
+.cm-openidea-overviewScroller::-webkit-scrollbar:vertical {
+  width: 0;
+}
+
+/* Settings › Appearance › Antialiasing (IDE / Editor). */
+:root[data-aa-ide="subpixel"] body {
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+:root[data-aa-ide="none"] body {
+  -webkit-font-smoothing: none;
+}
+:root[data-aa-editor="greyscale"] .cm-editor {
+  -webkit-font-smoothing: antialiased;
+}
+:root[data-aa-editor="subpixel"] .cm-editor {
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+:root[data-aa-editor="none"] .cm-editor {
+  -webkit-font-smoothing: none;
+}

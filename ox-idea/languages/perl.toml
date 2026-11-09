@@ -1,0 +1,14 @@
+id = "perl"
+name = "Perl"
+extensions = ["pl", "pm", "pod", "psgi", "cgi"]
+filenames = ["cpanfile", "Makefile.PL", "Build.PL"]
+first-line = "^#!.*\\bperl[0-9.]*\\b"
+line-comment = "#"
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Perl"
+
+[[language-servers]]
+name = "perlnavigator"
+command = "perlnavigator"
+args = ["--stdio"]
+install-hint = "npm i -g perlnavigator-server"

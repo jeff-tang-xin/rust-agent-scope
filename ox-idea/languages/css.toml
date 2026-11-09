@@ -1,0 +1,15 @@
+id = "css"
+name = "CSS"
+formatter = { tool = "prettier", parser = "css", range = false }
+extensions = ["css", "pcss", "postcss"]
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "CSS"
+tree-sitter = "css"
+
+[[language-servers]]
+name = "vscode-css-language-server"
+command = "vscode-css-language-server"
+args = ["--stdio"]
+initialization-options = { provideFormatter = true, css = {}, scss = {}, less = {} }
+install-hint = "npm i -g vscode-langservers-extracted"

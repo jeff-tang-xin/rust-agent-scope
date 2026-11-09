@@ -1,0 +1,246 @@
+.indented {
+  display: flex;
+  flex-direction: column;
+  padding-left: 20px;
+}
+.matched {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+.disabled {
+  color: var(--fg-subtle);
+}
+
+/* Two-column checkbox grid. */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 24px;
+}
+.column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* "[x] Limit history to: [1000] rows" */
+.fontFamily {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.inlineRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: var(--radius-row);
+}
+.unit {
+  color: var(--fg);
+}
+.inlineHint {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+
+.radios {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.radio input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration: underline;
+}
+
+.note {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  line-height: 1.4;
+}
+.ok {
+  color: var(--success, var(--fg-muted));
+}
+.error {
+  color: var(--danger);
+}
+
+.wide {
+  width: 360px;
+}
+.medium {
+  width: 220px;
+}
+.small {
+  width: 64px;
+}
+
+/* Editable tables / lists. */
+.tableBox {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 4px);
+  overflow: hidden;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.table th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--fg-muted);
+  height: var(--h-list-row);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.table td {
+  height: var(--h-list-row);
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table tbody tr:hover {
+  background: var(--bg-tree-hover);
+}
+.table tbody tr.selectedRow {
+  background: var(--bg-tree-selected);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.cellInput {
+  width: 100%;
+}
+.empty {
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+/* External Tools: list + editor. */
+.toolsLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.toolList {
+  min-height: 120px;
+  max-height: 220px;
+  overflow: auto;
+}
+.toolRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-list-row);
+  padding: 0 8px;
+  cursor: default;
+}
+.toolRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolName {
+  flex: 1;
+}
+.toolRow.empty {
+  height: auto;
+  min-height: var(--h-list-row);
+  padding-block: 4px;
+  overflow-wrap: anywhere;
+}
+.toolRow:hover {
+  background: var(--bg-tree-hover);
+}
+.toolRowSelected,
+.toolRowSelected:hover {
+  background: var(--bg-tree-selected);
+}
+.toolGroup {
+  max-width: 45%;
+  color: var(--fg-subtle);
+  margin-left: auto;
+}
+.macroField {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.macroList {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.macroItem {
+  display: flex;
+  gap: 12px;
+  padding: 3px 12px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.macroItem:hover {
+  background: var(--bg-list-selected);
+}
+.macroName {
+  font-family: var(--font-mono);
+  min-width: 200px;
+}
+.macroDesc {
+  color: var(--fg-subtle);
+}
+.mappingIcon {
+  vertical-align: -3px;
+  margin-right: 6px;
+}
+/* The aligned rows of a section share one label column, as wide as its widest label. */
+.toolsLayout *:has(> .alignedRow) {
+  display: grid;
+  grid-template-columns: minmax(130px, max-content) minmax(0, 1fr);
+  column-gap: 8px;
+  align-content: start;
+}
+.toolsLayout *:has(> .alignedRow) > * {
+  grid-column: 1 / -1;
+}
+.toolsLayout .alignedRow {
+  grid-template-columns: subgrid;
+}

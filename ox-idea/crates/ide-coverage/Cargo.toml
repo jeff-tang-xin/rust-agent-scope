@@ -1,0 +1,18 @@
+[package]
+name = "ide-coverage"
+description = "Run with Coverage: coverage-tool launch plans (cargo-llvm-cov, vitest / jest / c8, coverage.py, go test, JaCoCo) and report parsers (lcov, Go cover profiles, JaCoCo XML)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+ide-run.workspace = true
+quick-xml = "0.42"
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

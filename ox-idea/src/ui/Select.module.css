@@ -1,0 +1,144 @@
+/* ComboBox: same frame as text fields, 28px, ComboBox.padding 1,9,1,6, chevron in the arrow area. */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-field, 28px);
+  min-width: 0;
+  padding: 0 6px 0 9px;
+  border-radius: var(--radius-control, 4px);
+  color: var(--fg-strong);
+  transition:
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.framed {
+  background: var(--bg-field, var(--bg-button));
+  box-shadow: inset 0 0 0 1px var(--border-button);
+}
+.framed[aria-expanded="true"],
+.framed:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--focus-ring),
+    0 0 0 1px var(--focus-ring);
+}
+.framed:disabled {
+  background: transparent;
+  color: var(--fg-faint);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ghost {
+  height: var(--h-control);
+  color: var(--fg-secondary);
+  padding: 0 4px 0 6px;
+}
+.ghost:hover,
+.ghost[aria-expanded="true"] {
+  background: var(--bg-toolbar-hover);
+  color: var(--fg-strong);
+}
+.value {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.placeholder {
+  color: var(--fg-faint);
+}
+.chevron {
+  color: var(--fg-muted);
+}
+.popup {
+  padding: 6px 0;
+  overflow: hidden;
+}
+.popupInner {
+  display: flex;
+  flex-direction: column;
+}
+/* Focus only carries keystrokes; the active row is the indicator. */
+.popupInner:focus-visible {
+  outline: none;
+}
+.list {
+  max-height: 320px;
+}
+.check {
+  width: 12px;
+  flex: none;
+  color: var(--fg-muted);
+}
+.sizer {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+/* Mirrors a List row: inset, padding and gap. */
+.sizerRow {
+  display: flex;
+  gap: 6px;
+  margin: 0 var(--list-inset, 6px);
+  padding: 0 8px;
+  white-space: nowrap;
+}
+/* Short details (a count, a command) widen the popup; long ones (paths, URLs) are cut. */
+.sizerDetail {
+  max-width: 240px;
+  overflow: hidden;
+}
+.optionLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The label keeps its width (up to most of the row); a long detail (a path) is cut instead. */
+.withDetail {
+  flex-shrink: 0;
+  max-width: 70%;
+}
+.detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+.disabled {
+  color: var(--fg-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .framed {
+    border: 1px solid ButtonText;
+  }
+}
+
+.searchWrap {
+  padding: 4px 6px 6px;
+}
+.search {
+  width: 100%;
+  height: var(--h-field, 28px);
+  padding: 0 8px;
+  border-radius: var(--radius-control, 4px);
+  background: var(--bg-field, var(--bg-button));
+  box-shadow: inset 0 0 0 1px var(--border-button);
+  color: var(--fg-strong);
+}
+
+.option {
+  display: contents;
+}

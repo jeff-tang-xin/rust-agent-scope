@@ -1,0 +1,4 @@
+<!-- OpenIDEA: data source properties (database with a gear) -->
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10 3.75C10 2.51 8.21 1.5 6 1.5C3.79 1.5 2 2.51 2 3.75V11.25C2 12.49 3.79 13.5 6 13.5C6.7 13.5 7.36 13.4 7.93 13.22M10 3.75C10 4.99 8.21 6 6 6C3.79 6 2 4.99 2 3.75M10 3.75V7.5M2 6.83C2 8.07 3.79 9.08 6 9.08C6.6 9.08 7.17 9 7.68 8.87M2 9.92C2 11.16 3.79 12.17 6 12.17" stroke="#CED0D6"/><path d="M11.5 8.5V9.4M11.5 13.6V14.5M8.5 11.5H9.4M13.6 11.5H14.5M9.38 9.38L10 10M13 13L13.62 13.62M9.38 13.62L10 13M13 10L13.62 9.38" stroke="#548AF7" stroke-linecap="round"/><circle cx="11.5" cy="11.5" r="2" stroke="#548AF7"/><circle cx="11.5" cy="11.5" r="0.75" fill="#548AF7"/>
+</svg>

@@ -1,0 +1,64 @@
+.preview {
+  /* offsetParent for the scroll-to-line math. */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  background: var(--bg-app);
+  font-family: var(--font-mono);
+  font-weight: var(--fw-code);
+  font-size: var(--fs-ui);
+  line-height: 19px;
+  color: var(--fg);
+  /* The workbench disables selection globally; preview text stays selectable/copyable. */
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: default;
+}
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faint);
+  font-family: var(--font-ui);
+}
+.pre {
+  margin: 0;
+  padding: 4px 0;
+  font: inherit;
+  min-width: max-content;
+  cursor: text;
+}
+.codeLine {
+  display: flex;
+  white-space: pre;
+}
+.currentLine {
+  background: var(--bg-current-line);
+}
+.gutter {
+  flex: none;
+  position: sticky;
+  left: 0;
+  width: 48px;
+  padding-right: 12px;
+  text-align: right;
+  color: var(--fg-gutter);
+  background-color: var(--bg-app);
+  /* Copying the code leaves the line numbers out. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.currentLine .gutter {
+  color: var(--fg-muted);
+  background-color: var(--bg-current-line);
+}
+.code {
+  padding-right: 16px;
+}
+.match {
+  background: var(--accent-soft);
+  color: var(--fg-strong);
+  border-radius: 2px;
+}

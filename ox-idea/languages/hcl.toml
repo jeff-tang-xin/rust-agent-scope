@@ -1,0 +1,7 @@
+id = "hcl"
+name = "HCL"
+extensions = ["hcl", "nomad", "pkr.hcl"]
+line-comment = "#"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+tree-sitter = "hcl"

@@ -1,0 +1,26 @@
+---
+source: crates/ide-search/tests/search.rs
+expression: views
+---
+- relPath: i18n.txt
+  matches:
+    - line: 0
+      text: 中文字符 needle 😀 needle
+      ranges:
+        - - 5
+          - 11
+        - - 15
+          - 21
+      textOffset: 0
+    - line: 1
+      text: 🎉🎉needle
+      ranges:
+        - - 4
+          - 10
+      textOffset: 0
+    - line: 2
+      text: naïve Needle ünïcödé
+      ranges:
+        - - 6
+          - 12
+      textOffset: 0

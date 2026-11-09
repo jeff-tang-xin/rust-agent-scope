@@ -1,0 +1,12 @@
+---
+source: crates/ide-search/tests/search.rs
+expression: views
+---
+- relPath: a.rs
+  matches:
+    - line: 0
+      text: "fn foo() {"
+      ranges:
+        - - 9
+          - 10
+      textOffset: 0

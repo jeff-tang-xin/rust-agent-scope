@@ -1,0 +1,8 @@
+id = "makefile"
+name = "Makefile"
+extensions = ["mk", "mak", "make"]
+filenames = ["Makefile", "makefile", "GNUmakefile", "BSDmakefile", "Makefile.am", "Makefile.in", "Kbuild"]
+first-line = "^#!.*\\bmake\\b"
+line-comment = "#"
+indent = { tab-size = 4, insert-spaces = false }
+tree-sitter = "make"

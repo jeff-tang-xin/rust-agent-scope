@@ -1,0 +1,31 @@
+[package]
+name = "ide-lsp"
+description = "Language server manager: lifecycle, document sync, feature requests mapped to IDE types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+ide-vfs.workspace = true
+dunce.workspace = true
+ide-text.workspace = true
+ide-language.workspace = true
+ide-jsonrpc.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tokio = { workspace = true, features = ["net"] }
+parking_lot.workspace = true
+tracing.workspace = true
+futures.workspace = true
+globset.workspace = true
+ignore.workspace = true
+toml.workspace = true
+percent-encoding = "2"
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

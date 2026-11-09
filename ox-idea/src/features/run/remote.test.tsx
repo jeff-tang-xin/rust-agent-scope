@@ -1,0 +1,466 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+
+const ipc = vi.hoisted(() => ({
+  runStart: vi.fn(),
+  runStop: vi.fn(() => Promise.resolve({ status: "ok" as const, data: null })),
+  runSaveConfigs: vi.fn((_configs: unknown) => Promise.resolve({ status: "ok" as const, data: null })),
+  runConfigs: vi.fn(() => Promise.resolve({ status: "ok" as const, data: [] as unknown[] })),
+  sshTrustHost: vi.fn((_id: string) => Promise.resolve({ status: "ok" as const, data: null })),
+  sshSetSecret: vi.fn((_id: string, _secret: string | null, _save: boolean) => Promise.resolve()),
+}));
+const confirm = vi.hoisted(() => vi.fn(async () => true));
+const promptSecret = vi.hoisted(() => vi.fn(async (_m: string, save: boolean) => ({ secret: "pw", save })));
+
+vi.mock("@/platform/ipc", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/platform/ipc")>();
+  return { ...real, isTauri: () => true, commands: { ...real.commands, ...ipc } };
+});
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({ listen: async () => () => {} }),
+}));
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/core")>()),
+  Channel: class {
+    onmessage: ((m: unknown) => void) | null = null;
+  },
+}));
+vi.mock("@/workbench/messages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/workbench/messages")>()),
+  confirm,
+}));
+vi.mock("./dialogs", () => ({
+  confirmRerun: vi.fn(async () => true),
+  confirmTerminate: vi.fn(),
+  promptValue: vi.fn(),
+  promptSecret,
+  RunDialogsOverlay: () => null,
+}));
+
+import { executeAction, registerActions } from "@/platform/actions";
+import { setContext } from "@/platform/context";
+import { IpcError, type RunConfig } from "@/platform/ipc";
+import { useProject } from "@/platform/project";
+import { usePluginRunTargets } from "@/platform/pluginRunTargets";
+import { DEFAULT_RUN_TARGET, type RunTargetValid } from "@/platform/remoteSettings";
+import {
+  provideNotificationService,
+  provideToolWindowService,
+  type RunConfigTypeContribution,
+  type ToolWindowService,
+} from "@/workbench/contributions";
+import { ConfigForm } from "./ConfigForm";
+import { duplicateConfig, upsertConfig, userConfigs } from "./configs";
+import { activate } from "./index";
+import {
+  containerExecutorBlocked,
+  remoteDebugBlocked,
+  remoteLabel,
+  startRemedy,
+  startWithRemedies,
+  withTarget,
+  type RemedyDeps,
+} from "./remote";
+import { onRunExited, resetRuns, saveUserConfigs, startRun, useRun } from "./store";
+import { newConfigOfType } from "./types";
+import { readRan } from "./services";
+
+const cfg = (id: string, extra: Partial<RunConfig> = {}): RunConfig => ({
+  id,
+  name: id,
+  kind: "shell",
+  command: "python3",
+  args: ["main.py"],
+  cwd: null,
+  env: {},
+  detected: false,
+  isTest: false,
+  debugAdapter: null,
+  ...extra,
+});
+
+const box: RunTargetValid = {
+  ...DEFAULT_RUN_TARGET,
+  id: "box",
+  name: "Build box",
+  sshConfig: "ssh1",
+  projectRoot: "",
+  syncBeforeRun: true,
+  python: "",
+  node: "",
+  java: "",
+};
+
+const ok = { status: "ok" as const, data: { id: 3, configId: "app", name: "app", pid: 1, running: true, pty: false } };
+const fail = (message: string, kind = "permissionDenied") => ({ status: "error" as const, error: { kind, message } });
+
+const notify = vi.fn();
+
+beforeEach(() => {
+  usePluginRunTargets.setState({ targets: [] });
+  resetRuns();
+  for (const f of Object.values(ipc)) f.mockClear();
+  confirm.mockClear();
+  confirm.mockResolvedValue(true);
+  promptSecret.mockClear();
+  notify.mockClear();
+  provideToolWindowService({ show: vi.fn(), isVisible: () => true } as unknown as ToolWindowService);
+  provideNotificationService({ notify });
+  useProject.setState({
+    settings: {
+      runTargets: [box],
+      ssh: { configs: [{ id: "ssh1", name: "Box", host: "box", user: "me", auth: "password", saveSecret: true }] },
+    } as never,
+  });
+});
+afterEach(() => useProject.setState({ settings: null }));
+
+describe("run targets", () => {
+  it("label remote configurations with their target", () => {
+    expect(remoteLabel(cfg("app", { target: "box" }))).toBe("app @ Build box");
+    expect(remoteLabel(cfg("app", { target: "gone" }))).toBe("app @ gone");
+    expect(remoteLabel(cfg("app"))).toBe("app");
+  });
+
+  it("round-trip through edits, copies, templates and saving", async () => {
+    const remote = withTarget(cfg("app"), "box");
+    expect(remote.target).toBe("box");
+    expect("target" in withTarget(remote, "")).toBe(false);
+    expect(duplicateConfig(remote, [remote]).target).toBe("box");
+    const [edited] = upsertConfig([], { ...remote, detected: true });
+    expect(edited!.target).toBe("box");
+
+    const type: RunConfigTypeContribution = {
+      id: "test-py",
+      label: "Test Python",
+      icon: "file-python",
+      fields: [],
+      commandLine: () => ({ command: "python3", args: [] }),
+    };
+    expect(newConfigOfType(type, [], { ...cfg("template:test-py"), target: "box" }).target).toBe("box");
+
+    await saveUserConfigs(userConfigs([remote, cfg("local")]));
+    const saved = ipc.runSaveConfigs.mock.calls[0]![0] as RunConfig[];
+    expect(saved.map((c) => c.target)).toEqual(["box", undefined]);
+  });
+
+  it("are chosen under “Run on” in the configuration form", () => {
+    const onChange = vi.fn();
+    render(
+      <ConfigForm config={cfg("app")} all={[]} type={undefined} errors={{}} onChange={onChange} modifyRequest={0} />,
+    );
+    const select = screen.getByRole("button", { name: "Run on" });
+    expect(select.textContent).toContain("Default run target");
+    fireEvent.click(select);
+    const popup = document.querySelector("[data-autofocus]")!;
+    fireEvent.keyDown(popup, { key: "ArrowDown" });
+    fireEvent.keyDown(popup, { key: "ArrowDown" });
+    fireEvent.keyDown(popup, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ target: "box" }));
+  });
+  it("includes plugin targets labelled with their owner in the target selector", () => {
+    const id = "plugin-target:9:executionwrapper";
+    usePluginRunTargets.setState({
+      targets: [
+        {
+          id,
+          pluginId: "execution",
+          pluginName: "Fixture",
+          prompt: false,
+          target: {
+            id: "wrapper",
+            name: "Execution",
+            program: "wrapper",
+            args: [],
+            workdirArgs: [],
+            containerRoot: null,
+            commands: [],
+          },
+        },
+      ],
+    });
+    const onChange = vi.fn();
+    render(
+      <ConfigForm config={cfg("app")} all={[]} type={undefined} errors={{}} onChange={onChange} modifyRequest={0} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run on" }));
+    const popup = document.querySelector("[data-autofocus]")!;
+    expect(popup.textContent).toContain("Execution (Fixture)");
+    fireEvent.keyDown(popup, { key: "End" });
+    fireEvent.keyDown(popup, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ target: id }));
+  });
+});
+
+describe("remote debugging", () => {
+  let dispose: () => void;
+  const startConfig = vi.fn();
+  let unregister: () => void;
+  beforeEach(() => {
+    dispose = activate();
+    unregister = registerActions([{ id: "debug.startConfig", title: "Debug…", run: ({ arg }) => startConfig(arg) }]);
+    setContext("projectOpen", true);
+    startConfig.mockClear();
+  });
+  afterEach(() => {
+    unregister();
+    dispose();
+  });
+
+  it("is refused with a notification instead of starting the debugger", async () => {
+    const remote = cfg("app", { target: "box" });
+    useRun.setState({ configs: [remote], loaded: true });
+    await executeAction("run.debugConfig", remote.id);
+    expect(startConfig).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Debugging on run targets is not supported", level: "warning" }),
+    );
+  });
+
+  describe("in containers", () => {
+    const container: RunTargetValid = { ...DEFAULT_RUN_TARGET, kind: "docker", id: "py", name: "Python", image: "x" };
+    const attach = vi.fn();
+    let unregisterAttach: () => void;
+    beforeEach(() => {
+      useProject.setState({ settings: { runTargets: [box, container], ssh: { configs: [] } } as never });
+      unregisterAttach = registerActions([{ id: "debug.attach", title: "Attach", run: ({ arg }) => attach(arg) }]);
+      attach.mockClear();
+    });
+    afterEach(() => unregisterAttach());
+
+    it("stops a container that never announces debugpy", async () => {
+      vi.useFakeTimers();
+      try {
+        const py = cfg("app", { target: "py", debugAdapter: "debugpy" });
+        useRun.setState({ configs: [py], loaded: true });
+        ipc.runStart.mockResolvedValueOnce(ok);
+        await executeAction("run.debugConfig", py.id);
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(ipc.runStop).toHaveBeenCalledWith(3);
+        expect(attach).not.toHaveBeenCalled();
+        expect(notify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: "Cannot start container debugging",
+            body: expect.stringContaining("120 seconds"),
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports an early container exit and cancels the readiness timeout", async () => {
+      vi.useFakeTimers();
+      try {
+        const py = cfg("app", { target: "py", debugAdapter: "debugpy" });
+        useRun.setState({ configs: [py], loaded: true });
+        ipc.runStart.mockResolvedValueOnce(ok);
+        await executeAction("run.debugConfig", py.id);
+        onRunExited(3, 1);
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(attach).not.toHaveBeenCalled();
+        expect(ipc.runStop).not.toHaveBeenCalled();
+        expect(notify).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            title: "Cannot start container debugging",
+            body: expect.stringContaining("exited before debugpy"),
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("cleans up the readiness wait when the user stops the run", async () => {
+      vi.useFakeTimers();
+      try {
+        const py = cfg("app", { target: "py", debugAdapter: "debugpy" });
+        useRun.setState({ configs: [py], loaded: true });
+        ipc.runStart.mockResolvedValueOnce(ok);
+        await executeAction("run.debugConfig", py.id);
+        useRun.setState((s) => ({ sessions: s.sessions.map((s) => ({ ...s, stopped: true })) }));
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(attach).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("records debugger-requested stops before a signalled container exit", async () => {
+      vi.useFakeTimers();
+      try {
+        provideToolWindowService({ show: vi.fn(), isVisible: () => false } as unknown as ToolWindowService);
+        const py = cfg("app", { target: "py", debugAdapter: "debugpy" });
+        ipc.runStart.mockResolvedValueOnce(ok);
+        await startRun(py);
+        await executeAction("run.stopProcess", 3);
+        expect(useRun.getState().sessions[0]?.stopped).toBe(true);
+        expect(ipc.runStop).toHaveBeenCalledWith(3);
+        onRunExited(3, 143);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(notify).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("runs Python under debugpy and attaches once it listens", async () => {
+      const py = cfg("app", { target: "py", debugAdapter: "debugpy" });
+      useRun.setState({ configs: [py], loaded: true });
+      ipc.runStart.mockResolvedValueOnce(ok);
+      await executeAction("run.debugConfig", py.id);
+      expect(startConfig).not.toHaveBeenCalled();
+      expect(ipc.runStart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "app", params: { containerDebug: "true" } }),
+        expect.anything(),
+      );
+      const channel = ipc.runStart.mock.calls.at(-1)![1] as { onmessage: (m: unknown) => void };
+      channel.onmessage({
+        kind: "stderr",
+        text: "debugpy is waiting for the debugger on port 41234, project folder /app\n",
+      });
+      await vi.waitFor(() => expect(attach).toHaveBeenCalled());
+      channel.onmessage({
+        kind: "stderr",
+        text: "debugpy is waiting for the debugger on port 41234, project folder /app\n",
+      });
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(attach).toHaveBeenCalledWith(
+        expect.objectContaining({
+          adapter: "debugpy",
+          hostName: "127.0.0.1",
+          port: 41234,
+          remoteRoot: "/app",
+          process: 3,
+        }),
+      );
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it("refuses other debuggers", async () => {
+      const go = cfg("app", { target: "py", debugAdapter: "delve" });
+      useRun.setState({ configs: [go], loaded: true });
+      await executeAction("run.debugConfig", go.id);
+      expect(ipc.runStart).not.toHaveBeenCalled();
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Only Python can be debugged in containers", level: "warning" }),
+      );
+    });
+  });
+
+  it("still debugs local configurations", async () => {
+    const local = cfg("app", { debugAdapter: "debugpy" });
+    useRun.setState({ configs: [local], loaded: true });
+    expect(remoteDebugBlocked(local)).toBe(false);
+    await executeAction("run.debugConfig", local.id);
+    expect(startConfig).toHaveBeenCalledWith(local);
+  });
+
+  it("remembers a non-Spring-Boot configuration accepted for debugging", async () => {
+    useProject.setState({ project: { root: "/remember-debug" } as never });
+    const local = cfg("python:debug", { debugAdapter: "debugpy" });
+    useRun.setState({ configs: [local], loaded: true });
+    await executeAction("run.debugConfig", local.id);
+    expect(readRan("/remember-debug")).toContain(local.id);
+  });
+});
+
+describe("coverage and profiling", () => {
+  const container: RunTargetValid = {
+    ...DEFAULT_RUN_TARGET,
+    kind: "docker",
+    id: "py",
+    name: "Python",
+    image: "python:3.12",
+  };
+
+  it("are refused in containers, with a notification", () => {
+    expect(containerExecutorBlocked(cfg("app", { target: "py" }), [box, container])).toBe(true);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Coverage and profiling are not supported in containers", level: "warning" }),
+    );
+  });
+
+  it("are left alone locally and over SSH", () => {
+    expect(containerExecutorBlocked(cfg("app"), [box, container])).toBe(false);
+    expect(containerExecutorBlocked(cfg("app", { target: "box" }), [box, container])).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe("SSH remedies when starting", () => {
+  it("recognise host key and secret errors", () => {
+    expect(startRemedy("Unknown SSH host key for box:22 (ssh-ed25519 SHA256:x)")).toBe("trustHost");
+    expect(startRemedy("SSH password required for me@box:22")).toBe("sshSecret");
+    expect(startRemedy("SSH key passphrase required for /k")).toBe("sshSecret");
+    expect(startRemedy("No such file or directory")).toBeNull();
+  });
+
+  const deps = (over: Partial<RemedyDeps> = {}): RemedyDeps => ({
+    confirmTrust: vi.fn(async () => true),
+    askSecret: vi.fn(async (_m: string, save: boolean) => ({ secret: "pw", save })),
+    trustHost: vi.fn(async () => null),
+    setSecret: vi.fn(async () => undefined),
+    targets: () => [box],
+    sshConfigs: () => [],
+    ...over,
+  });
+  const err = (message: string) => new IpcError({ kind: "permissionDenied", message });
+
+  it("trust the host, then ask for the password, retrying after each", async () => {
+    const d = deps();
+    const start = vi
+      .fn()
+      .mockRejectedValueOnce(err("Unknown SSH host key for box:22"))
+      .mockRejectedValueOnce(err("SSH password required for me@box:22"))
+      .mockResolvedValueOnce("started");
+    await expect(startWithRemedies({ target: "box" }, start, d)).resolves.toBe("started");
+    expect(d.trustHost).toHaveBeenCalledWith("ssh1");
+    expect(d.setSecret).toHaveBeenCalledWith("ssh1", "pw", false);
+    expect(start).toHaveBeenCalledTimes(3);
+  });
+
+  it("retry each remedy once and give up when declined", async () => {
+    const twice = vi.fn().mockRejectedValue(err("SSH password required for me@box:22"));
+    await expect(startWithRemedies({ target: "box" }, twice, deps())).rejects.toThrow("SSH password required");
+    expect(twice).toHaveBeenCalledTimes(2);
+
+    const declined = deps({ confirmTrust: vi.fn(async () => false) });
+    const start = vi.fn().mockRejectedValue(err("Unknown SSH host key for box:22"));
+    await expect(startWithRemedies({ target: "box" }, start, declined)).rejects.toThrow("Unknown SSH host key");
+    expect(declined.trustHost).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("leave local runs alone", async () => {
+    const d = deps();
+    const start = vi.fn().mockRejectedValue(err("Unknown SSH host key for box:22"));
+    await expect(startWithRemedies({}, start, d)).rejects.toThrow();
+    expect(d.confirmTrust).not.toHaveBeenCalled();
+  });
+
+  it("startRun trusts the host and retries runStart", async () => {
+    ipc.runStart.mockResolvedValueOnce(fail("Unknown SSH host key for box:22 (ssh-ed25519 SHA256:x)", "protocol"));
+    ipc.runStart.mockResolvedValueOnce(fail("SSH password required for me@box:22"));
+    ipc.runStart.mockResolvedValueOnce(ok);
+    const session = await startRun(cfg("app", { target: "box" }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(ipc.sshTrustHost).toHaveBeenCalledWith("ssh1");
+    // The SSH configuration saves secrets: the prompt starts with Save checked.
+    expect(promptSecret).toHaveBeenCalledWith("SSH password required for me@box:22", true);
+    expect(ipc.sshSetSecret).toHaveBeenCalledWith("ssh1", "pw", true);
+    expect(ipc.runStart).toHaveBeenCalledTimes(3);
+    expect((ipc.runStart.mock.calls[2]![0] as RunConfig).target).toBe("box");
+    expect(session?.status).toBe("running");
+  });
+
+  it("startRun reports the error when the remedy is declined", async () => {
+    confirm.mockResolvedValue(false);
+    ipc.runStart.mockResolvedValue(fail("Unknown SSH host key for box:22", "protocol"));
+    const session = await startRun(cfg("app", { target: "box" }));
+    expect(ipc.runStart).toHaveBeenCalledTimes(1);
+    expect(session?.status).toBe("failed");
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "Error running 'app @ Build box'" }));
+  });
+});

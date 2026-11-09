@@ -1,0 +1,18 @@
+[package]
+name = "ide-spell"
+description = "Spell checking (Proofreading › Typo): word extraction from comments, strings and declared names, Hunspell en_US / en_GB dictionary, programming terms, user dictionaries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+# Pure-Rust Hunspell-compatible checker (MPL-2.0).
+spellbook = "0.4"
+serde.workspace = true
+specta.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

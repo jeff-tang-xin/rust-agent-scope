@@ -1,0 +1,45 @@
+.popup {
+  z-index: var(--z-popup);
+  overflow: auto;
+  opacity: 0;
+}
+.popup:focus-visible {
+  outline: none;
+}
+.popup[data-positioned] {
+  opacity: 1;
+  animation: popIn var(--dur-fast) var(--ease);
+}
+.popup::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.popup::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background-clip: content-box;
+}
+.popup::-webkit-scrollbar-track,
+.popup::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* Islands popups: container-popup-bg, 1px popup border, large arc, soft shadow. */
+.surface {
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
+  border-radius: var(--radius-popup-large, 10px);
+  box-shadow: var(--shadow-popup);
+  color: var(--fg-strong);
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .popup[data-positioned] {
+    animation: none;
+  }
+}

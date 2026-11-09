@@ -1,0 +1,7 @@
+{
+  "users": [
+    { "id": 1, "name": "Alice", "roles": ["admin"] },
+    { "id": 2, "name": "Bob", "roles": [] }
+  ],
+  "version": 3
+}

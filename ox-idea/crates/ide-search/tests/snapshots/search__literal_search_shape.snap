@@ -1,0 +1,30 @@
+---
+source: crates/ide-search/tests/search.rs
+expression: views
+---
+- relPath: src/lib.rs
+  matches:
+    - line: 0
+      text: pub mod foo;
+      ranges:
+        - - 8
+          - 11
+      textOffset: 0
+- relPath: src/main.rs
+  matches:
+    - line: 1
+      text: "    let foo = Foo::new();"
+      ranges:
+        - - 8
+          - 11
+        - - 14
+          - 17
+      textOffset: 0
+    - line: 2
+      text: "    foo.run(foo);"
+      ranges:
+        - - 4
+          - 7
+        - - 12
+          - 15
+      textOffset: 0

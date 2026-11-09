@@ -1,0 +1,14 @@
+id = "powershell"
+name = "PowerShell"
+extensions = ["ps1", "psm1", "psd1", "pssc", "psrc"]
+first-line = "^#!.*\\bpwsh\\b"
+line-comment = "#"
+block-comment = ["<#", "#>"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "PowerShell"
+
+[[language-servers]]
+name = "powershell-editor-services"
+command = "pwsh"
+args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "& \"$env:PSES_BUNDLE_PATH/PowerShellEditorServices/Start-EditorServices.ps1\" -BundledModulesPath $env:PSES_BUNDLE_PATH -LogPath ([IO.Path]::Combine([IO.Path]::GetTempPath(), 'openidea-pses.log')) -SessionDetailsPath ([IO.Path]::Combine([IO.Path]::GetTempPath(), 'openidea-pses.json')) -FeatureFlags @() -AdditionalModules @() -HostName openidea -HostProfileId openidea -HostVersion 1.0.0 -Stdio -LogLevel Normal"]
+install-hint = "Install PowerShell 7 (pwsh), unzip PowerShellEditorServices.zip from https://github.com/PowerShell/PowerShellEditorServices/releases and set PSES_BUNDLE_PATH to that folder"

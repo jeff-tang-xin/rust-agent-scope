@@ -1,0 +1,133 @@
+/* TextField / SearchField: Component.arc 8 (radius 4), 28px, accent border + ring when focused. */
+.input {
+  height: var(--h-field, 28px);
+  min-width: 0;
+  padding: 0 8px;
+  /* No UA frame (WebKit draws one for native text fields); the frame is the box-shadow below. */
+  appearance: none;
+  border: 0;
+  background: var(--bg-input);
+  color: var(--fg-strong);
+  font-size: var(--fs-ui);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.input::placeholder,
+.searchInput::placeholder {
+  color: var(--fg-faint);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.framed {
+  border-radius: var(--radius-control, 4px);
+  background: var(--bg-field, var(--bg-button));
+  box-shadow: inset 0 0 0 1px var(--border-button);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+.framed:focus,
+.framed:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--focus-ring),
+    0 0 0 1px var(--focus-ring);
+}
+.framed:disabled {
+  background: transparent;
+  color: var(--fg-faint);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.bare {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+.input[aria-invalid="true"].framed,
+.invalid.framed {
+  box-shadow:
+    inset 0 0 0 1px var(--danger),
+    0 0 0 1px var(--danger);
+}
+
+.searchField {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--h-field, 28px);
+  min-width: 0;
+  padding: 0 4px 0 8px;
+}
+.leading {
+  color: var(--fg-muted);
+  margin-right: 4px;
+}
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  appearance: none;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--fg-strong);
+  font-size: var(--fs-ui);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.input:focus-visible,
+.searchInput:focus-visible {
+  /* The frame's focus ring stands in for the global :focus-visible outline. */
+  outline: none;
+}
+.multiline {
+  height: auto;
+  align-items: flex-start;
+  padding-block: 4px;
+}
+.multiline .leading {
+  margin-top: 3px;
+}
+.searchArea {
+  resize: none;
+  font-family: inherit;
+  line-height: 20px;
+  padding: 0;
+}
+/* A multi-line capable field holding one line looks like a text input. */
+.searchAreaSingle {
+  height: 20px;
+  overflow: hidden;
+}
+.leading:is(button) {
+  margin-right: 2px;
+  margin-left: -4px;
+}
+.invalid .searchInput {
+  color: var(--danger);
+}
+.large {
+  height: 38px;
+  padding: 0 8px 0 12px;
+  gap: 6px;
+}
+.large .searchInput {
+  font-size: var(--fs-input-large);
+  color: var(--fg-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .framed {
+    transition: none;
+  }
+}
+
+/* Box-shadow frames vanish in forced-colors (high contrast) mode. */
+@media (forced-colors: active) {
+  .framed {
+    border: 1px solid FieldText;
+  }
+  .framed:focus,
+  .framed:focus-within {
+    outline: 2px solid Highlight;
+  }
+}

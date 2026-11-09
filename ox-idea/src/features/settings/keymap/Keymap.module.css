@@ -1,0 +1,242 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 420px;
+}
+.presetRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  margin-bottom: 6px;
+}
+.presetLabel {
+  flex: none;
+  white-space: nowrap;
+  color: var(--fg);
+}
+.presetSelect {
+  min-width: 220px;
+}
+.spacer {
+  flex: 1;
+}
+.modifiedNote {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.search {
+  flex: 1;
+  max-width: 360px;
+  margin-right: 4px;
+}
+.shortcutFilter {
+  flex: 1;
+  max-width: 360px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--h-control);
+  margin-right: 4px;
+  padding: 0 2px 0 8px;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.shortcutFilter:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.leading {
+  color: var(--fg-subtle);
+  margin-right: 4px;
+}
+.filterRecorder {
+  flex: 1;
+  box-shadow: none;
+  padding: 0;
+}
+.filterRecorder:focus,
+.filterRecorder:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.treeWrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border);
+  padding: 2px 0;
+}
+.empty {
+  padding: 8px 12px;
+  color: var(--fg-subtle);
+}
+.catRow,
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.catIcon {
+  color: var(--fg-subtle);
+}
+.catName {
+  color: var(--fg-emphasis);
+}
+.count {
+  color: var(--fg-faint);
+  font-size: var(--fs-small);
+}
+.actionIcon {
+  display: inline-flex;
+  width: 14px;
+  color: var(--fg-subtle);
+}
+.actionTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modified {
+  color: var(--accent);
+}
+.bindings {
+  display: inline-flex;
+  gap: 4px;
+  padding-right: 10px;
+}
+.kbd {
+  color: var(--fg-muted);
+}
+
+/* recorder */
+.mousePad {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+  padding: 0 12px;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--fg-emphasis);
+  text-align: center;
+  cursor: default;
+  user-select: none;
+}
+.recorder {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: var(--h-control);
+  padding: 0 8px;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--fg-emphasis);
+  cursor: text;
+  outline: none;
+}
+.recorder:focus {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.recorderDisabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.recorded {
+  font-family: var(--font-keys);
+  letter-spacing: 0.04em;
+}
+.recorderPlaceholder {
+  color: var(--fg-faint);
+}
+
+/* record dialog */
+.recordBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.recordRow {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.recordLabel {
+  color: var(--fg);
+}
+.recordHint {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.conflicts {
+  min-height: 72px;
+  padding: 6px 8px;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.noConflicts {
+  color: var(--fg-subtle);
+}
+.conflictTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-emphasis);
+}
+.conflictIcon {
+  color: var(--warning);
+}
+.conflictList {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0 0 0 20px;
+  max-height: 120px;
+  overflow: auto;
+}
+.conflictList li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-row);
+}
+.conflictAction {
+  color: var(--fg);
+}
+.conflictCategory {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+
+.toolbarSep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.conflictsLabel {
+  color: var(--fg);
+  padding-top: 4px;
+}
+.nameError {
+  color: var(--danger);
+  font-size: var(--fs-small);
+  padding-left: 128px;
+}

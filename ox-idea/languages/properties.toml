@@ -1,0 +1,7 @@
+id = "properties"
+name = "Properties"
+extensions = ["properties", "prefs"]
+filenames = ["gradle.properties", "local.properties"]
+line-comment = "#"
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Properties files"

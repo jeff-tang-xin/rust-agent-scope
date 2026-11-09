@@ -1,0 +1,15 @@
+id = "json"
+name = "JSON"
+formatter = { tool = "prettier", parser = "json", range = true }
+extensions = ["json", "geojson", "topojson", "webmanifest", "har", "avsc", "jsonl", "ndjson", "json.map"]
+filenames = [".prettierrc", ".watchmanconfig", "composer.lock", ".arcconfig"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "JSON"
+tree-sitter = "json"
+
+[[language-servers]]
+name = "vscode-json-language-server"
+command = "vscode-json-language-server"
+args = ["--stdio"]
+initialization-options = { provideFormatter = true }
+install-hint = "npm i -g vscode-langservers-extracted"

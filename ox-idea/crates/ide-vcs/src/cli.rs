@@ -1,0 +1,928 @@
+//! Thin wrapper around the `git` executable used for every mutating operation.
+
+use ide_core::process::{own_group, terminate_tree};
+use ide_core::{CancellationToken, IdeError, IdeResult};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+/// How long a cancelled git's process group (remote helpers, `ssh`, credential helpers) gets
+/// to exit on `SIGTERM` before `SIGKILL`: git removes its `index.lock` on `SIGTERM`.
+const KILL_GRACE: Duration = Duration::from_millis(20);
+
+/// Explicit git executable from Settings › Version Control › Git (`None` = auto-detect).
+static CONFIGURED: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Sets (or clears, with `None` / an empty path) the git executable to use.
+pub fn set_git_executable(path: Option<&Path>) {
+    let path = path.filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf);
+    if *CONFIGURED.read().unwrap_or_else(|e| e.into_inner()) != path {
+        *CONFIGURED.write().unwrap_or_else(|e| e.into_inner()) = path;
+    }
+}
+
+/// Environment that routes credential prompts (`ssh` passphrases and host keys,
+/// HTTPS user names and passwords) to the UI; empty = prompts fail.
+static ASKPASS: std::sync::RwLock<Vec<(String, String)>> = std::sync::RwLock::new(Vec::new());
+
+pub fn set_askpass_env(env: Vec<(String, String)>) {
+    *ASKPASS.write().unwrap_or_else(|e| e.into_inner()) = env;
+}
+
+/// Called once per git child with its id, success flag, and stderr.
+pub type GitCommandObserver = std::sync::Arc<dyn Fn(u64, bool, &str) + Send + Sync>;
+
+static COMMAND_OBSERVER: std::sync::RwLock<Option<(&'static str, GitCommandObserver)>> = std::sync::RwLock::new(None);
+
+/// Installs the completion observer and the environment variable carrying each
+/// child's unique id to its credential helper.
+pub fn set_git_command_observer(env_name: &'static str, observer: GitCommandObserver) {
+    *COMMAND_OBSERVER.write().unwrap_or_else(|e| e.into_inner()) = Some((env_name, observer));
+}
+
+struct CommandSession {
+    id: u64,
+    observer: Option<GitCommandObserver>,
+}
+
+impl CommandSession {
+    fn start(cmd: &mut Command) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let hook = COMMAND_OBSERVER.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let observer = hook.map(|(env_name, observer)| {
+            cmd.env(env_name, id.to_string());
+            observer
+        });
+        Self { id, observer }
+    }
+
+    fn finish(&mut self, success: bool, stderr: &str) {
+        if let Some(observer) = self.observer.take() {
+            observer(self.id, success, stderr);
+        }
+    }
+}
+
+impl Drop for CommandSession {
+    fn drop(&mut self) {
+        // Cancellation or an I/O error discards only this child's pending answers.
+        self.finish(false, "");
+    }
+}
+
+/// Locates the auto-detected git executable once per process.
+///
+/// GUI apps on macOS start with a minimal `PATH`, so a few well-known install
+/// locations are probed after the `PATH` lookup.
+fn detected_git() -> Option<&'static Path> {
+    static GIT: OnceLock<Option<PathBuf>> = OnceLock::new();
+    GIT.get_or_init(|| {
+        if let Some(explicit) = std::env::var_os("OPENIDEA_GIT").map(PathBuf::from).filter(|p| p.is_file()) {
+            return Some(explicit);
+        }
+        if let Ok(found) = which::which("git") {
+            return Some(found);
+        }
+        let candidates: &[&str] = if cfg!(windows) {
+            &[r"C:\Program Files\Git\cmd\git.exe", r"C:\Program Files (x86)\Git\cmd\git.exe"]
+        } else {
+            &["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git", "/bin/git"]
+        };
+        candidates.iter().map(PathBuf::from).find(|p| p.is_file())
+    })
+    .as_deref()
+}
+
+/// The auto-detected git executable, if any.
+pub fn detected_git_executable() -> Option<PathBuf> {
+    detected_git().map(Path::to_path_buf)
+}
+
+pub(crate) fn git_binary() -> IdeResult<PathBuf> {
+    if let Some(configured) = CONFIGURED.read().unwrap_or_else(|e| e.into_inner()).clone() {
+        return Ok(configured);
+    }
+    detected_git()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| IdeError::unavailable("git executable not found; install git and make sure it is on PATH"))
+}
+
+/// `git --version` of `executable` (or the configured / detected one), e.g. `git version 2.44.0`.
+pub fn git_version(executable: Option<&Path>) -> IdeResult<String> {
+    let exe = match executable.filter(|p| !p.as_os_str().is_empty()) {
+        Some(p) => p.to_path_buf(),
+        None => git_binary()?,
+    };
+    let mut cmd = Command::new(&exe);
+    cmd.arg("--version").stdin(Stdio::null()).env("LC_ALL", "C");
+    ide_core::process::prepare(&mut cmd);
+    let out = cmd.output().map_err(|e| IdeError::unavailable(format!("cannot run {}: {e}", exe.display())))?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || !text.starts_with("git version") {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(IdeError::invalid(format!(
+            "{} is not a git executable{}",
+            exe.display(),
+            if err.is_empty() { String::new() } else { format!(": {err}") }
+        )));
+    }
+    Ok(text)
+}
+
+/// `CreateProcessW` takes at most 32767 chars including the NUL; leave slack for quoting.
+/// (The same limits as `ide_run::java_cmdline`'s shortened java command lines.)
+pub(crate) const WINDOWS_LIMIT: usize = 32_000;
+/// Linux caps one argument at 128 KiB (`MAX_ARG_STRLEN`); macOS the whole `ARG_MAX` (1 MiB, env included).
+pub(crate) const UNIX_LIMIT: usize = 120_000;
+
+/// The longest command line this platform's process spawning accepts.
+pub(crate) fn command_line_limit() -> usize {
+    if cfg!(windows) { WINDOWS_LIMIT } else { UNIX_LIMIT }
+}
+
+/// Slack for the program path and the `-c` options [`command`] adds.
+const COMMAND_LINE_SLACK: usize = 512;
+
+/// Budget for `base` (two quotes and one separator per argument) plus [`COMMAND_LINE_SLACK`].
+pub(crate) fn base_command_line_len(base: &[&str]) -> usize {
+    base.iter().map(|a| a.len() + 3).sum::<usize>() + COMMAND_LINE_SLACK
+}
+
+/// Splits `paths` into runs whose length (`base_len` plus each path, two quotes, and a separator)
+/// stays within `limit`. A path that alone exceeds the remaining room still gets a batch
+/// of its own, so every call makes progress; an empty list yields no batches.
+pub(crate) fn batch_paths(base_len: usize, paths: &[String], limit: usize) -> Vec<&[String]> {
+    let mut batches = Vec::new();
+    let mut start = 0;
+    while start < paths.len() {
+        let mut len = base_len;
+        let mut end = start;
+        while end < paths.len() {
+            // Windows quotes arguments containing spaces or tabs; reserve both quotes on every platform.
+            let next = len + paths[end].len() + 3;
+            if next > limit && end > start {
+                break;
+            }
+            len = next;
+            end += 1;
+        }
+        batches.push(&paths[start..end]);
+        start = end;
+    }
+    batches
+}
+
+/// [`run`] with a list of paths appended after `--`, split into as many invocations as
+/// the platform's command-line limit needs (a large rollback would otherwise fail with
+/// `os error 206` on Windows). `args` must already carry `--literal-pathspecs` and
+/// end with `--`; the first error stops the remaining batches.
+pub(crate) fn run_paths_env(
+    root: &Path,
+    args: &[&str],
+    paths: &[String],
+    stdin: Option<&[u8]>,
+    env: &[(&str, &std::ffi::OsStr)],
+) -> IdeResult<Output> {
+    let mut out = Output { stdout: Vec::new(), stderr: Vec::new(), code: Some(0) };
+    if paths.is_empty() {
+        return Ok(out);
+    }
+    let base_len = base_command_line_len(args);
+    for batch in batch_paths(base_len, paths, command_line_limit()) {
+        let mut full: Vec<&str> = args.to_vec();
+        full.extend(batch.iter().map(String::as_str));
+        out = run_env(root, &full, stdin, env)?;
+    }
+    Ok(out)
+}
+
+/// [`run_paths_env`] without extra environment variables.
+pub(crate) fn run_paths(root: &Path, args: &[&str], paths: &[String]) -> IdeResult<Output> {
+    run_paths_env(root, args, paths, None, &[])
+}
+
+/// Builds a `git` command with the environment every invocation needs.
+pub(crate) fn command(root: &Path) -> IdeResult<Command> {
+    let restricted = !crate::execution_allowed();
+    let binary = if restricted {
+        detected_git().ok_or_else(|| IdeError::unavailable("git executable not found"))?.to_path_buf()
+    } else {
+        git_binary()?
+    };
+    let mut cmd = Command::new(binary);
+    if restricted {
+        for setting in [
+            "core.fsmonitor=false",
+            "core.hooksPath=",
+            "diff.external=",
+            "core.attributesFile=",
+            "submodule.recurse=false",
+        ] {
+            cmd.arg("-c").arg(setting);
+        }
+        cmd.env_remove("GIT_EXTERNAL_DIFF").env("GIT_NO_LAZY_FETCH", "1");
+    }
+    cmd.current_dir(root)
+        .arg("-c")
+        .arg("core.quotepath=off")
+        .arg("-c")
+        .arg("color.ui=false")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("GIT_PAGER", "cat")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE");
+    for (k, v) in ASKPASS.read().unwrap_or_else(|e| e.into_inner()).iter() {
+        cmd.env(k, v);
+    }
+    ide_core::process::prepare(&mut cmd);
+    Ok(cmd)
+}
+
+pub(crate) struct Output {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub code: Option<i32>,
+}
+
+impl Output {
+    pub fn stdout_str(&self) -> String {
+        String::from_utf8_lossy(&self.stdout).into_owned()
+    }
+}
+
+/// Runs git to completion, optionally feeding `stdin`. Never fails on a non-zero exit.
+pub(crate) fn run_raw(root: &Path, args: &[&str], stdin: Option<&[u8]>) -> IdeResult<Output> {
+    run_raw_env(root, args, stdin, &[])
+}
+
+/// [`run_raw`] with extra environment variables (e.g. a temporary `GIT_INDEX_FILE`).
+pub(crate) fn run_raw_env(
+    root: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    env: &[(&str, &std::ffi::OsStr)],
+) -> IdeResult<Output> {
+    let first = run_raw_env_once(root, args, stdin, env)?;
+    if !retryable_index_lock(args, &first) {
+        return Ok(first);
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(first);
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(50)));
+        if Instant::now() >= deadline {
+            return Ok(first);
+        }
+        let out = run_raw_env_once(root, args, stdin, env)?;
+        if !retryable_index_lock(args, &out) {
+            return Ok(out);
+        }
+    }
+}
+
+fn retryable_index_lock(args: &[&str], out: &Output) -> bool {
+    // These builtins take the index lock before changing the index, worktree or refs.
+    // switch folds post-checkout hook failures to exit 1, unlike checkout/restore
+    // path operations, whose hooks can return 128 after files have already changed.
+    // Keep commit, update-index, merge, rebase, stash and streaming operations out:
+    // a lock error there can follow partial work. Interactive modes are excluded too.
+    let args = args.strip_prefix(&["--literal-pathspecs"]).unwrap_or(args);
+    let Some((sub, options)) = args.split_first() else { return false };
+    if !matches!(*sub, "switch" | "add" | "rm" | "reset")
+        || options
+            .iter()
+            .take_while(|arg| **arg != "--")
+            .any(|arg| matches!(*arg, "-p" | "--patch" | "-i" | "--interactive" | "-e" | "--edit" | "--soft"))
+        || out.code != Some(128)
+        || !out.stdout.is_empty()
+    {
+        return false;
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let Some(path) = stderr.lines().next().and_then(|line| line.strip_prefix("fatal: Unable to create '")) else {
+        return false;
+    };
+    path.strip_suffix("': File exists.")
+        .is_some_and(|path| path.ends_with("/index.lock") || path.ends_with("\\index.lock"))
+}
+
+fn run_raw_env_once(
+    root: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    env: &[(&str, &std::ffi::OsStr)],
+) -> IdeResult<Output> {
+    let mut cmd = command(root)?;
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.args(args)
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    tracing::debug!(?args, "git");
+    let mut session = CommandSession::start(&mut cmd);
+    let mut child = cmd.spawn().map_err(spawn_error)?;
+    let writer = match (stdin, child.stdin.take()) {
+        (Some(data), Some(mut pipe)) => {
+            let data = data.to_vec();
+            Some(std::thread::spawn(move || {
+                // A broken pipe just means git stopped reading early; its exit status tells the story.
+                let _ = pipe.write_all(&data);
+            }))
+        }
+        _ => None,
+    };
+    let out = child.wait_with_output()?;
+    if let Some(w) = writer {
+        let _ = w.join();
+    }
+    session.finish(out.status.success(), &String::from_utf8_lossy(&out.stderr));
+    Ok(Output { stdout: out.stdout, stderr: out.stderr, code: out.status.code() })
+}
+
+/// Captures binary/NUL-delimited read output while allowing cancellation to kill git.
+pub(crate) fn run_cancellable(root: &Path, args: &[&str], cancel: &CancellationToken) -> IdeResult<Output> {
+    let out = run_cancellable_raw(root, args, cancel)?;
+    if out.code == Some(0) { Ok(out) } else { Err(failure(args, &out.stderr, &out.stdout, out.code)) }
+}
+
+/// Cancellable capture preserving exit codes for commands with documented non-error states.
+pub(crate) fn run_cancellable_raw(root: &Path, args: &[&str], cancel: &CancellationToken) -> IdeResult<Output> {
+    run_cancellable_raw_stdin(root, args, None, cancel)
+}
+
+/// Like `run_cancellable`, feeding `stdin` to git. Revisions and paths passed through
+/// `--stdin` are not bound by the command-line length limit (Windows: ~32K characters).
+pub(crate) fn run_cancellable_stdin(
+    root: &Path,
+    args: &[&str],
+    stdin: &[u8],
+    cancel: &CancellationToken,
+) -> IdeResult<Output> {
+    let out = run_cancellable_raw_stdin(root, args, Some(stdin), cancel)?;
+    if out.code == Some(0) { Ok(out) } else { Err(failure(args, &out.stderr, &out.stdout, out.code)) }
+}
+
+fn run_cancellable_raw_stdin(
+    root: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    cancel: &CancellationToken,
+) -> IdeResult<Output> {
+    run_capture(root, args, stdin, cancel, usize::MAX)
+}
+
+/// Neutralizes repository clean/process filters for a read of working-tree bytes.
+/// Git still applies them with --no-ext-diff and --no-textconv.
+pub(crate) fn filter_overrides(root: &Path, cancel: &CancellationToken) -> IdeResult<Vec<String>> {
+    if crate::execution_allowed() {
+        return Ok(Vec::new());
+    }
+    let config = run_bounded(root, &["config", "--null", "--list"], cancel, 4 << 20)?;
+    let mut overrides = Vec::new();
+    for record in config.stdout_str().split('\0') {
+        let key = record.split('\n').next().unwrap_or_default();
+        if key.starts_with("filter.")
+            && (key.ends_with(".clean") || key.ends_with(".process") || key.ends_with(".required"))
+        {
+            overrides.push("-c".into());
+            overrides.push(format!("{key}={}", if key.ends_with(".required") { "false" } else { "" }));
+        }
+    }
+    Ok(overrides)
+}
+
+/// Cancellable capture with bounded stdout and stderr; stops git on overflow.
+pub(crate) fn run_bounded(root: &Path, args: &[&str], cancel: &CancellationToken, max: usize) -> IdeResult<Output> {
+    let out = run_capture(root, args, None, cancel, max)?;
+    if out.code == Some(0) { Ok(out) } else { Err(failure(args, &out.stderr, &out.stdout, out.code)) }
+}
+fn run_capture(
+    root: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    cancel: &CancellationToken,
+    max: usize,
+) -> IdeResult<Output> {
+    if cancel.is_cancelled() {
+        return Err(IdeError::cancelled());
+    }
+    let overflow = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut cmd = command(root)?;
+    cmd.args(args)
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    own_group(&mut cmd);
+    let mut session = CommandSession::start(&mut cmd);
+    let mut child = cmd.spawn().map_err(spawn_error)?;
+    let writer = match (stdin, child.stdin.take()) {
+        (Some(data), Some(mut pipe)) => {
+            let data = data.to_vec();
+            Some(std::thread::spawn(move || {
+                // A broken pipe just means git stopped reading early; its exit status tells the story.
+                let _ = pipe.write_all(&data);
+            }))
+        }
+        _ => None,
+    };
+    let capture = |mut pipe: Box<dyn Read + Send>| {
+        let overflow = overflow.clone();
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            (&mut pipe).take(max.saturating_add(1) as u64).read_to_end(&mut bytes)?;
+            if bytes.len() > max {
+                overflow.store(true, std::sync::atomic::Ordering::Release);
+                std::io::copy(&mut pipe, &mut std::io::sink())?;
+            }
+            Ok(bytes)
+        })
+    };
+    let stdout = capture(Box::new(child.stdout.take().expect("piped stdout")));
+    let stderr = capture(Box::new(child.stderr.take().expect("piped stderr")));
+    let status = loop {
+        if cancel.is_cancelled() || overflow.load(std::sync::atomic::Ordering::Acquire) {
+            terminate_tree(&mut child, KILL_GRACE);
+            let _ = stdout.join();
+            let _ = stderr.join();
+            if let Some(w) = writer {
+                let _ = w.join();
+            }
+            return Err(if cancel.is_cancelled() {
+                IdeError::cancelled()
+            } else {
+                IdeError::invalid(format!("git output exceeds {max} bytes"))
+            });
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    if let Some(w) = writer {
+        let _ = w.join();
+    }
+    let join = |thread: std::thread::JoinHandle<std::io::Result<Vec<u8>>>| {
+        thread.join().map_err(|_| IdeError::internal("git output reader panicked"))?.map_err(IdeError::from)
+    };
+    let out = Output { stdout: join(stdout)?, stderr: join(stderr)?, code: status.code() };
+    session.finish(status.success(), &String::from_utf8_lossy(&out.stderr));
+    if out.stdout.len() > max || out.stderr.len() > max {
+        return Err(IdeError::invalid(format!("git output exceeds {max} bytes")));
+    }
+    Ok(out)
+}
+
+/// Runs git and maps a non-zero exit status to an error carrying git's message.
+pub(crate) fn run(root: &Path, args: &[&str], stdin: Option<&[u8]>) -> IdeResult<Output> {
+    let out = run_raw(root, args, stdin)?;
+    if out.code == Some(0) { Ok(out) } else { Err(failure(args, &out.stderr, &out.stdout, out.code)) }
+}
+
+/// [`run`] with extra environment variables.
+pub(crate) fn run_env(
+    root: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    env: &[(&str, &std::ffi::OsStr)],
+) -> IdeResult<Output> {
+    let out = run_raw_env(root, args, stdin, env)?;
+    if out.code == Some(0) { Ok(out) } else { Err(failure(args, &out.stderr, &out.stdout, out.code)) }
+}
+
+fn spawn_error(e: std::io::Error) -> IdeError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        IdeError::unavailable(format!("could not run git: {e}"))
+    } else {
+        e.into()
+    }
+}
+
+pub(crate) fn failure(args: &[&str], stderr: &[u8], stdout: &[u8], code: Option<i32>) -> IdeError {
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(stdout).trim().to_string();
+    let mut msg = if stderr.is_empty() {
+        stdout.clone()
+    } else {
+        // Merge/rebase/stash report conflicts on stdout; keep them next to the error.
+        let conflicts: Vec<&str> = stdout.lines().filter(|l| l.starts_with("CONFLICT")).collect();
+        if conflicts.is_empty() { stderr } else { format!("{}\n{stderr}", conflicts.join("\n")) }
+    };
+    if msg.is_empty() {
+        let sub = subcommand(args);
+        msg = match code {
+            Some(c) => format!("git {sub} failed with exit code {c}"),
+            None => format!("git {sub} was terminated"),
+        };
+    }
+    IdeError::new(classify(&msg), msg)
+}
+
+fn subcommand<'a>(args: &[&'a str]) -> &'a str {
+    let mut skip_next = false;
+    for a in args {
+        if skip_next {
+            skip_next = false;
+        } else if *a == "-c" {
+            skip_next = true;
+        } else if !a.starts_with('-') {
+            return a;
+        }
+    }
+    "git"
+}
+
+fn classify(msg: &str) -> ide_core::error::ErrorKind {
+    use ide_core::error::ErrorKind;
+    let lower = msg.to_ascii_lowercase();
+    if lower.contains("did not match any file")
+        || lower.contains("unknown revision")
+        || lower.contains("not found")
+        || lower.contains("does not exist")
+    {
+        ErrorKind::NotFound
+    } else if lower.contains("already exists") {
+        ErrorKind::AlreadyExists
+    } else if lower.contains("permission denied") {
+        ErrorKind::PermissionDenied
+    } else {
+        ErrorKind::Internal
+    }
+}
+
+/// Runs a (network) command, streaming every progress line to `on_output`.
+///
+/// Lines are split on both `\r` and `\n` so git's in-place progress counters arrive
+/// as separate updates. The child (and, on Unix, its whole process group — ssh,
+/// remote helpers) is killed promptly once `cancel` fires.
+pub(crate) fn run_streaming(
+    root: &Path,
+    args: &[&str],
+    cancel: &CancellationToken,
+    on_output: &dyn Fn(String),
+) -> IdeResult<()> {
+    run_streaming_env(root, args, &[], cancel, on_output)
+}
+
+/// [`run_streaming`] with extra environment variables (e.g. a sequence editor).
+pub(crate) fn run_streaming_env(
+    root: &Path,
+    args: &[&str],
+    env: &[(&str, &std::ffi::OsStr)],
+    cancel: &CancellationToken,
+    on_output: &dyn Fn(String),
+) -> IdeResult<()> {
+    if cancel.is_cancelled() {
+        return Err(IdeError::cancelled());
+    }
+    let mut cmd = command(root)?;
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    own_group(&mut cmd);
+    tracing::debug!(?args, "git (streaming)");
+    let mut session = CommandSession::start(&mut cmd);
+    let mut child = cmd.spawn().map_err(spawn_error)?;
+
+    let (tx, rx) = mpsc::channel::<Event>();
+    let mut readers = Vec::new();
+    if let Some(out) = child.stdout.take() {
+        readers.push(spawn_reader(out, tx.clone(), Stream::Stdout));
+    }
+    if let Some(err) = child.stderr.take() {
+        readers.push(spawn_reader(err, tx.clone(), Stream::Stderr));
+    }
+    drop(tx);
+
+    // Keep the tail of stderr (and stdout conflict reports) for the error message.
+    let mut stderr_tail: Vec<String> = Vec::new();
+    let mut conflicts: Vec<String> = Vec::new();
+    let mut open = readers.len();
+    while open > 0 {
+        if cancel.is_cancelled() {
+            terminate_tree(&mut child, KILL_GRACE);
+            for r in readers {
+                let _ = r.join();
+            }
+            return Err(IdeError::cancelled());
+        }
+        match rx.recv_timeout(Duration::from_millis(40)) {
+            Ok(Event::Line(stream, line)) => {
+                if stream == Stream::Stderr {
+                    stderr_tail.push(line.clone());
+                    if stderr_tail.len() > 40 {
+                        stderr_tail.remove(0);
+                    }
+                } else if line.starts_with("CONFLICT") && conflicts.len() < 40 {
+                    conflicts.push(line.clone());
+                }
+                on_output(line);
+            }
+            Ok(Event::Closed) => open -= 1,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    // Pipes are closed; the process is exiting. Still honour cancellation while waiting.
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if cancel.is_cancelled() {
+            terminate_tree(&mut child, KILL_GRACE);
+            return Err(IdeError::cancelled());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    for r in readers {
+        let _ = r.join();
+    }
+    if status.success() {
+        session.finish(true, &stderr_tail.join("\n"));
+        return Ok(());
+    }
+    let relevant: Vec<&str> =
+        conflicts.iter().chain(stderr_tail.iter()).map(String::as_str).filter(|l| !is_progress_line(l)).collect();
+    let msg = relevant.join("\n");
+    session.finish(false, &stderr_tail.join("\n"));
+    Err(failure(args, msg.as_bytes(), b"", status.code()))
+}
+
+fn is_progress_line(line: &str) -> bool {
+    let progress_prefixes = [
+        "remote: Counting",
+        "remote: Compressing",
+        "remote: Enumerating",
+        "remote: Total",
+        "Counting objects",
+        "Compressing objects",
+        "Enumerating objects",
+        "Receiving objects",
+        "Resolving deltas",
+        "Writing objects",
+        "Delta compression",
+        "Unpacking objects",
+    ];
+    progress_prefixes.iter().any(|p| line.starts_with(p))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stream {
+    Stdout,
+    Stderr,
+}
+
+enum Event {
+    Line(Stream, String),
+    Closed,
+}
+
+fn spawn_reader(
+    mut pipe: impl Read + Send + 'static,
+    tx: mpsc::Sender<Event>,
+    stream: Stream,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        let mut pending: Vec<u8> = Vec::new();
+        let flush = |pending: &mut Vec<u8>| {
+            if !pending.is_empty() {
+                let line = String::from_utf8_lossy(pending).trim_end().to_string();
+                pending.clear();
+                if !line.is_empty() {
+                    let _ = tx.send(Event::Line(stream, line));
+                }
+            }
+        };
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    for &b in &buf[..n] {
+                        if b == b'\n' || b == b'\r' {
+                            flush(&mut pending);
+                        } else {
+                            pending.push(b);
+                        }
+                    }
+                }
+            }
+        }
+        flush(&mut pending);
+        let _ = tx.send(Event::Closed);
+    })
+}
+
+#[cfg(test)]
+mod command_session_tests {
+    use super::*;
+
+    #[test]
+    fn command_ids_reach_children_and_completion_is_once_per_session() {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = events.clone();
+        set_git_command_observer(
+            "OPENIDEA_TEST_COMMAND_ID",
+            std::sync::Arc::new(move |id, success, stderr| {
+                seen.lock().unwrap().push((id, success, stderr.to_owned()));
+            }),
+        );
+        let mut first_cmd = Command::new("git");
+        let mut second_cmd = Command::new("git");
+        let mut first = CommandSession::start(&mut first_cmd);
+        let second = CommandSession::start(&mut second_cmd);
+        let (first_id, second_id) = (first.id, second.id);
+        assert_ne!(first_id, second_id);
+        for (cmd, id) in [(&first_cmd, first_id), (&second_cmd, second_id)] {
+            let value = cmd.get_envs().find(|(key, _)| *key == "OPENIDEA_TEST_COMMAND_ID").unwrap().1.unwrap();
+            assert_eq!(value, std::ffi::OsStr::new(&id.to_string()));
+        }
+        drop(second); // cancellation discards this command's state
+        first.finish(true, "done");
+        drop(first);
+        let events = events.lock().unwrap();
+        let ours: Vec<_> = events.iter().filter(|(id, _, _)| *id == first_id || *id == second_id).cloned().collect();
+        assert_eq!(ours, vec![(second_id, false, String::new()), (first_id, true, "done".into())]);
+    }
+}
+
+#[cfg(test)]
+mod batching_tests {
+    use super::{WINDOWS_LIMIT, base_command_line_len, batch_paths, command_line_limit};
+
+    fn paths(n: usize, len: usize) -> Vec<String> {
+        (0..n).map(|i| format!("src/file-{i}.rs").chars().cycle().take(len).collect()).collect()
+    }
+
+    fn len_of(base_len: usize, batch: &[String]) -> usize {
+        base_len + batch.iter().map(|p| p.len() + 3).sum::<usize>()
+    }
+
+    #[test]
+    fn empty_input_yields_no_batches() {
+        let empty: Vec<String> = Vec::new();
+        assert!(batch_paths(10, &empty, 100).is_empty());
+    }
+
+    #[test]
+    fn every_path_is_batched_exactly_once_and_in_order() {
+        let all = paths(100, 12);
+        let batches = batch_paths(50, &all, 200);
+        let joined: Vec<&String> = batches.iter().flat_map(|b| b.iter()).collect();
+        assert_eq!(joined, all.iter().collect::<Vec<_>>());
+        assert!(batches.len() > 1);
+    }
+
+    #[test]
+    fn batches_stay_within_the_limit() {
+        let all = paths(5_000, 40);
+        let base = 40;
+        let limit = 1_000;
+        for batch in batch_paths(base, &all, limit) {
+            assert!(len_of(base, batch) <= limit || batch.len() == 1);
+        }
+        // The whole list would not have fit one invocation.
+        assert!(len_of(base, &all) > limit);
+    }
+
+    #[test]
+    fn paths_with_spaces_fit_the_windows_limit_including_quotes() {
+        let all = vec![format!("directory with spaces/{}.rs", "x".repeat(15)); 5_000];
+        assert_eq!(all[0].len(), 40);
+        let base = base_command_line_len(&["--literal-pathspecs", "add", "-A", "--"]);
+        let batches = batch_paths(base, &all, WINDOWS_LIMIT);
+        assert!(batches.len() > 1);
+        for batch in batches {
+            assert!(len_of(base, batch) <= WINDOWS_LIMIT);
+        }
+    }
+
+    #[test]
+    fn an_oversized_path_gets_its_own_batch() {
+        let all = vec!["a".to_string(), "x".repeat(10_000), "b".to_string()];
+        let batches = batch_paths(0, &all, 100);
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].to_vec(), vec!["a".to_string()]);
+        assert_eq!(batches[1].to_vec(), vec!["x".repeat(10_000)]);
+        assert_eq!(batches[2].to_vec(), vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn the_platform_limit_is_a_positive_budget() {
+        assert!(command_line_limit() > 1_000);
+    }
+}
+
+#[cfg(test)]
+mod index_lock_tests {
+    use super::*;
+
+    fn repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q", "-b", "main"], None).unwrap();
+        std::fs::write(dir.path().join("file"), "main\n").unwrap();
+        run(dir.path(), &["add", "file"], None).unwrap();
+        run(
+            dir.path(),
+            &["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"],
+            None,
+        )
+        .unwrap();
+        run(dir.path(), &["branch", "other"], None).unwrap();
+        dir
+    }
+
+    #[test]
+    fn switch_retries_until_index_lock_is_released() {
+        let dir = repo();
+        let lock = dir.path().join(".git/index.lock");
+        std::fs::write(&lock, "held").unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            std::fs::remove_file(lock).unwrap();
+        });
+        let start = Instant::now();
+        let result = run(dir.path(), &["switch", "other"], None);
+        release.join().unwrap();
+        result.unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(300));
+        assert_eq!(run(dir.path(), &["branch", "--show-current"], None).unwrap().stdout_str().trim(), "other");
+    }
+
+    #[test]
+    fn persistent_index_lock_returns_original_error_without_removing_lock() {
+        let dir = repo();
+        let lock = dir.path().join(".git/index.lock");
+        std::fs::write(&lock, "held by someone else").unwrap();
+        let args = ["switch", "other"];
+        let original = run_raw_env_once(dir.path(), &args, None, &[]).unwrap();
+        let start = Instant::now();
+        let error = run(dir.path(), &args, None).err().unwrap();
+        assert!(start.elapsed() >= Duration::from_secs(2));
+        assert!(start.elapsed() < Duration::from_secs(4));
+        assert_eq!(error.to_string(), failure(&args, &original.stderr, &original.stdout, original.code).to_string());
+        assert_eq!(std::fs::read_to_string(lock).unwrap(), "held by someone else");
+        assert_eq!(run(dir.path(), &["branch", "--show-current"], None).unwrap().stdout_str().trim(), "main");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn switch_does_not_repeat_a_failed_post_checkout_hook() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = repo();
+        let hook = dir.path().join(".git/hooks/post-checkout");
+        std::fs::write(
+            &hook,
+            "#!/bin/sh\necho ran >> hook-runs\necho \"fatal: Unable to create '$PWD/.git/index.lock': File exists.\" >&2\nexit 128\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = run_raw(dir.path(), &["switch", "-q", "other"], None).unwrap();
+        assert_eq!(out.code, Some(1));
+        assert_eq!(std::fs::read_to_string(dir.path().join("hook-runs")).unwrap(), "ran\n");
+        assert_eq!(run(dir.path(), &["branch", "--show-current"], None).unwrap().stdout_str().trim(), "other");
+    }
+
+    #[test]
+    fn retry_requires_a_safe_command_and_the_exact_lock_failure() {
+        let mut out = Output {
+            stdout: Vec::new(),
+            stderr: b"fatal: Unable to create '/repo/.git/index.lock': File exists.\n\nAnother git process".to_vec(),
+            code: Some(128),
+        };
+        for args in [&["switch", "other"][..], &["--literal-pathspecs", "add", "-A", "--"], &["rm"], &["reset"]] {
+            assert!(retryable_index_lock(args, &out));
+        }
+        for sub in ["merge", "rebase", "stash", "commit", "update-index", "checkout", "restore", "pull", "status"] {
+            assert!(!retryable_index_lock(&[sub], &out));
+        }
+        assert!(!retryable_index_lock(&["add", "--patch"], &out));
+        assert!(!retryable_index_lock(&["reset", "--soft"], &out));
+        out.code = Some(1); // switch's post-checkout hook can fail after the switch succeeded.
+        assert!(!retryable_index_lock(&["switch"], &out));
+        out.code = Some(128);
+        for message in [
+            "fatal: Unable to create '/repo/.git/HEAD.lock': File exists.",
+            "fatal: Unable to create '/repo/.git/index.lock': Permission denied",
+            "error: index.lock: File exists",
+            "warning: partial work\nfatal: Unable to create '/repo/.git/index.lock': File exists.",
+        ] {
+            out.stderr = message.as_bytes().to_vec();
+            assert!(!retryable_index_lock(&["switch"], &out));
+        }
+    }
+}

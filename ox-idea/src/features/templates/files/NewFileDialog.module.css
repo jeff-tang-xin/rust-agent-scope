@@ -1,0 +1,79 @@
+.chooser {
+  outline: none;
+  display: flex;
+  flex-direction: column;
+}
+.target {
+  padding: 0 10px 6px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.templateList {
+  max-height: 360px;
+}
+.templateRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.icon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.variableDialog {
+  --form-inset: calc((var(--space-3) + var(--space-4)) / 2);
+}
+.variableDialog .form {
+  padding-inline: var(--form-inset);
+  gap: var(--space-3);
+}
+.variableDialog [data-dialog-footer] {
+  padding-inline: var(--form-inset);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kinds {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+.kind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-row);
+  padding: 0 8px;
+  border-radius: var(--radius-row);
+  color: var(--fg);
+  cursor: default;
+}
+.kind:hover {
+  background: var(--bg-hover);
+}
+.kindActive,
+.kindActive:hover {
+  background: var(--bg-selected);
+  color: var(--fg-strong);
+}
+.hint {
+  min-height: 16px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.error {
+  color: var(--danger);
+}

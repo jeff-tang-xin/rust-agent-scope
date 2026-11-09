@@ -12,6 +12,4 @@ commit-msg.txt
 .ox_cfg.json
 .ox_cfg_appdata.json
 .ox_state.json
-# OXidea 验证目录：独立 git 仓库（OpenIDEA fork），不纳入主仓库版本控制
-ox-idea/
 

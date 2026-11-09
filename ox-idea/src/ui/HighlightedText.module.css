@@ -1,0 +1,10 @@
+/* SearchMatch: matched fragments get the search-match background (rounded), text keeps its colour. */
+.match {
+  background: var(--bg-search-match);
+  color: var(--fg-search-match, inherit);
+  border-radius: 3px;
+  box-decoration-break: clone;
+}
+.accent {
+  color: var(--fg-search-match, inherit);
+}

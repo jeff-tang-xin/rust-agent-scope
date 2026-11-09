@@ -1,0 +1,166 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-editor, var(--bg-app));
+  color: var(--fg);
+  outline: none;
+}
+
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border-editor-tabs, var(--border));
+  font-size: var(--fs-small);
+  color: var(--fg-secondary);
+}
+.separator {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--border-strong);
+}
+.spacer {
+  flex: 1;
+}
+.info {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.textButton {
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-toolbar-button);
+  background: transparent;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.textButton:hover {
+  background: var(--bg-hover);
+}
+.message {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+/* --- image viewer ------------------------------------------------------------ */
+
+.canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.dragging {
+  cursor: grabbing;
+}
+.image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  image-rendering: auto;
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+.pixelated {
+  image-rendering: pixelated;
+}
+.chessboard {
+  background-color: var(--bg-elev);
+  background-image:
+    linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%, transparent 75%, var(--bg-hover) 75%),
+    linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%, transparent 75%, var(--bg-hover) 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    8px 8px;
+}
+
+/* --- hex view ---------------------------------------------------------------- */
+
+.hexScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+}
+.hexLayer {
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+}
+.hexRow {
+  position: absolute;
+  left: 0;
+  display: flex;
+  white-space: pre;
+  padding: 0 12px;
+  align-items: center;
+}
+.hexHeader {
+  flex: none;
+  display: flex;
+  white-space: pre;
+  padding: 0 12px;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  color: var(--fg-faint);
+  border-bottom: 1px solid var(--border);
+}
+.hexOffset {
+  color: var(--fg-gutter);
+  padding-right: 16px;
+}
+.hexBytes {
+  display: flex;
+  gap: 0;
+  padding-right: 16px;
+}
+.hexByte {
+  width: 3ch;
+  text-align: left;
+}
+.hexByte:nth-child(8) {
+  margin-right: 1ch;
+}
+.hexAscii {
+  display: flex;
+  color: var(--fg-secondary);
+}
+.hexChar {
+  width: 1ch;
+}
+.zero {
+  color: var(--fg-faint);
+}
+.selectedByte {
+  background: var(--bg-editor-selection, var(--bg-selected));
+  color: var(--fg-strong);
+}
+.pending {
+  color: var(--fg-faint);
+}

@@ -1,0 +1,14 @@
+id = "xml"
+name = "XML"
+extensions = ["xml", "xsd", "xsl", "xslt", "svg", "plist", "csproj", "fsproj", "vbproj", "props", "targets", "nuspec", "xaml", "axaml", "resx", "wsdl", "fxml", "iml", "jnlp", "rss", "atom", "xliff", "xlf", "storyboard", "xib", "tld", "pom"]
+filenames = ["NuGet.Config", "Directory.Build.targets", "web.config", "app.config"]
+first-line = "^<\\?xml\\b"
+block-comment = ["<!--", "-->"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "XML"
+tree-sitter = "xml"
+
+[[language-servers]]
+name = "lemminx"
+command = "lemminx"
+install-hint = "Install Eclipse LemMinX (https://github.com/redhat-developer/vscode-xml/releases, binary `lemminx`)"

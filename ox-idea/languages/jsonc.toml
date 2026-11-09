@@ -1,0 +1,17 @@
+id = "jsonc"
+name = "JSON with Comments"
+formatter = { tool = "prettier", parser = "jsonc", range = true }
+extensions = ["jsonc", "code-workspace", "code-snippets"]
+filenames = ["tsconfig.json", "jsconfig.json", "tsconfig.*.json", "jsconfig.*.json", ".eslintrc", ".eslintrc.json", ".jshintrc", ".babelrc", ".swcrc", "devcontainer.json", ".devcontainer.json", "launch.json", "tasks.json", "settings.json", "extensions.json", "keybindings.json", "tslint.json", "api-extractor.json", "typedoc.json", "deno.json", "biome.json", "turbo.json", "language-configuration.json"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "JSON"
+tree-sitter = "json"
+
+[[language-servers]]
+name = "vscode-json-language-server"
+command = "vscode-json-language-server"
+args = ["--stdio"]
+initialization-options = { provideFormatter = true }
+install-hint = "npm i -g vscode-langservers-extracted"

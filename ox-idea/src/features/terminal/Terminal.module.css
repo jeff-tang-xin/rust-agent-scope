@@ -1,0 +1,158 @@
+.root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-island, var(--bg-app));
+}
+
+.tabs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.tabStrip {
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+
+.tabActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+}
+
+/* A tab group: its header (while split) over its tabs' terminals. */
+.group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.panels {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+/* tab drag & drop target on a group: an edge splits, the middle joins (the editor's look) */
+.dropZone {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.drop-left {
+  right: 50%;
+}
+.drop-right {
+  left: 50%;
+}
+.drop-top {
+  bottom: 50%;
+}
+.drop-bottom {
+  top: 50%;
+}
+
+.panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.panel[hidden] {
+  display: none;
+}
+
+.split {
+  flex: 1;
+}
+
+.splitPanel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 0 0 8px;
+  overflow: hidden;
+  outline: none;
+  position: relative;
+}
+
+.exited :global(.xterm-cursor-layer),
+.exited :global(.xterm-cursor) {
+  visibility: hidden;
+}
+
+.pane :global(.xterm) {
+  height: 100%;
+}
+/* xterm's DOM renderer stretches the cursor cell over the whole row (line height
+   included); keep it to the font's own height, centred like the glyphs. */
+.pane :global(.xterm-rows .xterm-cursor) {
+  position: relative;
+  top: 50%;
+  height: auto;
+  max-height: 100%;
+  line-height: normal;
+  transform: translateY(-50%);
+}
+.pane :global(.xterm-viewport) {
+  background-color: var(--bg-island, var(--bg-app)) !important;
+}
+.pane :global(.xterm .xterm-scrollable-element > .scrollbar > .slider) {
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--scrollbar-thumb) content-box;
+}
+.pane :global(.xterm .xterm-scrollable-element > .scrollbar > .slider:hover),
+.pane :global(.xterm .xterm-scrollable-element > .scrollbar > .slider.active) {
+  background: var(--scrollbar-thumb-hover) content-box;
+}
+
+.rename {
+  padding: 6px;
+  width: 220px;
+}
+
+/* Find bar (⌘F) */
+.find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.findField {
+  flex: 0 1 360px;
+  min-width: 160px;
+}
+.findCount {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+  padding: 0 6px;
+  white-space: nowrap;
+  min-width: 56px;
+}
+.findCountNone {
+  color: var(--danger);
+}
+.findSpacer {
+  flex: 1;
+}

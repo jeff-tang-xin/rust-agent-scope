@@ -1,0 +1,53 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+  border-radius: var(--radius-small);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.button:not(:disabled):hover,
+.button[aria-expanded="true"] {
+  background: var(--bg-toolbar-hover);
+  color: var(--fg-strong);
+}
+.button:not(:disabled):active {
+  background: var(--bg-toolbar-pressed, color-mix(in srgb, var(--fg-strong) 12%, transparent));
+}
+.button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+/* Status bar widget (StatusBar.Widget): UI font, secondary text, rounded hover. */
+.status {
+  height: 22px;
+  margin: 0 -2px;
+  padding: 0 6px;
+  color: var(--fg-secondary);
+  font-size: var(--fs-ui);
+}
+/* Main toolbar widget (project / VCS / run configuration). */
+.title {
+  height: 28px;
+  margin: 0 -4px;
+  padding: 0 8px;
+  border-radius: var(--radius-toolbar-button, 6px);
+  color: var(--fg-strong);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.emphasis {
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

@@ -1,0 +1,24 @@
+id = "cmake"
+name = "CMake"
+extensions = ["cmake"]
+filenames = ["CMakeLists.txt", "CMakeCache.txt"]
+line-comment = "#"
+block-comment = ["#[[", "]]"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "CMake"
+tree-sitter = "cmake"
+
+[[language-servers]]
+name = "neocmakelsp"
+command = "neocmakelsp"
+args = ["stdio"]
+root-markers = ["CMakeLists.txt", "CMakePresets.json"]
+install-hint = "cargo install neocmakelsp (https://github.com/neocmakelsp/neocmakelsp)"
+
+[[language-servers]]
+name = "cmake-language-server"
+# Alternative: used only when the server above is not installed.
+fallback = true
+command = "cmake-language-server"
+root-markers = ["CMakeLists.txt", "CMakePresets.json"]
+install-hint = "pip install cmake-language-server"

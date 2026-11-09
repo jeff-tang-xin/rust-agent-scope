@@ -1,0 +1,24 @@
+[INFO] --- dependency:3.8.1:tree (default-cli) @ conflict-demo ---
+[INFO] demo:conflict-demo:jar:1.0-SNAPSHOT
+[INFO] +- org.hamcrest:hamcrest-core:jar:1.3:compile
+[INFO] +- org.apache.commons:commons-text:jar:1.10.0:compile
+[INFO] |  \- org.apache.commons:commons-lang3:jar:3.12.0:compile
+[INFO] +- org.apache.commons:commons-configuration2:jar:2.10.1:compile
+[INFO] |  +- (org.apache.commons:commons-lang3:jar:3.14.0:compile - omitted for conflict with 3.12.0)
+[INFO] |  +- (org.apache.commons:commons-text:jar:1.11.0:compile - omitted for conflict with 1.10.0)
+[INFO] |  \- commons-logging:commons-logging:jar:1.2:compile (version managed from 1.3.0)
+[INFO] +- com.google.guava:guava:jar:32.1.3-jre:compile
+[INFO] |  +- com.google.guava:failureaccess:jar:1.0.1:compile
+[INFO] |  +- com.google.guava:listenablefuture:jar:9999.0-empty-to-avoid-conflict-with-guava:compile
+[INFO] |  +- com.google.code.findbugs:jsr305:jar:3.0.2:compile
+[INFO] |  +- org.checkerframework:checker-qual:jar:3.37.0:compile
+[INFO] |  +- com.google.errorprone:error_prone_annotations:jar:2.21.1:compile
+[INFO] |  \- com.google.j2objc:j2objc-annotations:jar:2.8:compile
+[INFO] +- com.google.inject:guice:jar:5.1.0:compile
+[INFO] |  +- javax.inject:javax.inject:jar:1:compile
+[INFO] |  +- aopalliance:aopalliance:jar:1.0:compile
+[INFO] |  \- (com.google.guava:guava:jar:30.1-jre:compile - omitted for conflict with 32.1.3-jre)
+[INFO] \- junit:junit:jar:4.13.2:test
+[INFO]    \- (org.hamcrest:hamcrest-core:jar:1.3:test - omitted for duplicate)
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS

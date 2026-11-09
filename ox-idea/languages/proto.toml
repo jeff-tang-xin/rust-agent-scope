@@ -1,0 +1,15 @@
+id = "proto"
+name = "Protocol Buffers"
+extensions = ["proto"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "ProtoBuf"
+tree-sitter = "proto"
+
+[[language-servers]]
+name = "buf"
+command = "buf"
+args = ["lsp", "serve"]
+root-markers = ["buf.yaml", "buf.work.yaml", "buf.gen.yaml"]
+install-hint = "brew install bufbuild/buf/buf (https://buf.build/docs/installation)"

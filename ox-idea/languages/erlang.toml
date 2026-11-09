@@ -1,0 +1,15 @@
+id = "erlang"
+name = "Erlang"
+extensions = ["erl", "hrl", "escript", "app.src"]
+filenames = ["rebar.config", "rebar.lock", "sys.config"]
+first-line = "^#!.*\\bescript\\b"
+line-comment = "%"
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Erlang"
+
+[[language-servers]]
+name = "elp"
+command = "elp"
+args = ["server"]
+root-markers = ["rebar.config", "erlang.mk", ".elp.toml"]
+install-hint = "Install Erlang Language Platform (https://github.com/WhatsApp/erlang-language-platform/releases)"

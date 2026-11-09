@@ -1,0 +1,313 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Branch, Commit, LogQuery } from "@/bindings";
+const log = vi.hoisted(() => vi.fn());
+vi.mock("@/platform/ipc", async (original) => {
+  const real = await original<typeof import("@/platform/ipc")>();
+  return {
+    ...real,
+    commands: {
+      ...real.commands,
+      vcsLog: (repo: string | null, query: LogQuery) => log(repo, query),
+      vcsBranchInfo: () => Promise.resolve({ status: "ok", data: { upstream: null } }),
+      vcsConfigGet: () => Promise.resolve({ status: "ok", data: null }),
+    },
+  };
+});
+import { commitKey, graphCommit, mergeRepoLogs, type RepoCommit } from "../multiRoot";
+import { buildRepositoryBranchTree } from "../branches";
+import {
+  emptyFilters,
+  installGitLog,
+  loadMore,
+  openLogTab,
+  PAGE,
+  reloadLog,
+  selectCommit,
+  selectedCommits,
+  selectGitTab,
+  toggleCommitSelection,
+  toggleRepository,
+  useGitLog,
+} from "../logStore";
+import { useVcs } from "../store";
+import { commitFileDiffData } from "../diffInput";
+
+const commit = (id: string, timeMs = 0): Commit => ({
+  id,
+  shortId: id,
+  parents: [],
+  refs: [],
+  author: "a",
+  email: "a@test",
+  summary: id,
+  message: id,
+  timeMs,
+});
+const branch = (name: string, remote = false): Branch => ({
+  name,
+  remote,
+  current: false,
+  upstream: null,
+  ahead: 0,
+  behind: 0,
+  lastCommitMs: 0,
+  commit: "same",
+});
+
+beforeEach(() => {
+  useVcs.setState({ root: "/project", roots: ["/project/front", "/project/back"], repo: "/project/front" });
+  useGitLog.setState({
+    filters: emptyFilters(),
+    commits: [],
+    done: false,
+    selection: [],
+    selected: null,
+    shownLog: "log",
+    tab: "log",
+    logTabs: [],
+    generation: useGitLog.getState().generation + 1,
+  });
+  log.mockReset().mockResolvedValue({ status: "ok", data: [] });
+});
+
+describe("multi-root Git log", () => {
+  it("keeps filtered edge hints from both graph metadata formats", () => {
+    const row = { ...commit("tip"), repo: "/a", parents: ["real"], dashed: [true] };
+    expect(graphCommit(row)).toMatchObject({ parents: ["/a\0real"], dashed: [true], edgeTypes: ["filtered"] });
+    expect(graphCommit({ ...row, graphParents: ["visible"], graphDashed: [false] })).toMatchObject({
+      parents: ["/a\0visible"],
+      dashed: [false],
+      edgeTypes: ["normal"],
+    });
+  });
+
+  it("merges streams by time without violating each root's topological order", () => {
+    const child = { ...commit("child", 1), repo: "a", parents: ["parent"] };
+    const parent = { ...commit("parent", 100), repo: "a" };
+    const other = { ...commit("other", 50), repo: "b" };
+    expect(mergeRepoLogs([[child, parent], [other]], 3)).toEqual([other, child, parent]);
+    expect(graphCommit(child).parents).toEqual([commitKey(parent)]);
+  });
+
+  it("keeps identical SHAs distinct in selection and file paths", () => {
+    const front = { ...commit("same"), repo: "/project/front" };
+    const back = { ...commit("same"), repo: "/project/back" };
+    useGitLog.setState({ commits: [front, back] });
+    selectCommit(commitKey(front));
+    expect(selectedCommits()).toEqual([front]);
+    toggleCommitSelection(commitKey(back));
+    expect(selectedCommits()).toEqual([front, back]);
+    expect(commitFileDiffData(back, { path: "main.ts", oldPath: null, kind: "added" }).path).toBe(
+      "/project/back/main.ts",
+    );
+  });
+
+  it("pages each root by the number of its emitted commits, without gaps or duplicates", async () => {
+    const data: Record<string, Commit[]> = Object.fromEntries(
+      useVcs
+        .getState()
+        .roots.map((r, index) => [
+          r,
+          Array.from({ length: PAGE + 5 }, (_, i) => commit(`${index}-${i}`, 10000 - i * 2 - index)),
+        ]),
+    );
+    log.mockImplementation(async (repo: string, q: LogQuery) => ({
+      status: "ok",
+      data: data[repo]!.slice(q.skip, q.skip + q.limit),
+    }));
+    await reloadLog();
+    expect(useGitLog.getState().commits).toHaveLength(PAGE);
+    await loadMore();
+    await loadMore();
+    const rows = useGitLog.getState().commits;
+    expect(rows).toHaveLength((PAGE + 5) * 2);
+    expect(new Set(rows.map(commitKey)).size).toBe(rows.length);
+    expect(rows.map((c) => c.timeMs)).toEqual([...rows.map((c) => c.timeMs)].sort((a, b) => b! - a!));
+  });
+
+  it("does not mark native root pages complete before every fetched commit has been emitted", async () => {
+    const data = Object.fromEntries(
+      useVcs.getState().roots.map((repo, root) => [
+        repo,
+        Array.from({ length: 180 }, (_, i) => ({
+          ...commit(`${root}-${i}`, 10000 - i * 2 - root),
+          logPosition: i,
+          logTotal: 180,
+        })),
+      ]),
+    );
+    log.mockImplementation(async (repo: string, q: LogQuery) => ({
+      status: "ok",
+      data: data[repo]!.slice(q.skip, q.skip + q.limit),
+    }));
+    await reloadLog();
+    expect(useGitLog.getState().commits).toHaveLength(PAGE);
+    expect(useGitLog.getState().done).toBe(false);
+    await loadMore();
+    expect(useGitLog.getState().commits).toHaveLength(360);
+    expect(useGitLog.getState().done).toBe(true);
+    expect(new Set(useGitLog.getState().commits.map(commitKey)).size).toBe(360);
+  });
+
+  it("filters repositories and keeps history tabs pinned when the selected root changes", async () => {
+    log.mockImplementation(async () => ({ status: "ok", data: [commit("same")] }));
+    useGitLog.setState({ filters: { ...emptyFilters(), repositories: ["/project/back"] } });
+    await reloadLog();
+    expect((useGitLog.getState().commits as RepoCommit[]).map((c) => c.repo)).toEqual(["/project/back"]);
+    const off = installGitLog();
+    const id = openLogTab("history", "/project/back/main.ts");
+    await reloadLog();
+    useVcs.setState({ repo: "/project/front" });
+    selectGitTab("log");
+    useVcs.setState({ repo: "/project/back" });
+    selectGitTab(id);
+    expect(useGitLog.getState().filters.path).toBe("/project/back/main.ts");
+    expect((useGitLog.getState().commits as RepoCommit[])[0]?.repo).toBe("/project/back");
+    off();
+  });
+
+  it("shows a submodule folder's own history, not the folder's history in the enclosing repository", () => {
+    useVcs.setState({ roots: ["/r", "/r/libs/core"] });
+    openLogTab("history", "/r/libs/core");
+    openLogTab("history", "/r/libs/core/src/Lib.kt");
+    openLogTab("history", "/r/libs");
+    expect(useGitLog.getState().logTabs.map((t) => t.repo)).toEqual(["/r/libs/core", "/r/libs/core", "/r"]);
+  });
+
+  it("shows several repositories chosen one click at a time in the Repository filter", async () => {
+    log.mockImplementation(async (repo: string) => ({ status: "ok", data: [commit(repo)] }));
+    let repositories = toggleRepository(undefined, "/project/front");
+    repositories = toggleRepository(repositories, "/project/back");
+    expect(repositories).toEqual(["/project/front", "/project/back"]);
+    useGitLog.setState({ filters: { ...emptyFilters(), repositories } });
+    await reloadLog();
+    expect(new Set((useGitLog.getState().commits as RepoCommit[]).map((c) => c.repo))).toEqual(
+      new Set(["/project/front", "/project/back"]),
+    );
+    expect(toggleRepository(repositories, "/project/front")).toEqual(["/project/back"]);
+    expect(toggleRepository(["/project/back"], "/project/back")).toEqual([]);
+  });
+
+  it("groups identical local and remote names under distinct repository nodes", () => {
+    const roots = buildRepositoryBranchTree(
+      ["front", "back"].map((name) => ({
+        root: `/project/${name}`,
+        name,
+        branches: [branch("main"), branch("origin/main", true)],
+        tags: ["v1"],
+      })),
+      [],
+    );
+    for (const group of roots.filter((r) => r.kind === "group")) {
+      expect(group.children?.map((c) => c.label)).toEqual(["front", "back"]);
+      const children = group.children!.flatMap((r) => r.children!);
+      expect(new Set(children.map((c) => c.key)).size).toBe(children.length);
+      expect(children.map((c) => c.repo)).toEqual(["/project/front", "/project/back"]);
+    }
+  });
+});
+
+describe("Git log background refresh", () => {
+  it("keeps history and selection visible until the replacement is ready", async () => {
+    useVcs.setState({ roots: ["/project/front"] });
+    log.mockResolvedValue({ status: "ok", data: [commit("old")] });
+    await reloadLog();
+    const before = useGitLog.getState();
+    selectCommit(commitKey(before.commits[0]!));
+    let finish!: (value: unknown) => void;
+    log.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const refresh = reloadLog({ preserve: true });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    expect(useGitLog.getState().commits).toBe(before.commits);
+    expect(useGitLog.getState().loading).toBe(true);
+    finish({ status: "ok", data: [commit("new"), commit("old")] });
+    await refresh;
+    expect(useGitLog.getState().commits.map((c) => c.id)).toEqual(["new", "old"]);
+    expect(useGitLog.getState().selected).toBe(commitKey(before.commits[0]!));
+    expect(useGitLog.getState().loading).toBe(false);
+  });
+
+  it("refreshes the loaded range and resumes paging at the replacement's end", async () => {
+    useVcs.setState({ roots: ["/project/front"] });
+    const history = Array.from({ length: PAGE * 3 }, (_, i) => commit(String(i)));
+    log.mockImplementation(async (_repo, q) => ({ status: "ok", data: history.slice(q.skip, q.skip + q.limit) }));
+    await reloadLog();
+    await loadMore();
+    history.unshift(commit("new"));
+    await reloadLog({ preserve: true });
+    expect(useGitLog.getState().commits).toHaveLength(PAGE * 2);
+    expect(log.mock.lastCall?.[1]).toMatchObject({ skip: 0, limit: PAGE * 2 });
+    await loadMore();
+    expect(log.mock.lastCall?.[1]).toMatchObject({ skip: PAGE * 2, limit: PAGE });
+    expect(useGitLog.getState().commits.map((c) => c.id)).toEqual(history.slice(0, PAGE * 3).map((c) => c.id));
+  });
+
+  it("keeps the loaded multi-root window on refresh without emitting older candidates", async () => {
+    const roots = useVcs.getState().roots;
+    const history = Object.fromEntries(
+      roots.map((repo, root) => [
+        repo,
+        Array.from({ length: 180 }, (_, i) => commit(`${root}-${i}`, 1000 - i * 2 - root)),
+      ]),
+    );
+    log.mockImplementation(async (repo: string, q: LogQuery) => ({
+      status: "ok",
+      data: history[repo]!.slice(q.skip, q.skip + q.limit).map((c, i) => ({
+        ...c,
+        logPosition: q.skip + i,
+        logTotal: history[repo]!.length,
+      })),
+    }));
+    await reloadLog();
+    const loaded = useGitLog.getState().commits.map((c) => c.id);
+    expect(loaded).toHaveLength(PAGE);
+
+    history[roots[0]!]!.unshift(commit("new", 2000));
+    await reloadLog({ preserve: true });
+    expect(useGitLog.getState().commits.map((c) => c.id)).toEqual(["new", ...loaded]);
+    expect(useGitLog.getState().done).toBe(false);
+
+    await loadMore();
+    const expected = Object.values(history)
+      .flat()
+      .sort((a, b) => (b.timeMs ?? 0) - (a.timeMs ?? 0));
+    expect(useGitLog.getState().commits.map((c) => c.id)).toEqual(expected.map((c) => c.id));
+    expect(useGitLog.getState().done).toBe(true);
+  });
+
+  it("retains the current history if refreshing fails", async () => {
+    useVcs.setState({ roots: ["/project/front"] });
+    log.mockResolvedValue({ status: "ok", data: [commit("old")] });
+    await reloadLog();
+    const before = useGitLog.getState();
+    log.mockRejectedValue(new Error("unavailable"));
+    await reloadLog({ preserve: true });
+    expect(useGitLog.getState().commits).toBe(before.commits);
+    expect(useGitLog.getState().error).toContain("unavailable");
+    expect(useGitLog.getState().loading).toBe(false);
+  });
+
+  it("ignores a refresh that finishes after the filters have changed", async () => {
+    useVcs.setState({ roots: ["/project/front"] });
+    let finish!: (value: unknown) => void;
+    log.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const refresh = reloadLog({ preserve: true });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    useGitLog.setState({ filters: { ...emptyFilters(), text: "filtered" } });
+    log.mockResolvedValue({ status: "ok", data: [commit("filtered")] });
+    await reloadLog();
+    finish({ status: "ok", data: [commit("stale")] });
+    await refresh;
+    expect(useGitLog.getState().commits.map((c) => c.id)).toEqual(["filtered"]);
+  });
+});

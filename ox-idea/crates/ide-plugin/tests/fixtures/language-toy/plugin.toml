@@ -1,0 +1,12 @@
+# Contribution-only plugin: adds a language definition (same format as
+# languages/<id>.toml in the IDE repo).
+id = "language-toy"
+name = "Toy Language"
+version = "0.1.0"
+description = "Language support for .toy files: detection, comments and indentation."
+authors = ["OpenIDEA contributors"]
+change-notes = "0.1.0 — .toy file detection, line comments and indentation."
+openidea-api = "0.1"
+
+[[contributes.languages]]
+path = "languages/toy.toml"

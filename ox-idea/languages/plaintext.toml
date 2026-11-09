@@ -1,0 +1,5 @@
+id = "plaintext"
+name = "Plain Text"
+extensions = ["txt", "text"]
+filenames = ["LICENSE", "LICENCE", "COPYING", "AUTHORS", "NOTICE", "CODEOWNERS", "README", "CHANGELOG", "CONTRIBUTORS", "requirements.txt"]
+indent = { tab-size = 4, insert-spaces = true }

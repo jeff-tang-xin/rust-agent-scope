@@ -1,0 +1,133 @@
+.popup {
+  width: min(680px, 90vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.header {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-popup);
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+}
+.scope {
+  flex: none;
+}
+
+.searching {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-emphasis);
+}
+.count {
+  color: var(--fg-subtle);
+}
+.link {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--link);
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  min-height: 24px;
+  padding: 2px 0;
+  box-sizing: content-box;
+}
+.body > * {
+  flex: 1;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+.icon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.spacer {
+  flex: 1;
+}
+.where {
+  flex: none;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+
+.note {
+  flex: none;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--border-popup);
+  font-size: var(--fs-small);
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+
+.focus {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+.filter {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--fg-strong);
+  background: var(--accent-soft);
+  border-radius: var(--radius-small);
+  padding: 0 4px;
+}
+.noMatch {
+  color: var(--danger);
+}
+.empty {
+  padding: 4px 10px;
+  color: var(--fg-faint);
+  font-size: var(--fs-small);
+}
+.preview {
+  flex: none;
+  height: 200px;
+  border-top: 1px solid var(--border-popup);
+  overflow: hidden;
+}
+.previewEditor {
+  height: 100%;
+}
+.previewEditor :global(.cm-editor) {
+  height: 100%;
+}
+.previewHidden {
+  visibility: hidden;
+}
+.previewLine {
+  background: var(--bg-current-line);
+}
+.previewMatch {
+  background: var(--bg-text-search-result);
+}

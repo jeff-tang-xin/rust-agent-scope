@@ -1,0 +1,19 @@
+id = "zig"
+name = "Zig"
+extensions = ["zig", "zon"]
+line-comment = "//"
+indent = { tab-size = 4, insert-spaces = true }
+tree-sitter = "zig"
+
+[[language-servers]]
+name = "zls"
+command = "zls"
+root-markers = ["build.zig", "build.zig.zon"]
+install-hint = "Install ZLS matching your Zig version (https://github.com/zigtools/zls/releases)"
+
+[debugger]
+adapter = "codelldb"
+command = "codelldb"
+args = ["--port", "${port}"]
+transport = "tcp"
+install-hint = "Install CodeLLDB in Settings › Languages & Frameworks › Language Servers"

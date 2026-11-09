@@ -1,0 +1,15 @@
+id = "julia"
+name = "Julia"
+extensions = ["jl"]
+first-line = "^#!.*\\bjulia\\b"
+line-comment = "#"
+block-comment = ["#=", "=#"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Julia"
+
+[[language-servers]]
+name = "julia-languageserver"
+command = "julia"
+args = ["--startup-file=no", "--history-file=no", "--quiet", "-e", "using LanguageServer; runserver()"]
+root-markers = ["Project.toml", "JuliaProject.toml"]
+install-hint = "In Julia: ] add LanguageServer"

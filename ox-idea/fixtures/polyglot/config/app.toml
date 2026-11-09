@@ -1,0 +1,10 @@
+[server]
+port = 8080
+read_timeout = "5s"
+
+[database]
+url = "postgres://localhost:5432/acme"
+pool = 10
+
+[features]
+beta_search = true

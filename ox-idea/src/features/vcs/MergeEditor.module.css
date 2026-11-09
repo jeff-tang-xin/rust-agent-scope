@@ -1,0 +1,94 @@
+.root {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+}
+.toolbar {
+  flex: none;
+  height: var(--h-header);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+.sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--border-strong);
+}
+.status {
+  margin-left: auto;
+  padding: 0 8px;
+  color: var(--vcs-conflict);
+  font-size: var(--fs-small);
+}
+.statusDone {
+  color: var(--fg-muted);
+}
+.labels {
+  flex: none;
+  height: var(--h-row);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+}
+.labels > span {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+}
+.labels > span + span {
+  border-left: 1px solid var(--border);
+}
+.panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.panes[hidden] {
+  display: none;
+}
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.pane + .pane {
+  border-left: 1px solid var(--border);
+}
+.pane > :global(.cm-editor) {
+  flex: 1;
+  min-width: 0;
+}
+.footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.footerGroup {
+  display: flex;
+  gap: 8px;
+}
+.message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--fg-subtle);
+}

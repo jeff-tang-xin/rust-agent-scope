@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 120,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "dist",
+    "target",
+    "src/bindings.ts",
+    "src/editor/core/cm/angular/parser*.ts",
+    "src/editor/core/cm/jsp/parser*.ts",
+    "src/editor/core/cm/astro/parser*.ts",
+    "docs/plugins/themes.md",
+    "pnpm-lock.yaml",
+    "**/*.toml",
+    "fixtures",
+    "plugins/*/web",
+    "plugins/official/*/web",
+    "crates/**/tests/fixtures"
+  ],
+  "overrides": [
+    {
+      "files": ["**/*.md"],
+      "options": {
+        "embeddedLanguageFormatting": "off"
+      }
+    }
+  ]
+}

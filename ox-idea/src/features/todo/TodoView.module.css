@@ -1,0 +1,121 @@
+.view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.body > * {
+  flex: 1;
+  min-height: 0;
+}
+.tabs {
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+.tabFile {
+  margin-left: 4px;
+  color: var(--fg-muted);
+}
+.tabCount {
+  color: var(--fg-muted);
+}
+.banner {
+  padding: 2px 10px;
+  font-size: var(--fs-small);
+  color: var(--warning);
+  border-bottom: 1px solid var(--border);
+}
+.scopeBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.scopeSelect {
+  min-width: 200px;
+  max-width: 360px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+}
+.fileIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.fileName {
+  color: var(--fg-emphasis);
+}
+.selectedText {
+  color: var(--fg-strong);
+}
+.muted {
+  flex: none;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.count {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  margin-left: 4px;
+}
+.position {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+.keyword {
+  font-weight: 600;
+  font-style: normal;
+}
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.panel > * {
+  flex: 1;
+  min-height: 0;
+}
+.previewEditor,
+.previewError {
+  flex: 1;
+  min-height: 0;
+}
+.previewError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faint);
+  font-family: var(--font-ui);
+}

@@ -1,0 +1,4 @@
+<!-- OpenIDEA: export data (arrow leaving a tray) -->
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M2.5 9.5V12C2.5 12.8284 3.17157 13.5 4 13.5H12C12.8284 13.5 13.5 12.8284 13.5 12V9.5" stroke="#6C707E" stroke-linecap="round"/><path d="M8 10V2.5M5 5.5L8 2.5L11 5.5" stroke="#6C707E" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,32 @@
+[package]
+name = "ide-vfs"
+description = "File system access: directory listing, text loading/saving with encoding detection, watching, project walking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dunce.workspace = true
+gix = { workspace = true, features = ["sha1", "sha256"] }
+ide-core.workspace = true
+serde.workspace = true
+specta.workspace = true
+ignore.workspace = true
+globset.workspace = true
+notify.workspace = true
+encoding_rs.workspace = true
+chardetng.workspace = true
+trash.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["fs", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }

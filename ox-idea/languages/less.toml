@@ -1,0 +1,15 @@
+id = "less"
+name = "Less"
+formatter = { tool = "prettier", parser = "less", range = false }
+extensions = ["less"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "LESS"
+
+[[language-servers]]
+name = "vscode-css-language-server"
+command = "vscode-css-language-server"
+args = ["--stdio"]
+initialization-options = { provideFormatter = true, css = {}, scss = {}, less = {} }
+install-hint = "npm i -g vscode-langservers-extracted"

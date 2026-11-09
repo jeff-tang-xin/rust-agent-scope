@@ -1,0 +1,36 @@
+.split {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+.editor {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.withPreview .editor {
+  border-right: 1px solid var(--border-editor-tabs, var(--border));
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+}
+.browserBar {
+  top: var(--floating-toolbar-browser-top);
+}
+
+.preview {
+  flex: 1 1 50%;
+  min-width: 0;
+  border: 0;
+  background: var(--bg-editor, var(--bg-app));
+}
+.message {
+  padding: 16px;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+}

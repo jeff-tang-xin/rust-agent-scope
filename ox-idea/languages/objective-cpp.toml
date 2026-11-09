@@ -1,0 +1,19 @@
+id = "objective-cpp"
+name = "Objective-C++"
+extensions = ["mm"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Objective-C++"
+
+[[language-servers]]
+name = "clangd"
+command = "clangd"
+args = ["--background-index"]
+root-markers = ["compile_commands.json", "compile_flags.txt", ".clangd"]
+install-hint = "Install clangd (LLVM): brew install llvm"
+
+[debugger]
+adapter = "lldb-dap"
+command = "lldb-dap"
+install-hint = "Install LLVM's lldb-dap (brew install llvm; on macOS also `xcrun -f lldb-dap`)"

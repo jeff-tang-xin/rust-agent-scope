@@ -1,0 +1,135 @@
+.chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 14px 12px;
+  outline: none;
+}
+.chooserTitle {
+  color: var(--fg-emphasis);
+  font-weight: 500;
+}
+.grids {
+  display: flex;
+  gap: 14px;
+}
+.digits,
+.letters {
+  display: grid;
+  gap: 4px;
+  outline: none;
+}
+.digits {
+  grid-template-columns: repeat(3, 24px);
+  align-content: start;
+}
+.letters {
+  grid-template-columns: repeat(7, 24px);
+}
+.key {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.key:hover {
+  border-color: var(--accent);
+}
+.key:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
+}
+.keyAssigned {
+  background: var(--accent-soft);
+}
+.keyCurrent {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--fg-strong);
+}
+.description {
+  width: 100%;
+}
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.legendGap {
+  width: 8px;
+}
+
+.listDialog {
+  max-height: 80vh;
+}
+.listBody {
+  display: flex;
+  height: 420px;
+  min-height: 0;
+  border-top: 1px solid var(--border-popup);
+}
+.listPane {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-popup);
+}
+.listPane > * {
+  flex: 1;
+}
+.previewPane {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+.fileRow,
+.markRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.fileName {
+  color: var(--fg-strong);
+}
+.listRow {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.markText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.dim {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-subtle);
+}
+.mnemonic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--accent-soft);
+  font-size: var(--fs-tiny);
+  font-weight: 600;
+}

@@ -1,0 +1,12 @@
+id = "sql"
+name = "SQL"
+extensions = ["sql", "ddl", "dml", "psql", "pgsql", "mysql"]
+line-comment = "--"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "SQL"
+
+[[language-servers]]
+name = "sqls"
+command = "sqls"
+install-hint = "go install github.com/sqls-server/sqls@latest"

@@ -1,0 +1,445 @@
+.listPopup {
+  min-width: 360px;
+  max-width: min(720px, 90vw);
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.listHeader {
+  height: 28px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.listTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.query {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.withPreview {
+  flex-direction: row;
+  width: auto;
+  max-width: min(1160px, 94vw);
+}
+.listMain {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: none;
+}
+.mnemonic {
+  width: 10px;
+  flex: none;
+  font-family: var(--font-keys);
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+  text-align: right;
+}
+.previewPanel {
+  width: 420px;
+  flex: none;
+  min-height: 60px;
+  max-height: 340px;
+  overflow: auto;
+  border-left: 1px solid var(--border-popup);
+  background: var(--bg-popup-inline, var(--bg-elev));
+}
+.previewText {
+  padding: 8px 10px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.diff {
+  margin: 0;
+  padding: 6px 0;
+  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-weight: var(--fw-code);
+  font-size: var(--fs-small);
+  color: var(--fg-editor);
+}
+.diffLine {
+  padding: 0 10px;
+  white-space: pre;
+  min-height: 1.4em;
+}
+.diff-added {
+  background: color-mix(in srgb, var(--vcs-added) 20%, transparent);
+}
+.diff-removed {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+.diff-gap {
+  color: var(--fg-faint);
+}
+.listBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 24px;
+  padding: 0 0 4px;
+  box-sizing: content-box;
+}
+.listBody > * {
+  flex: 1;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  font-size: var(--fs-ui);
+}
+.emphasis .label {
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.disabled {
+  color: var(--fg-faint);
+}
+.label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.label:has(+ .preview) {
+  flex: none;
+  max-width: 60%;
+}
+.preview {
+  min-width: 80px;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+}
+.spacer {
+  flex: 1;
+}
+.subArrow {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: -4px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-small);
+  background: none;
+  color: var(--fg-muted);
+}
+.subArrow:hover {
+  background-color: var(--bg-toolbar-hover);
+}
+.subMenu {
+  padding: 6px 0;
+  min-width: 200px;
+  max-width: 420px;
+}
+.detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.shortcut {
+  flex: none;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.shortcut {
+  font-family: var(--font-keys);
+}
+.itemIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.iconSpacer {
+  width: 14px;
+  flex: none;
+}
+.bulb {
+  flex: none;
+}
+.empty {
+  font-size: var(--fs-ui);
+  color: var(--fg-faint);
+}
+
+.renamePopup {
+  padding: 10px 12px;
+  width: 300px;
+}
+.renameLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.renameSuggestions {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 2px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-row);
+  max-height: 140px;
+  overflow-y: auto;
+}
+.renameSuggestion {
+  display: block;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  text-align: left;
+}
+.renameSuggestion:hover {
+  background: var(--bg-hover);
+}
+.renameSuggestionActive {
+  background: var(--bg-selected);
+}
+.renameNote {
+  margin-top: 6px;
+  font-size: var(--fs-tiny);
+  color: var(--fg-subtle);
+}
+.renameHint {
+  margin-top: 6px;
+  font-size: var(--fs-tiny);
+  color: var(--fg-faint);
+}
+
+.docPopup {
+  max-width: min(600px, 90vw);
+  max-height: 420px;
+  overflow: auto;
+}
+.docScope {
+  display: contents;
+}
+.docFrame {
+  outline: none;
+}
+.docWindowFrame {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  outline: none;
+}
+.docWindowFrame .docBody {
+  flex: 1;
+}
+.docWindowEmpty {
+  padding: 16px;
+  font-size: var(--fs-ui);
+  color: var(--fg-faint);
+}
+.docToolbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border-top: 1px solid var(--border-popup);
+  background: var(--bg-popup);
+}
+.docBody {
+  padding: 10px 14px;
+}
+.defPopup {
+  width: min(640px, 90vw);
+  max-height: 460px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.defHeader {
+  height: 28px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 12px;
+  background: var(--bg-popup-inline, var(--bg-elev));
+  border-bottom: 1px solid var(--border-popup);
+  font-size: var(--fs-ui);
+  color: var(--fg-muted);
+}
+.defFile {
+  color: var(--fg-emphasis);
+}
+.defPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+}
+.defFrame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+.defCount {
+  flex: none;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.defBody {
+  overflow: auto;
+  padding: 4px 12px;
+}
+.defBody pre {
+  white-space: pre;
+}
+
+.previewSummary {
+  padding: 10px 14px 6px;
+  font-size: var(--fs-ui);
+  color: var(--fg-muted);
+}
+.previewList {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+.previewRow {
+  height: var(--h-row);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font-size: var(--fs-ui);
+}
+.previewName {
+  color: var(--fg-emphasis);
+}
+.previewPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.previewOp,
+.previewCount {
+  flex: none;
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+}
+
+.previewWarning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 14px 0;
+  font-size: var(--fs-ui);
+  color: var(--fg-muted);
+}
+.previewWarning > :first-child {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warning);
+}
+.previewLine {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-faint);
+}
+.previewCode {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-editor);
+}
+.previewMatch {
+  background: var(--bg-search-match);
+  color: var(--fg-search-match, inherit);
+  border-radius: 2px;
+}
+
+.statusMessage {
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dialog bodies get no padding of their own; wrap the groups like Analysis dialogs' .form. */
+.reformatBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.reformatGroup {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.reformatLegend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.reformatOption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-ui);
+}
+
+.pasteImports {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  font-size: var(--fs-ui);
+}
+.pasteImportList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,255 @@
+/** New Task page: one prompt box with the agent and its settings; where it works under it. */
+import clsx from "clsx";
+import { useEffect, useState } from "react";
+import type { AgentProbe, Branch } from "@/bindings";
+import { executeAction } from "@/platform/actions";
+import { call, commands } from "@/platform/ipc";
+import { useTx, useTxTemplate } from "@/platform/i18n";
+import { basename, useProject } from "@/platform/project";
+import { Icon, Select, T, type SelectOption } from "@/ui";
+import { defaultTaskProject } from "./project";
+import { maybeEditorService, type EditorInput } from "@/workbench/contributions";
+import { Composer } from "./Composer";
+import { SubmitButton } from "./SubmitButton";
+import { canSend, emptyDraft } from "./composerModel";
+import { ConfigPickers } from "./ConfigPickers";
+import { providerIcon } from "./model";
+import { ADD_AGENT, providerOptions as agentOptions } from "./providerOptions";
+import {
+  HOME,
+  NO_COMMANDS,
+  draftConfig,
+  refreshProviders,
+  setDraftOption,
+  startTask,
+  updateDraft,
+  useAgentCommands,
+  useAgents,
+} from "./store";
+import styles from "./Home.module.css";
+
+export function HomeEditor({ docked = false }: { docked?: boolean; input?: EditorInput }) {
+  const tx = useTx();
+  const txTemplate = useTxTemplate();
+  const draft = useAgents((s) => s.draft);
+  const providers = useAgents((s) => s.providers);
+  const history = useAgents((s) => s.history);
+  const composer = useAgents((s) => s.composers.get(HOME)) ?? emptyDraft();
+  const project = useProject((s) => s.project);
+  const [selected, setSelected] = useState(() =>
+    defaultTaskProject(project, maybeEditorService()?.activePath() ?? null, draft.projectRoot),
+  );
+  const members = project?.workspace?.projects ?? [];
+  const root = members.includes(selected ?? "") ? selected! : (members[0] ?? project?.root ?? "");
+  const [repoState, setRepoState] = useState<{
+    root: string;
+    branches: Branch[];
+    current: string | null;
+    isGit: boolean;
+  } | null>(null);
+  const branches = repoState?.root === root ? repoState.branches : [];
+  const current = repoState?.root === root ? repoState.current : null;
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+
+  // Agents installed in Settings (its own window) show up when this one is back in front.
+  useEffect(() => {
+    const refresh = () => void refreshProviders();
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    const repo = project?.workspace ? root : null;
+    void Promise.all([call(commands.vcsBranchInfo(repo)), call(commands.vcsBranches(repo))])
+      .then(([info, list]) => {
+        if (!live) return;
+        setRepoState({ root, branches: list.filter((b) => !b.remote), current: info.head, isGit: true });
+      })
+      .catch(() => {
+        if (live) setRepoState({ root, branches: [], current: null, isGit: false });
+      });
+    return () => {
+      live = false;
+    };
+  }, [root, project?.workspace]);
+
+  const provider = providers.find((p) => p.id === draft.provider) ?? providers[0];
+  const probe = useProbe(provider?.installed ? provider.id : null, provider?.command);
+  const agentCommands = useAgentCommands(provider?.id, null, provider?.commands ?? NO_COMMANDS);
+  const providerOptions: SelectOption[] = agentOptions(providers, tx, providerIcon);
+  // Without git under the project there are no worktrees: force the local checkout.
+  const isGit = project?.workspace ? repoState?.root === root && repoState.isGit : (project?.isGit ?? false);
+  const isolation = isGit ? draft.isolation : "local";
+  const base = draft.base ?? current;
+  const canStart =
+    canSend(composer) && !!provider?.installed && !starting && (!project?.workspace || repoState?.root === root);
+
+  const start = () => {
+    if (!canStart) return;
+    setStarting(true);
+    setError(null);
+    startTask(isolation, project?.workspace ? root : null)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setStarting(false));
+  };
+  const config = draftConfig(provider, draft);
+
+  return (
+    <div className={clsx(styles.home, docked && styles.docked)}>
+      <div className={styles.inner}>
+        {!docked && (
+          <h1 className={styles.heading}>
+            <T>What should the agent do?</T>
+          </h1>
+        )}
+        {/* Above the box, like the running session's state line. */}
+        <div className={styles.where}>
+          {members.length > 1 ? (
+            <Select
+              variant="ghost"
+              aria-label={tx("Project")}
+              className={styles.projectPicker}
+              value={root}
+              options={members.map((path) => ({ value: path, label: basename(path), detail: path }))}
+              onChange={(path) => {
+                setSelected(path);
+                updateDraft({ base: null });
+              }}
+            />
+          ) : (
+            <span className={styles.project} title={root}>
+              {members.length ? basename(root) : project?.name}
+            </span>
+          )}
+          {isGit && (
+            <Select
+              variant="ghost"
+              aria-label="Isolation"
+              className={styles.isolation}
+              value={isolation}
+              options={[
+                { value: "worktree", label: tx("New worktree"), icon: "branch", detail: tx("away from your changes") },
+                {
+                  value: "local",
+                  label: tx("Local checkout"),
+                  icon: "folder",
+                  detail: tx("edits your files directly"),
+                },
+              ]}
+              onChange={(isolation) => updateDraft({ isolation, isolationChosen: true })}
+            />
+          )}
+          {/* A folder that isn't a repository has no branch: the one Git found below it isn't where the agent runs. */}
+          {isolation === "local" && isGit && current && (
+            <>
+              {!docked && (
+                <span className={styles.note}>
+                  <T>on</T>
+                </span>
+              )}
+              <span className={styles.branch} title={current}>
+                <Icon name="branch" size={14} />
+                <span className={styles.branchName}>{current}</span>
+              </span>
+            </>
+          )}
+          {isolation === "worktree" && branches.length > 0 && (
+            <>
+              {!docked && (
+                <span className={styles.note}>
+                  <T>from</T>
+                </span>
+              )}
+              <Select
+                variant="ghost"
+                aria-label="Base branch"
+                className={styles.basePicker}
+                value={base}
+                options={branches.map((b) => ({ value: b.name, label: b.name }))}
+                onChange={(b) => updateDraft({ base: b === current ? null : b })}
+              />
+            </>
+          )}
+        </div>
+        <Composer
+          id={HOME}
+          autoFocus
+          placeholder={
+            docked
+              ? "Describe a task…"
+              : "Describe a task for the agent. @ references a file or folder, / runs a command"
+          }
+          root={root}
+          projectRoot={root}
+          commands={agentCommands}
+          history={history}
+          config={config}
+          onConfig={setDraftOption}
+          onSubmit={start}
+          disabled={!canStart}
+          toolbar={
+            <>
+              <Select
+                variant="ghost"
+                aria-label="Agent"
+                value={provider?.id ?? null}
+                options={providerOptions}
+                onChange={(id) =>
+                  id === ADD_AGENT ? void executeAction("agents.addAgent") : updateDraft({ provider: id, config: {} })
+                }
+              />
+              <ConfigPickers config={config} onChange={setDraftOption} />
+            </>
+          }
+          actions={
+            <SubmitButton
+              label={starting ? "Starting…" : "Start"}
+              pending={starting}
+              disabled={!canStart}
+              onClick={start}
+            />
+          }
+        />
+        {probe && (!docked || probe.error) && (
+          <p className={probe.error ? styles.warning : styles.note}>
+            {probe.error
+              ? txTemplate(`${provider?.name ?? probe.provider} didn't start: ${probe.error}`)
+              : [probe.name, probe.version, probe.protocol].filter(Boolean).join(" · ")}
+          </p>
+        )}
+        {(error || (provider && !provider.installed) || (provider && !provider.config.length)) && (
+          <p
+            className={error || !provider?.installed ? styles.warning : styles.note}
+            role={error ? "alert" : undefined}
+          >
+            {error ??
+              (provider && !provider.installed ? (
+                txTemplate(`${provider.command} was not found on PATH`)
+              ) : (
+                <T>Models and modes appear after this agent's first task.</T>
+              ))}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** What the agent reports about itself when it starts (no session is opened), once per agent. */
+function useProbe(provider: string | null, command?: string): AgentProbe | null {
+  const [probe, setProbe] = useState<AgentProbe | null>(null);
+  useEffect(() => {
+    if (!provider) return;
+    let live = true;
+    call(commands.agentProbe(provider, false))
+      .then((p) => live && setProbe(p))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [provider, command]);
+  return probe?.provider === provider ? probe : null;
+}

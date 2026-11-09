@@ -1,0 +1,14 @@
+id = "dockerfile"
+name = "Dockerfile"
+extensions = ["dockerfile", "containerfile"]
+filenames = ["Dockerfile", "Containerfile", "Dockerfile.*", "Containerfile.*", "*.Dockerfile"]
+first-line = "^#\\s*syntax\\s*=\\s*docker/dockerfile"
+line-comment = "#"
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Dockerfile"
+
+[[language-servers]]
+name = "dockerfile-language-server"
+command = "docker-langserver"
+args = ["--stdio"]
+install-hint = "npm i -g dockerfile-language-server-nodejs"

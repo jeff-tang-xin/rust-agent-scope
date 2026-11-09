@@ -1,0 +1,366 @@
+.root {
+  position: relative;
+  container: diff-editor / inline-size;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+}
+.toolbar {
+  flex: none;
+  height: var(--h-header);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+.toolbar > * {
+  flex-shrink: 0;
+}
+.sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--border-strong);
+}
+.toolbar > .count {
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: auto;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+/* Narrow (a side-docked preview): the whitespace / highlighting pickers stay in the gear menu. */
+@container diff-editor (max-width: 640px) {
+  .select {
+    display: none;
+  }
+}
+@container diff-editor (max-width: 380px) {
+  .toolbar > .sep {
+    display: none;
+  }
+}
+.labels {
+  flex: none;
+  display: flex;
+  height: var(--h-row);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.label + .label {
+  border-left: 1px solid var(--border);
+}
+.badge {
+  padding: 0 5px;
+  border-radius: var(--radius-small);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: var(--fs-tiny);
+  line-height: 15px;
+}
+/* The editor's find bar, over the side it searches (side-by-side) or the whole viewer. */
+.findRow {
+  flex: none;
+  display: flex;
+  background: var(--bg-editor-inline, var(--bg-elev));
+  border-bottom: 1px solid var(--border-editor-tabs, var(--border));
+}
+.findRow > div {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+.findRowSplit > div {
+  flex: 0 0 50%;
+  border-right: 1px solid var(--border);
+}
+.findRowRight {
+  justify-content: flex-end;
+}
+.findRowRight > div {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+.message {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--fg-subtle);
+}
+.host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.host:not([hidden]) {
+  animation: diff-enter var(--dur) var(--ease) both;
+}
+.host[hidden] {
+  display: none;
+}
+.host > :global(.cm-editor) {
+  flex: 1;
+  min-height: 0;
+}
+.host :global(.cm-mergeView) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.host :global(.cm-mergeViewEditors) {
+  min-height: 100%;
+}
+.host :global(.cm-mergeViewEditor) {
+  min-width: 0;
+  /* Clips like the library's `hidden` without becoming a scroll container, so the aligned view's
+     overview lane sticks to the MergeView's viewport (cm/lanes.ts `overviewLaneIn`). */
+  overflow: clip;
+}
+.host :global(.cm-merge-revert) {
+  width: 22px;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.host :global(.cm-merge-revert button) {
+  width: 20px;
+  margin-left: 1px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  border-radius: var(--radius-small);
+}
+.host :global(.cm-merge-revert button:hover) {
+  color: var(--fg-strong);
+  background: transparent;
+}
+.select {
+  height: var(--h-control-small);
+  font-size: var(--fs-small);
+}
+.host :global(.cm-diffArrows) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.host :global(.cm-merge-revert button.cm-diffArrow) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.host :global(.cm-diffHoverLine) {
+  position: relative;
+}
+.host :global(.cm-diffHoverRevert) {
+  position: absolute;
+  right: 8px;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--bg-elev);
+  color: var(--fg-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-tiny);
+  cursor: pointer;
+}
+.host :global(.cm-diffHoverRevert:hover) {
+  color: var(--fg-strong);
+  background: var(--bg-hover);
+}
+.noHighlight :global(.cm-changedLine),
+.noHighlight :global(.cm-insertedLine),
+.noHighlight :global(.cm-changedText),
+.noHighlight :global(.cm-diffLine),
+.noHighlight :global(.cm-diffChangedGutter) {
+  background: none !important;
+}
+/* Side-by-side without alignment (IDEA's default): each pane scrolls itself. */
+.unaligned :global(.cm-mergeView) {
+  overflow: hidden;
+}
+.unaligned :global(.cm-mergeViewEditors) {
+  height: 100%;
+  min-height: 0;
+}
+.unaligned :global(.cm-mergeViewEditor) {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Overrides MergeView's base theme, which leaves scrolling to the outer view. */
+.unaligned :global(.cm-mergeViewEditor > .cm-editor),
+.unaligned :global(.cm-mergeViewEditor > .cm-editor > .cm-scroller) {
+  height: 100% !important;
+}
+.unaligned :global(.cm-mergeViewEditor > .cm-editor > .cm-scroller) {
+  overflow: auto !important;
+}
+.host :global(.cm-diffDivider) {
+  position: relative;
+  flex: none;
+  width: 30px;
+  overflow: hidden;
+  background: var(--bg-app);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.host :global(.cm-diffDivider svg) {
+  position: absolute;
+  inset: 0;
+}
+/* The full colours of the change types (cm.ts), so bands and their midlines read as one shape. */
+.host :global(.cm-diffBand-inserted) {
+  --band: var(--diff-inserted);
+}
+.host :global(.cm-diffBand-deleted) {
+  --band: var(--diff-deleted);
+}
+.host :global(.cm-diffBand-modified) {
+  --band: var(--diff-modified);
+}
+.host :global(.cm-diffBand) {
+  fill: var(--band);
+}
+.host :global(.cm-diffBandLine) {
+  fill: none;
+  stroke: var(--band);
+  stroke-width: 1px;
+}
+.host :global(.cm-diffDivider button.cm-diffArrow) {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: none;
+  color: var(--fg-subtle);
+  cursor: pointer;
+}
+.host :global(.cm-diffDivider button.cm-diffArrow-a-to-b) {
+  left: 1px;
+}
+.host :global(.cm-diffDivider button.cm-diffArrow-b-to-a) {
+  right: 1px;
+}
+.host :global(.cm-diffDivider button.cm-diffArrow:hover) {
+  color: var(--fg-strong);
+  background: transparent;
+}
+/* Where the other pane has lines this one lacks. */
+.host :global(.cm-diffGap-inserted) {
+  box-shadow: inset 0 1px 0 var(--gutter-added);
+}
+.host :global(.cm-diffGap-deleted) {
+  box-shadow: inset 0 1px 0 var(--gutter-deleted);
+}
+.host :global(.cm-diffGap-inserted.cm-diffGapEnd) {
+  box-shadow: inset 0 -1px 0 var(--gutter-added);
+}
+.host :global(.cm-diffGap-deleted.cm-diffGapEnd) {
+  box-shadow: inset 0 -1px 0 var(--gutter-deleted);
+}
+
+/* Review comments under diff lines (pull requests). */
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 8px 6px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg-elev);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  color: var(--fg);
+  white-space: normal;
+}
+.note + .note {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.noteHead {
+  display: flex;
+  gap: 8px;
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.noteAuthor {
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+.noteBody {
+  margin-top: 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.navHint {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 6px 12px;
+  border: 1px solid var(--border-tooltip);
+  border-radius: var(--radius-tooltip);
+  background: var(--bg-tooltip);
+  color: var(--fg-tooltip);
+  box-shadow: var(--shadow-tooltip);
+  font-size: var(--fs-small);
+  pointer-events: none;
+}
+
+@keyframes diff-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .host:not([hidden]) {
+    animation: none;
+  }
+}

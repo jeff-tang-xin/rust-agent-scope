@@ -1,0 +1,130 @@
+{
+  "$comment": "Upper bounds, lower is better. ui: `<scenario>.<metric>` from `pnpm perf` (medians of the measured runs; enforced at CPU 1x only). Latencies are input → start of the first frame showing the result, so ~16.7 ms is 'next frame'. rust: criterion bench id → mean in microseconds, from `pnpm perf:rust` (`plugins/…`: the plugin runtime budgets).",
+  "regressionTolerance": 0.2,
+  "regressionFloor": 1,
+  "ui": {
+    "bundle.initialJsKb": 850,
+    "bundle.initialCssKb": 60,
+
+    "startup.readyMs": 400,
+    "startup.tbtMs": 50,
+    "startup.heapMb": 30,
+    "startup.domNodes": 1500,
+
+    "typing.p95Ms": 20,
+    "typing.maxMs": 33,
+    "typing.missedFramePct": 2,
+    "typing.styleLayoutMsPerKey": 3,
+    "typing.mainThreadMsPerKey": 10,
+    "typing.tbtMs": 50,
+
+    "typingLarge.openMs": 200,
+    "typingLarge.p95Ms": 20,
+    "typingLarge.maxMs": 33,
+    "typingLarge.missedFramePct": 2,
+    "typingLarge.styleLayoutMsPerKey": 3,
+    "typingLarge.mainThreadMsPerKey": 20,
+    "typingLarge.tbtMs": 50,
+
+    "typingAngular.openMs": 200,
+    "typingAngular.p95Ms": 30,
+    "typingAngular.maxMs": 40,
+    "typingAngular.mainThreadMsPerKey": 30,
+    "typingAngular.tbtMs": 50,
+
+    "completion.openMs": 150,
+    "completion.narrowP95Ms": 20,
+    "completion.narrowMissedFramePct": 2,
+    "completion.narrowMainThreadMsPerKey": 35,
+    "completion.arrowP95Ms": 20,
+    "completion.arrowMissedFramePct": 2,
+    "completion.tbtMs": 50,
+
+    "consoleOutput.streamMs": 4600,
+    "consoleOutput.droppedFramesPct": 2,
+    "consoleOutput.keyP95Ms": 20,
+    "consoleOutput.keyMissedFramePct": 10,
+    "consoleOutput.tbtMs": 50,
+
+    "gitLog.showMs": 300,
+    "gitLog.droppedFramesPct": 2,
+    "gitLog.tbtMs": 50,
+    "gitLog.arrowKeyP95Ms": 20,
+    "gitLog.arrowKeyMissedFramePct": 5,
+    "gitLogScrollbar.frameP95Ms": 17.5,
+    "gitLogScrollbar.droppedFramesPct": 2,
+    "gitLogScrollbar.tbtMs": 50,
+
+    "resizePanels.droppedFramesPct": 2,
+    "resizePanels.bottomDroppedFramesPct": 2,
+    "resizePanels.tbtMs": 50,
+
+    "keyRepeat.p95Ms": 20,
+    "keyRepeat.maxMs": 33,
+    "keyRepeat.missedFramePct": 2,
+    "keyRepeat.mainThreadMsPerKey": 16,
+    "keyRepeat.tbtMs": 50,
+
+    "scroll.frameP95Ms": 17.5,
+    "scroll.droppedFramesPct": 2,
+    "scroll.tbtMs": 50,
+    "scroll.jumpMs": 33,
+
+    "tabs.openSmallMs": 100,
+    "tabs.switchP95Ms": 33,
+
+    "popups.findActionOpenMs": 50,
+    "popups.findActionQueryMs": 120,
+    "popups.findActionKeyP95Ms": 33,
+    "popups.searchEverywhereOpenMs": 50,
+    "popups.searchEverywhereQueryMs": 120,
+
+    "toolWindows.maxMs": 50,
+
+    "projectTree.expandMs": 50,
+    "projectTree.frameP95Ms": 17.5,
+    "projectTree.droppedFramesPct": 2,
+    "projectTree.arrowKeyP95Ms": 20,
+    "projectTree.arrowKeyMissedFramePct": 2,
+
+    "leaks.heapGrowthMb": 4,
+    "leaks.domNodeGrowth": 100,
+    "leaks.listenerGrowth": 20
+  },
+  "rust": {
+    "text/open_1mb": 2000,
+    "text/apply_keystroke_1mb": 20,
+    "text/apply_100_changes_1mb": 1000,
+    "text/diff_two_edits_1mb": 10000,
+    "text/diff_every_line_1mb": 100000,
+    "text/offset_to_pos_round_trip": 5,
+    "text/pos_to_byte": 5,
+    "text/text_for_save_crlf_1mb": 1000,
+
+    "syntax_2mb/selection_cached_hit": 5000,
+    "syntax_2mb/outline_cached_hit": 10000,
+    "syntax_2mb/folding_cached_hit": 1000,
+    "syntax_2mb/folding_after_keystroke_incremental": 200000,
+    "syntax_2mb/outline_after_keystroke_incremental": 350000,
+
+    "index_100k/find_files/a": 10000,
+    "index_100k/find_files/ordcon": 10000,
+    "index_100k/find_files/src/user": 10000,
+    "index_100k/find_files/PaymentService": 10000,
+    "index_100k/find_dirs/util": 5000,
+    "index_100k/find_dirs/src/ui": 5000,
+    "index_100k/find_dirs/a": 5000,
+    "index_100k/find_symbols/OCo": 15000,
+    "index_100k/find_symbols/q": 15000,
+    "index_100k/find_symbols/invoiceRepo": 15000,
+    "index_100k/find_symbols_types/UsSe": 15000,
+
+    "search_5k/literal": 100000,
+    "search_5k/regex": 100000,
+    "search_5k/dense_limit": 20000,
+
+    "plugins/load_50": 20000,
+    "plugins/cold_activation": 30000,
+    "plugins/syntax_highlights_2k_lines": 50000
+  }
+}

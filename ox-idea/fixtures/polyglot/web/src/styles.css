@@ -1,0 +1,10 @@
+:root {
+  --accent: #3574f0;
+  --fg: #dfe1e5;
+}
+
+.app {
+  font: 14px/1.5 system-ui, sans-serif;
+  color: var(--fg);
+  padding: 24px;
+}

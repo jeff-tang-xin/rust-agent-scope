@@ -1,0 +1,21 @@
+id = "nix"
+name = "Nix"
+extensions = ["nix"]
+line-comment = "#"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+tree-sitter = "nix"
+
+[[language-servers]]
+name = "nil"
+command = "nil"
+root-markers = ["flake.nix", "default.nix", "shell.nix"]
+install-hint = "nix profile install github:oxalica/nil"
+
+[[language-servers]]
+name = "nixd"
+# Alternative: used only when the server above is not installed.
+fallback = true
+command = "nixd"
+root-markers = ["flake.nix", "default.nix", "shell.nix"]
+install-hint = "nix profile install nixpkgs#nixd"

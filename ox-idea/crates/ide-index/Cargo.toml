@@ -1,0 +1,30 @@
+[package]
+name = "ide-index"
+description = "Background project index: files and symbols, persisted in redb, fuzzy queried with nucleo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dunce.workspace = true
+ide-core.workspace = true
+ide-language.workspace = true
+serde.workspace = true
+specta.workspace = true
+redb.workspace = true
+nucleo-matcher.workspace = true
+rayon.workspace = true
+parking_lot.workspace = true
+blake3.workspace = true
+tracing.workspace = true
+ignore.workspace = true
+globset.workspace = true
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "index"
+harness = false

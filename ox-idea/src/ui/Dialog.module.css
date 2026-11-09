@@ -1,0 +1,299 @@
+/* Modal layer: blocks the workbench but never dims it (IDEA dialogs are separate windows). */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: transparent;
+}
+.top {
+  align-items: flex-start;
+  padding-top: 10vh;
+}
+.dialog {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  background: var(--bg-dialog, var(--bg-elev));
+  color: var(--fg-strong);
+  outline: none;
+  overflow: hidden;
+  animation: rise var(--dur) var(--ease);
+}
+/* macOS / Windows window: 10px corners, hairline frame, large soft window shadow. */
+.window {
+  border-radius: var(--radius-dialog);
+  border: 1px solid var(--border-dialog, var(--border-popup));
+  box-shadow: var(--shadow-dialog);
+}
+.popup {
+  border-radius: var(--radius-popup-large);
+  border: 1px solid var(--border-popup);
+  box-shadow: var(--shadow-popup);
+}
+
+/* Corner grip for `resizable` dialogs (over the footer's right padding). */
+.resizeGrip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 55%,
+    var(--fg-faint) 55%,
+    var(--fg-faint) 62%,
+    transparent 62%,
+    transparent 72%,
+    var(--fg-faint) 72%,
+    var(--fg-faint) 79%,
+    transparent 79%
+  );
+  opacity: 0.55;
+}
+.resizeGrip:hover {
+  opacity: 1;
+}
+
+/* Title bar (drag handle). macOS: traffic lights then the title; else title + close. */
+.titleBar {
+  height: var(--h-dialog-titlebar, 32px);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 14px;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+.macTitleBar {
+  height: var(--h-dialog-titlebar-mac, 28px);
+  padding: 0 12px 0 8px;
+  gap: 12px;
+}
+.popupHeader {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-strong);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.macTitleBar .title {
+  font-size: var(--fs-ui);
+}
+
+/* NSWindow standard buttons: 12px, 8px apart; close red, minimise / zoom disabled (modal). */
+.lights {
+  flex: none;
+  display: inline-flex;
+  gap: 8px;
+}
+.light {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--traffic-off);
+  box-shadow: inset 0 0 0 0.5px var(--traffic-off-border);
+  cursor: default;
+}
+.lightClose {
+  background: var(--traffic-close);
+  box-shadow: inset 0 0 0 0.5px var(--traffic-close-border);
+}
+[data-inactive] .lightClose {
+  background: var(--traffic-off);
+  box-shadow: inset 0 0 0 0.5px var(--traffic-off-border);
+}
+.lightGlyph {
+  --icon-color: var(--traffic-glyph);
+  color: var(--traffic-glyph);
+  opacity: 0;
+}
+.lights:hover .lightClose,
+.lightClose:focus-visible {
+  background: var(--traffic-close);
+  box-shadow: inset 0 0 0 0.5px var(--traffic-close-border);
+}
+.lights:hover .lightGlyph,
+.lightClose:focus-visible .lightGlyph {
+  opacity: 1;
+}
+.lightClose:active {
+  background: var(--traffic-close-pressed);
+}
+.lightClose:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.body::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background-clip: content-box;
+}
+.body::-webkit-scrollbar-track,
+.body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* [?] [footerStart …]            [buttons, platform order]; buttons wrap below a footerStart that does not fit. */
+.footer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.footerStart {
+  flex: 1 1 0;
+  min-width: fit-content;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.buttons {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+/* macOS round help button. */
+.help {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-button);
+  color: var(--fg-strong);
+  box-shadow: inset 0 0 0 1px var(--border-button);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  line-height: 1;
+}
+.help:hover {
+  background: color-mix(in srgb, var(--bg-button) 94%, var(--fg-strong));
+}
+.help:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Messages alert (IDEA AlertDialog): 32px icon, bold title, text; draggable anywhere but controls. */
+.message {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  gap: 16px;
+  padding: 20px 24px 4px 20px;
+  cursor: default;
+  touch-action: none;
+}
+.messageIcon {
+  flex: none;
+}
+.messageAppIcon {
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+.messageShape {
+  fill: var(--message-icon-color);
+}
+.messageGlyph {
+  stroke: var(--fg-button-primary);
+}
+.question,
+.info {
+  --message-icon-color: var(--info);
+}
+.warning {
+  --message-icon-color: var(--warning);
+}
+.error {
+  --message-icon-color: var(--danger);
+}
+.messageText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.messageTitle {
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+.messageBody {
+  color: var(--fg-strong);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.messageExtra {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+.messageFooter {
+  padding: 16px 24px 20px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.995);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dialog {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  .dialog {
+    border: 1px solid CanvasText;
+  }
+}

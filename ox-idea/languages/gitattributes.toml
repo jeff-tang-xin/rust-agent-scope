@@ -1,0 +1,5 @@
+id = "gitattributes"
+name = "Git Attributes"
+filenames = [".gitattributes"]
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }

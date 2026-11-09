@@ -1,0 +1,15 @@
+id = "r"
+name = "R"
+extensions = ["r", "rprofile"]
+filenames = [".Rprofile"]
+first-line = "^#!.*\\bRscript\\b"
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "R"
+
+[[language-servers]]
+name = "r-languageserver"
+command = "R"
+args = ["--no-echo", "-e", "languageserver::run()"]
+root-markers = ["DESCRIPTION", ".Rproj.user", "renv.lock"]
+install-hint = "In R: install.packages(\"languageserver\")"

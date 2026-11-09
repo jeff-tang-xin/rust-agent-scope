@@ -1,0 +1,75 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.heading {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.list {
+  height: 200px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  padding: 0 6px;
+}
+.activeRow .rowLabel {
+  color: var(--fg-strong);
+}
+.rowIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.rowLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowDetail {
+  margin-left: auto;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.empty {
+  padding: 6px 8px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pickerList {
+  height: 180px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}

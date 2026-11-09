@@ -1,0 +1,20 @@
+id = "csharp"
+name = "C#"
+extensions = ["cs", "csx"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "C#"
+tree-sitter = "csharp"
+
+[[language-servers]]
+name = "csharp-ls"
+command = "csharp-ls"
+root-markers = ["*.sln", "*.slnx", "*.csproj", "global.json", "Directory.Build.props", "ProjectSettings/ProjectVersion.txt"]
+install-hint = "dotnet tool install --global csharp-ls"
+
+[debugger]
+adapter = "netcoredbg"
+command = "netcoredbg"
+args = ["--interpreter=vscode"]
+install-hint = "Install netcoredbg (.NET debugger) in Settings › Languages & Frameworks › Language Servers"

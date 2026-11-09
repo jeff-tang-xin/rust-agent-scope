@@ -1,0 +1,137 @@
+.view {
+  height: 100%;
+  display: flex;
+  min-height: 0;
+}
+.tabs {
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+.toolbar {
+  flex: none;
+  width: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-right: 1px solid var(--border);
+}
+.toolbarSep {
+  width: 16px;
+  height: 1px;
+  margin: 3px 0;
+  background: var(--border);
+}
+.summary {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: var(--fs-ui);
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+.groupLabel {
+  color: var(--fg);
+}
+.error {
+  color: var(--danger);
+}
+.link {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--link);
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+.body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.body > * {
+  flex: 1;
+  min-height: 0;
+}
+.body > [role="toolbar"],
+.body > .summary {
+  flex: 0 0 auto;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+}
+.icon {
+  flex: none;
+}
+.file {
+  color: var(--fg);
+}
+.muted,
+.count {
+  flex: none;
+  color: var(--fg-subtle);
+}
+.line {
+  flex: none;
+  min-width: 3ch;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  color: var(--fg-line-number);
+}
+.preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  color: var(--fg);
+}
+.match {
+  background: var(--bg-search-match);
+  color: var(--fg-search-match, inherit);
+  border-radius: 2px;
+}
+
+.note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-small);
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+.excluded .preview,
+.excluded .file,
+.excluded .line {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.panel > * {
+  flex: 1;
+  min-height: 0;
+}

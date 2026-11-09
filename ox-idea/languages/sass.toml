@@ -1,0 +1,7 @@
+id = "sass"
+name = "Sass"
+extensions = ["sass"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Sass"

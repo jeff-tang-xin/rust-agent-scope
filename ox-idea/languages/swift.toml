@@ -1,0 +1,19 @@
+id = "swift"
+name = "Swift"
+extensions = ["swift", "swiftinterface"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Swift"
+tree-sitter = "swift"
+
+[[language-servers]]
+name = "sourcekit-lsp"
+command = "sourcekit-lsp"
+root-markers = ["Package.swift", "buildServer.json", "compile_commands.json", ".sourcekit-lsp"]
+install-hint = "Ships with the Swift toolchain / Xcode (xcrun sourcekit-lsp); https://www.swift.org/install"
+
+[debugger]
+adapter = "lldb-dap"
+command = "lldb-dap"
+install-hint = "Ships with the Swift toolchain (swift 6+) or LLVM; on macOS `xcrun -f lldb-dap`"

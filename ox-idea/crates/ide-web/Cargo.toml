@@ -1,0 +1,21 @@
+[package]
+name = "ide-web"
+description = "Web browsers: the built-in static web server that serves project files on 127.0.0.1 (IDEA's built-in server) and detection / launching of installed browsers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+open = "5"
+parking_lot.workspace = true
+percent-encoding = "2"
+serde.workspace = true
+specta.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros"] }

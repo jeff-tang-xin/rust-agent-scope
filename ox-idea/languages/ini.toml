@@ -1,0 +1,7 @@
+id = "ini"
+name = "INI"
+extensions = ["ini", "cfg", "conf", "cnf", "inf", "reg", "url", "desktop", "service", "socket", "timer"]
+filenames = [".editorconfig", ".gitconfig", ".gitmodules", ".npmrc", ".yarnrc", ".pypirc", ".flake8", ".pylintrc", "pylintrc", "setup.cfg", "tox.ini", "pytest.ini", "mypy.ini", ".coveragerc", "php.ini", ".hgrc", "hgrc", "credentials"]
+line-comment = ";"
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "Properties files"

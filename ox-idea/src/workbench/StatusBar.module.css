@@ -1,0 +1,117 @@
+/* Islands: the status bar sits on the frame background, no divider. */
+.bar {
+  height: calc(var(--h-statusbar) + 4px);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px 0 12px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Widgets read as plain UI text like IDEA's, whatever their own font. */
+.item {
+  font-family: var(--font-ui);
+}
+.item button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+.item {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 4px;
+}
+/* Left items (breadcrumbs…) and background tasks give way first on narrow windows. */
+.shrink {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.shrink > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item:empty {
+  display: none;
+}
+.spacer {
+  flex: 1;
+  min-width: 8px;
+}
+.task {
+  max-width: 320px;
+}
+.taskTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-ui);
+}
+.taskBar {
+  width: 96px;
+  flex: none;
+}
+.taskMore {
+  color: var(--fg-faint);
+}
+.taskList {
+  width: 320px;
+  padding: 6px 0;
+  font-family: var(--font-ui);
+}
+.taskListHeader {
+  padding: 2px 12px 6px;
+  color: var(--fg-faint);
+  font-size: var(--fs-small);
+}
+.taskRow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 12px;
+}
+.taskRowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.taskRowTitle {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-emphasis);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskCancelOff {
+  display: inline-flex;
+}
+.taskCancelOff > button {
+  pointer-events: none;
+}
+.taskPct {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--fg-subtle);
+}
+.taskMessage {
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info {
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

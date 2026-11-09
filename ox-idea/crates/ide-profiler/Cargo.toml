@@ -1,0 +1,17 @@
+[package]
+name = "ide-profiler"
+description = "Run with Profiler: sampling-profiler launch plans (Node.js --cpu-prof, py-spy, async-profiler, Linux perf) and a common call-tree model from .cpuprofile, collapsed stacks and perf script output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+ide-run.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

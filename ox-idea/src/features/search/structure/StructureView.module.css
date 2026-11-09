@@ -1,0 +1,119 @@
+.root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.toolbar {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+.sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.grow {
+  flex: 1;
+}
+.tree {
+  flex: 1;
+  min-height: 0;
+}
+.loading {
+  padding: 10px 12px;
+  color: var(--fg-subtle);
+}
+.node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.badge {
+  flex: none;
+}
+.name {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+}
+.ancestor .name {
+  color: var(--fg-subtle);
+}
+.popupTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.popupHint {
+  color: var(--fg-faint);
+  font-family: var(--font-keys);
+  font-size: var(--fs-small);
+  font-weight: 400;
+}
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border-popup);
+}
+.filter {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--fg-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  caret-color: var(--accent);
+}
+.filter::placeholder {
+  color: var(--fg-faint);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+}
+.popupList {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+.popupList > * {
+  flex: 1;
+}
+.popupOptions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 26px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-popup);
+  font-size: var(--fs-small);
+}
+.popupEmpty {
+  padding: 4px 12px;
+  color: var(--fg-faint);
+}
+/* Show Inherited: supertype members, greyed. */
+.inherited .name {
+  color: var(--fg-muted);
+}

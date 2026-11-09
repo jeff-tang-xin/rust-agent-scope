@@ -1,0 +1,21 @@
+[package]
+name = "ide-jsonrpc"
+description = "Content-Length framed transport and JSON-RPC 2.0 peer shared by LSP and DAP clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ide-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+encoding_rs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

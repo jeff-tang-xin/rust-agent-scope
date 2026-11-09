@@ -1,0 +1,632 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.headerTabs {
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+.split {
+  flex: 1;
+  min-height: 0;
+}
+.log {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.grow {
+  flex: 1;
+}
+
+/* branches */
+.branches {
+  height: 100%;
+  display: flex;
+  min-width: 0;
+}
+.branchesTools {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border-right: 1px solid var(--border);
+}
+.branchesMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.branchesBar,
+.filters,
+.detailsBar {
+  flex: none;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+.branchSearch {
+  flex: 1;
+  min-width: 60px;
+}
+.branchTree {
+  --tree-detail-flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
+}
+.branchDetail {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* filters */
+.filters {
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.textFilter {
+  flex: 0 1 260px;
+  min-width: 100px;
+}
+.filterGroup {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+.filterHidden {
+  visibility: hidden;
+}
+.filterButton {
+  flex: none;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-small);
+  color: var(--fg);
+}
+.filterButton:hover {
+  background: var(--bg-toolbar-hover);
+}
+.filterActive,
+.filterActive:hover {
+  background: var(--bg-toolbar-selected);
+}
+.filterMain {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px 0 8px;
+  font-size: var(--fs-ui);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filterValue {
+  color: var(--fg-strong);
+}
+.filterChevron {
+  color: var(--fg-icon);
+}
+.filterClear {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px 0 0;
+  color: var(--fg-icon);
+}
+.filterClear:hover {
+  color: var(--fg-strong);
+}
+.filterMain:focus-visible,
+.filterClear:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-small);
+}
+
+/* commit table */
+.listWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.speedSearch {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  z-index: 1;
+  padding: 4px 8px;
+  background: var(--bg-popup);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  /* Rows coming and going while scrolling relay out the list alone, not the workbench. */
+  contain: strict;
+}
+.row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  white-space: nowrap;
+  cursor: default;
+  font-size: var(--fs-ui);
+}
+.columnHeader {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-subtle);
+}
+.columnHeader:hover {
+  background: var(--bg-app);
+}
+.columnCell {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.columnHeading {
+  position: relative;
+  padding-inline-end: 6px;
+  cursor: grab;
+  touch-action: none;
+}
+.columnHeading.dragSource {
+  cursor: grabbing;
+  opacity: 0.6;
+}
+.columnHeading.dropBefore {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.columnHeading.dropAfter {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+.columnResize {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.columnResize:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+/* View Options › Highlight › Current Branch: commits reachable from HEAD are tinted. */
+.currentBranch {
+  --log-row-bg: var(--bg-log-current-branch);
+  background: var(--log-row-bg);
+}
+.row:hover {
+  background: var(--bg-tree-hover);
+}
+.selected,
+.selected:hover {
+  --log-row-bg: var(--bg-tree-selected-inactive);
+  background: var(--log-row-bg);
+}
+.list:focus-within .selected {
+  --log-row-bg: var(--bg-tree-selected);
+}
+.colSubject {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Let graph endpoints overlap adjacent rows, but never paint over the next column. */
+  overflow-x: clip;
+  overflow-y: visible;
+}
+.colAuthor {
+  flex: none;
+  width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.colDate {
+  flex: none;
+  width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.colHash {
+  flex: none;
+  width: 72px;
+  overflow: hidden;
+}
+.mine {
+  font-weight: 600;
+  color: var(--fg);
+}
+.mergeSubject {
+  color: var(--fg-subtle);
+}
+.muted {
+  color: var(--fg-subtle);
+}
+.subject {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+.headSubject {
+  font-weight: 600;
+}
+.graph {
+  flex: none;
+  fill: none;
+  stroke-width: 1.6;
+  overflow: visible;
+}
+.refs {
+  flex: 0 1 auto;
+  /* Shrinks to the first label's icon when the graph leaves no room. */
+  min-width: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 50%;
+  overflow: hidden;
+  margin-left: auto;
+}
+.refsLeft {
+  margin-left: 0;
+}
+.ref {
+  --tag-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1.5 1.5h4.2l4.8 4.8-4.2 4.2-4.8-4.8z' fill='none' stroke='black' stroke-width='1.1' stroke-linejoin='round'/%3E%3Ccircle cx='4' cy='4' r='.9'/%3E%3C/svg%3E");
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-ui);
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 180px;
+}
+/* Outlined tag glyph in the ref's colour. */
+.ref::before {
+  content: "";
+  flex: none;
+  width: 11px;
+  height: 11px;
+  background: var(--ref-color);
+  -webkit-mask: var(--tag-glyph) center / contain no-repeat;
+  mask: var(--tag-glyph) center / contain no-repeat;
+}
+.refHead {
+  --ref-color: var(--warning);
+}
+.refLocal {
+  --ref-color: var(--vcs-added);
+}
+.refRemote {
+  --ref-color: var(--syn-annotation);
+}
+.refTag {
+  --ref-color: var(--fg-subtle);
+}
+.message {
+  padding: 16px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+/* details */
+.details {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.filesPane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.detailsCount {
+  padding-left: 4px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-ui);
+}
+.fileTree {
+  flex: 1;
+  min-height: 0;
+}
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fileIcon {
+  flex: none;
+}
+.fileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fileDir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-subtle);
+}
+.lineStats {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.fileRow .lineStats {
+  margin-left: auto;
+}
+.lineAdded {
+  color: var(--vcs-added);
+}
+.lineRemoved {
+  color: var(--vcs-deleted);
+}
+.messageBox {
+  height: 100%;
+  overflow: auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  -webkit-user-select: text;
+  user-select: text;
+  font-size: var(--fs-ui);
+}
+.commitTooltip {
+  width: min(520px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  white-space: normal;
+  user-select: text;
+}
+.revisionSource {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.subjectLine {
+  color: var(--fg-strong);
+  font-weight: 600;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.fullMessage {
+  margin-top: 6px;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.meta {
+  margin-top: 10px;
+  color: var(--fg-subtle);
+  line-height: 1.5;
+}
+.commitEntry + .commitEntry {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.metaCompact {
+  margin-top: 2px;
+}
+.meta .refs {
+  margin-left: 0;
+  max-width: none;
+  flex-wrap: wrap;
+}
+.meta .ref {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.hash {
+  font-family: var(--font-mono);
+}
+.linkButton {
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.linkButton:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+.consoleWrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.consoleBar {
+  flex: none;
+  width: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+  border-right: 1px solid var(--border);
+}
+.console {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 18px;
+  -webkit-user-select: text;
+  cursor: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.line {
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--fg-secondary);
+  cursor: text;
+}
+.line-cmd {
+  color: var(--fg-emphasis);
+  margin-top: 4px;
+}
+.line-err {
+  color: var(--danger);
+}
+.line-info {
+  color: var(--success);
+}
+.time {
+  color: var(--fg-faint);
+}
+.issueLink {
+  color: var(--link);
+  text-decoration: none;
+  cursor: pointer;
+}
+.issueLink:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+.branchFilterPopup {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.branchFilterSearch {
+  flex: none;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-popup);
+}
+.branchFilterList {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px 0;
+  box-sizing: content-box;
+}
+.branchFilterListBody {
+  flex: 1;
+}
+.branchFilterSection {
+  padding: 0 10px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.branchFilterRow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.branchFilterIcon {
+  flex: none;
+  color: var(--fg-subtle);
+}
+.branchFilterCurrent {
+  flex: none;
+  color: var(--accent);
+}
+.branchFilterLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branchFilterCheck {
+  flex: none;
+  color: var(--accent);
+}
+.branchFilterEmpty {
+  color: var(--fg-faint);
+}
+.branchFilterMore {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-popup);
+  text-align: left;
+}
+.branchFilterMore:hover {
+  background: var(--bg-tree-hover);
+}
+/* Worktrees tab. */
+.worktrees {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px;
+}
+.worktreeList {
+  flex: 1;
+  min-height: 0;
+}
+
+.colRepository {
+  flex: 0 0 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+}

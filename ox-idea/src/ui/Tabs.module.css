@@ -1,0 +1,270 @@
+.strip {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+/* Islands tabs: the selected tab is a rounded pill (tab-selected-bg / -border); no underline, no separators. */
+.editor {
+  height: var(--h-header);
+  padding: 0 4px;
+}
+.compact {
+  /* Shrinks inside tool window headers so the overflow dropdown can take over. */
+  flex: 0 1 auto;
+  height: 28px;
+}
+.scroller {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+.tab {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: calc(100% - 6px);
+  min-height: 22px;
+  max-height: 28px;
+  border-radius: var(--radius-tab, 6px);
+  color: var(--fg-strong);
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.tab:hover {
+  background: var(--bg-toolbar-hover);
+}
+.selected,
+.selected:hover {
+  background: var(--bg-tab-selected);
+  box-shadow: inset 0 0 0 1px var(--border-tab-selected);
+}
+.tinted,
+.tinted:hover {
+  background: color-mix(in srgb, var(--tab-tint) var(--tint-strength, 22%), transparent);
+}
+.tinted.selected {
+  background: color-mix(in srgb, var(--tab-tint) var(--tint-strength, 22%), var(--bg-tab-selected));
+}
+.tabButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: inherit;
+  white-space: nowrap;
+  color: inherit;
+}
+.compact .tabButton {
+  padding: 0 10px;
+}
+.closable .tabButton {
+  padding-right: 2px;
+}
+.tabButton:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.tabIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.tabLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.italic {
+  font-style: italic;
+}
+.closeSlot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 20px;
+  /* Squeezed tabs shrink the label, never the close button (#1740). */
+  flex: none;
+  margin-right: 4px;
+}
+.close {
+  color: var(--fg-muted);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.tab:hover .close,
+.selected .close,
+.close:focus-visible {
+  opacity: 1;
+}
+.modified {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  flex: none;
+}
+.closeSlot .modified {
+  position: absolute;
+  left: 7px;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.tab:hover .closeSlot .modified,
+.selected .closeSlot .modified {
+  opacity: 0;
+}
+.more {
+  align-self: center;
+  margin: 0 4px;
+}
+.trailing {
+  flex: 1 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Tabs that don't fit: squeezed (labels ellipsized) or wrapped into rows. */
+.squeeze .scroller {
+  flex: 0 1 auto;
+}
+.squeeze .tab {
+  flex: 0 1 auto;
+  min-width: 40px;
+}
+/* A closable tab keeps room for its close slot: only the label shrinks. */
+.squeeze .closable {
+  min-width: 64px;
+}
+.squeeze .closeSlot {
+  flex: none;
+}
+.squeeze .tabButton {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.squeeze .tabLabel {
+  min-width: 0;
+}
+.wrap {
+  height: auto;
+  min-height: var(--h-header);
+}
+.wrap .scroller {
+  flex: 1;
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 2px;
+  padding: 3px 0;
+}
+.wrap .tab {
+  height: calc(var(--h-header) - 6px);
+}
+
+/* Vertical strip (editor tabs placed left / right): a scrolling column of full-width tabs. */
+.vertical {
+  flex-direction: column;
+  height: auto;
+  min-height: 0;
+  padding: 4px;
+}
+.vertical .scroller {
+  flex: 0 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.vertical .scroller::-webkit-scrollbar {
+  display: initial;
+}
+.vertical .tab {
+  height: 24px;
+  min-height: 24px;
+}
+.vertical .tabButton {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.vertical .tabLabel {
+  min-width: 0;
+  max-width: none;
+}
+.vertical .trailing {
+  flex: none;
+  justify-content: flex-end;
+  padding-bottom: 4px;
+}
+.vertical .dropBefore::before,
+.vertical .dropAfter::after {
+  top: auto;
+  bottom: auto;
+  left: 4px;
+  right: 4px;
+  width: auto;
+  height: 2px;
+}
+.vertical .dropBefore::before {
+  top: 0;
+}
+.vertical .dropAfter::after {
+  bottom: 0;
+}
+
+/* Close button on the left of the label */
+.closeLeft .closeSlot {
+  order: -1;
+  margin: 0 0 0 4px;
+}
+.closeLeft .closable .tabButton {
+  padding: 0 10px 0 2px;
+}
+
+/* drag & drop: the dragged tab is an empty slot the other tabs make room for (IDEA) */
+.tab.dragging,
+.tab.dragging:hover {
+  background: var(--bg-toolbar-hover);
+  box-shadow: none;
+}
+.dragging > * {
+  visibility: hidden;
+}
+.dropBefore::before,
+.dropAfter::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--accent);
+  z-index: 1;
+  pointer-events: none;
+}
+/* Inside the tab: the scroller clips anything past the first and last tab. */
+.dropBefore::before {
+  left: 0;
+}
+.dropAfter::after {
+  right: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .close,
+  .closeSlot .modified {
+    transition: none;
+  }
+}

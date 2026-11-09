@@ -1,0 +1,237 @@
+/* About (JetBrains-style: logo left, product facts as plain lines) */
+.about {
+  display: flex;
+  gap: 20px;
+  padding: 24px 24px 12px;
+}
+.logo {
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+.aboutBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.55;
+}
+.productName {
+  margin-bottom: 4px;
+  color: var(--fg-strong);
+  font-size: var(--fs-input-large);
+  font-weight: 600;
+}
+.aboutLine,
+.tagline {
+  color: var(--fg);
+}
+.tagline {
+  margin-bottom: 10px;
+}
+.facts {
+  margin: 0 0 10px;
+  display: grid;
+  gap: 0;
+}
+.fact {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.fact dt {
+  flex: none;
+  color: var(--fg);
+}
+.fact dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+.link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-small);
+}
+.license {
+  margin-top: 10px;
+  color: var(--fg-subtle);
+}
+.disclaimer {
+  color: var(--fg-subtle);
+  font-size: var(--fs-tiny);
+}
+
+/* Keymap reference */
+.keymap {
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+.keymapBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-popup);
+}
+.keymapSearch {
+  flex: 1;
+}
+.keymapMeta {
+  flex: none;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.keymapBody {
+  overflow: auto;
+  padding: 4px 12px 12px;
+  columns: 2 300px;
+  column-gap: 24px;
+}
+.keymapEmpty {
+  padding: 24px 0;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.keymapGroup {
+  break-inside: avoid;
+  padding-top: 8px;
+}
+.keymapHeading {
+  margin: 0;
+  height: var(--h-row);
+  line-height: var(--h-row);
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.keymapList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.keymapRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--h-row);
+  padding: 0 4px;
+  border-radius: var(--radius-row);
+}
+.keymapRow:hover {
+  background: var(--bg-hover);
+}
+.keymapTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.keymapKeys {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+.invalidateBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  color: var(--fg);
+  font-size: var(--fs-ui);
+}
+.invalidateText {
+  margin: 0;
+  line-height: 1.5;
+}
+.invalidateHeading {
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+.invalidateWarning {
+  margin: 4px 0 0;
+  color: var(--fg-weak-warning);
+}
+
+/* File › New Project… */
+.newProject {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+.newProjectRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.newProjectRow > :nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.newProjectLabel {
+  flex: none;
+  width: 72px;
+  color: var(--fg);
+}
+.newProjectHint {
+  min-height: 1.5em;
+  padding-left: 80px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+.newProjectError {
+  color: var(--danger);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+
+/* Import Settings… › JetBrains settings.zip confirmation */
+.importSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.importList {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 16px;
+}
+.importList dt {
+  color: var(--fg-muted);
+}
+.importList dd {
+  margin: 0;
+  color: var(--fg-strong);
+  overflow-wrap: anywhere;
+}

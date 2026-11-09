@@ -1,0 +1,20 @@
+id = "shellscript"
+name = "Shell Script"
+extensions = ["sh", "bash", "zsh", "ksh", "ash", "dash", "bats", "command"]
+filenames = [".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".bash_aliases", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".kshrc", "PKGBUILD", "APKBUILD", ".envrc"]
+first-line = "^#!.*\\b(bash|sh|zsh|ksh|dash|ash)\\b"
+line-comment = "#"
+indent = { tab-size = 2, insert-spaces = true }
+ui-mode = "Shell"
+tree-sitter = "bash"
+
+[[language-servers]]
+name = "bash-language-server"
+command = "bash-language-server"
+args = ["start"]
+install-hint = "npm i -g bash-language-server (optionally install shellcheck and shfmt)"
+
+[debugger]
+adapter = "bash-debug"
+command = "bash-debug-adapter"
+install-hint = "Install Bash Debug in Settings › Languages & Frameworks › Language Servers"
