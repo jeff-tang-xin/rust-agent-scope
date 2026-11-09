@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 /// The official marketplace: the index the release workflow publishes with
 /// the app, next to the signed packages of the official plugins.
-pub const OFFICIAL_INDEX: &str = "https://github.com/l0ng-ai/openidea/releases/latest/download/plugins-index.json";
+pub const OFFICIAL_INDEX: &str = "https://github.com/jeff-tang-xin/rust-agent-scope/releases/latest/download/plugins-index.json";
 
 /// The publisher of the official plugins.
 pub const OFFICIAL_PUBLISHER: &str = "openidea";

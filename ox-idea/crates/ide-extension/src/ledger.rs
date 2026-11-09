@@ -4,7 +4,7 @@
 //! - Installed plugins are keyed by id and remember the version and package
 //!   hash they were confirmed for. An update that needs no new capability is
 //!   accepted silently; one that does must be confirmed again.
-//! - Linked development plugins and project plugins (`.openidea/plugins/*`)
+//! - Linked development plugins and project plugins (`.oxidea/plugins/*`)
 //!   are keyed by their directory, not by hash, so rebuilding does not ask
 //!   again; new capabilities still do.
 //! - `process:<program>` grants record the program's absolute path and file

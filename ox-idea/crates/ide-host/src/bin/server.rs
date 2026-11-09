@@ -39,7 +39,7 @@ fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("OPENIDEA_LOG").unwrap_or_else(|_| "info".into()))
         .init();
     let home = dirs::home_dir().unwrap_or_default();
-    let base = std::env::var_os("OPENIDEA_SERVER_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".openidea"));
+    let base = std::env::var_os("OPENIDEA_SERVER_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".oxidea"));
     // An SSH exec channel gets a minimal environment: take the login shell's, read
     // afresh on every start, plus the IDE-managed tools. Before any other thread starts.
     ide_host::shell_env::inherit_login_shell_env("openidea-server");

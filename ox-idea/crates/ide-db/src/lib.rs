@@ -1346,7 +1346,7 @@ mod tests {
         assert_eq!(ids(&a), [("local".into(), false), ("shared".into(), true)]);
         assert_eq!(ids(&b), [("shared".into(), true)]);
         assert_eq!(b.password(&b.source("shared").unwrap()).await.as_deref(), Some("pw"));
-        let project_file = std::fs::read_to_string(one.join(".openidea/data-sources.toml")).unwrap();
+        let project_file = std::fs::read_to_string(one.join(".oxidea/data-sources.toml")).unwrap();
         assert!(!project_file.contains("shared") && !project_file.contains("global"), "{project_file}");
         assert!(!std::fs::read_to_string(app.join("data-sources.toml")).unwrap().contains("global"));
         // Made project-level again: gone from the other project, the password stays with it.

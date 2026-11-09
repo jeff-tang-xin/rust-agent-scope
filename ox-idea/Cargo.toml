@@ -58,6 +58,7 @@ specta-typescript = "0.0.12"
 
 # async & concurrency
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
+async-trait = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 parking_lot = "0.12"
 rayon = "1"

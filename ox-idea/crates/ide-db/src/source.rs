@@ -497,7 +497,7 @@ mod tests {
             ..Default::default()
         };
         save(tmp.path(), std::slice::from_ref(&s)).unwrap();
-        let text = std::fs::read_to_string(tmp.path().join(".openidea/data-sources.toml")).unwrap();
+        let text = std::fs::read_to_string(tmp.path().join(".oxidea/data-sources.toml")).unwrap();
         assert!(!text.contains("password ="), "{text}");
         assert_eq!(load(tmp.path()).unwrap(), vec![s]);
         assert!(save(tmp.path(), &[DataSource::default()]).is_err());
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn reads_configs_written_before_the_new_settings() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join(".openidea");
+        let dir = tmp.path().join(".oxidea");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join(FILE),

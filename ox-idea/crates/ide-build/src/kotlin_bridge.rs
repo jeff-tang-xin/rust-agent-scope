@@ -68,7 +68,7 @@ fn has_kotlin_sources(root: &Path) -> bool {
             kind.is_dir()
                 && !matches!(
                     entry.file_name().to_str(),
-                    Some("target" | "build" | "out" | "bin" | "node_modules" | ".git" | ".openidea")
+                    Some("target" | "build" | "out" | "bin" | "node_modules" | ".git" | ".oxidea")
                 )
                 && !["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
                     .iter()

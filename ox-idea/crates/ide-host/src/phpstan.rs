@@ -638,9 +638,9 @@ mod tests {
                 echo \"$XDEBUG_MODE $*\" >> runs.log\nsleep \"$pause\"\ncat stderr >&2 2>/dev/null\ncat report\n";
             std::fs::write(&php, script).unwrap();
             std::fs::set_permissions(&php, std::fs::Permissions::from_mode(0o755)).unwrap();
-            std::fs::create_dir_all(root.join(".openidea")).unwrap();
+            std::fs::create_dir_all(root.join(".oxidea")).unwrap();
             let settings = format!("[languages.php]\ninterpreter = {:?}\n", php.to_string_lossy());
-            std::fs::write(root.join(".openidea/settings.toml"), settings).unwrap();
+            std::fs::write(root.join(".oxidea/settings.toml"), settings).unwrap();
             let config = base.join("config");
             let settings = Arc::new(SettingsStore::load(&config, Some(&root)));
             let events = Arc::new(Mutex::new(Vec::new()));

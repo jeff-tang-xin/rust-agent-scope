@@ -1,5 +1,5 @@
 //! User-facing settings. Layered: defaults → global `settings.toml` →
-//! project `.openidea/settings.toml`. Loading/merging lives in `ide-workspace`.
+//! project `.oxidea/settings.toml`. Loading/merging lives in `ide-workspace`.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;

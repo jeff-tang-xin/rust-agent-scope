@@ -319,7 +319,7 @@ fn relevant_change(root: &Path, path: &Path, settings: &ide_core::settings::Sett
     if relative.components().any(|c| {
         matches!(
             c.as_os_str().to_str(),
-            Some("target" | "build" | "out" | "bin" | ".git" | "node_modules" | ".openidea")
+            Some("target" | "build" | "out" | "bin" | ".git" | "node_modules" | ".oxidea")
         )
     }) || ide_vfs::ExcludeMatcher::new(&settings.exclude_globs()).is_excluded(relative)
     {

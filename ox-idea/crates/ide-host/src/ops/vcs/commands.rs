@@ -261,7 +261,7 @@ fn shelf_dir(root: &Path) -> PathBuf {
 
 fn keep_private(root: &Path) {
     if let Err(e) = ide_vcs::changelists::ensure_ignored(&ide_core::project_dir::path(root, ""), &PRIVATE_ENTRIES) {
-        tracing::warn!("could not update .openidea/.gitignore: {e}");
+        tracing::warn!("could not update .oxidea/.gitignore: {e}");
     }
 }
 

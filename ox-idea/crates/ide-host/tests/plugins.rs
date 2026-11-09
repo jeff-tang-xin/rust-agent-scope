@@ -511,12 +511,12 @@ fn project_write_stays_inside_the_project() {
     f.install(&misbehave_with(f._tmp.path(), "misbehave-project-writer", "project.write"));
 
     // A Run configuration: neither the file nor `.openidea/` exists yet.
-    assert_eq!(f.run("misbehave", "projwrite", Some(".openidea/run.toml")).unwrap(), None);
-    let conf = f.project.join(".openidea").join("run.toml");
+    assert_eq!(f.run("misbehave", "projwrite", Some(".oxidea/run.toml")).unwrap(), None);
+    let conf = f.project.join(".oxidea").join("run.toml");
     assert_eq!(std::fs::read_to_string(&conf).unwrap(), "written inside the project\n");
     // What it wrote reads back through the project.
     assert_eq!(
-        f.run("misbehave", "read", Some(".openidea/run.toml")).unwrap().as_deref(),
+        f.run("misbehave", "read", Some(".oxidea/run.toml")).unwrap().as_deref(),
         Some("written inside the project\n")
     );
     // An absolute path inside the root lands in the same place.

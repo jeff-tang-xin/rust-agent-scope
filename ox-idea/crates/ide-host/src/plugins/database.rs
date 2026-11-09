@@ -96,7 +96,7 @@ impl PluginApi {
         if !workspace.trusted(root) {
             return Err(HostError::Denied("project is not trusted".into()));
         }
-        ide_plugin::resolve_new_in_root(root, ".openidea/data-sources.toml").map_err(HostError::Invalid)?;
+        ide_plugin::resolve_new_in_root(root, ".oxidea/data-sources.toml").map_err(HostError::Invalid)?;
         let host = workspace
             .database_host()
             .ok_or_else(|| HostError::Invalid("Database subsystem is unavailable on this host".into()))?;

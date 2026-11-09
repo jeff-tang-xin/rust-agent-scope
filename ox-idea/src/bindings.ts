@@ -706,7 +706,7 @@ export const commands = {
 	args: string[],
 	cwd: IpcPath | null,
 	env: { [key in string]: string },
-	/**  Detected configs are regenerated; user configs persist in `.openidea/run.toml`. */
+	/**  Detected configs are regenerated; user configs persist in `.oxidea/run.toml`. */
 	detected: boolean,
 	/**  Test runner configs render results in the test tree. */
 	isTest: boolean,
@@ -1068,7 +1068,7 @@ export const commands = {
 	pluginSubscribe: (onEvent: Channel<PluginEvent_Deserialize>) => __TAURI_INVOKE<void>("plugin_subscribe", { onEvent }),
 	/**
 	 *  Installed and linked plugins plus the project plugins of this window's
-	 *  project (`<project>/.openidea/plugins/*`, rescanned on every call), with
+	 *  project (`<project>/.oxidea/plugins/*`, rescanned on every call), with
 	 *  the UI contributions to project.
 	 */
 	pluginList: () => typedError<PluginsSnapshot, IdeError>(__TAURI_INVOKE("plugin_list")),
@@ -4900,7 +4900,7 @@ export type IndexEntry = {
 	capabilities?: string[],
 	/**
 	 *  The plugin API versions it loads in (a semver requirement): its
-	 *  manifest's `engines.openidea` and the API its component was built for.
+	 *  manifest's `engines.oxidea` and the API its component was built for.
 	 *  Required: an entry without one is offered to no IDE.
 	 */
 	engine?: string,
@@ -6592,7 +6592,7 @@ export type PluginSecretState = {
 export type PluginSource = 
 /**  Installed under `<app-data>/plugins/<id>/`. */
 "installed" | 
-/**  Loaded from `<project>/.openidea/plugins/<dir>/` while that project is open. */
+/**  Loaded from `<project>/.oxidea/plugins/<dir>/` while that project is open. */
 "dev" | 
 /**  A development plugin linked from any folder (`openidea-plugin link`). */
 "linked";
@@ -7395,7 +7395,7 @@ export type RunConfig_Deserialize = {
 	args: string[],
 	cwd: IpcPath | null,
 	env: { [key in string]: string },
-	/**  Detected configs are regenerated; user configs persist in `.openidea/run.toml`. */
+	/**  Detected configs are regenerated; user configs persist in `.oxidea/run.toml`. */
 	detected: boolean,
 	/**  Test runner configs render results in the test tree. */
 	isTest: boolean,
@@ -7415,7 +7415,7 @@ export type RunConfig_Serialize = {
 	args: string[],
 	cwd: IpcPath | null,
 	env: { [key in string]: string },
-	/**  Detected configs are regenerated; user configs persist in `.openidea/run.toml`. */
+	/**  Detected configs are regenerated; user configs persist in `.oxidea/run.toml`. */
 	detected: boolean,
 	/**  Test runner configs render results in the test tree. */
 	isTest: boolean,
@@ -7445,7 +7445,7 @@ export type RunExtras_Deserialize = {
 	params?: { [key in string]: string },
 	/**  Folder in the Run/Debug Configurations tree. */
 	folder?: string | null,
-	/**  Stored in the workspace (`.openidea/run.local.toml`, not shared) instead of `run.toml`. */
+	/**  Stored in the workspace (`.oxidea/run.local.toml`, not shared) instead of `run.toml`. */
 	local?: boolean,
 	/**  Off: the process gets only the configured variables. */
 	includeSystemEnv?: boolean,
@@ -7489,7 +7489,7 @@ export type RunExtras_Serialize = {
 	params?: { [key in string]: string },
 	/**  Folder in the Run/Debug Configurations tree. */
 	folder?: string | null,
-	/**  Stored in the workspace (`.openidea/run.local.toml`, not shared) instead of `run.toml`. */
+	/**  Stored in the workspace (`.oxidea/run.local.toml`, not shared) instead of `run.toml`. */
 	local?: boolean,
 	/**  Off: the process gets only the configured variables. */
 	includeSystemEnv?: boolean,

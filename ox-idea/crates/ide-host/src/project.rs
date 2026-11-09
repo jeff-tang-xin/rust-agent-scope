@@ -620,7 +620,7 @@ impl Host {
                     // Outside the app data dir: its path has spaces on macOS, which trips up build scripts.
                     dirs::home_dir()
                         .unwrap_or_else(|| self.data_dir.clone())
-                        .join(".openidea")
+                        .join(".oxidea")
                         .join("worktrees")
                         .join(project_key)
                 }),
@@ -1760,7 +1760,7 @@ mod agent_worktree_tests {
 
     #[test]
     fn agent_worktrees_sit_next_to_the_project() {
-        let fallback = || PathBuf::from("/home/me/.openidea/worktrees/key");
+        let fallback = || PathBuf::from("/home/me/.oxidea/worktrees/key");
         let project = Path::new("/work").join("acme-api");
         assert_eq!(agent_worktrees_dir(&project, fallback), Path::new("/work").join("acme-api.worktrees"));
         assert_eq!(agent_worktrees_dir(Path::new("/"), fallback), fallback());

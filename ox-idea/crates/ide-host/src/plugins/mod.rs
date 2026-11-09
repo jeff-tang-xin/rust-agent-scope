@@ -11,7 +11,7 @@
 //! only when one of its activation events fires (a command runs, or start-up
 //! finished for `on-startup-finished`).
 //!
-//! Sources: `<plugins_dir>/<id>/` (installed), `<project>/.openidea/plugins/*/`
+//! Sources: `<plugins_dir>/<id>/` (installed), `<project>/.oxidea/plugins/*/`
 //! (project plugins, loaded by [`PluginHost::sync_project`] for trusted
 //! projects) and folders linked with `openidea-plugin link` (`links.json`).
 
@@ -94,7 +94,7 @@ use std::time::{Duration, Instant};
 const STATE_FILE: &str = "state.json";
 const LINKS_FILE: &str = "links.json";
 /// Project plugins live here, relative to a project root.
-pub const DEV_PLUGINS_DIR: &str = ".openidea/plugins";
+pub const DEV_PLUGINS_DIR: &str = ".oxidea/plugins";
 
 #[derive(Default, Serialize, Deserialize)]
 struct PersistedState {
@@ -682,7 +682,7 @@ impl PluginHost {
         self.changed();
     }
 
-    /// Loads new project plugins from `<root>/.openidea/plugins/` (trusted
+    /// Loads new project plugins from `<root>/.oxidea/plugins/` (trusted
     /// projects only) and unloads vanished ones. Each still needs the user's
     /// consent before it runs.
     pub fn sync_project(&self, root: &Path) {
@@ -1194,7 +1194,7 @@ impl PluginHost {
         let plugin = self.get(id)?;
         if plugin.source != PluginSource::Installed {
             return Err(IdeError::invalid(
-                "development plugins are removed by deleting them from .openidea/plugins or unlinking them",
+                "development plugins are removed by deleting them from .oxidea/plugins or unlinking them",
             ));
         }
         // Its secrets (kept outside its directory, in the OS keychain on the desktop) go with it.

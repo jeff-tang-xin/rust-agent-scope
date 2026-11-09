@@ -188,9 +188,9 @@ mod tests {
         ide_ssh::secrets::testing::use_memory_store();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("project");
-        std::fs::create_dir_all(root.join(".openidea")).unwrap();
+        std::fs::create_dir_all(root.join(".oxidea")).unwrap();
         let original = "# user comment\n[[data-source]] # keep\nid = 'user'\nname='Mine'\ndriver='postgres'\n\n[data-source.options]\ntimeZone = 'UTC' # retain\n";
-        let file = root.join(".openidea/data-sources.toml");
+        let file = root.join(".oxidea/data-sources.toml");
         std::fs::write(&file, original).unwrap();
         let secrets = tmp.path().join("passwords.json");
         let db = DbManager::new(

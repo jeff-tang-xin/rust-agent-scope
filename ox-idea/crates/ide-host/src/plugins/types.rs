@@ -23,7 +23,7 @@ pub struct PluginOutputLine {
 pub enum PluginSource {
     /// Installed under `<app-data>/plugins/<id>/`.
     Installed,
-    /// Loaded from `<project>/.openidea/plugins/<dir>/` while that project is open.
+    /// Loaded from `<project>/.oxidea/plugins/<dir>/` while that project is open.
     Dev,
     /// A development plugin linked from any folder (`openidea-plugin link`).
     Linked,

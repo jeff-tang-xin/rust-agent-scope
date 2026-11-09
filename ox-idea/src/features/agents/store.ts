@@ -106,7 +106,7 @@ function save(key: string, value: unknown) {
   }
 }
 
-const fallbackDraft: Draft = { provider: "claude", config: {}, isolation: "local", base: null };
+const fallbackDraft: Draft = { provider: "ox-hareness", config: {}, isolation: "local", base: null };
 
 /**
  * The saved New Task settings. A worktree is used only when the user picked it: drafts
