@@ -149,7 +149,7 @@ describe("menu config", () => {
   });
 
   it("sends localised labels with platform-specific variants", async () => {
-    expect(buildMenuConfig("macos").labels["menu.app.quit"]).toBe("Quit OpenIDEA");
+    expect(buildMenuConfig("macos").labels["menu.app.quit"]).toBe("Quit OXidea");
     expect(buildMenuConfig("windows").labels["menu.app.quit"]).toBe("Exit");
     expect(buildMenuConfig("windows").labels["menu.help.showLog"]).toBe("Show Log in Explorer");
     await setLocale("zh");

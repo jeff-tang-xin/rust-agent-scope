@@ -100,7 +100,7 @@ impl Native {
             Native::Paste => "Paste",
             Native::SelectAll => "Select All",
             Native::Services => "Services",
-            Native::Hide => "Hide OpenIDEA",
+            Native::Hide => "Hide OXidea",
             Native::HideOthers => "Hide Others",
             Native::ShowAll => "Show All",
             Native::Minimize => "Minimize",
@@ -195,9 +195,9 @@ pub fn spec(os: Os) -> Vec<Entry> {
     if mac {
         menus.push(sub(
             "app",
-            "OpenIDEA",
+            "OXidea",
             vec![
-                act("app.about", "About OpenIDEA"),
+                act("app.about", "About OXidea"),
                 act("app.checkForUpdates", "Check for Updates…"),
                 SEP,
                 act("app.installCli", "Install 'openidea' Command"),
@@ -211,7 +211,7 @@ pub fn spec(os: Os) -> Vec<Entry> {
                 Entry::Native(Native::HideOthers),
                 Entry::Native(Native::ShowAll),
                 SEP,
-                accel("app.quit", "Quit OpenIDEA", "CmdOrCtrl+Q"),
+                accel("app.quit", "Quit OXidea", "CmdOrCtrl+Q"),
             ],
         ));
     }
@@ -853,7 +853,7 @@ pub fn spec(os: Os) -> Vec<Entry> {
         act("help.showLog", show_log),
     ];
     if !mac {
-        help.extend([act("app.checkForUpdates", "Check for Updates…"), SEP, act("app.about", "About OpenIDEA")]);
+        help.extend([act("app.checkForUpdates", "Check for Updates…"), SEP, act("app.about", "About OXidea")]);
     }
     menus.push(sub("help", "Help", help));
     menus

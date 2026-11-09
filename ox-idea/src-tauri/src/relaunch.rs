@@ -59,8 +59,8 @@ mod tests {
     #[test]
     fn finds_the_bundle_of_its_binary() {
         assert_eq!(
-            app_bundle(Path::new("/Applications/OpenIDEA.app/Contents/MacOS/openidea")),
-            Some(PathBuf::from("/Applications/OpenIDEA.app"))
+            app_bundle(Path::new("/Applications/OXidea.app/Contents/MacOS/oxidea")),
+            Some(PathBuf::from("/Applications/OXidea.app"))
         );
         assert_eq!(app_bundle(Path::new("/repo/target/debug/openidea")), None);
         assert_eq!(app_bundle(Path::new("/x/MacOS/openidea")), None);

@@ -28,12 +28,12 @@ export function summarizeMemory(m: Pick<AppMetrics, "memory" | "rssBytes"> | nul
 
 /** Status bar text: `OpenIDEA 560M` (no denominator: there is no heap limit to compare with). */
 export function indicatorLabel(s: MemorySummary): string {
-  return s.app == null ? "OpenIDEA –" : `OpenIDEA ${formatBytes(s.app)}`;
+  return s.app == null ? "OXidea –" : `OXidea ${formatBytes(s.app)}`;
 }
 
 /** Status bar tooltip: `OpenIDEA 560 MB · language servers 1.1 GB · processes 80 MB`. */
 export function indicatorTooltip(s: MemorySummary): string {
-  const parts = [`OpenIDEA ${formatSize(s.app)}`];
+  const parts = [`OXidea ${formatSize(s.app)}`];
   if (s.languageServers != null) parts.push(`language servers ${formatSize(s.languageServers)}`);
   if (s.processes != null) parts.push(`processes ${formatSize(s.processes)}`);
   return parts.join(" · ");
@@ -55,7 +55,7 @@ export interface BreakdownSection {
 }
 
 const SECTIONS: Array<{ category: MemoryCategory; title: string }> = [
-  { category: "app", title: "OpenIDEA" },
+  { category: "app", title: "OXidea" },
   { category: "languageServer", title: "Language servers" },
   { category: "process", title: "Debug adapters & processes" },
 ];

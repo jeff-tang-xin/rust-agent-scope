@@ -394,11 +394,11 @@ pub struct UpdateCheck {
 }
 
 fn update_endpoint_env() -> Option<String> {
-    std::env::var("OPENIDEA_UPDATE_ENDPOINT").ok().filter(|s| !s.trim().is_empty())
+    std::env::var("OXIDEA_UPDATE_ENDPOINT").ok().filter(|s| !s.trim().is_empty())
 }
 
 /// Whether an update endpoint is configured: `plugins.updater.endpoints` in
-/// tauri.conf.json, or the `OPENIDEA_UPDATE_ENDPOINT` environment variable. Empty by
+/// tauri.conf.json, or the `OXIDEA_UPDATE_ENDPOINT` environment variable. Empty by
 /// default, and "Check for Updates…" is hidden then.
 pub fn updates_configured<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
     !config_endpoints(app).is_empty() || update_endpoint_env().is_some()
@@ -415,7 +415,7 @@ pub enum UpdateSource {
     Cnb,
 }
 
-const CNB_ENDPOINT: &str = "https://cnb.cool/l0ng-ai/openidea/-/releases/latest/download/latest.json";
+const CNB_ENDPOINT: &str = "https://cnb.cool/l0ng-ai/oxidea/-/releases/latest/download/latest.json";
 
 fn config_endpoints<R: tauri::Runtime>(app: &AppHandle<R>) -> Vec<String> {
     app.config()
@@ -468,19 +468,11 @@ fn updater(app: &AppHandle, source: UpdateSource) -> IdeResult<Option<tauri_plug
 #[tauri::command]
 #[specta::specta]
 pub async fn app_check_update(app: AppHandle, source: UpdateSource) -> IdeResult<UpdateCheck> {
-    let Some(updater) = updater(&app, source)? else {
-        return Ok(UpdateCheck { enabled: false, update: None });
-    };
-    let update = updater.check().await.map_err(|e| IdeError::unavailable(e.to_string()))?;
-    Ok(UpdateCheck {
-        enabled: true,
-        update: update.map(|u| UpdateInfo {
-            version: u.version.clone(),
-            current_version: u.current_version.clone(),
-            notes: u.body.clone(),
-            date: u.date.map(|d| d.to_string()),
-        }),
-    })
+    // Placeholder: the OXidea update endpoint is not live yet, so every check reports
+    // success with no update instead of requesting the configured URL. Restore the
+    // real check (see git history) once the OXidea endpoint serves latest.json.
+    let _ = (app, source);
+    Ok(UpdateCheck { enabled: true, update: None })
 }
 
 /// The background check made once per process when the first window starts;

@@ -157,21 +157,21 @@ describe("memory breakdown", () => {
   it("sums per group and labels the indicator without a fake denominator", () => {
     const s = summarizeMemory({ memory: rows, rssBytes: 1 });
     expect(s).toEqual({ app: 520 * MB, languageServers: 1126 * MB, processes: null, total: 1646 * MB });
-    expect(indicatorLabel(s)).toBe("OpenIDEA 520M");
-    expect(indicatorTooltip(s)).toBe("OpenIDEA 520 MB · language servers 1.1 GB");
+    expect(indicatorLabel(s)).toBe("OXidea 520M");
+    expect(indicatorTooltip(s)).toBe("OXidea 520 MB · language servers 1.1 GB");
   });
 
   it("falls back to the backend's resident memory without a breakdown", () => {
     const s = summarizeMemory({ memory: [], rssBytes: 125 * MB });
-    expect(indicatorLabel(s)).toBe("OpenIDEA 125M");
+    expect(indicatorLabel(s)).toBe("OXidea 125M");
     expect(indicatorTooltip(s)).toBe("OpenIDEA 125 MB");
-    expect(indicatorLabel(summarizeMemory(null))).toBe("OpenIDEA –");
+    expect(indicatorLabel(summarizeMemory(null))).toBe("OXidea –");
   });
 
   it("builds popup sections in category order", () => {
     const sections = memorySections(rows);
     expect(sections.map((s) => [s.title, s.total, s.rows.length])).toEqual([
-      ["OpenIDEA", "520 MB", 4],
+      ["OXidea", "520 MB", 4],
       ["Language servers", "1.1 GB", 2],
       ["Debug adapters & processes", "–", 1],
     ]);

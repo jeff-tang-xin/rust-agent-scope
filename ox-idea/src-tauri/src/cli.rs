@@ -43,19 +43,19 @@ fn client(identifier: &str, args: &[String]) -> Result<(), String> {
             return Ok(());
         }
         Command::Version => {
-            println!("OpenIDEA {}", env!("CARGO_PKG_VERSION"));
+            println!("OXidea {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Command::Open(targets) | Command::Diff(targets) => targets,
     };
-    let socket = socket::socket_path(identifier).ok_or("no cache directory for the OpenIDEA socket")?;
+    let socket = socket::socket_path(identifier).ok_or("no cache directory for the OXidea socket")?;
     let request = Request { diff, ..Request::open(targets) };
     let response = match socket::send(&socket, &request) {
         Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
             start_app()?;
             send_when_started(&socket, &request)?
         }
-        sent => sent.map_err(|e| format!("cannot reach OpenIDEA: {e}"))?,
+        sent => sent.map_err(|e| format!("cannot reach OXidea: {e}"))?,
     };
     match response {
         Response::Ok => Ok(()),
@@ -83,7 +83,7 @@ fn start_app() -> Result<(), String> {
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0000_0008 | 0x0000_0200);
-    command.spawn().map(drop).map_err(|e| format!("cannot start OpenIDEA: {e}"))
+    command.spawn().map(drop).map_err(|e| format!("cannot start OXidea: {e}"))
 }
 
 fn send_when_started(socket: &Path, request: &Request) -> Result<Response, String> {
@@ -92,11 +92,11 @@ fn send_when_started(socket: &Path, request: &Request) -> Result<Response, Strin
         match socket::send(socket, request) {
             Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
                 if start.elapsed() > START_TIMEOUT {
-                    return Err("OpenIDEA did not start in time".into());
+                    return Err("OXidea did not start in time".into());
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            sent => return sent.map_err(|e| format!("cannot reach OpenIDEA: {e}")),
+            sent => return sent.map_err(|e| format!("cannot reach OXidea: {e}")),
         }
     }
 }
@@ -127,7 +127,7 @@ pub fn serve(app: &AppHandle, identifier: &str) {
             }
         }) {
             Ok(()) => Response::Ok,
-            Err(e) => Response::Error { message: format!("OpenIDEA cannot open windows: {e}") },
+            Err(e) => Response::Error { message: format!("OXidea cannot open windows: {e}") },
         }
     });
     if let Err(e) = served {
@@ -161,8 +161,8 @@ mod tests {
 
     #[test]
     fn bundle_of_the_app_executable() {
-        let exe = Path::new("/Applications/OpenIDEA.app/Contents/MacOS/openidea");
-        let expected = cfg!(target_os = "macos").then(|| PathBuf::from("/Applications/OpenIDEA.app"));
+        let exe = Path::new("/Applications/OXidea.app/Contents/MacOS/oxidea");
+        let expected = cfg!(target_os = "macos").then(|| PathBuf::from("/Applications/OXidea.app"));
         assert_eq!(app_bundle(exe), expected);
         assert_eq!(app_bundle(Path::new("/repo/target/debug/openidea")), None);
     }

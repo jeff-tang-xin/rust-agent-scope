@@ -8,7 +8,7 @@ import { useEditorRegistry } from "@/editor/api";
 import { basename, useProject } from "@/platform/project";
 import { useT } from "@/platform/i18n";
 import { ProgressBar } from "@/ui";
-import projectMark from "../../src-tauri/icons/source/openidea-mark.svg";
+import projectMark from "../../src-tauri/icons/source/oxidea-mark.svg";
 import { useDistractionFree } from "./distractionFree";
 import { EditorArea } from "./EditorArea";
 import { OverlayHost } from "./OverlayHost";
@@ -55,7 +55,7 @@ function ProjectOpening({ path }: { path: string }) {
       <div className={styles.openingBody} role="status" aria-label={label}>
         <div className={styles.openingBrand} aria-hidden="true">
           <img className={styles.openingLogo} src={projectMark} alt="" draggable={false} />
-          <span>OpenIDEA</span>
+          <span>OXidea</span>
         </div>
         <ProgressBar className={styles.openingProgress} aria-label={label} />
         <div className={styles.openingTitle}>{label}</div>

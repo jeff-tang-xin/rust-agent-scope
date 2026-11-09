@@ -19,7 +19,7 @@ afterEach(() => {
 it("surfaces module evaluation errors before React is available", () => {
   window.dispatchEvent(new ErrorEvent("error", { error: new SyntaxError("Invalid regular expression") }));
   expect(document.getElementById("splash")).toBeNull();
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain("OpenIDEA could not start");
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("OXidea could not start");
   expect(document.querySelector("textarea")?.value).toContain("Invalid regular expression");
   expect(document.querySelector("textarea")?.value).toContain(navigator.userAgent);
 });

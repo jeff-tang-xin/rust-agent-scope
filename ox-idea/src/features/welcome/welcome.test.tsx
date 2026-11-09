@@ -86,7 +86,7 @@ afterEach(() => {
 describe("Welcome › Projects", () => {
   it("shows brand, version and project rows with badges, ~ paths and branches", async () => {
     await renderWelcome();
-    expect(screen.getByText("OpenIDEA")).toBeTruthy();
+    expect(screen.getByText("OXidea")).toBeTruthy();
     expect(screen.getByText("1.2.3")).toBeTruthy();
     const rows = screen.getAllByRole("option");
     expect(rows).toHaveLength(3);
@@ -134,7 +134,7 @@ describe("Welcome › Projects", () => {
   it("shows the landing page without recent projects", async () => {
     recent = [];
     await renderWelcome();
-    expect(screen.getByText("Welcome to OpenIDEA")).toBeTruthy();
+    expect(screen.getByText("Welcome to OXidea")).toBeTruthy();
     expect(screen.queryByLabelText("Search projects")).toBeNull();
   });
 });

@@ -504,7 +504,7 @@
   "Allow": "Allow",
   "Deny": "Deny",
   "Agents can read, edit, and run projects open in OpenIDEA through its built-in tools. Run tools ask for confirmation. The server listens on 127.0.0.1 only and requires a token.": "Agents can read, edit, and run projects open in OpenIDEA through its built-in tools. Run tools ask for confirmation. The server listens on 127.0.0.1 only and requires a token.",
-  "OpenIDEA could not start": "OpenIDEA could not start",
+  "OpenIDEA could not start": "OXidea could not start",
   "Copy the details below and include them in a GitHub issue.": "Copy the details below and include them in a GitHub issue.",
   "Report an issue": "Report an issue",
   "Copy details": "Copy details",
