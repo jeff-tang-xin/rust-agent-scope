@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AgentProvider } from "@/bindings";
 import { tx, useTxTemplate } from "@/platform/i18n";
 import clsx from "clsx";
-import { Icon, IconButton, Input, List, Spinner, T } from "@/ui";
+import { Icon, IconButton, Input, List, Select, Spinner, T } from "@/ui";
 import { useSettingsForm } from "@/workbench/contributions";
 import { providerIcon } from "./model";
 import type { CommandsBackend } from "./registry";
@@ -177,6 +177,9 @@ function Details({
           )}
         </p>
       )}
+      {agent.id === "ox-hareness" && (
+        <OxModelFields envText={env.value} onEnvChange={env.set} saving={env.saving} />
+      )}
       {agent.commandReadOnlyReason !== "registry" && agent.commandReadOnlyReason !== "customAgent" && (
         <>
           <label className={styles.label} htmlFor={`agent-env-${agent.id}`}>
@@ -234,6 +237,120 @@ const formatEnv = (env: Record<string, string>) =>
   Object.entries(env)
     .map(([k, v]) => `${k}=${v}`)
     .join("; ");
+
+/** `AGENTSCOPE_*` env keys consumed by the in-process OX agent (`build_model` in agentscope-acp). */
+const OX_ENV_KEYS = {
+  provider: "AGENTSCOPE_PROVIDER",
+  apiKey: "AGENTSCOPE_API_KEY",
+  model: "AGENTSCOPE_MODEL",
+  baseUrl: "AGENTSCOPE_BASE_URL",
+} as const;
+
+/** Providers accepted by `AGENTSCOPE_PROVIDER`; an unset key means the dashscope default. */
+const OX_PROVIDERS = ["dashscope", "openai", "anthropic", "gemini", "ollama"] as const;
+
+/**
+ * Structured model configuration for the in-process OX agent, projected onto the
+ * same staged env text as the raw variables field: edits here rewrite that draft,
+ * so one Apply saves both and neither view can clobber the other.
+ */
+function OxModelFields({
+  envText,
+  onEnvChange,
+  saving,
+}: {
+  envText: string;
+  onEnvChange: (text: string) => void;
+  saving: boolean;
+}) {
+  const parsed = safeParseEnv(envText);
+  const get = (key: string) => parsed?.[key] ?? "";
+  const patch = (key: string, value: string) => {
+    // A staged draft with invalid syntax is left alone: fixing it is the raw
+    // field's job, and rewriting it here would silently drop the user's edits.
+    if (!parsed) return;
+    const env = { ...parsed };
+    if (value) env[key] = value;
+    else delete env[key];
+    onEnvChange(formatEnv(env));
+  };
+  return (
+    <>
+      <h4 className={styles.section}>
+        <T>Model provider</T>
+      </h4>
+      <label className={styles.label} htmlFor="ox-provider">
+        <T>Provider</T>
+      </label>
+      <div className={styles.controls}>
+        <Select
+          id="ox-provider"
+          value={get(OX_ENV_KEYS.provider)}
+          disabled={saving}
+          options={[
+            { value: "", label: "Default (Dashscope)" },
+            ...OX_PROVIDERS.map((p) => ({ value: p, label: p })),
+          ]}
+          onChange={(v) => patch(OX_ENV_KEYS.provider, v)}
+          aria-label={tx("Provider")}
+        />
+      </div>
+      <label className={styles.label} htmlFor="ox-api-key">
+        <T>API key</T>
+      </label>
+      <div className={styles.controls}>
+        <Input
+          id="ox-api-key"
+          type="password"
+          mono
+          value={get(OX_ENV_KEYS.apiKey)}
+          disabled={saving}
+          autoComplete="new-password"
+          placeholder="sk-…"
+          onChange={(e) => patch(OX_ENV_KEYS.apiKey, e.target.value)}
+        />
+      </div>
+      <label className={styles.label} htmlFor="ox-model">
+        <T>Model</T>
+      </label>
+      <div className={styles.controls}>
+        <Input
+          id="ox-model"
+          mono
+          value={get(OX_ENV_KEYS.model)}
+          disabled={saving}
+          placeholder="qwen3-coder-plus"
+          onChange={(e) => patch(OX_ENV_KEYS.model, e.target.value)}
+        />
+      </div>
+      <label className={styles.label} htmlFor="ox-base-url">
+        <T>Base URL</T>
+      </label>
+      <div className={styles.controls}>
+        <Input
+          id="ox-base-url"
+          mono
+          value={get(OX_ENV_KEYS.baseUrl)}
+          disabled={saving}
+          placeholder="Optional override"
+          onChange={(e) => patch(OX_ENV_KEYS.baseUrl, e.target.value)}
+        />
+      </div>
+      <p className={styles.hint}>
+        <T>Model is required; the rest falls back to provider defaults. Changes apply to new sessions.</T>
+      </p>
+    </>
+  );
+}
+
+/** parseEnv that tolerates a staged draft with invalid entries instead of throwing. */
+function safeParseEnv(text: string): Record<string, string> | null {
+  try {
+    return parseEnv(text);
+  } catch {
+    return null;
+  }
+}
 
 /** Login hints are plain text with optional backtick-delimited command spans. */
 function LoginHint({ text }: { text: string }) {
