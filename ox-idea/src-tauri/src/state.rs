@@ -60,7 +60,7 @@ impl AppState {
         let syntax: Arc<OnceLock<Arc<Syntax>>> = Arc::default();
         {
             let syntax = syntax.clone();
-            std::thread::Builder::new().name("openidea-syntax-init".into()).spawn(move || {
+            std::thread::Builder::new().name("oxidea-syntax-init".into()).spawn(move || {
                 syntax.get_or_init(|| Arc::new(Syntax::new()));
             })?;
         }
@@ -97,6 +97,7 @@ impl AppState {
             runtime: tauri::async_runtime::handle().inner().clone(),
             project_environment: false,
         }));
+        ide_host::ox_tools::install_ox_tools(host.clone());
         Ok(Self {
             recent: RecentProjects::load(&config_dir),
             askpass: start_askpass(&app),

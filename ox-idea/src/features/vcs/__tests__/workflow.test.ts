@@ -54,9 +54,9 @@ describe("issue navigation", () => {
       { pattern: "#(\\d+)", link: "https://gh/issues/$1" },
       { pattern: "(", link: "broken" },
     ];
-    expect(linkifyIssues("Fix OPENIDEA-12 and #7.", links)).toEqual([
+    expect(linkifyIssues("Fix OXIDEA-12 and #7.", links)).toEqual([
       "Fix ",
-      { text: "OPENIDEA-12", url: "https://jira/browse/OPENIDEA-12" },
+      { text: "OXIDEA-12", url: "https://jira/browse/OXIDEA-12" },
       " and ",
       { text: "#7", url: "https://gh/issues/7" },
       ".",

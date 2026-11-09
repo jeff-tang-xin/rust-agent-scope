@@ -111,8 +111,8 @@ describe("editor font size actions", () => {
     const view = new EditorView({ state: EditorState.create({ extensions: [fontExtension(settings), fontZoom] }) });
     views.push(view);
     view.dispatch({ effects: setFontZoom.of(2) });
-    expect(view.dom.style.getPropertyValue("--openidea-editor-base-size")).toBe("13px");
-    expect(view.dom.style.getPropertyValue("--openidea-editor-font-size")).toContain("+ 2px");
+    expect(view.dom.style.getPropertyValue("--oxidea-editor-base-size")).toBe("13px");
+    expect(view.dom.style.getPropertyValue("--oxidea-editor-font-size")).toContain("+ 2px");
   });
 
   it("routes font size actions by focus even when another surface is hovered", async () => {
@@ -139,7 +139,7 @@ describe("editor font size actions", () => {
     });
 
     const releaseFrame = registerFontZoomSurface(iframe, (delta) =>
-      iframe.contentWindow?.postMessage({ tag: "openidea-view", fontZoomDelta: delta }, "*"),
+      iframe.contentWindow?.postMessage({ tag: "oxidea-view", fontZoomDelta: delta }, "*"),
     );
 
     try {
@@ -159,14 +159,14 @@ describe("editor font size actions", () => {
       expect(termZooms).toEqual([1, -1, 1]);
       iframe.focus();
       await executeAction("editor.increaseFontSize");
-      expect(posted).toEqual([{ tag: "openidea-view", fontZoomDelta: 1 }]);
+      expect(posted).toEqual([{ tag: "oxidea-view", fontZoomDelta: 1 }]);
       qsa.mockRestore();
 
       await executeAction("editor.resetFontSize");
       expect(termZooms).toEqual([1, -1, 1, 0]);
       expect(posted).toEqual([
-        { tag: "openidea-view", fontZoomDelta: 1 },
-        { tag: "openidea-view", fontZoomDelta: 0 },
+        { tag: "oxidea-view", fontZoomDelta: 1 },
+        { tag: "oxidea-view", fontZoomDelta: 0 },
       ]);
     } finally {
       releaseTerminal();

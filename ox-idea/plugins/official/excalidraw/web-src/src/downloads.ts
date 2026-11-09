@@ -1,11 +1,11 @@
 /**
  * The frame may not download files (no `allow-downloads`): Excalidraw's
  * "Save to disk" and image export click a download link, which this turns
- * into the IDE's save dialog (`openidea.saveFile`).
+ * into the IDE's save dialog (`oxidea.saveFile`).
  */
 const click = HTMLAnchorElement.prototype.click;
 
-export function routeDownloadsToTheIde(bridge: OpenideaBridge) {
+export function routeDownloadsToTheIde(bridge: OxideaBridge) {
   HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
     const href = this.href;
     if (!this.hasAttribute("download") || !/^(blob|data):/.test(href)) return click.call(this);
@@ -17,7 +17,7 @@ export function routeDownloadsToTheIde(bridge: OpenideaBridge) {
   };
 }
 
-function filtersFor(name: string): OpenideaFileFilter[] | undefined {
+function filtersFor(name: string): OxideaFileFilter[] | undefined {
   const ext = /\.([\w]+)$/.exec(name)?.[1]?.toLowerCase();
   if (!ext) return undefined;
   const label: Record<string, string> = { png: "PNG image", svg: "SVG image", excalidraw: "Excalidraw drawing" };

@@ -122,7 +122,7 @@ describe("change lane clicks", () => {
       }),
     });
     view.dispatch({ effects: setHunksEffect.of([h("modified", 0, 1, 0, 1, "b\n")]) });
-    const lane = view.dom.querySelector(".cm-openidea-lane")!;
+    const lane = view.dom.querySelector(".cm-oxidea-lane")!;
     expect(view.contentDOM.contains(lane)).toBe(false);
     lane.dispatchEvent(
       new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: 0, clientY: 0 }),

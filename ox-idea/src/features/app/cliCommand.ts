@@ -1,4 +1,4 @@
-/** Install / Uninstall the `openidea` shell command. */
+/** Install / Uninstall the `oxidea` shell command. */
 import type { Action } from "@/platform/actions";
 import { tx } from "@/platform/i18n";
 import { call, commands, isCancelled } from "@/platform/ipc";
@@ -15,10 +15,10 @@ async function installCli(): Promise<void> {
     const result = await call(commands.appCliInstall());
     const hint = result.pathDirectory
       ? tx`Add ${result.pathDirectory} to the beginning of PATH, then open a new terminal.`
-      : tx("Open a new terminal to use the openidea command.");
+      : tx("Open a new terminal to use the oxidea command.");
     notifications().notify({
       level: "info",
-      title: tx("The openidea command is installed"),
+      title: tx("The oxidea command is installed"),
       body: `${result.path}\n${hint}`,
       key: KEY,
     });
@@ -26,7 +26,7 @@ async function installCli(): Promise<void> {
     if (!isCancelled(e))
       notifications().notify({
         level: "error",
-        title: tx("Cannot install the openidea command"),
+        title: tx("Cannot install the oxidea command"),
         body: errorText(e),
         key: KEY,
       });
@@ -38,7 +38,7 @@ async function uninstallCli(): Promise<void> {
     const links = await call(commands.appCliUninstall());
     notifications().notify({
       level: "info",
-      title: tx(links.length ? "The openidea command is uninstalled" : "The openidea command is not installed"),
+      title: tx(links.length ? "The oxidea command is uninstalled" : "The oxidea command is not installed"),
       body: links.join("\n") || undefined,
       key: KEY,
     });
@@ -46,7 +46,7 @@ async function uninstallCli(): Promise<void> {
     if (!isCancelled(e))
       notifications().notify({
         level: "error",
-        title: tx("Cannot uninstall the openidea command"),
+        title: tx("Cannot uninstall the oxidea command"),
         body: errorText(e),
         key: KEY,
       });
@@ -57,14 +57,14 @@ export function cliActions(): Action[] {
   return [
     {
       id: "app.installCli",
-      title: tx("Install 'openidea' Command"),
+      title: tx("Install 'oxidea' Command"),
       category: tx("Tools"),
       keywords: ["cli", "shell", "terminal", "path", "command line", "launcher"],
       run: installCli,
     },
     {
       id: "app.uninstallCli",
-      title: tx("Uninstall 'openidea' Command"),
+      title: tx("Uninstall 'oxidea' Command"),
       category: tx("Tools"),
       keywords: ["cli", "shell", "terminal", "path", "command line", "launcher"],
       run: uninstallCli,

@@ -164,7 +164,7 @@ describe("memory breakdown", () => {
   it("falls back to the backend's resident memory without a breakdown", () => {
     const s = summarizeMemory({ memory: [], rssBytes: 125 * MB });
     expect(indicatorLabel(s)).toBe("OXidea 125M");
-    expect(indicatorTooltip(s)).toBe("OpenIDEA 125 MB");
+    expect(indicatorTooltip(s)).toBe("OXidea 125 MB");
     expect(indicatorLabel(summarizeMemory(null))).toBe("OXidea –");
   });
 

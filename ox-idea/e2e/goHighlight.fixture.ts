@@ -3,7 +3,7 @@ import { syntaxHighlighting } from "@codemirror/language";
 import { commands } from "../src/platform/ipc";
 import { setInvokeRoute } from "../src/platform/tauriCore";
 import { schemeCss } from "../src/platform/colorScheme";
-import { openideaHighlightStyle } from "../src/editor/core/cm/highlight";
+import { oxideaHighlightStyle } from "../src/editor/core/cm/highlight";
 import { findLanguageDescription, loadSupport } from "../src/editor/core/cm/languages";
 import { lspDoc } from "../src/editor/lsp/lsp";
 import { semanticExtension } from "../src/editor/lsp/semantic";
@@ -35,7 +35,7 @@ new EditorView({
   doc: "const Limit = 3\nvar Global = 1\nfmt.Println(Global)\nfunc Greet() {}",
   extensions: [
     support!,
-    syntaxHighlighting(openideaHighlightStyle),
+    syntaxHighlighting(oxideaHighlightStyle),
     lspTheme,
     lspDoc.of({ doc: 1, path: "demo.go", language: "go", uiMode: "Go", readOnly: false }),
     semanticExtension(),

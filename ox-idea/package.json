@@ -1,5 +1,5 @@
 {
-  "name": "openidea",
+  "name": "oxidea",
   "private": true,
   "description": "An open-source IDE inspired by IntelliJ IDEA",
   "version": "0.0.1",
@@ -18,7 +18,7 @@
     "format:check": "oxfmt --check",
     "knip": "knip",
     "typecheck": "tsrs --noEmit && tsrs -p tsconfig.node.json --noEmit && tsrs -p perf --noEmit && tsrs -p scripts --noEmit && tsrs -p smoke --noEmit",
-    "gen:bindings": "cargo test -p openidea --test export_bindings",
+    "gen:bindings": "cargo test -p oxidea --test export_bindings",
     "gen:windows-icons": "node scripts/gen-windows-icons.ts",
     "gen:angular-grammar": "lezer-generator src/editor/core/cm/angular/angular.grammar --typeScript -o src/editor/core/cm/angular/parser.ts",
     "gen:jsp-grammar": "lezer-generator src/editor/core/cm/jsp/jsp.grammar --typeScript -o src/editor/core/cm/jsp/parser.ts",

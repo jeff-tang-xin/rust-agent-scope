@@ -18,18 +18,18 @@ mod bindings {
         world: "probe-host",
         path: "tests/fixtures/p0-probe/wit",
         imports: {
-            "openidea:probe/host-api.sleep-ms": async | trappable,
+            "oxidea:probe/host-api.sleep-ms": async | trappable,
             default: trappable,
         },
         exports: { default: async },
         with: {
             "wasi:io/poll": wasmtime_wasi::p2::bindings::io::poll,
-            "openidea:probe/host-api.task": super::Task,
+            "oxidea:probe/host-api.task": super::Task,
         },
     });
 }
 
-use bindings::openidea::probe::host_api;
+use bindings::oxidea::probe::host_api;
 
 /// Host side of the `task` resource: a queue the host pushes into.
 pub struct Task {
@@ -172,8 +172,8 @@ fn store(env: &Env, task: TaskHandle) -> Store<Data> {
     store
 }
 
-const BASE: &str = "openidea:probe/base@0.1.0";
-const CODE_ACTIONS: &str = "openidea:probe/code-actions@0.1.0";
+const BASE: &str = "oxidea:probe/base@0.1.0";
+const CODE_ACTIONS: &str = "oxidea:probe/code-actions@0.1.0";
 
 /// P0-1: a component that lacks optional exports still binds; presence is
 /// detectable per interface, and present interfaces are callable.
@@ -193,7 +193,7 @@ async fn optional_exports_bind_per_interface() {
     assert!(bindings::ProbeHostPre::new(pre_min.clone()).is_err());
 
     // ... but per-interface indices bind what is there.
-    use bindings::exports::openidea::probe::{base, code_actions, completion};
+    use bindings::exports::oxidea::probe::{base, code_actions, completion};
     let base_idx = base::GuestIndices::new(&pre_min).unwrap();
     assert!(code_actions::GuestIndices::new(&pre_min).is_err());
     let mut s = store(&env, TaskHandle::default());
@@ -218,7 +218,7 @@ async fn optional_exports_bind_per_interface() {
 async fn spinning_guest_yields_to_the_executor() {
     let env = env();
     let pre = env.linker.instantiate_pre(&Component::from_file(&env.engine, dist("min.wasm")).unwrap()).unwrap();
-    let idx = bindings::exports::openidea::probe::base::GuestIndices::new(&pre).unwrap();
+    let idx = bindings::exports::oxidea::probe::base::GuestIndices::new(&pre).unwrap();
     let mut s = store(&env, TaskHandle::default());
     let inst = pre.instantiate_async(&mut s).await.unwrap();
     let base = idx.load(&mut s, &inst).unwrap();
@@ -247,7 +247,7 @@ async fn spinning_guest_yields_to_the_executor() {
 async fn cancelled_instance_cannot_be_reused_but_reinstantiates_fast() {
     let env = env();
     let pre = env.linker.instantiate_pre(&Component::from_file(&env.engine, dist("min.wasm")).unwrap()).unwrap();
-    let idx = bindings::exports::openidea::probe::base::GuestIndices::new(&pre).unwrap();
+    let idx = bindings::exports::oxidea::probe::base::GuestIndices::new(&pre).unwrap();
     let mut s = store(&env, TaskHandle::default());
     let inst = pre.instantiate_async(&mut s).await.unwrap();
     let base = idx.load(&mut s, &inst).unwrap();
@@ -286,7 +286,7 @@ async fn cancelled_instance_cannot_be_reused_but_reinstantiates_fast() {
 async fn async_host_import_does_not_block() {
     let env = env();
     let pre = env.linker.instantiate_pre(&Component::from_file(&env.engine, dist("min.wasm")).unwrap()).unwrap();
-    let idx = bindings::exports::openidea::probe::base::GuestIndices::new(&pre).unwrap();
+    let idx = bindings::exports::oxidea::probe::base::GuestIndices::new(&pre).unwrap();
     let mut s = store(&env, TaskHandle::default());
     let inst = pre.instantiate_async(&mut s).await.unwrap();
     let base = idx.load(&mut s, &inst).unwrap();
@@ -307,7 +307,7 @@ async fn async_host_import_does_not_block() {
 async fn pollable_task_streams_and_cancels_cooperatively() {
     let env = env();
     let pre = env.linker.instantiate_pre(&Component::from_file(&env.engine, dist("min.wasm")).unwrap()).unwrap();
-    let idx = bindings::exports::openidea::probe::base::GuestIndices::new(&pre).unwrap();
+    let idx = bindings::exports::oxidea::probe::base::GuestIndices::new(&pre).unwrap();
     let task = TaskHandle::default();
     let mut s = store(&env, task.clone());
     let inst = pre.instantiate_async(&mut s).await.unwrap();

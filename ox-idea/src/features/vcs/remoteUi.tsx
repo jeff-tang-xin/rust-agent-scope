@@ -686,7 +686,7 @@ function PushDialog({ target: pushTarget, onClose }: { target: PushTarget; onClo
   );
 }
 
-const PUSH_SPLIT_KEY = "openidea.vcs.pushSplit";
+const PUSH_SPLIT_KEY = "oxidea.vcs.pushSplit";
 
 /** Heights of the Push dialog's commits and changed files, as the splitter left them. */
 function loadPushSplit(): Record<string, number> | undefined {
@@ -708,7 +708,7 @@ function savePushSplit(layout: Record<string, number>) {
   }
 }
 
-const SILENT_FORCE_PUSH_KEY = "openidea.vcs.silentForcePushTargets";
+const SILENT_FORCE_PUSH_KEY = "oxidea.vcs.silentForcePushTargets";
 
 function silentForcePushTargets(): string[] {
   try {

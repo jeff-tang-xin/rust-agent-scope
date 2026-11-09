@@ -87,7 +87,7 @@ async fn database_calls_enforce_grants_trust_ownership_and_uninstall_lifetime() 
     let source = f.host.project("main").unwrap().db.plugin_source(ID, "local").unwrap();
     let store = ide_db::secrets::SecretStore::new(f._tmp.path().join("data/db-passwords.json"), &f.root);
     assert_eq!(store.get(&source.id).as_deref(), Some("never-on-disk"));
-    let file = f.root.join(".openidea/data-sources.toml");
+    let file = f.root.join(".oxidea/data-sources.toml");
     assert!(!std::fs::read_to_string(&file).unwrap().contains("never-on-disk"));
     for command in ["remove", "connect"] {
         assert!(f.run(command, Some("foreign")).is_err());
@@ -97,7 +97,7 @@ async fn database_calls_enforce_grants_trust_ownership_and_uninstall_lifetime() 
     assert!(file.exists());
     f.plugins.set_enabled(ID, true).unwrap();
     assert!(f.host.project("main").unwrap().db.plugin_source(ID, "local").is_ok());
-    f.host.set_mcp_executable(Some(PathBuf::from("/app/openidea")));
+    f.host.set_mcp_executable(Some(PathBuf::from("/app/oxidea")));
     let command: serde_json::Value = serde_json::from_str(&f.run("stdio", None).unwrap().unwrap()).unwrap();
     assert_eq!(command[1], "--mcp-stdio");
     f.host.set_mcp_executable(None);
@@ -219,10 +219,10 @@ async fn official_api_examples_install_and_render_real_component_contributions()
         f.plugins
             .language_code_lenses(&doc)
             .iter()
-            .any(|(owner, lens)| owner == "openidea.blame-annotations" && lens.command == "annotate")
+            .any(|(owner, lens)| owner == "oxidea.blame-annotations" && lens.command == "annotate")
     }));
-    f.plugins.run_command("openidea.todo-finder", "find", None, f.invocation()).unwrap();
-    let view = f.plugins.render_view("openidea.todo-finder", "todos", None, f.invocation()).unwrap();
+    f.plugins.run_command("oxidea.todo-finder", "find", None, f.invocation()).unwrap();
+    let view = f.plugins.render_view("oxidea.todo-finder", "todos", None, f.invocation()).unwrap();
     let ide_plugin::ViewBody::List(items) = view.body else { panic!("expected TODO list") };
     assert_eq!(items.len(), 1);
     assert!(items[0].label.contains("TODO example"));
@@ -240,11 +240,11 @@ async fn official_api_examples_install_and_render_real_component_contributions()
             f.plugins
                 .language_gutter_actions(&doc)
                 .iter()
-                .any(|(owner, action)| owner == "openidea.test-runner" && action.argument.as_deref() == Some("adds"))
+                .any(|(owner, action)| owner == "oxidea.test-runner" && action.argument.as_deref() == Some("adds"))
         }));
         f.plugins.refresh_run_configurations(&f.root);
         let configs = f.plugins.run_detection().detect(&f.root);
-        assert!(configs.iter().any(|c| c.id == "plugin:openidea.test-runner:tests"));
+        assert!(configs.iter().any(|c| c.id == "plugin:oxidea.test-runner:tests"));
     }
 }
 

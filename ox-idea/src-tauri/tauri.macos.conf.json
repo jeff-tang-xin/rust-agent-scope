@@ -2,7 +2,7 @@
   "bundle": {
     "macOS": {
       "files": {
-        "Resources/bin/openidea": "./cli/openidea"
+        "Resources/bin/oxidea": "./cli/oxidea"
       }
     },
     "fileAssociations": [

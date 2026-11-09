@@ -147,7 +147,7 @@ describe("reveal and expand", () => {
   });
 
   it("reveals files of linked workspace projects outside the workspace directory", async () => {
-    fs = new MemoryFs({ "/ws/.openidea/workspace.json": "x", "/a/src/app.ts": "x", "/b/lib/util.ts": "x" }, "/");
+    fs = new MemoryFs({ "/ws/.oxidea/workspace.json": "x", "/a/src/app.ts": "x", "/b/lib/util.ts": "x" }, "/");
     setProjectFsForTests(fs, "/ws");
     initProjectTree("/ws", "ws", ["/a", "/b"]);
     expect(revealPath("/b/lib/util.ts")).toBe(true);

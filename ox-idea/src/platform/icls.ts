@@ -188,7 +188,7 @@ const COLOR_NAMES: Record<string, [string, "foreground" | "background"]> = {
 };
 // Preserve editor attributes without a standard exchange name on our own round trip.
 for (const attr of ATTRIBUTES)
-  if (!Object.values(ATTRIBUTE_NAMES).includes(attr.id)) ATTRIBUTE_NAMES[`OPENIDEA_${attr.id}`] = attr.id;
+  if (!Object.values(ATTRIBUTE_NAMES).includes(attr.id)) ATTRIBUTE_NAMES[`OXIDEA_${attr.id}`] = attr.id;
 
 // IntelliJ's EFFECT_TYPE codes. The box (0) and faded text (6) have no counterpart here; the bold and the
 // bold dotted line (4, 5) become an underline.

@@ -1,7 +1,7 @@
 /**
  * External tokens of `angular.grammar`. From @codemirror/lang-angular 0.1.4
  * (MIT, see LICENSE); text stopping at blocks, the block tokens and
- * microsyntax expressions added by OpenIDEA.
+ * microsyntax expressions added by OXidea.
  */
 import { ExternalTokenizer, type InputStream } from "@lezer/lr";
 import {

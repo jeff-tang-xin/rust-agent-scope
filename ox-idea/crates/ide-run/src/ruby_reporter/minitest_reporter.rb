@@ -1,15 +1,15 @@
-# Written by OpenIDEA for test runs; registered by `openidea_test_hook.rb` once Minitest is loaded.
+# Written by OXidea for test runs; registered by `oxidea_test_hook.rb` once Minitest is loaded.
 # Nothing in the project is changed.
 #
 # One record per line on stdout, which the IDE strips from the console again:
-#   @@OPENIDEA@@{"t":"start","c":"MyTest","n":"test_x","f":"/abs/test.rb","l":12}
-#   @@OPENIDEA@@{"t":"result","c":"MyTest","n":"test_x","s":"passed","d":0.001,"f":...,"l":...,"m":"failure text"}
-#   @@OPENIDEA@@{"t":"summary","runs":7,"failures":1,"errors":1,"skips":1,"d":0.4}
+#   @@OXIDEA@@{"t":"start","c":"MyTest","n":"test_x","f":"/abs/test.rb","l":12}
+#   @@OXIDEA@@{"t":"result","c":"MyTest","n":"test_x","s":"passed","d":0.001,"f":...,"l":...,"m":"failure text"}
+#   @@OXIDEA@@{"t":"summary","runs":7,"failures":1,"errors":1,"skips":1,"d":0.4}
 require "json"
 
 module Minitest
-  class OpenIdeaReporter < AbstractReporter
-    MARK = "@@OPENIDEA@@"
+  class OXideaReporter < AbstractReporter
+    MARK = "@@OXIDEA@@"
 
     def initialize(io)
       super()
@@ -68,11 +68,11 @@ module Minitest
     end
   end
 
-  def self.plugin_openidea_init(options)
-    return unless ENV["OPENIDEA_TEST_REPORT"]
+  def self.plugin_oxidea_init(options)
+    return unless ENV["OXIDEA_TEST_REPORT"]
 
     io = options[:io] || $stdout
     io.sync = true if io.respond_to?(:sync=)
-    reporter << OpenIdeaReporter.new(io)
+    reporter << OXideaReporter.new(io)
   end
 end

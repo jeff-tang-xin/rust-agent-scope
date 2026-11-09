@@ -458,7 +458,7 @@ async fn full_protocol_flow() {
         "lifecycle order"
     );
     let init = h.request("initialize");
-    assert_eq!(init["arguments"]["clientID"], "openidea");
+    assert_eq!(init["arguments"]["clientID"], "oxidea");
     assert_eq!(init["arguments"]["linesStartAt1"], true);
     assert_eq!(init["arguments"]["columnsStartAt1"], true);
     assert_eq!(init["arguments"]["pathFormat"], "path");
@@ -1204,7 +1204,7 @@ async fn godot_connects_to_the_editor_adapter() {
         fake_adapter(stream, server_log, Script::default()).await;
     });
     let (owner, _events) = recording_owner("main");
-    let manager = DebugManager::new(godot_registry(port, "openidea-no-such-godot", &[]));
+    let manager = DebugManager::new(godot_registry(port, "oxidea-no-such-godot", &[]));
     let project = std::env::temp_dir();
     let id = manager.start(godot_launch(&project), owner).await.unwrap();
     let launch = log.lock().iter().find(|m| m["command"] == "launch").cloned().unwrap();
@@ -1218,7 +1218,7 @@ async fn godot_connects_to_the_editor_adapter() {
 async fn godot_without_editor_or_executable_says_what_to_do() {
     let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
     let (owner, _events) = recording_owner("main");
-    let manager = DebugManager::new(godot_registry(port, "openidea-no-such-godot", &[]));
+    let manager = DebugManager::new(godot_registry(port, "oxidea-no-such-godot", &[]));
     let err = manager.start(godot_launch(&std::env::temp_dir()), owner).await.unwrap_err();
     assert_eq!(err.kind, ide_core::error::ErrorKind::Unavailable);
     assert!(err.message.contains("Open the project in the Godot editor"), "{}", err.message);
@@ -1251,8 +1251,8 @@ async fn godot_starts_a_headless_editor_when_none_is_open() {
 #[cfg(unix)]
 #[tokio::test]
 async fn godot_gets_resolved_paths() {
-    let real = std::env::temp_dir().join(format!("openidea-godot-real-{}", std::process::id()));
-    let link = std::env::temp_dir().join(format!("openidea-godot-link-{}", std::process::id()));
+    let real = std::env::temp_dir().join(format!("oxidea-godot-real-{}", std::process::id()));
+    let link = std::env::temp_dir().join(format!("oxidea-godot-link-{}", std::process::id()));
     std::fs::create_dir_all(&real).unwrap();
     std::fs::write(real.join("player.gd"), "extends Node\n").unwrap();
     let _ = std::fs::remove_file(&link);
@@ -1433,7 +1433,7 @@ async fn a_plugin_language_runs_its_debug_adapter_from_the_approved_program() {
     use ide_language::plugin_point::{PluginLanguages, parse_definition};
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = std::env::temp_dir().join(format!("openidea-plugin-dap-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("oxidea-plugin-dap-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // Stands in for `godot --headless --editor …`.
     let program = dir.join("godot");
@@ -1480,7 +1480,7 @@ async fn a_plugin_language_runs_its_debug_adapter_from_the_approved_program() {
 
 #[test]
 fn flutter_projects_are_found_from_the_program_or_the_working_directory() {
-    let root = std::env::temp_dir().join(format!("openidea-flutter-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("oxidea-flutter-{}", std::process::id()));
     let app = root.join("app");
     let tool = root.join("tool");
     std::fs::create_dir_all(app.join("lib")).unwrap();
@@ -1794,7 +1794,7 @@ async fn stop_kills_the_program_started_by_the_reported_launcher() {
 
 #[test]
 fn delve_leftovers_are_removed_without_touching_other_files() {
-    let dir = std::env::temp_dir().join(format!("openidea-delve-bin-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("oxidea-delve-bin-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for name in ["__debug_bin", "__debug_bin.exe", "__debug_bin.exe3323301925"] {
         std::fs::write(dir.join(name), b"bin").unwrap();

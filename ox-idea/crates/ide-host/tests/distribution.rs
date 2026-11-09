@@ -333,7 +333,7 @@ fn the_marketplace_offers_the_newest_version_this_ide_can_load() {
     let listed = f.host.refresh_market().unwrap();
     assert_eq!((listed[0].entry.version.as_str(), listed[0].compatible), ("2.0.0", false));
     let err = f.host.download_market_plugin("acme.hello").unwrap_err();
-    assert!(err.message.contains("update OpenIDEA"), "{}", err.message);
+    assert!(err.message.contains("update OXidea"), "{}", err.message);
 }
 
 #[test]
@@ -489,7 +489,7 @@ fn an_index_in_a_newer_format_still_revokes() {
     );
     std::fs::write(market.join("index.json"), newer).unwrap();
     let err = f.host.refresh_market().unwrap_err();
-    assert!(err.message.contains("newer OpenIDEA"), "{}", err.message);
+    assert!(err.message.contains("newer OXidea"), "{}", err.message);
     let info = f.host.info_of("acme.hello").unwrap();
     assert_eq!((info.status, info.error.as_deref()), (PluginStatus::Failed, Some("revoked: steals tokens")));
     assert!(f.host.market_plugins().is_empty());
@@ -507,14 +507,14 @@ fn official_plugins_need_the_key_this_ide_was_built_with() {
     let keys = vec![KeyEntry::new(intruder.public_base64())];
     f.host.set_market_url(Some(index_of(&market, vec![publisher(OFFICIAL_PUBLISHER, keys.clone())], vec![forged])));
     f.host.refresh_market().unwrap();
-    let err = f.host.download_market_plugin("openidea.hello").unwrap_err();
+    let err = f.host.download_market_plugin("oxidea.hello").unwrap_err();
     assert!(err.message.contains("trusted publisher"), "{}", err.message);
 
     // Signed with the built-in key it installs, whatever keys the index lists.
     let (_, genuine) = signed(&market, OFFICIAL_PUBLISHER, "1.0.1", &root, &f.host, |t| t.to_owned());
     index_of(&market, vec![publisher(OFFICIAL_PUBLISHER, keys)], vec![genuine]);
     f.host.refresh_market().unwrap();
-    let dir = f.host.download_market_plugin("openidea.hello").unwrap();
+    let dir = f.host.download_market_plugin("oxidea.hello").unwrap();
     assert_eq!(f.host.preview_install(&dir).unwrap().publisher.as_deref(), Some(OFFICIAL_PUBLISHER));
 }
 

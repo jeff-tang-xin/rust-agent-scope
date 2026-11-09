@@ -86,7 +86,7 @@ class ActionMarker extends GutterMarker {
       void call(
         commands.lspExecuteCommand(this.ctx.doc, {
           title: this.action.tooltip,
-          command: `openidea.plugin-language:${this.plugin}:${this.action.command}`,
+          command: `oxidea.plugin-language:${this.plugin}:${this.action.command}`,
           arguments: [JSON.stringify(this.action.argument)],
         }),
       ).catch(console.warn);

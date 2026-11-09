@@ -22,7 +22,7 @@ interface TomcatServerProfile {
   tomee?: boolean;
 }
 
-const SERVERS_STORAGE_KEY = "openidea.tomcat.servers.v1";
+const SERVERS_STORAGE_KEY = "oxidea.tomcat.servers.v1";
 
 function shortVersion(version: string): string {
   return version.replace(/^Apache Tomcat\//i, "").trim() || version;

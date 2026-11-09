@@ -17,14 +17,14 @@ vi.mock("@/workbench/contributions", () => ({
 }));
 vi.mock("@/editor/lsp/hint", () => ({ showHint: hints.showHint }));
 vi.mock("@/editor/api", () => ({
-  CONTRIBUTED_DEFINITION: "openideaDefinition",
+  CONTRIBUTED_DEFINITION: "oxideaDefinition",
   whenSynced: () => Promise.resolve(),
 }));
 
 import { EditorState } from "@codemirror/state";
 import { inArtifactElement, pomNavigationExtension, propertyRefAt } from "./pomNavigation";
 
-const DEFINITION = "openideaDefinition";
+const DEFINITION = "oxideaDefinition";
 
 /** An editor state over `text` with the contribution for `path` installed. */
 function state(text: string, path = "/p/app/pom.xml") {

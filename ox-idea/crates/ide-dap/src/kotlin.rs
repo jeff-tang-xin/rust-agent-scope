@@ -24,7 +24,7 @@ impl SourceMirror {
         if base.starts_with(fs::canonicalize(project)?) {
             return Err(IdeError::invalid("Kotlin source mirror must be outside the project"));
         }
-        let dir = tempfile::Builder::new().prefix("openidea-kotlin-").tempdir_in(base)?;
+        let dir = tempfile::Builder::new().prefix("oxidea-kotlin-").tempdir_in(base)?;
         let source_dir = if project.join("src").is_dir() { project.join("src") } else { project.to_owned() };
         let mut mirror = Self {
             dir,

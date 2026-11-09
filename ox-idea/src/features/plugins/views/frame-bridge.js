@@ -1,5 +1,5 @@
 /*
- * `window.openidea` inside a plugin view's sandboxed frame: the frame's only
+ * `window.oxidea` inside a plugin view's sandboxed frame: the frame's only
  * way to the IDE. Shared by both kinds of frames: inlined into the `html`
  * bodies plugin code renders (src/features/plugins/views/frame.ts) and
  * injected by the desktop into the pages of web views
@@ -11,7 +11,7 @@
  * loaded).
  */
 (initialTheme) => {
-  const TAG = "openidea-view";
+  const TAG = "oxidea-view";
   const listeners = [];
   const themeListeners = [];
   const documentListeners = [];
@@ -32,7 +32,7 @@
   const applyTheme = (t) => {
     if (!t || typeof t !== "object" || !t.vars || typeof t.vars !== "object") return;
     const vars = {};
-    for (const [k, v] of Object.entries(t.vars)) if (k.startsWith("--openidea-") && typeof v === "string") vars[k] = v;
+    for (const [k, v] of Object.entries(t.vars)) if (k.startsWith("--oxidea-") && typeof v === "string") vars[k] = v;
     for (const k of applied) if (!(k in vars)) root.style.removeProperty(k);
     for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
     applied = Object.keys(vars);
@@ -114,7 +114,7 @@
     replace: (version, text) => call("document.replace", { version, text: String(text) }),
   });
 
-  window.openidea = Object.freeze({
+  window.oxidea = Object.freeze({
     /** To the plugin's code (`ViewEvent::Message`). */
     postMessage: (text) => window.parent.postMessage({ tag: TAG, text: String(text) }, "*"),
     /** From the plugin's code (`host::post_view_message`). */

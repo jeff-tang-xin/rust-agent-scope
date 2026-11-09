@@ -5,7 +5,7 @@
  */
 import type { GroupLayout, SplitOrientation } from "./store";
 
-const STORAGE_PREFIX = "openidea.terminal.tabs.v1:";
+const STORAGE_PREFIX = "oxidea.terminal.tabs.v1:";
 
 interface StoredTab {
   id: string;

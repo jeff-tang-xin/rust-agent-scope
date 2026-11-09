@@ -35,7 +35,7 @@ describe("CMake highlighting", () => {
   it("styles the screenshot's commands, argument keywords and built-in variables", async () => {
     const out = tokens(
       await state(`cmake_minimum_required(VERSION 3.20)
-project(OpenIdeaSmoke LANGUAGES C CXX)
+project(OXideaSmoke LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(cpp_smoke main.cpp math.cpp)

@@ -12,7 +12,7 @@ import {
   type ToolWindowLayoutSnapshot,
 } from "./store";
 
-const STORAGE_KEY = "openidea.toolWindowLayouts.v1";
+const STORAGE_KEY = "oxidea.toolWindowLayouts.v1";
 
 interface LayoutsState {
   /** Saved layouts by name, in save order. */

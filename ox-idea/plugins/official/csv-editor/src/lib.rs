@@ -1,4 +1,4 @@
-//! CSV Editor for OpenIDEA: a custom editor showing `.csv` / `.tsv` files as
+//! CSV Editor for OXidea: a custom editor showing `.csv` / `.tsv` files as
 //! a table. It never keeps its own copy of the data: every render parses the
 //! document, and every edit is a versioned text edit of the document, so the
 //! text view of the same file follows at once and Undo is one history.
@@ -6,10 +6,10 @@
 //! Large files: the IDE asks only for the rows it shows; the parse of the
 //! last document version is kept, so scrolling doesn't parse again.
 
-use openidea_plugin::host;
-use openidea_plugin::text::position;
-use openidea_plugin::views::{Body, Button, Table, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Error, Invocation, Plugin, Range, TextEdit, register_plugin};
+use oxidea_plugin::host;
+use oxidea_plugin::text::position;
+use oxidea_plugin::views::{Body, Button, Table, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Error, Invocation, Plugin, Range, TextEdit, register_plugin};
 use std::ops::Range as Span;
 
 /// One record: the byte spans of its fields and of the whole record (without
@@ -247,7 +247,7 @@ register_plugin!(CsvEditor, views);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     const DATA: &str = "name,age,city\nAda,36,London\n\"Lovelace, A.\",\"say \"\"hi\"\"\",\"multi\nline\"\nBob,40\n";
 

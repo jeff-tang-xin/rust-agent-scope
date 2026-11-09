@@ -1,4 +1,4 @@
-/// OpenIDEA plugin API, version 1.0. Once released, 1.x only adds (new
+/// OXidea plugin API, version 1.0. Once released, 1.x only adds (new
 /// interfaces, new optional exports; plugins/README.md, "Evolving the plugin
 /// API"); a 2.0 keeps 1.0 running through an adapter in the host.
 ///
@@ -8,7 +8,7 @@
 /// `fs` and `workspace`, and everything else goes through the imports below,
 /// gated by the capabilities granted in `plugin.toml` (a missing one returns
 /// `error::denied`).
-package openidea:plugin@1.4.0;
+package oxidea:plugin@1.4.0;
 
 world plugin {
     import log;

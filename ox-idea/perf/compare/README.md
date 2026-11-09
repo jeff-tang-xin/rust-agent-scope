@@ -1,7 +1,7 @@
 # IDE comparison
 
-`pnpm perf` measures OpenIDEA from inside its webview. This measures any IDE
-from the outside, the same way for each, so OpenIDEA can be compared with
+`pnpm perf` measures OXidea from inside its webview. This measures any IDE
+from the outside, the same way for each, so OXidea can be compared with
 IntelliJ IDEA (or anything else listed in `apps.toml`).
 
 ```sh
@@ -17,7 +17,7 @@ closes it, and records:
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `window_s`                                  | first visible window whose title matches `window_title` (the project name)                                            |
 | `ready_s`                                   | the process tree's CPU stays under `--quiet-cores` for `--quiet-secs`, after the window and any `ready_after` markers |
-| markers                                     | first/last time a log line matches, e.g. OpenIDEA `indexed`, IDEA `exit dumb mode`                                    |
+| markers                                     | first/last time a log line matches, e.g. OXidea `indexed`, IDEA `exit dumb mode`                                    |
 | `peak_rss_mb`, `rss_mb`, `uss_mb`, `pss_mb` | summed over every process the app started (WebView2/WebKit, jdtls, language servers, the JVM)                         |
 | `total_cpu_s`, `idle_cpu_pct`               | CPU time until ready; CPU while idle for `--idle-secs`                                                                |
 | `exit_s`                                    | until every process has exited                                                                                        |

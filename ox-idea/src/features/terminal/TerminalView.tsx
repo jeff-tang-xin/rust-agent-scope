@@ -48,12 +48,12 @@ import {
 import { TerminalFindBar } from "./FindBar";
 import styles from "./Terminal.module.css";
 
-const TAB_PREFIX = "openidea-terminal";
+const TAB_PREFIX = "oxidea-terminal";
 /**
  * Drag type of terminal tabs: dragging one reorders its group's strip or moves
  * it to another group's, like IDEA's terminal tabs.
  */
-const TAB_MIME = "application/x-openidea-terminal-tab";
+const TAB_MIME = "application/x-oxidea-terminal-tab";
 
 /** Full title when the label is trimmed, then the working directory. */
 function tabTooltip(tab: TerminalTab, sessions: Parameters<typeof tabTitle>[1]): string | undefined {

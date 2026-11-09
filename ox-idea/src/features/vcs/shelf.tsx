@@ -1,5 +1,5 @@
 /**
- * Shelf: Shelve Changes… (named patch under `.openidea/shelf`, changes reverted),
+ * Shelf: Shelve Changes… (named patch under `.oxidea/shelf`, changes reverted),
  * the Shelf tab of the Commit tool window, Unshelve (3-way, conflicts go to the
  * merge UI), rename and delete.
  */
@@ -178,10 +178,10 @@ function ShelveDialog({
       </div>
       <FileChecklist files={files} selected={selected} onChange={setSelected} label="Files to shelve" />
       <div className={styles.form}>
-        <label className={styles.fieldLabel} htmlFor="openidea-shelf-name">
+        <label className={styles.fieldLabel} htmlFor="oxidea-shelf-name">
           <T>Name:</T>
         </label>
-        <Input id="openidea-shelf-name" data-autofocus value={name} onChange={(e) => setName(e.target.value)} />
+        <Input id="oxidea-shelf-name" data-autofocus value={name} onChange={(e) => setName(e.target.value)} />
       </div>
     </Dialog>
   );

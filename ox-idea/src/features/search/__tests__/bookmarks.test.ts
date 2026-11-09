@@ -66,7 +66,7 @@ describe("bookmark store", () => {
 
   it("ignores corrupt storage", () => {
     localStorage.setItem(
-      "openidea.bookmarks.v1:/bad",
+      "oxidea.bookmarks.v1:/bad",
       JSON.stringify([{ path: 1 }, { path: "/bad/x", line: 2 }, "nope"]),
     );
     loadBookmarks("/bad");
@@ -105,7 +105,7 @@ describe("mnemonic bookmarks", () => {
       description: "note",
     });
     localStorage.setItem(
-      "openidea.bookmarks.v1:/m",
+      "oxidea.bookmarks.v1:/m",
       JSON.stringify([...list, { path: "/p/b", line: 0, mnemonic: "ab" }]),
     );
     loadBookmarks("/m");

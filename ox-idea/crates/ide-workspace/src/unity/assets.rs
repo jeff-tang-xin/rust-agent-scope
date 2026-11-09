@@ -161,7 +161,7 @@ pub fn deletion_paths(path: &Path) -> IdeResult<Vec<PathBuf>> {
 }
 
 fn staging(root: &Path) -> IdeResult<PathBuf> {
-    let parent = root.join("Library/OpenIDEA/AssetOperations");
+    let parent = root.join("Library/OXidea/AssetOperations");
     no_links(&parent)?;
     fs::create_dir_all(&parent)?;
     let dir = parent.join(uuid::Uuid::new_v4().simple().to_string());

@@ -4,7 +4,7 @@
   const zh = navigator.language.toLowerCase().startsWith("zh");
   const text = zh
     ? {
-        title: "OpenIDEA 无法启动",
+        title: "OXidea 无法启动",
         report: "请复制下方详情，并附在 GitHub 问题中。",
         link: "报告问题",
         copy: "复制详情",
@@ -14,7 +14,7 @@
         timeout: "启动未在 30 秒内完成。",
       }
     : {
-        title: "OpenIDEA could not start",
+        title: "OXidea could not start",
         report: "Copy the details below and include them in a GitHub issue.",
         link: "Report an issue",
         copy: "Copy details",
@@ -53,7 +53,7 @@
       const details = document.createElement("textarea");
       details.readOnly = true;
       details.setAttribute("aria-label", text.details);
-      details.value = `OpenIDEA startup failure\n${navigator.userAgent}\n\n${describe(reason)}`;
+      details.value = `OXidea startup failure\n${navigator.userAgent}\n\n${describe(reason)}`;
       const actions = document.createElement("div");
       actions.className = "boot-error-actions";
       const copy = document.createElement("button");
@@ -72,7 +72,7 @@
         }
       });
       const report = document.createElement("a");
-      report.href = "https://github.com/l0ng-ai/openidea/issues/new?template=bug_report.yml";
+      report.href = "https://github.com/l0ng-ai/oxidea/issues/new?template=bug_report.yml";
       report.target = "_blank";
       report.rel = "noreferrer";
       report.textContent = text.link;
@@ -100,14 +100,14 @@
     window.clearTimeout(timer);
     window.removeEventListener("error", onError, true);
     window.removeEventListener("unhandledrejection", onRejection);
-    window.removeEventListener("openidea:boot-error", onBootError);
-    window.removeEventListener("openidea:boot-ready", onReady);
+    window.removeEventListener("oxidea:boot-error", onBootError);
+    window.removeEventListener("oxidea:boot-ready", onReady);
   };
   const timer = window.setTimeout(() => show(text.timeout), 30_000);
   window.addEventListener("error", onError, true);
   window.addEventListener("unhandledrejection", onRejection);
-  window.addEventListener("openidea:boot-error", onBootError);
-  window.addEventListener("openidea:boot-ready", onReady);
+  window.addEventListener("oxidea:boot-error", onBootError);
+  window.addEventListener("oxidea:boot-ready", onReady);
 })();
 
 // Runs before the app's CSS loads: restores the last theme (theme.ts stores it)
@@ -121,7 +121,7 @@ try {
     style.textContent = css;
     document.head.appendChild(style);
   };
-  const last = JSON.parse(localStorage.getItem("openidea.theme") ?? "null");
+  const last = JSON.parse(localStorage.getItem("oxidea.theme") ?? "null");
   if (last?.theme) root.dataset.theme = last.theme;
   if (last?.contrast) root.dataset.contrast = last.contrast;
   // A built-in palette theme (Solarized, One) over its light / dark base (tokens.css).
@@ -129,9 +129,9 @@ try {
     root.dataset.colorTheme = last.colorTheme;
   // A plugin theme's stylesheet (plugins/bridge.ts), so the workbench doesn't
   // show the built-in theme until the plugin host answers.
-  const plugin = JSON.parse(localStorage.getItem("openidea.pluginTheme") ?? "null");
+  const plugin = JSON.parse(localStorage.getItem("oxidea.pluginTheme") ?? "null");
   if (typeof plugin?.id === "string" && typeof plugin.css === "string" && !/[<\\]|url\(/i.test(plugin.css)) {
-    addStyle("openidea-plugin-theme", plugin.css);
+    addStyle("oxidea-plugin-theme", plugin.css);
     root.dataset.pluginTheme = plugin.id;
     root.dataset.pluginThemeKind = root.dataset.theme = plugin.kind === "light" ? "light" : "dark";
     delete root.dataset.contrast;
@@ -143,7 +143,7 @@ try {
     ["--boot-fg", last?.fg],
     ["--boot-accent", last?.accent],
   ].filter(([, v]) => typeof v === "string" && /^#[0-9a-f]{3,8}$/i.test(v));
-  if (colors.length) addStyle("openidea-boot-colors", `:root { ${colors.map(([k, v]) => `${k}: ${v};`).join(" ")} }`);
+  if (colors.length) addStyle("oxidea-boot-colors", `:root { ${colors.map(([k, v]) => `${k}: ${v};`).join(" ")} }`);
 } catch {
   /* storage unavailable */
 }

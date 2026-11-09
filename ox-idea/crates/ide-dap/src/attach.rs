@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn detects_go_binaries_by_buildinfo() {
-        let dir = std::env::temp_dir().join(format!("openidea-attach-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oxidea-attach-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let go = dir.join("gobin");
         let mut bytes = vec![0u8; (1 << 20) - 5];

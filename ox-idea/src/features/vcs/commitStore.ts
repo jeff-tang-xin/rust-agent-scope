@@ -52,10 +52,10 @@ export const useCommit = create<CommitState>(() => ({
   signOff: false,
   author: "",
   runHooks: true,
-  groupByDir: readBool("openidea.vcs.groupByDir", false),
-  groupByStaging: readBool("openidea.vcs.groupByStaging", false),
-  diffPreview: readBool("openidea.vcs.diffPreview", true),
-  commitDiffPreview: readBool("openidea.vcs.commitDiffPreview", false),
+  groupByDir: readBool("oxidea.vcs.groupByDir", false),
+  groupByStaging: readBool("oxidea.vcs.groupByStaging", false),
+  diffPreview: readBool("oxidea.vcs.diffPreview", true),
+  commitDiffPreview: readBool("oxidea.vcs.commitDiffPreview", false),
   checks: new Map(),
   excludedHunks: new Map(),
   selection: [],
@@ -89,7 +89,7 @@ function readBool(key: string, fallback: boolean): boolean {
 export function setGroupByDir(v: boolean) {
   useCommit.setState({ groupByDir: v });
   try {
-    localStorage.setItem("openidea.vcs.groupByDir", String(v));
+    localStorage.setItem("oxidea.vcs.groupByDir", String(v));
   } catch {
     // ignore
   }
@@ -98,7 +98,7 @@ export function setGroupByDir(v: boolean) {
 export function setGroupByStaging(v: boolean) {
   useCommit.setState({ groupByStaging: v });
   try {
-    localStorage.setItem("openidea.vcs.groupByStaging", String(v));
+    localStorage.setItem("oxidea.vcs.groupByStaging", String(v));
   } catch {
     // ignore
   }
@@ -107,7 +107,7 @@ export function setGroupByStaging(v: boolean) {
 export function setDiffPreview(v: boolean) {
   useCommit.setState({ diffPreview: v });
   try {
-    localStorage.setItem("openidea.vcs.diffPreview", String(v));
+    localStorage.setItem("oxidea.vcs.diffPreview", String(v));
   } catch {
     // ignore
   }
@@ -116,13 +116,13 @@ export function setDiffPreview(v: boolean) {
 export function setCommitDiffPreview(v: boolean) {
   useCommit.setState({ commitDiffPreview: v });
   try {
-    localStorage.setItem("openidea.vcs.commitDiffPreview", String(v));
+    localStorage.setItem("oxidea.vcs.commitDiffPreview", String(v));
   } catch {
     // ignore
   }
 }
 
-const historyKey = () => `openidea.vcs.commitMessages:${useVcs.getState().root ?? ""}`;
+const historyKey = () => `oxidea.vcs.commitMessages:${useVcs.getState().root ?? ""}`;
 const MAX_HISTORY = 20;
 
 export function messageHistory(): string[] {

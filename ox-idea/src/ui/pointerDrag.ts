@@ -7,14 +7,14 @@
  */
 import styles from "./pointerDrag.module.css";
 
-/** What is dragged: `type` is matched by targets (e.g. `application/x-openidea-editor-tab`). */
+/** What is dragged: `type` is matched by targets (e.g. `application/x-oxidea-editor-tab`). */
 export interface DragData {
   type: string;
   payload: string;
 }
 
 /** Project files dragged from the Project view: `payload` is the paths joined by `\n`, folders ending with `/`. */
-export const FILES_DRAG = "application/x-openidea-files";
+export const FILES_DRAG = "application/x-oxidea-files";
 
 export interface DropTarget {
   accepts(type: string): boolean;

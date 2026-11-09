@@ -2,7 +2,7 @@
 
 Spring YAML / properties navigation is described in [CONFIGURATION.md](CONFIGURATION.md).
 
-The app-owned OSGi command `openidea.java.usages` returns `{location, kind, access}`.
+The app-owned OSGi command `oxidea.java.usages` returns `{location, kind, access}`.
 `kind` retains field/getter/setter/unknown identity for compatibility. Optional
 `access` is read/write/readWrite/unknown. Missing access metadata is unknown;
 old servers and ordinary LSP locations remain visible under either filter.
@@ -20,7 +20,7 @@ first and runs the full search after it. Rows in library classes (`jdt:` URIs) c
 line as `text`, from the contents the client would request for the class, so the client
 need not fetch thousands of class files to show them.
 
-`openidea.workspace.coveredFiles([candidateUri, ...])` returns candidate URIs already
+`oxidea.workspace.coveredFiles([candidateUri, ...])` returns candidate URIs already
 covered by the current JDT source search scope. It checks imported compilation units,
 classpath inclusion/exclusion rules and test-source policy; it does not infer coverage
 from directory names. References, rename and incoming calls leave those files closed
@@ -94,7 +94,7 @@ unrelated content and non-Java resource changes; its reproducible SHA-256 is
 `cbae3e3a0bcf2818b4cc9d98998bd9b81f92e1ae7803dc757134485f9776a4e1`.
 Version 1.3.0 adds the class-hierarchy refactoring commands; its reproducible SHA-256 is
 `cca4cc385ace286111730d2a6164333b8958d74d69631548eadca8863255c24a`.
-Version 1.4.0 adds `openidea.java.implementations` (Go to Implementation in the workspace's
+Version 1.4.0 adds `oxidea.java.implementations` (Go to Implementation in the workspace's
 source folders, before the standard request that also searches every dependency jar); its
 reproducible SHA-256 is `d7601493eda846811b4bb8bfe7f3d56e3234a45e663648210db3937cebc770a5`.
 Version 1.5.0 answers `{locations, complete}`: `complete` when the type is declared in the sources
@@ -102,11 +102,11 @@ Version 1.5.0 answers `{locations, complete}`: `complete` when the type is decla
 dependencies' implementations after the first ones. The search also covers the project's Kotlin
 classes attached by the Kotlin bridge; its reproducible SHA-256 is
 `7588748c2797f9da2beb209714a75c29b4e31b155f095329bfb7e399d807c20a`.
-Version 1.6.0 adds `openidea.java.configuration.warmup`, which builds configuration indexes in a
+Version 1.6.0 adds `oxidea.java.configuration.warmup`, which builds configuration indexes in a
 low-priority background job after import, and builds them under cancellable per-project locks
 instead of one global lock; its reproducible SHA-256 is
 `33cfa1bb8489247ffeb6fc8249966c8a2955b7b2858c8169a70486eb70ade696`.
-Version 1.7.0 adds the `"sources"` scope to `openidea.java.usages`, searches each class
+Version 1.7.0 adds the `"sources"` scope to `oxidea.java.usages`, searches each class
 file's decompiled source on its own and returns the line (`text`) of each usage in a library
 class; its reproducible SHA-256 is
 `56d35619d5be937b028ac143ba748365a66a74c803bc112e4788a7dce98b44fc`.
@@ -145,7 +145,7 @@ not rebuild this jar. A maintainer must:
 ```sh
 python3 java/java-usages/tests/verify.py /path/to/jdtls /path/to/lombok.jar
 python3 java/java-usages/tests/read-write.py /path/to/jdtls /path/to/lombok.jar > /tmp/read-write.json
-OPENIDEA_USAGES_INDEX_STRESS=1 python3 java/java-usages/tests/read-write.py /path/to/jdtls /path/to/lombok.jar > /tmp/read-write-indexed.json
+OXIDEA_USAGES_INDEX_STRESS=1 python3 java/java-usages/tests/read-write.py /path/to/jdtls /path/to/lombok.jar > /tmp/read-write-indexed.json
 python3 java/java-usages/tests/hierarchy.py /path/to/jdtls
 python3 java/java-usages/tests/implementations.py /path/to/jdtls
 ```
@@ -166,11 +166,11 @@ the fixture and compiled with javac.
 
 ## Class-hierarchy refactorings
 
-`openidea.java.hierarchy.members(uri, line, column, kind)` describes the class at the
+`oxidea.java.hierarchy.members(uri, line, column, kind)` describes the class at the
 position for `kind` `pullUp` or `pushDown`: its movable members (handle id, label,
 kind, preselected, can be declared abstract) and the destination supertypes, or the
 direct subtypes the members are pushed into. A position on a member preselects it.
-`openidea.java.hierarchy.refactor(uri, line, column, kind, target, choices)` runs
+`oxidea.java.hierarchy.refactor(uri, line, column, kind, target, choices)` runs
 JDT's `PullUpRefactoringProcessor` / `PushDownRefactoringProcessor` with the chosen
 `{id, abstract}` members and returns `{problems, edit}`. Nothing is applied by the
 server; the app shows the problems, then applies the edit as one undoable change.

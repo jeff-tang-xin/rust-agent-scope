@@ -1,12 +1,12 @@
 [package]
-name = "openidea"
-description = "OpenIDEA desktop shell: an open-source IDE inspired by IntelliJ IDEA"
+name = "oxidea"
+description = "OXidea desktop shell: an open-source IDE inspired by IntelliJ IDEA"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "openidea_lib"
+name = "oxidea_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

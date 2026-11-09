@@ -26,7 +26,7 @@ const QUICK: Duration = Duration::from_secs(60);
 pub fn gh_executable() -> Option<PathBuf> {
     static GH: OnceLock<Option<PathBuf>> = OnceLock::new();
     GH.get_or_init(|| {
-        if let Some(explicit) = std::env::var_os("OPENIDEA_GH").map(PathBuf::from).filter(|p| p.is_file()) {
+        if let Some(explicit) = std::env::var_os("OXIDEA_GH").map(PathBuf::from).filter(|p| p.is_file()) {
             return Some(explicit);
         }
         if let Ok(found) = which::which("gh") {

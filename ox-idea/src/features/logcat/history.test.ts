@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetFilters, loadFilters, rememberFilter } from "./history";
 
-const KEY = "openidea.logcat.filters";
+const KEY = "oxidea.logcat.filters";
 
 function fakeStorage(): Storage {
   const map = new Map<string, string>();

@@ -148,7 +148,7 @@ describe("log options", () => {
   it("reloads only for options that change the query", () => {
     expect(setLogOptions({ compactRefs: false })).toBe(false);
     expect(setLogOptions({ noMerges: true })).toBe(true);
-    expect(JSON.parse(localStorage.getItem("openidea.vcs.logOptions")!).noMerges).toBe(true);
+    expect(JSON.parse(localStorage.getItem("oxidea.vcs.logOptions")!).noMerges).toBe(true);
   });
 
   it("sends the graph options and the date range to the backend", async () => {

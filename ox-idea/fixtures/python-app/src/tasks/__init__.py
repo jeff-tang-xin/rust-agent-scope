@@ -1,4 +1,4 @@
-"""A tiny task tracker used as an OpenIDEA QA fixture."""
+"""A tiny task tracker used as an OXidea QA fixture."""
 
 from .models import Priority, Task, TaskList
 

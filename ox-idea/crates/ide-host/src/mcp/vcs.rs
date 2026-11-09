@@ -86,7 +86,7 @@ fn get_repositories() -> Tool {
         "get_repositories",
         "Retrieves the list of VCS roots in the project.
 This is useful to detect all repositories in a multi-repository project.
-In OpenIDEA each root also tells its current `branch` (absent when HEAD is detached), `headCommit` and a merge, \
+In OXidea each root also tells its current `branch` (absent when HEAD is detached), `headCommit` and a merge, \
 rebase or cherry-pick in progress (`operationInProgress`).",
         |call| async move {
             let host = call.host();

@@ -27,7 +27,7 @@ interface BreakpointState {
 
 export const useBreakpoints = create<BreakpointState>(() => ({ root: null, byFile: {}, status: {}, muted: false }));
 
-const STORAGE_PREFIX = "openidea.debugger.breakpoints:";
+const STORAGE_PREFIX = "oxidea.debugger.breakpoints:";
 
 interface Persisted {
   muted?: boolean;

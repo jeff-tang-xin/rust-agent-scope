@@ -6,7 +6,7 @@
 import type { RunConfig } from "@/platform/ipc";
 import type { RunAnythingItem, RunAnythingProvider } from "@/workbench/contributions";
 
-const HISTORY_PREFIX = "openidea.runAnything.history.v1:";
+const HISTORY_PREFIX = "oxidea.runAnything.history.v1:";
 export const MAX_HISTORY = 30;
 /** Rows per provider group. */
 const GROUP_LIMIT = 8;

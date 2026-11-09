@@ -201,7 +201,7 @@ function versionCompletion(doc: EditorDocContext): Extension {
       return null;
     }
   };
-  return EditorState.languageData.of(() => [{ openideaCompletion: completion }]);
+  return EditorState.languageData.of(() => [{ oxideaCompletion: completion }]);
 }
 
 export function activate(): () => void {

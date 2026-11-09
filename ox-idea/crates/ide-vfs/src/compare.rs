@@ -276,7 +276,7 @@ pub fn copy_merge(
             // Stage the complete file before touching its destination.
             static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let temp = dst.with_file_name(format!(".openidea-copy-{}-{id}", std::process::id()));
+            let temp = dst.with_file_name(format!(".oxidea-copy-{}-{id}", std::process::id()));
             let mut staged = false;
             let result: IdeResult<()> = (|| {
                 #[cfg(windows)]

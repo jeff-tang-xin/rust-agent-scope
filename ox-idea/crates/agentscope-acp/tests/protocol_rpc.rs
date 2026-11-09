@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use agentscope_acp::rpc::RpcConn;
-use agentscope_acp::{protocol, serve};
+use agentscope_acp::{protocol, serve, set_ox_tool_provider, OxHostContext};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::io::duplex;
@@ -74,14 +74,58 @@ fn parse_new_session_requires_cwd() {
     assert!(protocol::parse_new_session(&json!({ "cwd": "  " })).is_err());
 }
 
+/// session/new 走 assemble_agent 全路径：宿主注入记忆锚点时，记忆管线
+/// （memory 工具 + flush/maintenance 中间件）装配成功，会话正常建立。
+/// 注意：set_ox_tool_provider 是进程级 OnceLock——本测试注册的上下文会被
+/// 同进程后续走 assemble_agent 的测试读到（当前仅此一个测试走 session/new）。
 #[tokio::test]
-async fn serve_answers_initialize_and_rejects_unknown_method() {
+async fn session_new_assembles_memory_pipeline_from_host_context() {
+    let root = std::env::temp_dir().join(format!("ox-acp-mem-{}", std::process::id()));
+    let cwd = root.join("proj");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let memory_root = root.join("memory-anchor");
+    set_ox_tool_provider(Arc::new(move |_| OxHostContext {
+        tools: Vec::new(),
+        memory_root: Some(memory_root.clone()),
+    }));
+
     let (client, server) = duplex(64 * 1024);
+    let (client_read, mut client_write) = tokio::io::split(client);
+    let mut client_reader = tokio::io::BufReader::new(client_read);
+    let (server_read, server_write) = tokio::io::split(server);
+    let env = vec![("AGENTSCOPE_MODEL".to_owned(), "test-model".to_owned())];
+    let server_task = tokio::spawn(serve(server_read, server_write, env));
+
+    client_write
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+        .await
+        .unwrap();
+    let frame = read_frame(&mut client_reader).await;
+    assert_eq!(frame["id"], 1);
+
+    let params = json!({ "cwd": cwd.display().to_string() });
+    client_write
+        .write_all(
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"session/new\",\"params\":{params}}}\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let frame = read_frame(&mut client_reader).await;
+    assert_eq!(frame["id"], 2);
+    assert!(frame["result"]["sessionId"].is_string(), "session/new failed: {frame}");
+
+    server_task.abort();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn serve_answers_initialize_and_rejects_unknown_method() {    let (client, server) = duplex(64 * 1024);
     let (client_read, mut client_write) = tokio::io::split(client);
     let mut client_reader = tokio::io::BufReader::new(client_read);
     // serve 从 server 读半边收帧，响应写回 server 写半边（duplex 回程 → client 可读）。
     let (server_read, server_write) = tokio::io::split(server);
-    let server_task = tokio::spawn(serve(server_read, server_write));
+    let server_task = tokio::spawn(serve(server_read, server_write, Vec::new()));
 
     // initialize
     client_write

@@ -1101,7 +1101,7 @@ describe("marketplace", () => {
     const list = await screen.findByRole("list", { name: "Available plugins" });
     await waitFor(() => expect(within(list).getByText("Incompatible")).toBeInTheDocument());
     await user.click(within(list).getByText("Next"));
-    expect(screen.getByRole("note")).toHaveTextContent("Needs plugin API ^9.0. Update OpenIDEA to install it.");
+    expect(screen.getByRole("note")).toHaveTextContent("Needs plugin API ^9.0. Update OXidea to install it.");
     expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
   });
 

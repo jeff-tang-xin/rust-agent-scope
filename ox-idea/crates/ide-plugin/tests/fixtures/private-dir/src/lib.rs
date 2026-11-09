@@ -1,4 +1,4 @@
-use openidea_plugin::{Context, Error, Invocation, Plugin, host, register_plugin};
+use oxidea_plugin::{Context, Error, Invocation, Plugin, host, register_plugin};
 
 #[derive(Default)]
 struct PrivateDir;
@@ -42,13 +42,13 @@ impl Plugin for PrivateDir {
     }
 }
 
-impl openidea_plugin::providers::Providers for PrivateDir {
+impl oxidea_plugin::providers::Providers for PrivateDir {
     fn completion(
         &mut self,
-        _: &openidea_plugin::providers::Document,
-        _: openidea_plugin::Position,
+        _: &oxidea_plugin::providers::Document,
+        _: oxidea_plugin::Position,
         _: Option<&str>,
-    ) -> Vec<openidea_plugin::providers::CompletionItem> {
+    ) -> Vec<oxidea_plugin::providers::CompletionItem> {
         let Ok(dir) = host::fs::plugin_dir() else { return Vec::new() };
         let path = format!("{dir}/fake-secret.txt");
         let Ok(text) = host::fs::read_file(&path) else { return Vec::new() };
@@ -56,7 +56,7 @@ impl openidea_plugin::providers::Providers for PrivateDir {
         if host::open_location(&path, 0, 0).is_ok() {
             return Vec::new();
         }
-        vec![openidea_plugin::providers::CompletionItem::new(&text, openidea_plugin::providers::CompletionKind::Text)]
+        vec![oxidea_plugin::providers::CompletionItem::new(&text, oxidea_plugin::providers::CompletionKind::Text)]
     }
 }
 

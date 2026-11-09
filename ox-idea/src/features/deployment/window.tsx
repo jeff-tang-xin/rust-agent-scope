@@ -26,7 +26,7 @@ import { patchSync, useDeployment } from "./store";
 import styles from "./Deployment.module.css";
 import { openDeploymentSource } from "./windowBridge";
 
-const LAUNCH_EVENT = "openidea://launch";
+const LAUNCH_EVENT = "oxidea://launch";
 
 let startupError: string | null = null;
 const startupListeners = new Set<() => void>();

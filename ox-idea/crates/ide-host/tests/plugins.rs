@@ -192,7 +192,7 @@ fn misbehave_with(dir: &Path, name: &str, capability: &str) -> PathBuf {
     let required = format!("required = [\"project.read\", \"{capability}\"]");
     let text = text
         .replace("required = [\"project.read\"]", &required)
-        .replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.3\"");
+        .replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.3\"");
     std::fs::write(&manifest, text).unwrap();
     pkg
 }
@@ -215,7 +215,7 @@ fn write_theme_pair(dir: &Path) {
     std::fs::create_dir_all(dir.join("t")).unwrap();
     std::fs::write(
         dir.join("plugin.toml"),
-        "id = \"theme-pair\"\nname = \"Pair\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        "id = \"theme-pair\"\nname = \"Pair\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
          [[contributes.themes]]\npath = \"t/day.json\"\n[[contributes.themes]]\npath = \"t/night.json\"\n",
     )
     .unwrap();
@@ -260,11 +260,11 @@ fn hello_02(text: &str, required: &str) -> String {
         .replace("required = [\"editor.read\", \"editor.write\"]", &format!("required = [{required}]"))
 }
 
-/// `hello` with a 0.1 manifest (`openidea-api`, `permissions`, no activation).
+/// `hello` with a 0.1 manifest (`oxidea-api`, `permissions`, no activation).
 fn hello_01(text: &str) -> String {
     // A Windows checkout may have CRLF line ends.
     text.replace("\r\n", "\n")
-        .replace("engines.openidea = \"^1.0\"", "openidea-api = \"0.1\"")
+        .replace("engines.oxidea = \"^1.0\"", "oxidea-api = \"0.1\"")
         .replace("activation = [\"on-command:*\", \"on-view:greetings\"]\n", "")
         .replace(
             "[capabilities]\nrequired = [\"editor.read\", \"editor.write\"]",
@@ -510,7 +510,7 @@ fn project_write_stays_inside_the_project() {
     let f = fixture(Limits::default());
     f.install(&misbehave_with(f._tmp.path(), "misbehave-project-writer", "project.write"));
 
-    // A Run configuration: neither the file nor `.openidea/` exists yet.
+    // A Run configuration: neither the file nor `.oxidea/` exists yet.
     assert_eq!(f.run("misbehave", "projwrite", Some(".oxidea/run.toml")).unwrap(), None);
     let conf = f.project.join(".oxidea").join("run.toml");
     assert_eq!(std::fs::read_to_string(&conf).unwrap(), "written inside the project\n");
@@ -1322,7 +1322,7 @@ fn misbehave_with_language(dir: &Path) -> PathBuf {
     copy_dir(&misbehave_pkg(), &pkg);
     std::fs::write(
         pkg.join("plugin.toml"),
-        "id = \"misbehave\"\nname = \"Misbehave\"\nversion = \"0.0.1\"\nengines.openidea = \"^1.0\"\n\
+        "id = \"misbehave\"\nname = \"Misbehave\"\nversion = \"0.0.1\"\nengines.oxidea = \"^1.0\"\n\
          wasm = \"dist/plugin.wasm\"\nactivation = [\"on-language:mis\"]\n\
          [[contributes.languages]]\npath = \"mis.toml\"\n",
     )
@@ -1403,7 +1403,7 @@ fn providers_of_several_plugins_run_concurrently() {
         std::fs::write(
             pkg.join("plugin.toml"),
             format!(
-                "id = \"{id}\"\nname = \"{id}\"\nversion = \"0.0.1\"\nengines.openidea = \"^1.0\"\n\
+                "id = \"{id}\"\nname = \"{id}\"\nversion = \"0.0.1\"\nengines.oxidea = \"^1.0\"\n\
                  wasm = \"dist/plugin.wasm\"\nactivation = [\"on-language:text\"]\n\
                  [[contributes.providers]]\nkinds = [\"completion\"]\nlanguages = [\"text\"]\n"
             ),
@@ -1477,7 +1477,7 @@ fn contribution_only_plugins() {
     assert_eq!(theme.status, PluginStatus::Static);
     assert!(!theme.has_code);
     assert!(theme.icon.is_none());
-    assert_eq!(f.theme_kinds("openidea.harbor-night")[0].0, "harbor-night");
+    assert_eq!(f.theme_kinds("oxidea.harbor-night")[0].0, "harbor-night");
     let lang = f.install(&sample("language-toy"));
     assert_eq!(lang.status, PluginStatus::Static);
     assert_eq!(f.host.languages()[0].id.as_str(), "toy");
@@ -1485,14 +1485,14 @@ fn contribution_only_plugins() {
     assert!(f.run("language-toy", "x", None).unwrap_err().contains("no code"));
 
     f.take_events();
-    let active = f.host.set_theme(Some(("openidea.harbor-night", "harbor-night"))).unwrap().unwrap();
+    let active = f.host.set_theme(Some(("oxidea.harbor-night", "harbor-night"))).unwrap().unwrap();
     assert_eq!(active.theme.tokens["--bg-app"], "#14171c");
     assert_eq!(active.theme.tokens["--syn-string"], "#9ccc7a");
     assert!(f.take_events().iter().any(|(_, e)| matches!(e, PluginEvent::ThemeChanged { theme: Some(_) })));
     assert_eq!(f.host.list(None).active_theme, Some(active));
 
     // Disabling the plugin withdraws its theme and language.
-    f.host.set_enabled("openidea.harbor-night", false).unwrap();
+    f.host.set_enabled("oxidea.harbor-night", false).unwrap();
     assert!(f.host.active_theme().is_none());
     assert!(f.take_events().iter().any(|(_, e)| *e == PluginEvent::ThemeChanged { theme: None }));
     f.host.set_enabled("language-toy", false).unwrap();
@@ -1505,10 +1505,10 @@ fn theme_template_installs_with_its_editor_scheme() {
     let f = fixture(Limits::default());
     let info = f.install(&theme_template());
     assert_eq!(info.status, PluginStatus::Static);
-    assert_eq!(f.theme_kinds("openidea.harbor-night"), [("harbor-night".to_owned(), ThemeKind::Dark)]);
+    assert_eq!(f.theme_kinds("oxidea.harbor-night"), [("harbor-night".to_owned(), ThemeKind::Dark)]);
     // The scheme file is copied with the package and merged over the UI tokens.
-    assert!(f.installed("openidea.harbor-night").join("themes/harbor-night.scheme.json").is_file());
-    let active = f.host.set_theme(Some(("openidea.harbor-night", "harbor-night"))).unwrap().unwrap();
+    assert!(f.installed("oxidea.harbor-night").join("themes/harbor-night.scheme.json").is_file());
+    let active = f.host.set_theme(Some(("oxidea.harbor-night", "harbor-night"))).unwrap().unwrap();
     let tokens = &active.theme.tokens;
     assert!(
         tokens.contains_key("--bg-app") && tokens.contains_key("--syn-keyword") && tokens.contains_key("--ansi-red")
@@ -1564,7 +1564,7 @@ fn theme_with_broken_editor_scheme_is_rejected() {
     std::fs::create_dir(dir.path().join("t")).unwrap();
     std::fs::write(
         dir.path().join("plugin.toml"),
-        "id = \"bad-scheme\"\nname = \"B\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        "id = \"bad-scheme\"\nname = \"B\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
          [[contributes.themes]]\npath = \"t/a.json\"\neditor-scheme = \"t/a.scheme.json\"\n",
     )
     .unwrap();
@@ -1588,7 +1588,7 @@ fn state_persists_across_restarts() {
     f.install(&sample("hello"));
     f.install(&theme_template());
     f.host.set_enabled("hello", false).unwrap();
-    f.host.set_theme(Some(("openidea.harbor-night", "harbor-night"))).unwrap();
+    f.host.set_theme(Some(("oxidea.harbor-night", "harbor-night"))).unwrap();
     f.host.set_theme_frame(Some("#1f252e")).unwrap();
 
     let again = PluginHost::new(f.plugins_dir.clone(), Arc::new(|_: Option<&str>, _| {}), Limits::default()).unwrap();
@@ -1934,7 +1934,7 @@ fn plugin_syntax_for_languages_without_a_grammar() {
     assert_eq!(kind_at("contract"), Some("keyword"));
     assert_eq!(kind_at("uint256"), Some("type"));
     assert_eq!(kind_at("// c"), Some("comment"));
-    assert_eq!(host.info_of("openidea.solidity").unwrap().status, PluginStatus::Active, "activated on first use");
+    assert_eq!(host.info_of("oxidea.solidity").unwrap().status, PluginStatus::Active, "activated on first use");
 
     // As the editor gets it: through a project's syntax cache.
     ide_language::set_external_syntax(Some(provider.clone()));
@@ -1972,7 +1972,7 @@ fn run_detectors_offer_granted_commands_in_marked_projects() {
     std::fs::create_dir(&pkg).unwrap();
     std::fs::write(
         pkg.join("plugin.toml"),
-        "id = \"acme.forge\"\nname = \"Forge\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        "id = \"acme.forge\"\nname = \"Forge\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
          [[contributes.runDetectors]]\nid = \"test\"\nname = \"forge test\"\nfiles = [\"foundry.toml\"]\n\
          command = \"forge\"\nargs = [\"test\"]\ntest = true\n",
     )
@@ -2055,7 +2055,7 @@ fn install_validation_atomic_replace_and_uninstall() {
     std::fs::create_dir_all(&pkg).unwrap();
     std::fs::write(
         pkg.join("plugin.toml"),
-        "id = \"b\"\nname = \"B\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\nwasm = \"x.wasm\"",
+        "id = \"b\"\nname = \"B\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\nwasm = \"x.wasm\"",
     )
     .unwrap();
     let install = |p: &Path| f.host.install_from_dir(p, &Consent::all());
@@ -2128,7 +2128,7 @@ fn icon_themes_are_a_contribution_type_like_any_other() {
     .unwrap();
     std::fs::write(
         pkg.join("plugin.toml"),
-        "id = \"acme.icons\"\nname = \"Icons\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        "id = \"acme.icons\"\nname = \"Icons\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
          [[contributes.iconThemes]]\nid = \"acme\"\nlabel = \"Acme Icons\"\npath = \"theme.json\"\n",
     )
     .unwrap();
@@ -2157,12 +2157,12 @@ fn official_material_icons_install() {
     )
     .unwrap();
     let defined = theme["iconDefinitions"].as_object().unwrap().len();
-    let svgs = f.host.assets("openidea.material-icons", &icon_theme_svg_prefix("material")).unwrap();
+    let svgs = f.host.assets("oxidea.material-icons", &icon_theme_svg_prefix("material")).unwrap();
     assert_eq!(svgs.len(), defined, "every icon survives the sanitiser");
-    let map = &f.host.assets("openidea.material-icons", &icon_theme_map_asset("material")).unwrap()[0].1;
+    let map = &f.host.assets("oxidea.material-icons", &icon_theme_map_asset("material")).unwrap()[0].1;
     assert!(map.contains("\"src\":\"folder-src\""), "folder names are part of the mapping");
     assert!(
-        !f.installed("openidea.material-icons").join("generate.py").exists(),
+        !f.installed("oxidea.material-icons").join("generate.py").exists(),
         "only referenced files are installed"
     );
 }
@@ -2191,7 +2191,7 @@ fn thousands_of_icons_install_and_reload_within_budget() {
     std::fs::write(pkg.join("theme.json"), theme.to_string()).unwrap();
     std::fs::write(
         pkg.join("plugin.toml"),
-        "id = \"acme.many\"\nname = \"Many\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        "id = \"acme.many\"\nname = \"Many\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
          [[contributes.iconThemes]]\nid = \"many\"\nlabel = \"Many\"\npath = \"theme.json\"\n",
     )
     .unwrap();
@@ -2258,7 +2258,7 @@ fn catalog_lists_sample_packages() {
     std::fs::create_dir_all(&broken).unwrap();
     std::fs::write(
         broken.join("plugin.toml"),
-        "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\nwasm = \"dist/plugin.wasm\"\n",
+        "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\nwasm = \"dist/plugin.wasm\"\n",
     )
     .unwrap();
     std::fs::create_dir_all(tmp.path().join("junk")).unwrap();
@@ -2270,13 +2270,13 @@ fn catalog_lists_sample_packages() {
         tmp.path().to_path_buf(),
     ]);
     let ids: Vec<&str> = catalog.iter().map(|c| c.id.as_str()).collect();
-    for id in ["hello", "openidea.harbor-night", "language-toy", "x"] {
+    for id in ["hello", "oxidea.harbor-night", "language-toy", "x"] {
         assert!(ids.contains(&id), "{id} missing from {ids:?}");
     }
     let hello = catalog.iter().find(|c| c.id == "hello").unwrap();
     assert!(hello.has_code && hello.problem.is_none() && hello.change_notes.is_some());
     assert_eq!(hello.contributions.iter().find(|c| c.point == "commands").unwrap().count, 2);
-    let theme = catalog.iter().find(|c| c.id == "openidea.harbor-night").unwrap();
+    let theme = catalog.iter().find(|c| c.id == "oxidea.harbor-night").unwrap();
     assert!(!theme.has_code);
     assert_eq!(theme.contributions[0].count, 1);
     let x = catalog.iter().find(|c| c.id == "x").unwrap();
@@ -2294,7 +2294,7 @@ fn official_string_tools() {
     let f = fixture(Limits::default());
     let info = f.install(&official("string-tools"));
     assert_eq!(info.status, PluginStatus::Inactive, "{:?}", info.error);
-    let titles = f.command_titles("openidea.string-tools");
+    let titles = f.command_titles("oxidea.string-tools");
     assert_eq!(titles.len(), 26);
     assert!(titles.contains(&"String Tools: To snake_case".to_owned()));
     let categories: std::collections::BTreeSet<String> =
@@ -2303,7 +2303,7 @@ fn official_string_tools() {
 
     let editor = f.workspace.open("src/notes.txt", &[(0, 0, 0, 3), (1, 5, 1, 5)]);
     let before = f.workspace.document(&editor.path).unwrap().0;
-    f.run_in(&editor, "openidea.string-tools", "upper-case").unwrap();
+    f.run_in(&editor, "oxidea.string-tools", "upper-case").unwrap();
     assert_eq!(f.workspace.text("src/notes.txt"), "ONE two three\nfour FIVE\n");
     assert_eq!(f.workspace.document(&editor.path).unwrap().0, before + 1, "both selections in one change");
 }
@@ -2337,7 +2337,7 @@ fn official_key_promoter() {
     f.host.post_events(Some("main"), vec![menu("code.duplicate"), menu("code.duplicate")]);
     f.host.flush_events_at(now + Duration::from_secs(3));
     assert!(f.host.wait_events(Duration::from_secs(10)));
-    let info = f.host.info_of("openidea.key-promoter").unwrap();
+    let info = f.host.info_of("oxidea.key-promoter").unwrap();
     assert_eq!((info.status, info.stats.activations, info.stats.calls), (PluginStatus::Active, 1, 1), "one wake-up");
     let tips: Vec<_> = f
         .take_events()
@@ -2350,12 +2350,12 @@ fn official_key_promoter() {
     assert_eq!(tips.len(), 1, "{tips:?}");
     assert_eq!(tips[0].0.as_deref(), Some("main"), "shown in the window the actions came from");
     assert!(tips[0].1.contains("Ctrl+D") && tips[0].2.contains("3 times"), "{tips:?}");
-    let stored = stored(&f, "openidea.key-promoter");
+    let stored = stored(&f, "oxidea.key-promoter");
     assert!(stored.contains(&("count:code.duplicate".into(), "3".into())), "{stored:?}");
 
     // Uninstalling removes its data.
-    f.host.uninstall("openidea.key-promoter").unwrap();
-    assert!(!f.plugins_dir.join(".data/openidea.key-promoter").exists());
+    f.host.uninstall("oxidea.key-promoter").unwrap();
+    assert!(!f.plugins_dir.join(".data/oxidea.key-promoter").exists());
     assert!(f.host.event_kinds().is_empty());
 }
 
@@ -2435,7 +2435,7 @@ fn official_git_toolbox_fetches_on_schedule_after_idle_reclaim() {
     f.host.flush_events_at(now + Duration::from_secs(3));
     assert!(f.host.wait_events(Duration::from_secs(10)));
     let item = |host: &PluginHost| {
-        host.status_items().into_iter().find(|(p, id, _)| p == "openidea.git-toolbox" && id == "branch")
+        host.status_items().into_iter().find(|(p, id, _)| p == "oxidea.git-toolbox" && id == "branch")
     };
     assert_eq!(item(&f.host).map(|(_, _, i)| i.text), Some("main".into()));
 
@@ -2443,14 +2443,14 @@ fn official_git_toolbox_fetches_on_schedule_after_idle_reclaim() {
     std::thread::sleep(Duration::from_millis(100));
     f.host.tick();
     assert_eq!(f.host.instances(), 0);
-    assert_eq!(f.status("openidea.git-toolbox"), PluginStatus::Inactive);
+    assert_eq!(f.status("oxidea.git-toolbox"), PluginStatus::Inactive);
     assert!(item(&f.host).is_some(), "its status item stays while it sleeps");
 
     // Five minutes later: activated by its schedule, fetches, shows ↓1.
     f.take_events();
     f.host.tick_at(Instant::now() + Duration::from_secs(301));
     assert!(f.host.wait_events(Duration::from_secs(30)));
-    let info = f.host.info_of("openidea.git-toolbox").unwrap();
+    let info = f.host.info_of("oxidea.git-toolbox").unwrap();
     assert_eq!(info.stats.activations, 2, "{:?}", info.error);
     assert_eq!(item(&f.host).map(|(_, _, i)| i.text), Some("main ↓1".into()));
     let events = f.take_events();
@@ -2460,7 +2460,7 @@ fn official_git_toolbox_fetches_on_schedule_after_idle_reclaim() {
         )
     );
     assert!(events.iter().any(|(_, e)| matches!(e, PluginEvent::TaskEnded { .. })));
-    let stored = stored(&f, "openidea.git-toolbox");
+    let stored = stored(&f, "oxidea.git-toolbox");
     assert!(stored.iter().any(|(key, _)| key.starts_with("last-fetch:")), "{stored:?}");
 }
 
@@ -2482,7 +2482,7 @@ fn git_toolbox_does_not_fetch_untrusted_projects() {
         global_settings: Mutex::default(),
     });
     f.host.set_workspace(Some(untrusted));
-    let err = f.run("openidea.git-toolbox", "fetch", None).unwrap_err();
+    let err = f.run("oxidea.git-toolbox", "fetch", None).unwrap_err();
     assert!(err.contains("Restricted Mode"), "{err}");
 }
 
@@ -2538,7 +2538,7 @@ fn official_ai_completion_cancels_superseded_requests() {
     let (port, seen) = http_server(r#"{"choices":[{"text":"a + b\n"}]}"#, |n| {
         if n == 0 { Duration::from_secs(3) } else { Duration::ZERO }
     });
-    f.run("openidea.ai-completion", "set-endpoint", Some(&format!("http://localhost:{port}"))).unwrap();
+    f.run("oxidea.ai-completion", "set-endpoint", Some(&format!("http://localhost:{port}"))).unwrap();
     let doc = ide_plugin::ProviderDocument {
         path: f.project.join("src/a.rs"),
         language: "rust".into(),
@@ -2566,7 +2566,7 @@ fn official_ai_completion_cancels_superseded_requests() {
     assert!(old_took < Duration::from_secs(1), "cancelled, not waited out: {old_took:?}");
     assert_eq!(second.map(|(_, s)| s.insert_text).as_deref(), Some("a + b"));
     eprintln!("inline completion after cancelling the previous request: {took:?}");
-    let info = host.host.info_of("openidea.ai-completion").unwrap();
+    let info = host.host.info_of("oxidea.ai-completion").unwrap();
     assert_eq!((info.stats.crashes, info.stats.activations), (0, 1), "cooperative: same instance");
     assert!(seen.lock()[1].contains("\"prompt\":\"fn add(a: i32, b: i32) -> i32 {\\n    \""), "{:?}", seen.lock());
 
@@ -2616,7 +2616,7 @@ fn official_checkstyle_checks_on_save() {
     saved(&f);
     assert!(f.host.wait_events(Duration::from_secs(20)));
     let diagnostics =
-        |f: &Fixture| f.workspace.diagnostics.lock().get(&("openidea.checkstyle".into(), java.clone())).cloned();
+        |f: &Fixture| f.workspace.diagnostics.lock().get(&("oxidea.checkstyle".into(), java.clone())).cloned();
     let d = diagnostics(&f).expect("published");
     assert_eq!((d.len(), d[0].code.as_deref(), d[0].range.start.line), (1, Some("FileTabCharacter"), 1));
 
@@ -2644,7 +2644,7 @@ fn official_checkstyle_checks_on_save() {
     assert!(f.host.wait_events(Duration::from_secs(20)));
     assert!(started.elapsed() < Duration::from_secs(4), "the slow run was killed: {:?}", started.elapsed());
     assert_eq!(diagnostics(&f).map(|d| d.len()), Some(1), "published by the second check");
-    let info = f.host.info_of("openidea.checkstyle").unwrap();
+    let info = f.host.info_of("oxidea.checkstyle").unwrap();
     assert_eq!(info.stats.crashes, 0);
 }
 
@@ -2660,7 +2660,7 @@ fn official_license_header_reports_fixes_and_scans() {
     std::fs::write(&a, "fn a() {}\n").unwrap();
     std::fs::write(&b, "#!/usr/bin/env python3\nprint()\n").unwrap();
     let diagnostics = |path: &Path| {
-        f.workspace.diagnostics.lock().get(&("openidea.license-header".into(), path.to_path_buf())).cloned()
+        f.workspace.diagnostics.lock().get(&("oxidea.license-header".into(), path.to_path_buf())).cloned()
     };
 
     f.host.post_events(Some("main"), vec![WorkbenchEvent::FileOpened(to_ipc(&a))]);
@@ -2685,7 +2685,7 @@ fn official_license_header_reports_fixes_and_scans() {
             && edit.new_text.contains("# SPDX-License-Identifier: Apache-2.0")
     );
 
-    f.host.run_command("openidea.license-header", "scan", None, f.inv()).unwrap();
+    f.host.run_command("oxidea.license-header", "scan", None, f.inv()).unwrap();
     assert_eq!(diagnostics(&b).map(|d| d.len()), Some(1), "found by the scan");
     std::fs::write(&a, "// Copyright (c) 2026 X\nfn a() {}\n").unwrap();
     f.host.post_events(Some("main"), vec![WorkbenchEvent::FileSaved(to_ipc(&a))]);
@@ -2694,7 +2694,7 @@ fn official_license_header_reports_fixes_and_scans() {
     assert_eq!(diagnostics(&a).map(|d| d.len()), Some(0), "cleared once the header is there");
 
     // Disabling the plugin withdraws the problems it still shows.
-    f.host.set_enabled("openidea.license-header", false).unwrap();
+    f.host.set_enabled("oxidea.license-header", false).unwrap();
     assert_eq!(diagnostics(&b).map(|d| d.len()), Some(0), "withdrawn with the plugin");
 }
 
@@ -2755,7 +2755,7 @@ fn official_mybatis_navigates_between_interface_and_xml() {
     );
 
     // Warm (index cached): well inside the edit-path budget.
-    let slow = f.host.info_of("openidea.mybatis").unwrap().stats.slow_calls;
+    let slow = f.host.info_of("oxidea.mybatis").unwrap().stats.slow_calls;
     let mut times = Vec::new();
     for _ in 0..20 {
         let started = Instant::now();
@@ -2765,7 +2765,7 @@ fn official_mybatis_navigates_between_interface_and_xml() {
     times.sort();
     eprintln!("mybatis line markers p95: {:?}", times[18]);
     assert!(times[18] < Duration::from_millis(50), "{times:?}");
-    assert_eq!(f.host.info_of("openidea.mybatis").unwrap().stats.slow_calls, slow);
+    assert_eq!(f.host.info_of("oxidea.mybatis").unwrap().stats.slow_calls, slow);
 }
 
 /// CSV Editor: a custom editor renders the document as a table (the
@@ -2780,26 +2780,26 @@ fn official_csv_editor_edits_the_shared_document() {
     let editor = f.workspace.open("people.csv", &[]);
     let inv = Invocation { editor: Some(editor.clone()), ..f.inv() };
     let viewport = Some(ide_plugin::Viewport { first_row: 1, rows: 10 });
-    let view = f.host.render_view("openidea.csv-editor", "table", viewport, inv.clone()).unwrap();
+    let view = f.host.render_view("oxidea.csv-editor", "table", viewport, inv.clone()).unwrap();
     let ide_plugin::ViewBody::Table(t) = &view.body else { panic!("{view:?}") };
     assert_eq!((t.columns.clone(), t.total_rows, t.first_row), (vec!["name".to_owned(), "city".into()], 2, 1));
     assert_eq!(t.rows, [vec!["Bob".to_owned(), "Oslo".into()]]);
     assert_eq!(view.status.as_deref(), Some("2 rows × 2 columns, delimiter ','"));
 
     let cell = ide_plugin::ViewEvent::Cell { row: 0, column: 1, value: "Paris, FR".into() };
-    f.host.view_event("openidea.csv-editor", "table", cell, inv.clone()).unwrap();
+    f.host.view_event("oxidea.csv-editor", "table", cell, inv.clone()).unwrap();
     assert_eq!(f.workspace.text("people.csv"), "name,city\nAda,\"Paris, FR\"\nBob,Oslo\n");
 
     // Settings: without a header row every record is a row.
     let mut values = serde_json::Map::new();
     values.insert("firstRowIsHeader".into(), serde_json::Value::Bool(false));
-    f.workspace.settings.lock().insert("openidea.csv-editor".into(), values);
-    let view = f.host.render_view("openidea.csv-editor", "table", None, inv.clone()).unwrap();
+    f.workspace.settings.lock().insert("oxidea.csv-editor".into(), values);
+    let view = f.host.render_view("oxidea.csv-editor", "table", None, inv.clone()).unwrap();
     let ide_plugin::ViewBody::Table(t) = &view.body else { panic!("{view:?}") };
     assert_eq!((t.columns[0].as_str(), t.total_rows), ("Column 1", 3));
 
     // Undeclared views are refused before any code runs.
-    let err = f.host.render_view("openidea.csv-editor", "other", None, inv).unwrap_err();
+    let err = f.host.render_view("oxidea.csv-editor", "other", None, inv).unwrap_err();
     assert_eq!(err.kind, ide_core::error::ErrorKind::NotFound);
 }
 
@@ -2807,7 +2807,7 @@ fn official_csv_editor_edits_the_shared_document() {
 fn context_menu_entries_can_name_a_submenu() {
     fn with_menu(version: &'static str, extra: &'static str) -> impl Fn(&str) -> String {
         move |m: &str| {
-            let m = m.replace("engines.openidea = \"^1.0\"", &format!("engines.openidea = \"{version}\""));
+            let m = m.replace("engines.oxidea = \"^1.0\"", &format!("engines.oxidea = \"{version}\""));
             format!("{m}\n[[contributes.menus]]\ncommand = \"word-count\"\n{extra}\n")
         }
     }
@@ -2836,7 +2836,7 @@ fn context_menu_entries_can_name_a_submenu() {
 fn view_item_menus_name_a_declared_view() {
     /// The menu is new in API 1.2.
     fn api_1_2(m: &str) -> String {
-        m.replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.2\"")
+        m.replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.2\"")
     }
     fn with_menu(extra: &str) -> impl Fn(&str) -> String + '_ {
         move |m: &str| format!("{}\n[[contributes.menus]]\ncommand = \"word-count\"\n{extra}\n", api_1_2(m))
@@ -2908,7 +2908,7 @@ fn conditional_and_grouped_views_need_api_1_3() {
     let f = fixture(Limits::default());
     let tmp = tempfile::tempdir().unwrap();
     let pkg = hello_variant(tmp.path(), |m| {
-        m.replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.3\"").replace(
+        m.replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.3\"").replace(
             "location = \"right\"",
             "location = \"right\"\ngroup = \"spring\"\nwhen = \"workspaceContains:pom.xml || plugin.hello.ready\"",
         )
@@ -2967,7 +2967,7 @@ fn view_conditions_and_group_ids_are_validated() {
         let f = fixture(Limits::default());
         let tmp = tempfile::tempdir().unwrap();
         let pkg = hello_variant(tmp.path(), |m| {
-            m.replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.3\"")
+            m.replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.3\"")
                 .replace("location = \"right\"", &format!("location = \"right\"\n{field}"))
         });
         let err = f.host.install_from_dir(&pkg, &Consent::all()).unwrap_err();
@@ -3063,14 +3063,14 @@ fn official_regex_tester_answers_its_page() {
     let f = fixture(Limits::default());
     let info = f.install(&official("regex-tester"));
     assert_eq!(info.status, PluginStatus::Inactive, "{:?}", info.error);
-    let view = f.host.render_view("openidea.regex-tester", "regex", None, f.inv()).unwrap();
+    let view = f.host.render_view("oxidea.regex-tester", "regex", None, f.inv()).unwrap();
     let ide_plugin::ViewBody::Html(page) = &view.body else { panic!("{view:?}") };
-    assert!(page.contains("openidea.postMessage") && page.contains(r#"{"flags":"m"}"#));
+    assert!(page.contains("oxidea.postMessage") && page.contains(r#"{"flags":"m"}"#));
 
     f.take_events();
     let run = serde_json::json!({ "op": "run", "seq": 3, "pattern": r"(\d+)", "flags": "", "text": "é 12 345" });
     let event = ide_plugin::ViewEvent::Message { text: run.to_string() };
-    f.host.view_event("openidea.regex-tester", "regex", event, f.inv()).unwrap();
+    f.host.view_event("oxidea.regex-tester", "regex", event, f.inv()).unwrap();
     let reply = f
         .take_events()
         .into_iter()
@@ -3197,11 +3197,11 @@ fn vcs_remotes_clipboard_and_open_url() {
     assert_eq!(f.run("jobs", "remotes", None).unwrap().as_deref(), Some(""));
 
     git(&f.project, &["init", "-b", "main"]);
-    git(&f.project, &["remote", "add", "origin", "git@github.com:l0ng-ai/openidea.git"]);
-    git(&f.project, &["remote", "add", "upstream", "https://github.com/org/openidea"]);
+    git(&f.project, &["remote", "add", "origin", "git@github.com:l0ng-ai/oxidea.git"]);
+    git(&f.project, &["remote", "add", "upstream", "https://github.com/org/oxidea"]);
     assert_eq!(
         f.run("jobs", "remotes", None).unwrap().as_deref(),
-        Some("origin=git@github.com:l0ng-ai/openidea.git\nupstream=https://github.com/org/openidea")
+        Some("origin=git@github.com:l0ng-ai/oxidea.git\nupstream=https://github.com/org/oxidea")
     );
 
     f.host.set_capability("jobs", "vcs.read", false).unwrap();
@@ -3209,12 +3209,12 @@ fn vcs_remotes_clipboard_and_open_url() {
 
     // `ui.copy-to-clipboard` requires `clipboard` and addresses the calling window.
     f.take_events();
-    f.run("jobs", "copy", Some("https://github.com/l0ng-ai/openidea")).unwrap();
+    f.run("jobs", "copy", Some("https://github.com/l0ng-ai/oxidea")).unwrap();
     let copied = f.take_events().into_iter().find_map(|(client, e)| match e {
         PluginEvent::CopyToClipboard { plugin_id, text } => Some((client, plugin_id, text)),
         _ => None,
     });
-    assert_eq!(copied, Some((Some("main".into()), "jobs".into(), "https://github.com/l0ng-ai/openidea".into())));
+    assert_eq!(copied, Some((Some("main".into()), "jobs".into(), "https://github.com/l0ng-ai/oxidea".into())));
 
     f.host.set_capability("jobs", "clipboard", false).unwrap();
     f.take_events();
@@ -3223,7 +3223,7 @@ fn vcs_remotes_clipboard_and_open_url() {
 
     // `ui.open-url` accepts http(s) URLs and rejects other schemes.
     f.take_events();
-    f.run("jobs", "open-url", Some("https://github.com/l0ng-ai/openidea/blob/main/README.md#L1")).unwrap();
+    f.run("jobs", "open-url", Some("https://github.com/l0ng-ai/oxidea/blob/main/README.md#L1")).unwrap();
     let opened = f.take_events().into_iter().find_map(|(client, e)| match e {
         PluginEvent::OpenUrl { plugin_id, url } => Some((client, plugin_id, url)),
         _ => None,
@@ -3231,7 +3231,7 @@ fn vcs_remotes_clipboard_and_open_url() {
     assert_eq!(
         opened,
         Some(
-            (Some("main".into()), "jobs".into(), "https://github.com/l0ng-ai/openidea/blob/main/README.md#L1".into(),)
+            (Some("main".into()), "jobs".into(), "https://github.com/l0ng-ai/oxidea/blob/main/README.md#L1".into(),)
         )
     );
 
@@ -3385,7 +3385,7 @@ fn views_can_use_an_svg_icon_from_the_package() {
                 r#"id = "panel-icon"
 name = "Panel Icon"
 version = "1.0.0"
-engines.openidea = "^1.0"
+engines.oxidea = "^1.0"
 
 [[contributes.views]]
 id = "panel"
@@ -3426,7 +3426,7 @@ fn a_package_ships_translations_in_locales() {
         std::fs::write(
             pkg.join("plugin.toml"),
             format!(
-                "id = \"{id}\"\nname = \"Words\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\n\
+                "id = \"{id}\"\nname = \"Words\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\n\
                  [[contributes.commands]]\nid = \"count\"\ntitle = \"Count Words\"\n"
             ),
         )
@@ -3481,7 +3481,7 @@ fn web_views_serve_only_their_own_files() {
         r#"id = "web-demo"
 name = "Web Demo"
 version = "1.0.0"
-engines.openidea = "^1.0"
+engines.oxidea = "^1.0"
 
 [capabilities]
 optional = ["clipboard"]
@@ -3583,7 +3583,7 @@ fn file_templates_api_13_names_and_variables() {
                 r#"id = "template-demo"
 name = "Templates"
 version = "1.0.0"
-engines.openidea = "{api}"
+engines.oxidea = "{api}"
 [[contributes.fileTemplates]]
 id = "template"
 name = "Template"
@@ -3638,7 +3638,7 @@ fn web_view_declarations_are_checked() {
     let manifest = |decl: &str| {
         std::fs::write(
             pkg.join("plugin.toml"),
-            format!("id = \"bad-web\"\nname = \"B\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n{decl}"),
+            format!("id = \"bad-web\"\nname = \"B\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n{decl}"),
         )
         .unwrap();
         f.host.install_from_dir(&pkg, &Consent::all()).unwrap_err().message
@@ -3699,20 +3699,20 @@ fn official_excalidraw_installs_and_serves_its_page() {
     let f = fixture(Limits::default());
     let info = f.install(&pkg);
     assert_eq!(info.status, PluginStatus::Static, "{:?}", info.error);
-    let page = f.host.web_page("openidea.excalidraw", "canvas").unwrap();
-    let (rev, entry) = page.path.strip_prefix("openidea.excalidraw/").unwrap().split_once('/').unwrap();
+    let page = f.host.web_page("oxidea.excalidraw", "canvas").unwrap();
+    let (rev, entry) = page.path.strip_prefix("oxidea.excalidraw/").unwrap().split_once('/').unwrap();
     assert_eq!(entry, "web/index.html");
-    let html = f.host.web_file("openidea.excalidraw", &format!("{rev}/{entry}")).unwrap();
+    let html = f.host.web_file("oxidea.excalidraw", &format!("{rev}/{entry}")).unwrap();
     let html = String::from_utf8(html.bytes).unwrap();
     // Relative URLs only: the page is served from the package.
     let script = html.split("src=\"").nth(1).unwrap().split('"').next().unwrap();
     assert!(script.starts_with("./assets/"), "{script}");
-    assert!(f.host.web_file("openidea.excalidraw", &format!("{rev}/web/{}", &script[2..])).is_ok());
-    let font = f.host.web_file("openidea.excalidraw", &format!("{rev}/web/fonts/Virgil/Virgil-Regular.woff2")).unwrap();
+    assert!(f.host.web_file("oxidea.excalidraw", &format!("{rev}/web/{}", &script[2..])).is_ok());
+    let font = f.host.web_file("oxidea.excalidraw", &format!("{rev}/web/fonts/Virgil/Virgil-Regular.woff2")).unwrap();
     assert_eq!(font.mime, "font/woff2");
     assert_eq!(f.host.ui_items("customEditors")[0].decl["layout"], "preview");
     assert!(f.host.languages().iter().any(|l| l.id.as_str() == "excalidraw"));
-    assert_eq!(f.host.assets("openidea.excalidraw", "fileIcon/excalidraw/").unwrap().len(), 2);
+    assert_eq!(f.host.assets("oxidea.excalidraw", "fileIcon/excalidraw/").unwrap().len(), 2);
 }
 
 /// A copy of the official plugin at `src` in `dir`, with a stand-in for its
@@ -3756,7 +3756,7 @@ fn official_graphviz_turns_its_pages_reports_into_problems() {
     assert_eq!(info.status, PluginStatus::Inactive, "{:?}", info.error);
     assert_eq!(f.host.ui_items("customEditors")[0].decl["layout"], "split");
     assert!(f.host.languages().iter().any(|l| l.id.as_str() == "dot"));
-    assert!(f.host.web_page("openidea.graphviz", "preview").is_ok());
+    assert!(f.host.web_page("oxidea.graphviz", "preview").is_ok());
 
     std::fs::write(f.project.join("flow.dot"), "digraph {\n  a -> \n}\n").unwrap();
     let editor = f.workspace.open("flow.dot", &[]);
@@ -3764,14 +3764,14 @@ fn official_graphviz_turns_its_pages_reports_into_problems() {
     let report =
         r#"{"op":"problems","items":[{"line":3,"message":"syntax error in line 3 near '}'","level":"error"}]}"#;
     let event = ide_plugin::ViewEvent::Message { text: report.into() };
-    f.host.view_event("openidea.graphviz", "preview", event, inv.clone()).unwrap();
+    f.host.view_event("oxidea.graphviz", "preview", event, inv.clone()).unwrap();
     let path = f.project.join("flow.dot");
     let problems =
-        |f: &Fixture| f.workspace.diagnostics.lock().get(&("openidea.graphviz".into(), path.clone())).cloned();
+        |f: &Fixture| f.workspace.diagnostics.lock().get(&("oxidea.graphviz".into(), path.clone())).cloned();
     let d = problems(&f).expect("published");
     assert_eq!((d.len(), d[0].range.start.line), (1, 2));
     let cleared = ide_plugin::ViewEvent::Message { text: r#"{"op":"problems","items":[]}"#.into() };
-    f.host.view_event("openidea.graphviz", "preview", cleared, inv).unwrap();
+    f.host.view_event("oxidea.graphviz", "preview", cleared, inv).unwrap();
     assert_eq!(problems(&f).map(|d| d.len()), Some(0));
 }
 
@@ -3813,13 +3813,13 @@ fn a_zipped_plugin_folder_installs_like_the_folder() {
     assert_eq!(info.id, "language-toy");
     assert_eq!(f.host.languages().len(), 1);
 
-    // A zip that isn't an OpenIDEA plugin says so.
+    // A zip that isn't an OXidea plugin says so.
     let other = tmp.path().join("intellij-plugin.zip");
     let mut zip = zip::ZipWriter::new(std::fs::File::create(&other).unwrap());
     zip.start_file("my-plugin/lib/my-plugin.jar", zip::write::SimpleFileOptions::default()).unwrap();
     zip.finish().unwrap();
     let err = f.host.unpack_package(&other).unwrap_err().message;
-    assert!(err.contains("is not an OpenIDEA plugin"), "{err}");
+    assert!(err.contains("is not an OXidea plugin"), "{err}");
 }
 
 /// What the UI writes for an imported IntelliJ theme goes through the install page.
@@ -3830,7 +3830,7 @@ fn a_generated_package_is_staged_for_the_install_page() {
     let manifest = r#"id = "intellij.deep-sea"
 name = "Deep Sea"
 version = "2.3.0"
-engines.openidea = "^1.0"
+engines.oxidea = "^1.0"
 
 [[contributes.themes]]
 path = "themes/deep-sea.theme.json"
@@ -3896,9 +3896,9 @@ fn uninstalling_deletes_the_plugins_secrets() {
     let keychain = Arc::new(Keychain::default());
     f.host.set_secret_store(keychain.clone());
     f.install(&official("ai-completion"));
-    f.host.set_secret("openidea.ai-completion", "api-key", Some("sk-test")).unwrap();
-    assert!(keychain.get("openidea.ai-completion", "api-key").is_some());
-    f.host.uninstall("openidea.ai-completion").unwrap();
+    f.host.set_secret("oxidea.ai-completion", "api-key", Some("sk-test")).unwrap();
+    assert!(keychain.get("oxidea.ai-completion", "api-key").is_some());
+    f.host.uninstall("oxidea.ai-completion").unwrap();
     assert!(keychain.0.lock().is_empty(), "{:?}", keychain.0.lock().keys().collect::<Vec<_>>());
 }
 
@@ -4166,7 +4166,7 @@ fn file_action_resolution_can_ask_before_returning_resource_operations() {
 /// `hello` as a services view, which needs API 1.3.
 fn services_variant(text: &str) -> String {
     text.replace("location = \"right\"", "location = \"services\"")
-        .replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.3\"")
+        .replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.3\"")
 }
 
 #[test]
@@ -4230,7 +4230,7 @@ fn detail_views_work_in_every_location_and_require_api_1_3_code() {
         let f = fixture(Limits::default());
         let tmp = tempfile::tempdir().unwrap();
         let pkg = hello_variant(tmp.path(), |t| {
-            t.replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.3\"")
+            t.replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.3\"")
                 .replace("location = \"right\"", &format!("location = {location:?}\ndetail = true"))
         });
         assert!(f.install(&pkg).error.is_none());
@@ -4245,7 +4245,7 @@ fn detail_views_work_in_every_location_and_require_api_1_3_code() {
         let f = fixture(Limits::default());
         let tmp = tempfile::tempdir().unwrap();
         let pkg = hello_variant(tmp.path(), |t| {
-            t.replace("engines.openidea = \"^1.0\"", &format!("engines.openidea = {api:?}")).replace(
+            t.replace("engines.oxidea = \"^1.0\"", &format!("engines.oxidea = {api:?}")).replace(
                 "location = \"right\"",
                 if web {
                     "location = \"right\"\ndetail = true\nweb = \"web/index.html\""
@@ -4573,7 +4573,7 @@ fn icon_package(dir: &Path, id: &str, extra: &str, files: &[(&str, &str)]) -> Pa
     std::fs::create_dir_all(&pkg).unwrap();
     std::fs::write(
         pkg.join("plugin.toml"),
-        format!("id = \"{id}\"\nname = \"Iconic\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.2\"\n{extra}"),
+        format!("id = \"{id}\"\nname = \"Iconic\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.2\"\n{extra}"),
     )
     .unwrap();
     for (name, text) in files {
@@ -5129,9 +5129,9 @@ fn web_ptys_require_a_current_exact_program_grant_and_project() {
     ] {
         assert!(options(cmd).is_err());
     }
-    let got = options(WebPtyCommand { env: [("OPENIDEA_WEB_PTY_TEST_NEW".into(), "yes".into())].into(), ..command() })
+    let got = options(WebPtyCommand { env: [("OXIDEA_WEB_PTY_TEST_NEW".into(), "yes".into())].into(), ..command() })
         .unwrap();
-    assert_eq!(got.env["OPENIDEA_WEB_PTY_TEST_NEW"], "yes");
+    assert_eq!(got.env["OXIDEA_WEB_PTY_TEST_NEW"], "yes");
     assert!(f.host.web_pty_options("web-pty", "missing", "main", command()).is_err());
     f.host.set_workspace(None);
     assert!(options(command()).is_err());
@@ -5265,7 +5265,7 @@ fn marker_icons_ship_sanitized_light_and_dark_assets() {
 id = "marker-icons"
 name = "Marker Icons"
 version = "1.0.0"
-engines.openidea = "{engine}"
+engines.oxidea = "{engine}"
 [[contributes.markerIcons]]
 id = "resource"
 icon = "{icon}"
@@ -5349,7 +5349,7 @@ fn marker_icons_validate_indexed_marker_prefixes_and_tooltips() {
 id = "indexed-marker-icons"
 name = "Indexed Marker Icons"
 version = "1.0.0"
-engines.openidea = "{engine}"
+engines.oxidea = "{engine}"
 [[contributes.markerIcons]]
 id = "usages"
 icon = "icons/usages.svg"
@@ -5597,7 +5597,7 @@ fn view_header_none_needs_api_1_3_and_an_ungrouped_web_view() {
     std::fs::write(pkg.join("web/index.html"), "<!doctype html><p>hi</p>").unwrap();
     let manifest = |engine: &str, view_fields: &str| {
         format!(
-            "id = \"headerless\"\nname = \"Headerless\"\nversion = \"1.0.0\"\nengines.openidea = \"{engine}\"\n[[contributes.views]]\nid = \"panel\"\ntitle = \"Panel\"\nlocation = \"bottom\"\n{view_fields}\n"
+            "id = \"headerless\"\nname = \"Headerless\"\nversion = \"1.0.0\"\nengines.oxidea = \"{engine}\"\n[[contributes.views]]\nid = \"panel\"\ntitle = \"Panel\"\nlocation = \"bottom\"\n{view_fields}\n"
         )
     };
     for (engine, fields, expected) in [
@@ -5621,7 +5621,7 @@ fn view_header_none_needs_api_1_3_and_an_ungrouped_web_view() {
 
     std::fs::write(
         pkg.join("plugin.toml"),
-        "id = \"headerless\"\nname = \"Headerless\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.3\"\n[[contributes.views]]\nid = \"panel\"\ntitle = \"Panel\"\nlocation = \"right\"\nsecondary = true\nweb = \"web/index.html\"\nheader = \"none\"\n",
+        "id = \"headerless\"\nname = \"Headerless\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.3\"\n[[contributes.views]]\nid = \"panel\"\ntitle = \"Panel\"\nlocation = \"right\"\nsecondary = true\nweb = \"web/index.html\"\nheader = \"none\"\n",
     )
     .unwrap();
     let info = f.install(&pkg);
@@ -5636,7 +5636,7 @@ fn view_secondary_requires_api_1_3_and_a_boolean_tool_window_placement() {
         for fields in ["", "secondary = false", "secondary = true", "group = \"g\"\nsecondary = true"] {
             let tmp = tempfile::tempdir().unwrap();
             let pkg = hello_variant(tmp.path(), |t| {
-                t.replace("engines.openidea = \"^1.0\"", "engines.openidea = \"^1.3\"")
+                t.replace("engines.oxidea = \"^1.0\"", "engines.oxidea = \"^1.3\"")
                     .replace("location = \"right\"", &format!("location = {location:?}\n{fields}"))
             });
             assert!(f.install(&pkg).error.is_none());
@@ -5656,7 +5656,7 @@ fn view_secondary_requires_api_1_3_and_a_boolean_tool_window_placement() {
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let pkg = hello_variant(tmp.path(), |t| {
-            t.replace("engines.openidea = \"^1.0\"", &format!("engines.openidea = {api:?}"))
+            t.replace("engines.oxidea = \"^1.0\"", &format!("engines.oxidea = {api:?}"))
                 .replace("location = \"right\"", &format!("location = {location:?}\nsecondary = {value}"))
         });
         let err = f.host.install_from_dir(&pkg, &Consent::all()).unwrap_err();

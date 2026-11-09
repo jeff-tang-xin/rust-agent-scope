@@ -41,7 +41,7 @@ function Menu() {
   );
 }
 
-function useIdeTheme(bridge: OpenideaBridge): "dark" | "light" {
+function useIdeTheme(bridge: OxideaBridge): "dark" | "light" {
   const [dark, setDark] = useState(bridge.theme?.dark ?? window.matchMedia?.("(prefers-color-scheme: dark)").matches);
   useEffect(() => bridge.onThemeChange((t) => setDark(t.dark)), [bridge]);
   return dark ? THEME.DARK : THEME.LIGHT;
@@ -49,7 +49,7 @@ function useIdeTheme(bridge: OpenideaBridge): "dark" | "light" {
 
 type Start = { scene: Scene | null; error: string | null; readOnly: boolean; name: string };
 
-function App({ bridge }: { bridge: OpenideaBridge }) {
+function App({ bridge }: { bridge: OxideaBridge }) {
   const theme = useIdeTheme(bridge);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [start, setStart] = useState<Start | null>(null);
@@ -89,7 +89,7 @@ function App({ bridge }: { bridge: OpenideaBridge }) {
   if (!start) return null;
   if (!start.scene && error)
     return (
-      <div className="openidea-error">
+      <div className="oxidea-error">
         <p>This file can't be shown as a drawing until its text is valid again:</p>
         <pre>{error}</pre>
       </div>
@@ -109,7 +109,7 @@ function App({ bridge }: { bridge: OpenideaBridge }) {
   );
 }
 
-const bridge = window.openidea;
+const bridge = window.oxidea;
 const root = createRoot(document.getElementById("root")!);
 if (bridge) {
   routeDownloadsToTheIde(bridge);
@@ -119,5 +119,5 @@ if (bridge) {
     </StrictMode>,
   );
 } else {
-  root.render(<p className="openidea-error">This page runs inside OpenIDEA.</p>);
+  root.render(<p className="oxidea-error">This page runs inside OXidea.</p>);
 }

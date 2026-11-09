@@ -28,7 +28,7 @@ const superItem: Omit<HierarchyItem, "name" | "path"> = {
   selectionRange: { start: { line: 0, col: 0 }, end: { line: 0, col: 1 } },
   fromRanges: [],
 };
-const SCRATCH = "/Users/me/Library/Application Support/ai.l0ng.openidea/scratches";
+const SCRATCH = "/Users/me/Library/Application Support/ai.l0ng.oxidea/scratches";
 
 const cfg = (over: Partial<RunConfig> & { id: string; kind: string }): RunConfig => ({
   name: over.id,
@@ -46,7 +46,7 @@ const cfg = (over: Partial<RunConfig> & { id: string; kind: string }): RunConfig
 function env(tools: Record<string, string | null>, extra: Partial<ToolEnv> = {}): ToolEnv {
   return {
     tool: (n): LocatedTool | null => (n in tools ? { path: `/bin/${n}`, version: tools[n] ?? null } : null),
-    compileDir: "/tmp/openidea-run",
+    compileDir: "/tmp/oxidea-run",
     ...extra,
   };
 }
@@ -356,12 +356,12 @@ describe("single-file producers (scratches)", () => {
     expect(p.config!.cwd).toBe(SCRATCH);
     expect(p.config!.args).toEqual([]);
     expect(p.config!.command).toMatch(
-      /^mkdir -p \/tmp\/openidea-run && \/bin\/rustc -g --edition 2021 -o \/tmp\/openidea-run\/hihi-\w+ hihi\.rs && \/tmp\/openidea-run\/hihi-\w+$/,
+      /^mkdir -p \/tmp\/oxidea-run && \/bin\/rustc -g --edition 2021 -o \/tmp\/oxidea-run\/hihi-\w+ hihi\.rs && \/tmp\/oxidea-run\/hihi-\w+$/,
     );
     expect(p.config!.kind).toBe("rustc");
     expect(p.debug!.build.command).toMatch(/rustc -g .* hihi\.rs$/);
     expect(p.debug!.config).toMatchObject({ kind: "native", debugAdapter: "codelldb", args: [] });
-    expect(p.debug!.config.command).toMatch(/^\/tmp\/openidea-run\/hihi-\w+$/);
+    expect(p.debug!.config.command).toMatch(/^\/tmp\/oxidea-run\/hihi-\w+$/);
     expect(produceContext(scratch("hihi.rs", "fn main() {}"), env({}))!.missing!.body).toMatch(/rustup/);
   });
 
@@ -438,7 +438,7 @@ describe("single-file producers (scratches)", () => {
       "class Parent {\n  void show() {}\n}\n\npublic class Test {\n" +
       "  public static void main(String[] args) {\n    new Parent().show();\n  }\n}\n";
     const input = { path: `${ROOT}/src/Test.java`, root: ROOT, configs: [], content: src };
-    const out = "/tmp/openidea-run/Test-[a-z0-9]+-classes";
+    const out = "/tmp/oxidea-run/Test-[a-z0-9]+-classes";
     for (const p of [produceFile(input, ALL), produceContext(input, ALL), produceContext({ ...input, line: 6 }, ALL)]) {
       expect(p!.config).toMatchObject({
         id: "context:file:src/Test.java",
@@ -487,12 +487,12 @@ describe("single-file producers (scratches)", () => {
     const jdk = "C:\\Program Files\\Java\\jdk-21\\bin\\java.exe";
     const win: ToolEnv = {
       tool: (n) => (n === "java" ? { path: jdk, version: null } : null),
-      compileDir: "C:/Users/me/AppData/Local/openidea/run",
+      compileDir: "C:/Users/me/AppData/Local/oxidea/run",
       windows: true,
     };
     const p = produceContext(scratch("Second.java", src, 8), win)!;
     expect(p.config!.command).toMatch(
-      /^\(if not exist (C:\\Users\\me\\AppData\\Local\\openidea\\run\\Second-[a-z0-9]+-classes) mkdir \1\) && "C:\\Program Files\\Java\\jdk-21\\bin\\javac\.exe" -g -d \1 Second\.java && "C:\\Program Files\\Java\\jdk-21\\bin\\java\.exe" -cp \1 demo\.Second$/,
+      /^\(if not exist (C:\\Users\\me\\AppData\\Local\\oxidea\\run\\Second-[a-z0-9]+-classes) mkdir \1\) && "C:\\Program Files\\Java\\jdk-21\\bin\\javac\.exe" -g -d \1 Second\.java && "C:\\Program Files\\Java\\jdk-21\\bin\\java\.exe" -cp \1 demo\.Second$/,
     );
   });
 
@@ -608,7 +608,7 @@ describe("single-file producers (scratches)", () => {
   it("C / C++: compile with debug info into the compile directory", () => {
     const c = produceContext(scratch("a.c", "int main(void) { return 0; }"), ALL)!;
     expect(c.config!.command).toMatch(
-      /^mkdir -p \/tmp\/openidea-run && \/bin\/clang -g -o \/tmp\/openidea-run\/a-\w+ a\.c && \/tmp\/openidea-run\/a-\w+$/,
+      /^mkdir -p \/tmp\/oxidea-run && \/bin\/clang -g -o \/tmp\/oxidea-run\/a-\w+ a\.c && \/tmp\/oxidea-run\/a-\w+$/,
     );
     const cpp = produceContext(scratch("a.cpp", "int main() {}"), env({ "g++": null }))!;
     expect(cpp.config!.command).toMatch(/\/bin\/g\+\+ -g -std=c\+\+17 -o/);
@@ -864,7 +864,7 @@ describe("Kotlin single file (.kt)", () => {
     expect(p.name).toBe("hello.kt");
     expect(p.config).toMatchObject({ kind: "kotlinc", cwd: SCRATCH, args: [], debugAdapter: null });
     expect(p.config!.command).toMatch(
-      /^mkdir -p \/tmp\/openidea-run && \/bin\/kotlinc -include-runtime -d \/tmp\/openidea-run\/hello-\w+\.jar hello\.kt && \/bin\/java -jar \/tmp\/openidea-run\/hello-\w+\.jar$/,
+      /^mkdir -p \/tmp\/oxidea-run && \/bin\/kotlinc -include-runtime -d \/tmp\/oxidea-run\/hello-\w+\.jar hello\.kt && \/bin\/java -jar \/tmp\/oxidea-run\/hello-\w+\.jar$/,
     );
     expect(p.debug).toBeUndefined();
     // `suspend fun main()` and the gutter on it (scratch mains with a class name).
@@ -902,10 +902,10 @@ describe("compile-and-run lines on Windows", () => {
     ({
       tool: (n: string): LocatedTool | null =>
         n in tools ? { path: `C:\\Program Files\\Tools\\${n}.exe`, version: tools[n] ?? null } : null,
-      compileDir: "C:\\Users\\me\\AppData\\Local\\Temp\\openidea-run",
+      compileDir: "C:\\Users\\me\\AppData\\Local\\Temp\\oxidea-run",
       windows: true,
     }) satisfies ToolEnv;
-  const DIR = String.raw`C:\Users\me\AppData\Local\Temp\openidea-run`;
+  const DIR = String.raw`C:\Users\me\AppData\Local\Temp\oxidea-run`;
   /** The command with the per-file hash replaced by `H`. */
   const line = (p: { config?: { command: string } } | null) =>
     p!.config!.command.replace(/-[0-9a-z]+(-test)?\.(exe|jar)/g, "-H$1.$2");
@@ -955,13 +955,13 @@ describe("compile-and-run lines on Windows", () => {
   });
 
   it("a compile directory with spaces is quoted for cmd", () => {
-    const e = { ...WIN({ clang: null }), compileDir: "C:/Users/John Smith/Temp/openidea-run/" };
+    const e = { ...WIN({ clang: null }), compileDir: "C:/Users/John Smith/Temp/oxidea-run/" };
     const p = produceContext(scratch("a.c", "int main() {}"), e)!;
     expect(p.config!.command).toMatch(
-      /^\(if not exist "C:\\Users\\John Smith\\Temp\\openidea-run" mkdir "C:\\Users\\John Smith\\Temp\\openidea-run"\) && /,
+      /^\(if not exist "C:\\Users\\John Smith\\Temp\\oxidea-run" mkdir "C:\\Users\\John Smith\\Temp\\oxidea-run"\) && /,
     );
     expect(p.config!.command).toMatch(
-      / -o "C:\\Users\\John Smith\\Temp\\openidea-run\\a-\w+\.exe" a\.c && "C:\\Users\\John Smith\\Temp\\openidea-run\\a-\w+\.exe"$/,
+      / -o "C:\\Users\\John Smith\\Temp\\oxidea-run\\a-\w+\.exe" a\.c && "C:\\Users\\John Smith\\Temp\\oxidea-run\\a-\w+\.exe"$/,
     );
   });
 });

@@ -149,7 +149,7 @@ async fn a_task_runs_on_a_v2_agent_and_resumes_its_session() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Use the TodoWrite tool"),
-            provider: "claude-acp".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: "model".into(), value: "haiku".into() }],
             isolation: Isolation::Local,
             base: None,

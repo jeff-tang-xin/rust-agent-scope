@@ -43,22 +43,22 @@ function ChangelistForm({
 }) {
   return (
     <div className={styles.form}>
-      <label className={styles.fieldLabel} htmlFor="openidea-cl-name">
+      <label className={styles.fieldLabel} htmlFor="oxidea-cl-name">
         <T>Name:</T>
       </label>
       <Input
-        id="openidea-cl-name"
+        id="oxidea-cl-name"
         data-autofocus
         value={value.name}
         invalid={!!value.name && !!error}
         onChange={(e) => onChange({ ...value, name: e.target.value })}
       />
       {value.name && error && <div className={styles.error}>{error}</div>}
-      <label className={styles.fieldLabel} htmlFor="openidea-cl-comment">
+      <label className={styles.fieldLabel} htmlFor="oxidea-cl-comment">
         <T>Comment:</T>
       </label>
       <textarea
-        id="openidea-cl-comment"
+        id="oxidea-cl-comment"
         className={styles.textarea}
         rows={3}
         value={value.comment}

@@ -15,25 +15,25 @@ import { tx } from "@/platform/i18n";
 
 /** localStorage prefixes of IDE-level state exported with the settings (templates, macros, layouts). */
 export const EXPORTED_STORAGE = [
-  "openidea.liveTemplates.",
-  "openidea.fileTemplates.",
-  "openidea.postfix.",
-  "openidea.macros.",
-  "openidea.toolWindowLayouts.",
+  "oxidea.liveTemplates.",
+  "oxidea.fileTemplates.",
+  "oxidea.postfix.",
+  "oxidea.macros.",
+  "oxidea.toolWindowLayouts.",
 ];
 
 /** IDE-level preferences kept in localStorage, exported with the settings as well. */
 const EXPORTED_KEYS = new Set([
-  "openidea.projectTree.options",
-  "openidea.todo.v1",
-  "openidea.vim.v1",
-  "openidea.vcs.diffOptions",
-  "openidea.vcs.diffPreview",
-  "openidea.vcs.branchesPopup.options",
-  "openidea.merge.autoApplyNonConflicting",
-  "openidea.markdown.defaultMode",
-  "openidea.imageViewer.chessboard",
-  "openidea.welcome.reopenLastProject",
+  "oxidea.projectTree.options",
+  "oxidea.todo.v1",
+  "oxidea.vim.v1",
+  "oxidea.vcs.diffOptions",
+  "oxidea.vcs.diffPreview",
+  "oxidea.vcs.branchesPopup.options",
+  "oxidea.merge.autoApplyNonConflicting",
+  "oxidea.markdown.defaultMode",
+  "oxidea.imageViewer.chessboard",
+  "oxidea.welcome.reopenLastProject",
 ]);
 
 const isExported = (key: string) => EXPORTED_KEYS.has(key) || EXPORTED_STORAGE.some((p) => key.startsWith(p));
@@ -59,8 +59,8 @@ async function exportSettings() {
   const { save } = await import("@tauri-apps/plugin-dialog");
   const path = await save({
     title: "Export Settings",
-    defaultPath: "openidea-settings.json",
-    filters: [{ name: "OpenIDEA settings", extensions: ["json"] }],
+    defaultPath: "oxidea-settings.json",
+    filters: [{ name: "OXidea settings", extensions: ["json"] }],
   });
   if (!path) return;
   try {
@@ -81,7 +81,7 @@ async function importSettings() {
   const picked = await open({
     title: "Import Settings",
     multiple: false,
-    filters: [{ name: "OpenIDEA or JetBrains settings", extensions: ["json", "zip"] }],
+    filters: [{ name: "OXidea or JetBrains settings", extensions: ["json", "zip"] }],
   });
   const path = Array.isArray(picked) ? picked[0] : picked;
   if (!path) return;

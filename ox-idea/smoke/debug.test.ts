@@ -73,7 +73,7 @@ const CASES: Record<string, Case> = {
     file: "cmd/server/main.go",
     variable: "r",
     evaluate: ["r.Method", /^"GET"$/],
-    request: "http://127.0.0.1:8080/notes?q=openidea",
+    request: "http://127.0.0.1:8080/notes?q=oxidea",
   },
   java: {
     fixture: "java-app",
@@ -115,7 +115,7 @@ afterEach(async () => {
 });
 
 async function open(c: Case): Promise<string> {
-  base = realpathSync(mkdtempSync(join(tmpdir(), "openidea-smoke-")));
+  base = realpathSync(mkdtempSync(join(tmpdir(), "oxidea-smoke-")));
   const root = join(base, c.fixture);
   cpSync(join(repoRoot, "fixtures", c.fixture), root, { recursive: true });
   c.setup?.(root);

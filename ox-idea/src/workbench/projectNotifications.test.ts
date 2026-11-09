@@ -15,10 +15,10 @@ describe("notifications across project changes", () => {
     });
     const dispose = activateWorkbench();
     try {
-      notify({ level: "info", title: "Downloading OpenIDEA 0.1.35", key: "app.update", sticky: true });
+      notify({ level: "info", title: "Downloading OXidea 0.1.35", key: "app.update", sticky: true });
       notify({ level: "info", title: "Git refresh failed", group: "vcs" });
       useProject.setState({ project: null });
-      expect(useNotifications.getState().items.map((n) => n.title)).toEqual(["Downloading OpenIDEA 0.1.35"]);
+      expect(useNotifications.getState().items.map((n) => n.title)).toEqual(["Downloading OXidea 0.1.35"]);
     } finally {
       dispose();
     }

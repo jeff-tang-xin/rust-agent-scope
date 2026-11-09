@@ -1,5 +1,5 @@
 // Angular templates: the text and attributes of HTML parsed by `@lezer/html`.
-// From @codemirror/lang-angular 0.1.4 (MIT, see LICENSE). Changed by OpenIDEA:
+// From @codemirror/lang-angular 0.1.4 (MIT, see LICENSE). Changed by OXidea:
 // control-flow blocks (`@if`, `@for`, `@switch`, `@defer`, ...) and `@let`
 // declarations in text, key and animation event names (`(keydown.enter)`,
 // `(@fade.done)`), animation bindings (`[@fade]`) and structural directives'

@@ -1,5 +1,5 @@
-use openidea_plugin::endpoints::{Endpoint, EndpointsProvider};
-use openidea_plugin::{Error, Invocation, Location, Plugin, Position, Range, register_plugin};
+use oxidea_plugin::endpoints::{Endpoint, EndpointsProvider};
+use oxidea_plugin::{Error, Invocation, Location, Plugin, Position, Range, register_plugin};
 #[derive(Default)]
 struct Fixture;
 impl Plugin for Fixture {

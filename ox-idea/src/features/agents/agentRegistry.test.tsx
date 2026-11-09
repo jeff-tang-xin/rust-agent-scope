@@ -475,13 +475,13 @@ describe("Built-in executable overrides", () => {
     commands.list = [claudeProvider("claude")];
     await openCommands(commands);
     const env = () => screen.getByRole("textbox", { name: "Environment variables" });
-    fireEvent.change(env(), { target: { value: "CLAUDE_CODE_ENTRYPOINT=openidea; HTTPS_PROXY=http://proxy:8080" } });
+    fireEvent.change(env(), { target: { value: "CLAUDE_CODE_ENTRYPOINT=oxidea; HTTPS_PROXY=http://proxy:8080" } });
     expect(commands.savedEnv).toEqual([]);
     await act(async () => fireEvent.click(apply()));
     expect(commands.savedEnv).toEqual([
-      ["claude", { CLAUDE_CODE_ENTRYPOINT: "openidea", HTTPS_PROXY: "http://proxy:8080" }],
+      ["claude", { CLAUDE_CODE_ENTRYPOINT: "oxidea", HTTPS_PROXY: "http://proxy:8080" }],
     ]);
-    expect(env()).toHaveValue("CLAUDE_CODE_ENTRYPOINT=openidea; HTTPS_PROXY=http://proxy:8080");
+    expect(env()).toHaveValue("CLAUDE_CODE_ENTRYPOINT=oxidea; HTTPS_PROXY=http://proxy:8080");
     fireEvent.change(env(), { target: { value: "" } });
     await act(async () => fireEvent.click(apply()));
     expect(commands.savedEnv.at(-1)).toEqual(["claude", {}]);

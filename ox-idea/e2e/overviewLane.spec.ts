@@ -11,7 +11,7 @@ test("the scrollbar thumb drags even where overview marks cover it (#752)", asyn
   // A match on every line covers the overview lane, as a new file's change mark does.
   await page.keyboard.press("Meta+f");
   await page.getByRole("textbox", { name: "Find" }).fill("mark");
-  await expect(editor.locator(".cm-openidea-overviewMark").first()).toBeVisible();
+  await expect(editor.locator(".cm-oxidea-overviewMark").first()).toBeVisible();
   const scroller = editor.locator(".cm-scroller");
   await scroller.evaluate((s) => (s.scrollTop = 0));
   const box = (await scroller.boundingBox())!;
@@ -26,7 +26,7 @@ test("the scrollbar thumb drags even where overview marks cover it (#752)", asyn
   expect(await scroller.evaluate((s) => s.scrollTop)).toBeGreaterThan(0);
   // Away from the thumb the marks take the pointer again.
   await page.mouse.move(x, box.y + box.height - 20);
-  await expect(editor.locator(".cm-openidea-overview")).not.toHaveClass(/cm-openidea-overview-onThumb/);
+  await expect(editor.locator(".cm-oxidea-overview")).not.toHaveClass(/cm-oxidea-overview-onThumb/);
 });
 
 test("the scrollbar thumb shows over a mark the height of the lane (#1014)", async ({ workbench: page }) => {
@@ -36,8 +36,8 @@ test("the scrollbar thumb shows over a mark the height of the lane (#1014)", asy
   await page.keyboard.insertText(Array.from({ length: 400 }, (_, i) => `val mark${i} = ${i}`).join("\n"));
   await page.keyboard.press("Meta+f");
   await page.getByRole("textbox", { name: "Find" }).fill("mark");
-  await expect(editor.locator(".cm-openidea-overviewMark").first()).toBeVisible();
-  const thumb = editor.locator(".cm-openidea-overviewThumb");
+  await expect(editor.locator(".cm-oxidea-overviewMark").first()).toBeVisible();
+  const thumb = editor.locator(".cm-oxidea-overviewThumb");
   await expect(thumb).toBeVisible();
   // Drawn last in the lane, so it paints over every mark.
   expect(await thumb.evaluate((t) => t.nextElementSibling)).toBeNull();

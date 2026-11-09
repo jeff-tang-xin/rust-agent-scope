@@ -88,7 +88,7 @@ async function renderOne(source: string, key: string): Promise<Result> {
   const mermaid = await loadMermaid();
   await fontsLoaded(getComputedStyle(document.documentElement).getPropertyValue("--font-ui").trim(), 16);
   configure(mermaid, key);
-  const id = `openidea-mermaid-${++seq}`;
+  const id = `oxidea-mermaid-${++seq}`;
   try {
     const { svg } = await mermaid.render(id, source);
     return { svg };

@@ -9,7 +9,7 @@ import styles from "./Run.module.css";
 import { tx } from "@/platform/i18n";
 
 /** Test tree filters, kept across runs and restarts (IDEA hides passed tests by default). */
-const FILTERS_KEY = "openidea.run.testFilters";
+const FILTERS_KEY = "oxidea.run.testFilters";
 
 interface TestFilters {
   showPassed: boolean;

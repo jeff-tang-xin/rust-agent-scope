@@ -5,14 +5,15 @@
 //! A shim speaks ACP v1 as the agent side, plus:
 //! - `agentCapabilities.sessionCapabilities.fork` and `session/fork`
 //!   (`{ sessionId, cwd, mcpServers }` → a `session/new` result for the copy);
-//! - `agentCapabilities._meta.openidea.rollback` and `_openidea/rollback`
+//! - `agentCapabilities._meta.oxidea.rollback` and `_oxidea/rollback`
 //!   (`{ sessionId, turns }`: drops the last `turns` user turns from the session);
-//! - `agentCapabilities._meta.openidea.steer` and `_openidea/steer`
+//! - `agentCapabilities._meta.oxidea.steer` and `_oxidea/steer`
 //!   (`{ sessionId, prompt }`: adds ACP content blocks to the running turn; fails when
 //!   no turn runs).
 
 pub(crate) mod claude;
 pub(crate) mod codex;
+pub(crate) mod ox;
 
 use ide_jsonrpc::{Framing, Handler, Peer};
 use std::path::{Path, PathBuf};

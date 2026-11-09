@@ -579,14 +579,14 @@ fn replace_matches_search_count() {
     }
 }
 
-/// `OPENIDEA_SEARCH_BENCH=/path/to/repo PATTERN cargo test --release -- --ignored bench`
+/// `OXIDEA_SEARCH_BENCH=/path/to/repo PATTERN cargo test --release -- --ignored bench`
 #[test]
 #[ignore]
 fn bench_large_tree() {
-    let Ok(root) = std::env::var("OPENIDEA_SEARCH_BENCH") else { return };
-    let pattern = std::env::var("OPENIDEA_SEARCH_PATTERN").unwrap_or_else(|_| "fn main".into());
+    let Ok(root) = std::env::var("OXIDEA_SEARCH_BENCH") else { return };
+    let pattern = std::env::var("OXIDEA_SEARCH_PATTERN").unwrap_or_else(|_| "fn main".into());
     let q = SearchQuery { max_matches: u32::MAX, is_regex: true, case_sensitive: true, ..query(&pattern) };
-    if let Ok(dump) = std::env::var("OPENIDEA_SEARCH_DUMP") {
+    if let Ok(dump) = std::env::var("OXIDEA_SEARCH_DUMP") {
         let (files, _) = run_with(Path::new(&root), &q, &|_| None, &CancellationToken::new());
         let list: Vec<_> = files.iter().map(|f| f.path.display().to_string()).collect();
         std::fs::write(dump, list.join("\n") + "\n").unwrap();

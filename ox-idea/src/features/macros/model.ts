@@ -44,7 +44,7 @@ interface MacroState {
   saved: Macro[];
 }
 
-export const STORAGE_KEY = "openidea.macros.v1";
+export const STORAGE_KEY = "oxidea.macros.v1";
 
 function isStep(v: unknown): v is MacroStep {
   if (!v || typeof v !== "object") return false;

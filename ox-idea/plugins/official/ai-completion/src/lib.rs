@@ -1,13 +1,13 @@
-//! AI Completion for OpenIDEA: inline suggestions from an OpenAI-compatible
+//! AI Completion for OXidea: inline suggestions from an OpenAI-compatible
 //! `/v1/completions` endpoint (fill-in-the-middle with `prompt` + `suffix`).
 //! The IDE cancels a request as soon as the user types on (the fetch returns
 //! `Cancelled`); the API key is filled in by the IDE (`{{secret:api-key}}`)
 //! and never seen here.
 
-use openidea_plugin::host::{self, storage};
-use openidea_plugin::providers::{Document, InlineSuggestion, Providers};
-use openidea_plugin::text::offset;
-use openidea_plugin::{Error, HttpRequest, Invocation, LogLevel, NotificationLevel, Plugin, Position, register_plugin};
+use oxidea_plugin::host::{self, storage};
+use oxidea_plugin::providers::{Document, InlineSuggestion, Providers};
+use oxidea_plugin::text::offset;
+use oxidea_plugin::{Error, HttpRequest, Invocation, LogLevel, NotificationLevel, Plugin, Position, register_plugin};
 use serde_json::{Value, json};
 
 const LOCAL: &str = "http://localhost:11434";
@@ -157,8 +157,8 @@ register_plugin!(AiCompletion, providers);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::HttpResponse;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::HttpResponse;
+    use oxidea_plugin::mock::MockHost;
 
     fn doc(text: &str) -> Document {
         Document { path: "/p/a.rs".into(), language: "rust".into(), version: 1, text: text.into() }

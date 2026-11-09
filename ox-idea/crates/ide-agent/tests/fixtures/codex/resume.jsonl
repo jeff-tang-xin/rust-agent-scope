@@ -1,6 +1,6 @@
 {"prompt":"Count to five.","scenario":"resume","source":"recorded from codex-cli 0.146.0","thread":"01a182a3-3d7f-7442-b384-57a309b2ee3a","type":"meta"}
-{"dir":"out","frame":{"id":1,"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{"experimentalApi":true,"optOutNotificationMethods":["turn/diff/updated"]},"clientInfo":{"name":"openidea","title":"OpenIDEA","version":"0.1.22"}}}}
-{"dir":"in","frame":{"id":1,"result":{"codexHome":"<home>/.codex","platformFamily":"unix","platformOs":"macos","userAgent":"openidea/0.146.0 (Mac OS 26.3.1; arm64) unknown (openidea; 0.1.22)"}}}
+{"dir":"out","frame":{"id":1,"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{"experimentalApi":true,"optOutNotificationMethods":["turn/diff/updated"]},"clientInfo":{"name":"oxidea","title":"OXidea","version":"0.1.22"}}}}
+{"dir":"in","frame":{"id":1,"result":{"codexHome":"<home>/.codex","platformFamily":"unix","platformOs":"macos","userAgent":"oxidea/0.146.0 (Mac OS 26.3.1; arm64) unknown (oxidea; 0.1.22)"}}}
 {"dir":"in","frame":{"emittedAtMs":1793193101056,"method":"remoteControl/status/changed","params":{"environmentId":null,"installationId":"<installation>","serverName":"<host>","status":"disabled"}}}
 {"dir":"out","frame":{"jsonrpc":"2.0","method":"initialized"}}
 {"dir":"out","frame":{"id":2,"jsonrpc":"2.0","method":"model/list","params":{"cursor":null}}}

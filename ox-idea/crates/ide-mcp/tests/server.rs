@@ -98,7 +98,7 @@ fn bearer(s: &Setup) -> String {
 }
 
 async fn rpc(s: &Setup, method: &str, params: Value) -> Value {
-    let project = format!("X-OpenIDEA-Project: {}", s.project.display());
+    let project = format!("X-OXidea-Project: {}", s.project.display());
     let (status, body) = post(
         s,
         "/mcp",
@@ -122,7 +122,7 @@ async fn initialize_list_and_call_tools() {
     )
     .await;
     assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
-    assert_eq!(init["result"]["serverInfo"]["name"], "OpenIDEA");
+    assert_eq!(init["result"]["serverInfo"]["name"], "OXidea");
     assert!(init["result"]["capabilities"]["tools"].is_object());
     let newer = rpc(&s, "initialize", json!({ "protocolVersion": "2099-01-01" })).await;
     assert_eq!(newer["result"]["protocolVersion"], "2025-06-18");
@@ -199,12 +199,12 @@ async fn requests_without_the_token_or_from_web_pages_are_refused() {
 async fn folders_that_are_not_open_are_named_in_the_error() {
     let s = setup();
     let elsewhere = s.project.parent().unwrap().join("elsewhere");
-    let header = format!("X-OpenIDEA-Project: {}", elsewhere.display());
+    let header = format!("X-OXidea-Project: {}", elsewhere.display());
     let (status, body) =
         post(&s, "/mcp", &[&bearer(&s), &header], &json!({"jsonrpc":"2.0","id":3,"method":"tools/list"})).await;
     assert_eq!(status, 200);
     let reply: Value = serde_json::from_str(&body).unwrap();
-    assert!(reply["error"]["message"].as_str().unwrap().contains("isn't open in OpenIDEA"));
+    assert!(reply["error"]["message"].as_str().unwrap().contains("isn't open in OXidea"));
     let (_, body) = post(&s, "/mcp", &[&bearer(&s)], &json!({"jsonrpc":"2.0","id":3,"method":"tools/list"})).await;
     assert!(serde_json::from_str::<Value>(&body).unwrap()["result"]["tools"].is_array());
 }

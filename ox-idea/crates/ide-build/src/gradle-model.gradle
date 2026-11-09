@@ -1,4 +1,4 @@
-// OpenIDEA Gradle sync: prints each project as Gradle evaluated it, one JSON line per project.
+// OXidea Gradle sync: prints each project as Gradle evaluated it, one JSON line per project.
 // Read by `ide_build::gradle::parse_reported_projects`. Dependencies are not resolved: the
 // Java language server reads the classpath itself, and resolving is the slow part of an import.
 import groovy.json.JsonOutput
@@ -34,7 +34,7 @@ def describe = { Project p ->
         def lv = java?.toolchain?.languageVersion?.getOrNull()
         m.java = lv != null ? lv.asInt() : (java?.targetCompatibility?.majorVersion as Integer)
     } catch (ignored) {}
-    println '@openidea-model\t' + JsonOutput.toJson(m)
+    println '@oxidea-model\t' + JsonOutput.toJson(m)
 }
 
 gradle.projectsEvaluated { g -> g.rootProject.allprojects { describe(it) } }

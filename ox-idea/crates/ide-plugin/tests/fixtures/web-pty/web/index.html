@@ -1,7 +1,7 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>PTY Probe</title>
 <style>
-body { background: var(--openidea-bg); color: var(--openidea-fg); font-family: var(--openidea-font-mono, monospace); font-size: var(--openidea-font-size, 13px); padding: 12px; }
+body { background: var(--oxidea-bg); color: var(--oxidea-fg); font-family: var(--oxidea-font-mono, monospace); font-size: var(--oxidea-font-size, 13px); padding: 12px; }
 button, input { font: inherit; padding: 6px; } pre { white-space: pre-wrap; overflow-wrap: anywhere; } form { display: flex; gap: 4px; } input { flex: 1; min-width: 0; }
 </style></head><body>
 <h2>Web PTY Probe</h2><p id="isolation"></p>
@@ -10,9 +10,9 @@ button, input { font: inherit; padding: 6px; } pre { white-space: pre-wrap; over
 <form id="input"><input id="command" aria-label="Terminal input" placeholder="Type a shell command"><button>Send</button></form>
 <script>
 const output = document.querySelector('#output');
-const send = (op, args = {}) => openidea.postMessage(JSON.stringify({ op, sessionId: 'probe', ...args }));
+const send = (op, args = {}) => oxidea.postMessage(JSON.stringify({ op, sessionId: 'probe', ...args }));
 document.querySelector('#isolation').textContent = `IPC globals: ${typeof window.__TAURI_INTERNALS__}; parent access: ` + (() => { try { return parent.document.title; } catch { return 'blocked'; } })();
-openidea.onMessage(text => {
+oxidea.onMessage(text => {
   let m; try { m = JSON.parse(text); } catch { return; }
   if (m.op === 'pty-data') {
     output.textContent = (output.textContent + m.data).slice(-65536);

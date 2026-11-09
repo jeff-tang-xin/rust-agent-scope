@@ -321,7 +321,7 @@ impl Http {
             cmd.arg("-q");
         }
         own_group(ide_core::process::prepare(&mut cmd));
-        cmd.args(["-fsSL", "--retry", "2", "--connect-timeout", "20", "-A", "openidea"]);
+        cmd.args(["-fsSL", "--retry", "2", "--connect-timeout", "20", "-A", "oxidea"]);
         // System Settings › HTTP Proxy (a manual proxy comes in through `prepare`'s environment).
         cmd.args(ide_core::proxy_settings::proxy().curl_args(url));
         if self.https_only {

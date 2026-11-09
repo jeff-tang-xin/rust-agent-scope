@@ -1,4 +1,4 @@
-// OpenIDEA: reports each test of Gradle's Test tasks as a TeamCity service message on the
+// OXidea: reports each test of Gradle's Test tasks as a TeamCity service message on the
 // build's output, for the Run window's test tree: Gradle itself prints only failures (or a
 // project's own format), and writes its XML reports when a task ends. Test tasks always run,
 // so a rerun never ends UP-TO-DATE without results.
@@ -47,7 +47,7 @@ allprojects {
 gradle.projectsEvaluated {
     allprojects {
         tasks.withType(Test).configureEach { Test task ->
-            if (System.getProperty('openidea.run.debug') == 'true') {
+            if (System.getProperty('oxidea.run.debug') == 'true') {
                 task.debugOptions.enabled = false
                 task.doFirst {
                     task.setJvmArgs(task.jvmArgs.findAll {

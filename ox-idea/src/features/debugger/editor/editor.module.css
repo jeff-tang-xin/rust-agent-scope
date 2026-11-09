@@ -126,11 +126,11 @@
 
 /* Beat the caret row (`.cm-activeLine`), as IDEA does; the suspended line wins over a breakpoint. */
 :global(.cm-editor) :global(.cm-line).bpLine {
-  --openidea-line-bg: var(--bg-breakpoint-line);
+  --oxidea-line-bg: var(--bg-breakpoint-line);
 }
 
 :global(.cm-editor) :global(.cm-line).execLine {
-  --openidea-line-bg: var(--bg-debug-line);
+  --oxidea-line-bg: var(--bg-debug-line);
 }
 
 .inlineValue {

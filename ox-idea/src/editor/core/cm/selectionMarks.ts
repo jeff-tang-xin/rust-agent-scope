@@ -7,7 +7,7 @@ import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate
  * This repaints selected text in the innermost span. At equal precedence the earlier source
  * nests inside, so this must precede find and semantic decorations at `Prec.highest`.
  */
-const selectedMark = Decoration.mark({ class: "cm-openidea-selected" });
+const selectedMark = Decoration.mark({ class: "cm-oxidea-selected" });
 
 function selectedRanges(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
@@ -36,10 +36,10 @@ const plugin = ViewPlugin.fromClass(
 );
 
 const theme = EditorView.baseTheme({
-  ".cm-openidea-selected": {
+  ".cm-oxidea-selected": {
     backgroundColor: "var(--editor-selection-inactive, var(--bg-editor-selection-inactive))",
   },
-  "&.cm-focused .cm-openidea-selected": {
+  "&.cm-focused .cm-oxidea-selected": {
     backgroundColor: "var(--editor-selection, var(--bg-editor-selection))",
   },
 });

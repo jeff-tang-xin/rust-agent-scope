@@ -19,7 +19,7 @@ impl TempIndex {
     fn new(r: &Repo) -> Self {
         static SEQ: AtomicU32 = AtomicU32::new(0);
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        TempIndex(r.git_dir.join(format!("openidea-index-{}-{n}", std::process::id())))
+        TempIndex(r.git_dir.join(format!("oxidea-index-{}-{n}", std::process::id())))
     }
     fn env(&self) -> [(&'static str, &OsStr); 1] {
         [("GIT_INDEX_FILE", self.0.as_os_str())]

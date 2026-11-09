@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 
 export type ServiceOrder = Record<string, string[]>;
-const STORAGE_KEY = "openidea.services.runOrder:";
+const STORAGE_KEY = "oxidea.services.runOrder:";
 const EMPTY: ServiceOrder = {};
 const unsaved = new Map<string, ServiceOrder>();
 const useOrder = create<{ location: string | null; order: ServiceOrder }>(() => ({ location: null, order: EMPTY }));

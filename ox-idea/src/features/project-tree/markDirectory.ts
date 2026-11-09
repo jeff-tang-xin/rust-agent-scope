@@ -18,7 +18,7 @@ export function directoryRole(path: string): FolderRole | null {
 }
 
 /**
- * Gives `path` the `role` (null = Unmark); written to the project's `.openidea/settings.toml`.
+ * Gives `path` the `role` (null = Unmark); written to the project's `.oxidea/settings.toml`.
  * Unmarking a root detected from a build file keeps it unmarked across re-detection.
  */
 export async function markDirectory(path: string, role: FolderRole | null): Promise<void> {

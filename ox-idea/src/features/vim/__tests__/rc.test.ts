@@ -4,7 +4,7 @@ import { exOfRhs, IDEA_ACTIONS, parseVimrc, resolveActionId } from "../rc";
 import { readSourcedFiles } from "../rcFile";
 
 const RC = `
-" OpenIDEA vimrc
+" OXidea vimrc
 set textwidth=100 nopcre
 set ideajoin surround
 let mapleader = " "
@@ -73,7 +73,7 @@ describe("ideavimrc parsing", () => {
 });
 
 describe(":action ids", () => {
-  it("maps IdeaVim ids to OpenIDEA ids and passes our own ids through", () => {
+  it("maps IdeaVim ids to OXidea ids and passes our own ids through", () => {
     expect(resolveActionId("GotoDeclaration")).toBe("navigate.declaration");
     expect(resolveActionId("ReformatCode")).toBe("code.reformat");
     expect(resolveActionId("FindInPath")).toBe("find.inPath");

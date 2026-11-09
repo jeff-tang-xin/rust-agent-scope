@@ -147,7 +147,7 @@ export function windowBackgroundHex(root: HTMLElement = document.documentElement
 }
 
 /** localStorage key read by public/boot.js. */
-export const STARTUP_THEME_KEY = "openidea.theme";
+export const STARTUP_THEME_KEY = "oxidea.theme";
 
 /**
  * Remembers the theme for public/boot.js, which applies it to the next window

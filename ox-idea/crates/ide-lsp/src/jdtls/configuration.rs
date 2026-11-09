@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::SystemTime;
 
-const COMMAND: &str = "openidea.java.configuration";
+const COMMAND: &str = "oxidea.java.configuration";
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_FILES: usize = 2000;
 const MAX_CACHED_KEYS: usize = 100_000;

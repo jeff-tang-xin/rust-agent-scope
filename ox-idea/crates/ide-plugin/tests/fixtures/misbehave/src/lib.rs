@@ -5,9 +5,9 @@ wit_bindgen::generate!({
     inline: "
         package fixture:misbehave;
         world misbehave {
-            include openidea:plugin/plugin-syntax@1.4.0;
-            export openidea:plugin/providers@1.4.0;
-            export openidea:plugin/file-actions@1.4.0;
+            include oxidea:plugin/plugin-syntax@1.4.0;
+            export oxidea:plugin/providers@1.4.0;
+            export oxidea:plugin/file-actions@1.4.0;
         }
     ",
     path: "../../../../../wit",
@@ -15,12 +15,12 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use exports::openidea::plugin::providers::{
+use exports::oxidea::plugin::providers::{
     self, CodeAction, CompletionItem, Document, FileEdit, InlineSuggestion, LineMarker,
 };
-use exports::openidea::plugin::syntax_provider::{self, Fold, Symbol, Token};
-use exports::openidea::plugin::{commands, event_handler, lifecycle};
-use openidea::plugin::{invocation::Invocation, process, types};
+use exports::oxidea::plugin::syntax_provider::{self, Fold, Symbol, Token};
+use exports::oxidea::plugin::{commands, event_handler, lifecycle};
+use oxidea::plugin::{invocation::Invocation, process, types};
 
 struct Misbehave;
 
@@ -68,11 +68,11 @@ impl commands::Guest for Misbehave {
             }
             "root" => ctx.project().map(|p| p.root()).transpose(),
             // The `fs.read` grants: the text of `arg`, or the refusal naming what it needs.
-            "fsread" => openidea::plugin::fs::read_file(&arg.unwrap_or_default()).map(Some),
+            "fsread" => oxidea::plugin::fs::read_file(&arg.unwrap_or_default()).map(Some),
             // The `fs.read-dir` listing: "name kind" lines.
             "read-dir" => {
-                use openidea::plugin::workspace::FileKind;
-                let entries = openidea::plugin::fs::read_dir(&arg.unwrap_or_default())?;
+                use oxidea::plugin::workspace::FileKind;
+                let entries = oxidea::plugin::fs::read_dir(&arg.unwrap_or_default())?;
                 let lines: Vec<String> = entries
                     .iter()
                     .map(|e| {
@@ -89,7 +89,7 @@ impl commands::Guest for Misbehave {
             }
             // The `fs.write` grant: replaces the file at `arg`.
             "fswrite" => {
-                openidea::plugin::fs::write_file(&arg.unwrap_or_default(), "written by the plugin\n").map(|()| None)
+                oxidea::plugin::fs::write_file(&arg.unwrap_or_default(), "written by the plugin\n").map(|()| None)
             }
             // The `project.write` grant: writes `arg` inside the project.
             "projwrite" => {
@@ -117,7 +117,7 @@ impl commands::Guest for Misbehave {
                     args: vec![
                         "hash-object".into(),
                         "--stdin".into(),
-                        format!("--path={}", arg.unwrap_or_else(|| "openidea-process-2027".into())),
+                        format!("--path={}", arg.unwrap_or_else(|| "oxidea-process-2027".into())),
                     ],
                     env: Vec::new(),
                 };
@@ -144,15 +144,15 @@ impl commands::Guest for Misbehave {
                 let env = if id.starts_with("envdeny") {
                     vec![(arg.unwrap_or_else(|| "PATH".into()), "replacement".into())]
                 } else {
-                    vec![("OPENIDEA_PROCESS_TEST_VALUE".into(), "added by the plugin".into())]
+                    vec![("OXIDEA_PROCESS_TEST_VALUE".into(), "added by the plugin".into())]
                 };
                 let cmd = process::Command {
                     program: "git".into(),
                     args: vec![
-                        "--config-env=openidea.test=OPENIDEA_PROCESS_TEST_VALUE".into(),
+                        "--config-env=oxidea.test=OXIDEA_PROCESS_TEST_VALUE".into(),
                         "config".into(),
                         "--get".into(),
-                        "openidea.test".into(),
+                        "oxidea.test".into(),
                     ],
                     env,
                 };
@@ -166,7 +166,7 @@ impl commands::Guest for Misbehave {
             // A task that keeps reporting is still working: the call may run
             // past the background budget it began with.
             "patient" => {
-                let task = openidea::plugin::tasks::begin("waiting", false);
+                let task = oxidea::plugin::tasks::begin("waiting", false);
                 let cmd = process::Command {
                     program: "git".into(),
                     args: vec!["hash-object".into(), "--stdin".into()],
@@ -193,10 +193,10 @@ impl commands::Guest for Misbehave {
             // The user gave up: not the plugin failing.
             "cancel" => Err(types::Error::Cancelled),
             // Event kinds are names: one this IDE doesn't know is refused.
-            "subscribe" => openidea::plugin::events::subscribe(&arg.unwrap_or_default()).map(|()| None),
+            "subscribe" => oxidea::plugin::events::subscribe(&arg.unwrap_or_default()).map(|()| None),
             // Tagged problems from another tool on the line 0 of `arg`.
             "diagnose" => {
-                use openidea::plugin::diagnostics::{self, Diagnostic, Severity};
+                use oxidea::plugin::diagnostics::{self, Diagnostic, Severity};
                 let start = types::Position { line: 0, character: 0 };
                 let d = Diagnostic {
                     range: types::Range { start, end: start },
@@ -215,7 +215,7 @@ impl commands::Guest for Misbehave {
 }
 
 impl event_handler::Guest for Misbehave {
-    fn handle(_events: Vec<openidea::plugin::events::Event>, _ctx: &Invocation) {}
+    fn handle(_events: Vec<oxidea::plugin::events::Event>, _ctx: &Invocation) {}
 }
 
 /// Edit-path budgets: the text says how to behave. `sleep:<ms>` busy-waits
@@ -252,7 +252,7 @@ impl syntax_provider::Guest for Misbehave {
 }
 
 fn action_answer(kind: &str) -> Result<String, types::Error> {
-    use openidea::plugin::{ui, views};
+    use oxidea::plugin::{ui, views};
     let items = vec![
         ui::PickItem { key: "a".into(), label: "Alpha".into(), description: None },
         ui::PickItem { key: "b".into(), label: "Beta".into(), description: None },
@@ -277,7 +277,7 @@ fn action_answer(kind: &str) -> Result<String, types::Error> {
         }
         "pick-directory" => ui::pick_directory("Not allowed", None)?,
         "open-project" => {
-            openidea::plugin::workspace::open_project("/not-allowed", false)?;
+            oxidea::plugin::workspace::open_project("/not-allowed", false)?;
             None
         }
         _ => return Err(types::Error::Invalid("unknown prompt".into())),
@@ -399,12 +399,12 @@ impl providers::Guest for Misbehave {
 
 /// `files`: one action that creates, renames and deletes files, then opens
 /// one, and one listed with `data` only, whose file `resolve` creates.
-impl exports::openidea::plugin::file_actions::Guest for Misbehave {
+impl exports::oxidea::plugin::file_actions::Guest for Misbehave {
     fn code_actions(
-        doc: exports::openidea::plugin::file_actions::Document,
+        doc: exports::oxidea::plugin::file_actions::Document,
         _selection: types::Range,
-    ) -> Vec<exports::openidea::plugin::file_actions::FileAction> {
-        use exports::openidea::plugin::file_actions::{CreateFile, DeleteFile, FileAction, FileOperation, RenameFile};
+    ) -> Vec<exports::oxidea::plugin::file_actions::FileAction> {
+        use exports::oxidea::plugin::file_actions::{CreateFile, DeleteFile, FileAction, FileOperation, RenameFile};
         if doc.text == "prompt-files" {
             return vec![FileAction {
                 title: "Create a service".into(),
@@ -454,15 +454,15 @@ impl exports::openidea::plugin::file_actions::Guest for Misbehave {
     }
 
     fn resolve(
-        doc: exports::openidea::plugin::file_actions::Document,
-        action: exports::openidea::plugin::file_actions::FileAction,
-    ) -> Result<exports::openidea::plugin::file_actions::FileAction, types::Error> {
-        use exports::openidea::plugin::file_actions::{CreateFile, FileOperation};
+        doc: exports::oxidea::plugin::file_actions::Document,
+        action: exports::oxidea::plugin::file_actions::FileAction,
+    ) -> Result<exports::oxidea::plugin::file_actions::FileAction, types::Error> {
+        use exports::oxidea::plugin::file_actions::{CreateFile, FileOperation};
         if doc.text == "prompt-files" {
             let name = action_answer("input")?;
             let dir = doc.path.rsplit_once('/').map_or("", |(dir, _)| dir);
             let path = format!("{dir}/{name}.txt");
-            return Ok(exports::openidea::plugin::file_actions::FileAction {
+            return Ok(exports::oxidea::plugin::file_actions::FileAction {
                 operations: vec![FileOperation::Create(CreateFile {
                     path: path.clone(),
                     text: name,
@@ -479,7 +479,7 @@ impl exports::openidea::plugin::file_actions::Guest for Misbehave {
             text: "later".into(),
             overwrite: false,
         })];
-        Ok(exports::openidea::plugin::file_actions::FileAction { operations, data: None, ..action })
+        Ok(exports::oxidea::plugin::file_actions::FileAction { operations, data: None, ..action })
     }
 }
 

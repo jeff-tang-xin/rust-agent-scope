@@ -26,12 +26,12 @@ export function summarizeMemory(m: Pick<AppMetrics, "memory" | "rssBytes"> | nul
   return { app, languageServers, processes, total: parts.length ? parts.reduce((a, b) => a + b, 0) : null };
 }
 
-/** Status bar text: `OpenIDEA 560M` (no denominator: there is no heap limit to compare with). */
+/** Status bar text: `OXidea 560M` (no denominator: there is no heap limit to compare with). */
 export function indicatorLabel(s: MemorySummary): string {
   return s.app == null ? "OXidea –" : `OXidea ${formatBytes(s.app)}`;
 }
 
-/** Status bar tooltip: `OpenIDEA 560 MB · language servers 1.1 GB · processes 80 MB`. */
+/** Status bar tooltip: `OXidea 560 MB · language servers 1.1 GB · processes 80 MB`. */
 export function indicatorTooltip(s: MemorySummary): string {
   const parts = [`OXidea ${formatSize(s.app)}`];
   if (s.languageServers != null) parts.push(`language servers ${formatSize(s.languageServers)}`);

@@ -78,7 +78,7 @@ export const useGhRepository = create<RepositoryState>(() => ({
 }));
 
 const projectRoot = () => useProject.getState().project?.root ?? null;
-const selectionKey = (root: string) => `openidea.github.repository.v1:${root}`;
+const selectionKey = (root: string) => `oxidea.github.repository.v1:${root}`;
 
 function loadSelection(root: string | null): string | null {
   if (!root) return null;

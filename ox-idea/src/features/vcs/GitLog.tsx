@@ -176,7 +176,7 @@ export function GitTabs() {
       onSelect={selectGitTab}
       onClose={closeLogTab}
       aria-label="Git"
-      panelIdPrefix="openidea-git"
+      panelIdPrefix="oxidea-git"
       items={tabItems(tabs)}
     />
   );
@@ -196,8 +196,8 @@ export function GitToolWindow() {
     <div
       className={styles.root}
       role="tabpanel"
-      id={`openidea-git-panel-${shown}`}
-      aria-labelledby={`openidea-git-tab-${shown}`}
+      id={`oxidea-git-panel-${shown}`}
+      aria-labelledby={`oxidea-git-tab-${shown}`}
     >
       {shown === "changes" ? (
         <LocalChangesView />
@@ -1723,7 +1723,7 @@ function CommitList() {
               .join("\n"),
           );
           e.clipboardData.setData(
-            "application/x-openidea-vcs-commits",
+            "application/x-oxidea-vcs-commits",
             JSON.stringify({ version: 1, commits: selected.map((c) => ({ root: commitRepo(c), hash: c.id })) }),
           );
         }}

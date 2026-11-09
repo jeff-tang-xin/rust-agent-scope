@@ -86,10 +86,10 @@ fn tool(entry: &AgentEntry) -> (&str, AgentToolStatus, Option<&str>) {
 
 #[test]
 fn the_negotiating_request_carries_both_versions() {
-    let p = initialize_params(&json!({ "name": "OpenIDEA", "version": "1.0" }));
+    let p = initialize_params(&json!({ "name": "OXidea", "version": "1.0" }));
     assert_eq!(p["protocolVersion"], 2);
-    assert_eq!(p["info"]["name"], "OpenIDEA");
-    assert_eq!(p["clientInfo"]["name"], "OpenIDEA");
+    assert_eq!(p["info"]["name"], "OXidea");
+    assert_eq!(p["clientInfo"]["name"], "OXidea");
     assert!(p["capabilities"].is_object());
     assert_eq!(p["clientCapabilities"]["subagents"], json!({}));
     assert_eq!(p["clientCapabilities"]["terminal"], false);
@@ -140,15 +140,15 @@ fn meta_and_auth_methods_pass_through() {
     // The native shims advertise their extensions in `agentCapabilities._meta`.
     let shim = Negotiated::from_initialize(&json!({ "protocolVersion": 1, "agentCapabilities": {
         "loadSession": true, "sessionCapabilities": { "fork": {} },
-        "_meta": { "openidea": { "rollback": true, "steer": true } } } }));
-    assert!(shim.meta("/openidea/rollback").is_some() && shim.meta("/openidea/steer").is_some());
+        "_meta": { "oxidea": { "rollback": true, "steer": true } } } }));
+    assert!(shim.meta("/oxidea/rollback").is_some() && shim.meta("/oxidea/steer").is_some());
     assert!(shim.session("fork"));
 
     let v2 = Negotiated::from_initialize(&json!({ "protocolVersion": 2, "info": { "name": "x", "version": "1" },
-        "capabilities": { "session": { "fork": null, "prompt": { "image": null } }, "_meta": { "openidea": { "steer": true } } },
+        "capabilities": { "session": { "fork": null, "prompt": { "image": null } }, "_meta": { "oxidea": { "steer": true } } },
         "authMethods": [{ "type": "agent", "methodId": "login", "name": "Log in" },
                         { "type": "terminal", "methodId": "cli", "name": "CLI", "args": ["login"] }] }));
-    assert!(v2.meta("/openidea/steer").is_some());
+    assert!(v2.meta("/oxidea/steer").is_some());
     // `null` is "not supported".
     assert!(!v2.session("fork") && !v2.prompt("image"));
     assert_eq!(v2.auth_methods[0], json!({ "type": "agent", "id": "login", "name": "Log in" }));
@@ -455,7 +455,7 @@ async fn connect(agent: Arc<ScriptedAgent>) -> (Conn, Arc<Recorder>) {
     let recorder = Arc::new(Recorder::default());
     let dialect = Dialect::wrap(recorder.clone());
     let conn = Conn::new(Peer::connect_framed(ar, aw, dialect.clone(), Framing::Lines), dialect);
-    let n = conn.initialize(&json!({ "name": "OpenIDEA", "version": "0" })).await.unwrap();
+    let n = conn.initialize(&json!({ "name": "OXidea", "version": "0" })).await.unwrap();
     assert_eq!((n.generation, conn.generation()), (2, 2));
     (conn, recorder)
 }

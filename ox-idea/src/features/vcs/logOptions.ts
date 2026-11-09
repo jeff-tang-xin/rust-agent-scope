@@ -83,7 +83,7 @@ export const DEFAULT_LOG_OPTIONS: LogOptions = {
 /** Options that change which commits the backend returns (a reload is needed). */
 export const QUERY_OPTIONS: ReadonlyArray<keyof LogOptions> = ["sort", "firstParent", "noMerges"];
 
-const KEY = "openidea.vcs.logOptions";
+const KEY = "oxidea.vcs.logOptions";
 
 export function parseLogOptions(raw: unknown): LogOptions {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};

@@ -36,7 +36,7 @@ const b = (name: string, opts: Partial<Branch> = {}): Branch => ({
 });
 
 const remember = (repo: string, branches: string[]) =>
-  localStorage.setItem(`openidea.vcs.logBranches:${repo}`, JSON.stringify(branches));
+  localStorage.setItem(`oxidea.vcs.logBranches:${repo}`, JSON.stringify(branches));
 
 /** A project and its selected repository with the given branches. */
 function project(root: string, repo = root, branches: readonly Branch[] = [b("main", { current: true })]) {

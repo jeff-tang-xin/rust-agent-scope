@@ -316,7 +316,7 @@ async fn library_sources(snap: &DocSnap, pos: Pos, locs: Vec<Location>) -> Vec<L
     .unwrap_or_default()
 }
 
-const JAVA_IMPLEMENTATIONS: &str = "openidea.java.implementations";
+const JAVA_IMPLEMENTATIONS: &str = "oxidea.java.implementations";
 
 /// The answer of [`JAVA_IMPLEMENTATIONS`]: `complete` when the type is declared in the
 /// sources, so no dependency can implement it.
@@ -758,7 +758,7 @@ impl LspManager {
         }
         let mut params = json!({
             "processId": std::process::id(),
-            "clientInfo": { "name": "OpenIDEA", "version": env!("CARGO_PKG_VERSION") },
+            "clientInfo": { "name": "OXidea", "version": env!("CARGO_PKG_VERSION") },
             "locale": "en",
             "rootPath": server.root.to_string_lossy(),
             "rootUri": root_uri,
@@ -1281,7 +1281,7 @@ impl LspManager {
         Ok(results.into_iter().map(Result::unwrap_or_default).collect())
     }
 
-    /// jdtls: the implementations in the project's sources (`openidea.java.implementations`),
+    /// jdtls: the implementations in the project's sources (`oxidea.java.implementations`),
     /// and whether they are all there are. Its standard request builds the type hierarchy over
     /// every dependency jar too, which takes long in a project with many dependencies.
     async fn java_source_implementations(
@@ -1466,7 +1466,7 @@ impl LspManager {
         // Old/custom servers retain the standard protocol, including cancellation and scope widening.
         if targets.len() == 1
             && targets[0].server.name == "jdtls"
-            && targets[0].caps().commands().iter().any(|c| c == "openidea.java.usages")
+            && targets[0].caps().commands().iter().any(|c| c == "oxidea.java.usages")
         {
             let classified = async {
                 let t = &targets[0];
@@ -1500,7 +1500,7 @@ impl LspManager {
                         .call(
                             t,
                             "workspace/executeCommand",
-                            json!({ "command": "openidea.java.usages", "arguments": arguments }),
+                            json!({ "command": "oxidea.java.usages", "arguments": arguments }),
                             Some(cancel),
                             LONG_TIMEOUT,
                         )

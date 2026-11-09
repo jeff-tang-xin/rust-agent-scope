@@ -1,4 +1,4 @@
-//! The host side of the `openidea:plugin@1.0.0` world: bindings, resource
+//! The host side of the `oxidea:plugin@1.0.0` world: bindings, resource
 //! types and the implementation of every import. Capabilities are checked
 //! here; a missing one returns `error::denied` (the plugin can degrade).
 
@@ -20,13 +20,13 @@ pub(crate) mod bindings {
         path: "../../wit",
         imports: { default: trappable },
         with: {
-            "openidea:plugin/workspace.project": super::ProjectRes,
-            "openidea:plugin/editor.text-editor": super::EditorRes,
-            "openidea:plugin/invocation.invocation": super::InvocationRes,
-            "openidea:plugin/tasks.task": super::TaskRes,
-            "openidea:plugin/process.child": super::ChildRes,
-            "openidea:plugin/ipc.connection": super::ConnectionRes,
-            "openidea:plugin/auth.loopback": super::LoopbackRes,
+            "oxidea:plugin/workspace.project": super::ProjectRes,
+            "oxidea:plugin/editor.text-editor": super::EditorRes,
+            "oxidea:plugin/invocation.invocation": super::InvocationRes,
+            "oxidea:plugin/tasks.task": super::TaskRes,
+            "oxidea:plugin/process.child": super::ChildRes,
+            "oxidea:plugin/ipc.connection": super::ConnectionRes,
+            "oxidea:plugin/auth.loopback": super::LoopbackRes,
         },
     });
 }
@@ -38,32 +38,32 @@ pub(crate) mod syntax_bindings {
         path: "../../wit",
         imports: { default: trappable },
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/log": super::bindings::openidea::plugin::log,
-            "openidea:plugin/ui": super::bindings::openidea::plugin::ui,
-            "openidea:plugin/storage": super::bindings::openidea::plugin::storage,
-            "openidea:plugin/workspace": super::bindings::openidea::plugin::workspace,
-            "openidea:plugin/editor": super::bindings::openidea::plugin::editor,
-            "openidea:plugin/decorations": super::bindings::openidea::plugin::decorations,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
-            "openidea:plugin/vcs": super::bindings::openidea::plugin::vcs,
-            "openidea:plugin/commit": super::bindings::openidea::plugin::commit,
-            "openidea:plugin/events": super::bindings::openidea::plugin::events,
-            "openidea:plugin/tasks": super::bindings::openidea::plugin::tasks,
-            "openidea:plugin/diagnostics": super::bindings::openidea::plugin::diagnostics,
-            "openidea:plugin/net": super::bindings::openidea::plugin::net,
-            "openidea:plugin/secrets": super::bindings::openidea::plugin::secrets,
-            "openidea:plugin/run": super::bindings::openidea::plugin::run,
-            "openidea:plugin/process": super::bindings::openidea::plugin::process,
-            "openidea:plugin/output": super::bindings::openidea::plugin::output,
-            "openidea:plugin/auth": super::bindings::openidea::plugin::auth,
-            "openidea:plugin/command-runner": super::bindings::openidea::plugin::command_runner,
-            "openidea:plugin/ipc": super::bindings::openidea::plugin::ipc,
-            "openidea:plugin/fs": super::bindings::openidea::plugin::fs,
-            "openidea:plugin/views": super::bindings::openidea::plugin::views,
-            "openidea:plugin/settings": super::bindings::openidea::plugin::settings,
-            "openidea:plugin/database": super::bindings::openidea::plugin::database,
-            "openidea:plugin/mcp": super::bindings::openidea::plugin::mcp,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/log": super::bindings::oxidea::plugin::log,
+            "oxidea:plugin/ui": super::bindings::oxidea::plugin::ui,
+            "oxidea:plugin/storage": super::bindings::oxidea::plugin::storage,
+            "oxidea:plugin/workspace": super::bindings::oxidea::plugin::workspace,
+            "oxidea:plugin/editor": super::bindings::oxidea::plugin::editor,
+            "oxidea:plugin/decorations": super::bindings::oxidea::plugin::decorations,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
+            "oxidea:plugin/vcs": super::bindings::oxidea::plugin::vcs,
+            "oxidea:plugin/commit": super::bindings::oxidea::plugin::commit,
+            "oxidea:plugin/events": super::bindings::oxidea::plugin::events,
+            "oxidea:plugin/tasks": super::bindings::oxidea::plugin::tasks,
+            "oxidea:plugin/diagnostics": super::bindings::oxidea::plugin::diagnostics,
+            "oxidea:plugin/net": super::bindings::oxidea::plugin::net,
+            "oxidea:plugin/secrets": super::bindings::oxidea::plugin::secrets,
+            "oxidea:plugin/run": super::bindings::oxidea::plugin::run,
+            "oxidea:plugin/process": super::bindings::oxidea::plugin::process,
+            "oxidea:plugin/output": super::bindings::oxidea::plugin::output,
+            "oxidea:plugin/auth": super::bindings::oxidea::plugin::auth,
+            "oxidea:plugin/command-runner": super::bindings::oxidea::plugin::command_runner,
+            "oxidea:plugin/ipc": super::bindings::oxidea::plugin::ipc,
+            "oxidea:plugin/fs": super::bindings::oxidea::plugin::fs,
+            "oxidea:plugin/views": super::bindings::oxidea::plugin::views,
+            "oxidea:plugin/settings": super::bindings::oxidea::plugin::settings,
+            "oxidea:plugin/database": super::bindings::oxidea::plugin::database,
+            "oxidea:plugin/mcp": super::bindings::oxidea::plugin::mcp,
         },
     });
 }
@@ -75,32 +75,32 @@ pub(crate) mod providers_bindings {
         path: "../../wit",
         imports: { default: trappable },
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/log": super::bindings::openidea::plugin::log,
-            "openidea:plugin/ui": super::bindings::openidea::plugin::ui,
-            "openidea:plugin/storage": super::bindings::openidea::plugin::storage,
-            "openidea:plugin/workspace": super::bindings::openidea::plugin::workspace,
-            "openidea:plugin/editor": super::bindings::openidea::plugin::editor,
-            "openidea:plugin/decorations": super::bindings::openidea::plugin::decorations,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
-            "openidea:plugin/vcs": super::bindings::openidea::plugin::vcs,
-            "openidea:plugin/commit": super::bindings::openidea::plugin::commit,
-            "openidea:plugin/events": super::bindings::openidea::plugin::events,
-            "openidea:plugin/tasks": super::bindings::openidea::plugin::tasks,
-            "openidea:plugin/diagnostics": super::bindings::openidea::plugin::diagnostics,
-            "openidea:plugin/net": super::bindings::openidea::plugin::net,
-            "openidea:plugin/secrets": super::bindings::openidea::plugin::secrets,
-            "openidea:plugin/run": super::bindings::openidea::plugin::run,
-            "openidea:plugin/process": super::bindings::openidea::plugin::process,
-            "openidea:plugin/output": super::bindings::openidea::plugin::output,
-            "openidea:plugin/auth": super::bindings::openidea::plugin::auth,
-            "openidea:plugin/command-runner": super::bindings::openidea::plugin::command_runner,
-            "openidea:plugin/ipc": super::bindings::openidea::plugin::ipc,
-            "openidea:plugin/fs": super::bindings::openidea::plugin::fs,
-            "openidea:plugin/views": super::bindings::openidea::plugin::views,
-            "openidea:plugin/settings": super::bindings::openidea::plugin::settings,
-            "openidea:plugin/database": super::bindings::openidea::plugin::database,
-            "openidea:plugin/mcp": super::bindings::openidea::plugin::mcp,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/log": super::bindings::oxidea::plugin::log,
+            "oxidea:plugin/ui": super::bindings::oxidea::plugin::ui,
+            "oxidea:plugin/storage": super::bindings::oxidea::plugin::storage,
+            "oxidea:plugin/workspace": super::bindings::oxidea::plugin::workspace,
+            "oxidea:plugin/editor": super::bindings::oxidea::plugin::editor,
+            "oxidea:plugin/decorations": super::bindings::oxidea::plugin::decorations,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
+            "oxidea:plugin/vcs": super::bindings::oxidea::plugin::vcs,
+            "oxidea:plugin/commit": super::bindings::oxidea::plugin::commit,
+            "oxidea:plugin/events": super::bindings::oxidea::plugin::events,
+            "oxidea:plugin/tasks": super::bindings::oxidea::plugin::tasks,
+            "oxidea:plugin/diagnostics": super::bindings::oxidea::plugin::diagnostics,
+            "oxidea:plugin/net": super::bindings::oxidea::plugin::net,
+            "oxidea:plugin/secrets": super::bindings::oxidea::plugin::secrets,
+            "oxidea:plugin/run": super::bindings::oxidea::plugin::run,
+            "oxidea:plugin/process": super::bindings::oxidea::plugin::process,
+            "oxidea:plugin/output": super::bindings::oxidea::plugin::output,
+            "oxidea:plugin/auth": super::bindings::oxidea::plugin::auth,
+            "oxidea:plugin/command-runner": super::bindings::oxidea::plugin::command_runner,
+            "oxidea:plugin/ipc": super::bindings::oxidea::plugin::ipc,
+            "oxidea:plugin/fs": super::bindings::oxidea::plugin::fs,
+            "oxidea:plugin/views": super::bindings::oxidea::plugin::views,
+            "oxidea:plugin/settings": super::bindings::oxidea::plugin::settings,
+            "oxidea:plugin/database": super::bindings::oxidea::plugin::database,
+            "oxidea:plugin/mcp": super::bindings::oxidea::plugin::mcp,
         },
     });
 }
@@ -112,37 +112,37 @@ pub(crate) mod views_bindings {
         path: "../../wit",
         imports: { default: trappable },
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/log": super::bindings::openidea::plugin::log,
-            "openidea:plugin/ui": super::bindings::openidea::plugin::ui,
-            "openidea:plugin/storage": super::bindings::openidea::plugin::storage,
-            "openidea:plugin/workspace": super::bindings::openidea::plugin::workspace,
-            "openidea:plugin/editor": super::bindings::openidea::plugin::editor,
-            "openidea:plugin/decorations": super::bindings::openidea::plugin::decorations,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
-            "openidea:plugin/vcs": super::bindings::openidea::plugin::vcs,
-            "openidea:plugin/commit": super::bindings::openidea::plugin::commit,
-            "openidea:plugin/events": super::bindings::openidea::plugin::events,
-            "openidea:plugin/tasks": super::bindings::openidea::plugin::tasks,
-            "openidea:plugin/diagnostics": super::bindings::openidea::plugin::diagnostics,
-            "openidea:plugin/net": super::bindings::openidea::plugin::net,
-            "openidea:plugin/secrets": super::bindings::openidea::plugin::secrets,
-            "openidea:plugin/run": super::bindings::openidea::plugin::run,
-            "openidea:plugin/process": super::bindings::openidea::plugin::process,
-            "openidea:plugin/output": super::bindings::openidea::plugin::output,
-            "openidea:plugin/auth": super::bindings::openidea::plugin::auth,
-            "openidea:plugin/command-runner": super::bindings::openidea::plugin::command_runner,
-            "openidea:plugin/ipc": super::bindings::openidea::plugin::ipc,
-            "openidea:plugin/fs": super::bindings::openidea::plugin::fs,
-            "openidea:plugin/views": super::bindings::openidea::plugin::views,
-            "openidea:plugin/settings": super::bindings::openidea::plugin::settings,
-            "openidea:plugin/database": super::bindings::openidea::plugin::database,
-            "openidea:plugin/mcp": super::bindings::openidea::plugin::mcp,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/log": super::bindings::oxidea::plugin::log,
+            "oxidea:plugin/ui": super::bindings::oxidea::plugin::ui,
+            "oxidea:plugin/storage": super::bindings::oxidea::plugin::storage,
+            "oxidea:plugin/workspace": super::bindings::oxidea::plugin::workspace,
+            "oxidea:plugin/editor": super::bindings::oxidea::plugin::editor,
+            "oxidea:plugin/decorations": super::bindings::oxidea::plugin::decorations,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
+            "oxidea:plugin/vcs": super::bindings::oxidea::plugin::vcs,
+            "oxidea:plugin/commit": super::bindings::oxidea::plugin::commit,
+            "oxidea:plugin/events": super::bindings::oxidea::plugin::events,
+            "oxidea:plugin/tasks": super::bindings::oxidea::plugin::tasks,
+            "oxidea:plugin/diagnostics": super::bindings::oxidea::plugin::diagnostics,
+            "oxidea:plugin/net": super::bindings::oxidea::plugin::net,
+            "oxidea:plugin/secrets": super::bindings::oxidea::plugin::secrets,
+            "oxidea:plugin/run": super::bindings::oxidea::plugin::run,
+            "oxidea:plugin/process": super::bindings::oxidea::plugin::process,
+            "oxidea:plugin/output": super::bindings::oxidea::plugin::output,
+            "oxidea:plugin/auth": super::bindings::oxidea::plugin::auth,
+            "oxidea:plugin/command-runner": super::bindings::oxidea::plugin::command_runner,
+            "oxidea:plugin/ipc": super::bindings::oxidea::plugin::ipc,
+            "oxidea:plugin/fs": super::bindings::oxidea::plugin::fs,
+            "oxidea:plugin/views": super::bindings::oxidea::plugin::views,
+            "oxidea:plugin/settings": super::bindings::oxidea::plugin::settings,
+            "oxidea:plugin/database": super::bindings::oxidea::plugin::database,
+            "oxidea:plugin/mcp": super::bindings::oxidea::plugin::mcp,
         },
     });
 }
 
-use bindings::openidea::plugin::{
+use bindings::oxidea::plugin::{
     commit, detail_types, diagnostics, editor, events, fs, invocation, ipc, log, net, process, secrets, settings,
     storage, tasks, types as wit, ui, vcs, views, workspace,
 };
@@ -1089,7 +1089,7 @@ pub(crate) fn commit_draft_to_wit(d: crate::types::CommitDraft) -> commit::Commi
 impl events::Host for StoreData {
     fn subscribe(&mut self, kind: String) -> Fallible<()> {
         let Some(kind) = EventKind::parse(&kind) else {
-            return Ok(Err(wit::Error::Invalid(format!("no event kind {kind:?} in this OpenIDEA"))));
+            return Ok(Err(wit::Error::Invalid(format!("no event kind {kind:?} in this OXidea"))));
         };
         if matches!(
             kind,
@@ -1577,7 +1577,7 @@ impl settings::Host for StoreData {
     }
 }
 
-impl views_bindings::openidea::plugin::view_types::Host for StoreData {}
+impl views_bindings::oxidea::plugin::view_types::Host for StoreData {}
 
 fn file_kind(t: std::fs::FileType) -> workspace::FileKind {
     if t.is_file() {
@@ -1727,7 +1727,7 @@ const MAX_VIEW_MESSAGE: usize = 8 << 20;
 pub(crate) mod indexing_bindings {
     wasmtime::component::bindgen!({
         world: "indexing", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
@@ -1736,10 +1736,10 @@ pub(crate) mod details_bindings {
     wasmtime::component::bindgen!({
         world: "details", path: "../../wit",
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/workspace": super::bindings::openidea::plugin::workspace,
-            "openidea:plugin/editor": super::bindings::openidea::plugin::editor,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/workspace": super::bindings::oxidea::plugin::workspace,
+            "oxidea:plugin/editor": super::bindings::oxidea::plugin::editor,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
         },
     });
 }
@@ -1749,11 +1749,11 @@ pub(crate) mod commit_checks_bindings {
     wasmtime::component::bindgen!({
         world: "commit-checks", path: "../../wit",
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/workspace": super::bindings::openidea::plugin::workspace,
-            "openidea:plugin/editor": super::bindings::openidea::plugin::editor,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
-            "openidea:plugin/commit": super::bindings::openidea::plugin::commit,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/workspace": super::bindings::oxidea::plugin::workspace,
+            "oxidea:plugin/editor": super::bindings::oxidea::plugin::editor,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
+            "oxidea:plugin/commit": super::bindings::oxidea::plugin::commit,
         },
     });
 }
@@ -1761,21 +1761,21 @@ pub(crate) mod commit_checks_bindings {
 pub(crate) mod semantic_bindings {
     wasmtime::component::bindgen!({
         world: "semantic-tokens", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
 pub(crate) mod hover_bindings {
     wasmtime::component::bindgen!({
         world: "hover", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
 pub(crate) mod inlay_bindings {
     wasmtime::component::bindgen!({
         world: "inlay-hints", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
@@ -1783,10 +1783,10 @@ pub(crate) mod endpoints_bindings {
     wasmtime::component::bindgen!({
         world: "endpoints", path: "../../wit",
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/workspace": super::bindings::openidea::plugin::workspace,
-            "openidea:plugin/editor": super::bindings::openidea::plugin::editor,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/workspace": super::bindings::oxidea::plugin::workspace,
+            "oxidea:plugin/editor": super::bindings::oxidea::plugin::editor,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
         },
     });
 }
@@ -1795,7 +1795,7 @@ pub(crate) mod endpoints_bindings {
 pub(crate) mod file_actions_bindings {
     wasmtime::component::bindgen!({
         world: "file-actions-provider", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
@@ -1813,14 +1813,14 @@ fn validate_ui_path(path: &str) -> Result<(), wit::Error> {
     Ok(())
 }
 
-impl From<bindings::openidea::plugin::views::ContentAction> for crate::ContentAction {
-    fn from(v: bindings::openidea::plugin::views::ContentAction) -> Self {
+impl From<bindings::oxidea::plugin::views::ContentAction> for crate::ContentAction {
+    fn from(v: bindings::oxidea::plugin::views::ContentAction) -> Self {
         Self { id: v.id, label: v.label, icon: v.icon, primary: v.primary, save: v.save }
     }
 }
 
-impl From<bindings::openidea::plugin::views::ContentTab> for crate::ContentTab {
-    fn from(v: bindings::openidea::plugin::views::ContentTab) -> Self {
+impl From<bindings::oxidea::plugin::views::ContentTab> for crate::ContentTab {
+    fn from(v: bindings::oxidea::plugin::views::ContentTab) -> Self {
         Self {
             key: v.key,
             title: v.title,
@@ -1833,14 +1833,14 @@ impl From<bindings::openidea::plugin::views::ContentTab> for crate::ContentTab {
     }
 }
 
-impl From<bindings::openidea::plugin::views::ContentDiff> for crate::ContentDiff {
-    fn from(v: bindings::openidea::plugin::views::ContentDiff) -> Self {
+impl From<bindings::oxidea::plugin::views::ContentDiff> for crate::ContentDiff {
+    fn from(v: bindings::oxidea::plugin::views::ContentDiff) -> Self {
         Self { left: v.left, right: v.right, left_label: v.left_label, right_label: v.right_label, title: v.title }
     }
 }
 
-impl From<bindings::openidea::plugin::views::ContentTabReply> for crate::ContentTabReply {
-    fn from(v: bindings::openidea::plugin::views::ContentTabReply) -> Self {
+impl From<bindings::oxidea::plugin::views::ContentTabReply> for crate::ContentTabReply {
+    fn from(v: bindings::oxidea::plugin::views::ContentTabReply) -> Self {
         Self {
             content: v.content,
             saved: v.saved,
@@ -1852,11 +1852,11 @@ impl From<bindings::openidea::plugin::views::ContentTabReply> for crate::Content
     }
 }
 
-impl bindings::openidea::plugin::run_targets::Host for StoreData {
+impl bindings::oxidea::plugin::run_targets::Host for StoreData {
     fn register(
         &mut self,
         project: Resource<ProjectRes>,
-        target: bindings::openidea::plugin::run_targets::RunTarget,
+        target: bindings::oxidea::plugin::run_targets::RunTarget,
     ) -> Fallible<()> {
         if let Err(e) = self.require(Capability::Process(target.program.clone())) {
             return Ok(Err(e));
@@ -1885,7 +1885,7 @@ impl bindings::openidea::plugin::run_targets::Host for StoreData {
     }
 }
 
-impl bindings::openidea::plugin::run::Host for StoreData {
+impl bindings::oxidea::plugin::run::Host for StoreData {
     fn start(&mut self, config: String, args: Vec<String>, debug: bool) -> Fallible<String> {
         if let Err(e) = self.require_window() {
             return Ok(Err(e));
@@ -1911,7 +1911,7 @@ pub(crate) mod run_configurations_bindings {
 }
 pub(crate) mod test_results_bindings {
     wasmtime::component::bindgen!({ world: "test-results-provider", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
@@ -1934,8 +1934,8 @@ pub(crate) mod diagnostics_bindings {
     wasmtime::component::bindgen!({
         world: "editor-diagnostics", path: "../../wit",
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/diagnostics": super::bindings::openidea::plugin::diagnostics,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/diagnostics": super::bindings::oxidea::plugin::diagnostics,
         },
     });
 }
@@ -2014,7 +2014,7 @@ impl ipc::HostConnection for StoreData {
     }
 }
 
-impl bindings::openidea::plugin::command_runner::Host for StoreData {
+impl bindings::oxidea::plugin::command_runner::Host for StoreData {
     fn execute(&mut self, id: String, arg: Option<String>) -> Fallible<Option<String>> {
         if let Err(e) = self.require_window() {
             return Ok(Err(e));
@@ -2045,7 +2045,7 @@ impl Drop for LoopbackRes {
         self.host.close_loopback(self.id);
     }
 }
-impl bindings::openidea::plugin::auth::Host for StoreData {
+impl bindings::oxidea::plugin::auth::Host for StoreData {
     fn begin_loopback(&mut self, path: String) -> Fallible<Resource<LoopbackRes>> {
         if let Err(e) = self.require_window() {
             return Ok(Err(e));
@@ -2056,7 +2056,7 @@ impl bindings::openidea::plugin::auth::Host for StoreData {
         }
     }
 }
-impl bindings::openidea::plugin::auth::HostLoopback for StoreData {
+impl bindings::oxidea::plugin::auth::HostLoopback for StoreData {
     fn redirect_uri(&mut self, this: Resource<LoopbackRes>) -> wasmtime::Result<String> {
         Ok(self.table.get(&this)?.uri.clone())
     }
@@ -2078,7 +2078,7 @@ impl bindings::openidea::plugin::auth::HostLoopback for StoreData {
     }
 }
 
-impl bindings::openidea::plugin::output::Host for StoreData {
+impl bindings::oxidea::plugin::output::Host for StoreData {
     fn append(&mut self, channel: String, text: String) -> Fallible<()> {
         Ok(self.host.output_write(&channel, Some(&text)).map_err(to_wit))
     }
@@ -2113,12 +2113,12 @@ fn diagnostic_to_wit(d: ide_core::Diagnostic) -> diagnostics::Diagnostic {
         related: Vec::new(),
     }
 }
-impl bindings::openidea::plugin::decorations::Host for StoreData {
+impl bindings::oxidea::plugin::decorations::Host for StoreData {
     fn set(
         &mut self,
         path: String,
         set_id: String,
-        items: Vec<bindings::openidea::plugin::decorations::Decoration>,
+        items: Vec<bindings::oxidea::plugin::decorations::Decoration>,
     ) -> Fallible<()> {
         if let Err(e) = self.require(Capability::ProjectRead) {
             return Ok(Err(e));
@@ -2146,7 +2146,7 @@ impl bindings::openidea::plugin::decorations::Host for StoreData {
         &mut self,
         path: String,
         set_id: String,
-        item: bindings::openidea::plugin::decorations::FileDecoration,
+        item: bindings::oxidea::plugin::decorations::FileDecoration,
     ) -> Fallible<()> {
         if let Err(e) = self.require(Capability::ProjectRead) {
             return Ok(Err(e));
@@ -2174,20 +2174,20 @@ impl bindings::openidea::plugin::decorations::Host for StoreData {
 
 pub(crate) mod language_features_bindings {
     wasmtime::component::bindgen!({ world: "editor-language-features", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 pub(crate) mod injections_bindings {
     wasmtime::component::bindgen!({ world: "language-injections", path: "../../wit",
-        with: { "openidea:plugin/types": super::bindings::openidea::plugin::types },
+        with: { "oxidea:plugin/types": super::bindings::oxidea::plugin::types },
     });
 }
 
-impl bindings::openidea::plugin::database::Host for StoreData {
+impl bindings::oxidea::plugin::database::Host for StoreData {
     fn upsert_source(
         &mut self,
         project: Resource<ProjectRes>,
-        source: bindings::openidea::plugin::database::DataSource,
+        source: bindings::oxidea::plugin::database::DataSource,
     ) -> Fallible<()> {
         if let Err(e) = self.require(Capability::DatabaseSources) {
             return Ok(Err(e));
@@ -2254,7 +2254,7 @@ impl bindings::openidea::plugin::database::Host for StoreData {
         Ok(result.map_err(to_wit))
     }
 }
-impl bindings::openidea::plugin::mcp::Host for StoreData {
+impl bindings::oxidea::plugin::mcp::Host for StoreData {
     fn stdio_command(&mut self) -> wasmtime::Result<Option<Vec<String>>> {
         Ok(self.client().and_then(|client| self.host.mcp_stdio_command(client)))
     }
@@ -2263,8 +2263,8 @@ impl bindings::openidea::plugin::mcp::Host for StoreData {
 pub(crate) mod mcp_bindings {
     wasmtime::component::bindgen!({ world: "mcp-tools", path: "../../wit",
         with: {
-            "openidea:plugin/types": super::bindings::openidea::plugin::types,
-            "openidea:plugin/invocation": super::bindings::openidea::plugin::invocation,
+            "oxidea:plugin/types": super::bindings::oxidea::plugin::types,
+            "oxidea:plugin/invocation": super::bindings::oxidea::plugin::invocation,
         },
     });
 }

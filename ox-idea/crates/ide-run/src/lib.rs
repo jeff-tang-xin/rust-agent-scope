@@ -41,7 +41,7 @@ pub struct RunConfig {
     pub args: Vec<String>,
     pub cwd: Option<ide_core::IpcPath>,
     pub env: BTreeMap<String, String>,
-    /// Detected configs are regenerated; user configs persist in `.openidea/run.toml`.
+    /// Detected configs are regenerated; user configs persist in `.oxidea/run.toml`.
     pub detected: bool,
     /// Test runner configs render results in the test tree.
     pub is_test: bool,
@@ -123,7 +123,7 @@ pub struct RunExtras {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[specta(optional)]
     pub folder: Option<String>,
-    /// Stored in the workspace (`.openidea/run.local.toml`, not shared) instead of `run.toml`.
+    /// Stored in the workspace (`.oxidea/run.local.toml`, not shared) instead of `run.toml`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[specta(optional)]
     pub local: bool,
@@ -257,12 +257,12 @@ pub fn detect_with_profiles(
     detect::detect_with_profiles(root, excluded_poms, profiles)
 }
 
-/// Reads `<root>/.openidea/run.toml`; a missing file yields no configs.
+/// Reads `<root>/.oxidea/run.toml`; a missing file yields no configs.
 pub fn load_user_configs(root: &Path) -> IdeResult<Vec<RunConfig>> {
     config::load(root)
 }
 
-/// Writes `<root>/.openidea/run.toml` (and the workspace-local `run.local.toml` for
+/// Writes `<root>/.oxidea/run.toml` (and the workspace-local `run.local.toml` for
 /// configurations not stored as project files), preserving unrelated content.
 pub fn save_user_configs(root: &Path, configs: &[RunConfig]) -> IdeResult<()> {
     config::save(root, configs, &[])

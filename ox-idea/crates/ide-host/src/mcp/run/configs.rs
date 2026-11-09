@@ -108,7 +108,7 @@ Only pass those override parameters when this flag is `true` for the selected co
 With `filePath`, this tool discovers executable entry points (run points) in that file, such as test methods,
 main methods, or other executable entry points where the IDE shows a Run gutter icon. The result contains `filePath` and
 `runPoints`; use the returned line numbers with `execute_run_configuration` to run from code.
-In OpenIDEA the configurations are the saved ones and those detected from the build files (package.json scripts, \
+In OXidea the configurations are the saved ones and those detected from the build files (package.json scripts, \
 Cargo targets, Gradle/Maven tasks, Go, Python, Makefile…); `description` is the configuration type and `commandLine` \
 the whole command. Run points are found in Rust, JavaScript/TypeScript, Python and Go files.",
         |call| async move {
@@ -530,7 +530,7 @@ Behavior:
 - `fullOutputPath` points to a temp file with the full raw output and may continue growing while the process is alive.
 
 Returns the execution result including current output snapshot, optional exit code, and optional `fullOutputPath`.
-In OpenIDEA the user is asked first for every call; `programArguments` replace the configuration's \
+In OXidea the user is asked first for every call; `programArguments` replace the configuration's \
 arguments (appended to a command that is one shell line, such as `npm run dev`); the run does not appear in the Run \
 tool window; output files are private and deleted after a day.",
         |call| async move {

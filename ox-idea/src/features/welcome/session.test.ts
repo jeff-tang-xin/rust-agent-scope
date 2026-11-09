@@ -37,7 +37,7 @@ beforeEach(() => {
   connectRemote.mockReset();
   useProject.setState({ project: null, lightEdit: false });
   sessionStorage.clear();
-  localStorage.setItem("openidea.session.openProject", "/p/last");
+  localStorage.setItem("oxidea.session.openProject", "/p/last");
   _resetSessionForTests();
 });
 
@@ -63,7 +63,7 @@ describe("reopenLastProject", () => {
   it.each(["last session", "window session"])(
     "keeps launched loose files instead of restoring the %s project",
     async (remembered) => {
-      if (remembered === "window session") sessionStorage.setItem("openidea.window.project", "/p/window");
+      if (remembered === "window session") sessionStorage.setItem("oxidea.window.project", "/p/window");
       provideStartupLaunch(
         Promise.resolve().then(() => {
           useProject.setState({ lightEdit: true });
@@ -83,7 +83,7 @@ describe("reopenLastProject", () => {
   });
 
   it("restores a session saved as a WSL UNC folder through the distro", async () => {
-    localStorage.setItem("openidea.session.openProject", UNC);
+    localStorage.setItem("oxidea.session.openProject", UNC);
     provideStartupLaunch(Promise.resolve());
     await reopenLastProject();
     expect(connectRemote).toHaveBeenCalledWith({ kind: "wsl", distro: "Ubuntu" }, "/home/me/app");
@@ -104,7 +104,7 @@ describe("reopenLastProject", () => {
     provideStartupLaunch(Promise.resolve());
     const promise = reopenLastProject();
     await new Promise((r) => setTimeout(r, 0));
-    expect(localStorage.getItem("openidea.session.openProject")).toBeNull();
+    expect(localStorage.getItem("oxidea.session.openProject")).toBeNull();
     expect(useSession.getState().reopening).toBe("/p/last");
 
     cancelReopen();
@@ -112,7 +112,7 @@ describe("reopenLastProject", () => {
     resolveOpen();
     await promise;
     expect(closeProject).toHaveBeenCalledOnce();
-    expect(localStorage.getItem("openidea.session.openProject")).toBeNull();
+    expect(localStorage.getItem("oxidea.session.openProject")).toBeNull();
   });
 
   it("keeps a project the user opened after cancelling", async () => {

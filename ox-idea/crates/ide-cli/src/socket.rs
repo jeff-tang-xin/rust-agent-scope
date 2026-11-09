@@ -25,12 +25,12 @@ pub fn socket_path(identifier: &str) -> Option<PathBuf> {
     if cfg!(windows) {
         let user = dirs::data_local_dir()?;
         return Some(PathBuf::from(format!(
-            r"\\.\pipe\openidea-{:016x}",
+            r"\\.\pipe\oxidea-{:016x}",
             fnv1a(&format!("{}:{identifier}", user.display()))
         )));
     }
     let dir = if cfg!(target_os = "macos") { dirs::cache_dir() } else { dirs::runtime_dir().or_else(dirs::cache_dir) };
-    Some(dir?.join(format!("openidea-{:016x}.sock", fnv1a(identifier))))
+    Some(dir?.join(format!("oxidea-{:016x}.sock", fnv1a(identifier))))
 }
 
 fn fnv1a(s: &str) -> u64 {
@@ -201,8 +201,8 @@ mod tests {
 
     #[test]
     fn socket_names_separate_identifiers_and_stay_short() {
-        let release = socket_path("ai.l0ng.openidea").unwrap();
-        let dev = socket_path("ai.l0ng.openidea.dev.w158e9c5954b7bf64").unwrap();
+        let release = socket_path("ai.l0ng.oxidea").unwrap();
+        let dev = socket_path("ai.l0ng.oxidea.dev.w158e9c5954b7bf64").unwrap();
         assert_ne!(release, dev);
         assert!(dev.as_os_str().len() < 100 || cfg!(unix));
     }

@@ -30,7 +30,7 @@ describe("Column Selection Mode", () => {
     expect(isColumnMode(v.state)).toBe(false);
     toggleColumnMode(v);
     expect(isColumnMode(v.state)).toBe(true);
-    expect(v.dom.classList.contains("cm-openidea-columnMode")).toBe(true);
+    expect(v.dom.classList.contains("cm-oxidea-columnMode")).toBe(true);
     toggleColumnMode(v);
     expect(isColumnMode(v.state)).toBe(false);
   });

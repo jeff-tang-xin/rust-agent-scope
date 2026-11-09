@@ -33,7 +33,7 @@ fn saves_moves_and_forgets_in_the_os_store() {
     #[cfg(windows)]
     {
         let index: serde_json::Value = serde_json::from_str(&on_disk).unwrap();
-        let service = format!("ai.l0ng.openidea/{}", index["id"].as_str().unwrap());
+        let service = format!("ai.l0ng.oxidea/{}", index["id"].as_str().unwrap());
         let listed = std::process::Command::new("cmdkey").arg("/list").output().unwrap();
         let listed = String::from_utf8_lossy(&listed.stdout);
         assert_eq!(listed.matches(service.as_str()).count(), 2, "{listed}");

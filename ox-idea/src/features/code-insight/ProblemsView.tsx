@@ -62,7 +62,7 @@ export const useProblemsView = create<ViewState>((set) => ({
 // View options (persisted), in the tool window's ⋮ menu. IDEA's defaults:
 // no autoscroll, no preview, sorted by severity.
 
-const OPTIONS_KEY = "openidea.problems.view.v1";
+const OPTIONS_KEY = "oxidea.problems.view.v1";
 
 interface ProblemsOptions extends ProblemOrder {
   /** Selecting a problem opens it in the editor. */

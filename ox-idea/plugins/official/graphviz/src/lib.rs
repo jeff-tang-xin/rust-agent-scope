@@ -1,11 +1,11 @@
-//! Graphviz for OpenIDEA: `.dot` / `.gv` files open in the text editor with a
+//! Graphviz for OXidea: `.dot` / `.gv` files open in the text editor with a
 //! live preview beside them. The preview is a web page (`web-src/`: viz.js,
 //! Graphviz compiled to WebAssembly) that renders the document as it changes;
 //! what Graphviz reports it sends here, and the plugin publishes it as the
 //! file's problems, on the line Graphviz names.
 
-use openidea_plugin::views::{View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Diagnostic, Error, Invocation, Plugin, Position, Range, Severity, host, register_plugin};
+use oxidea_plugin::views::{View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Diagnostic, Error, Invocation, Plugin, Position, Range, Severity, host, register_plugin};
 use serde_json::Value;
 
 pub const VIEW: &str = "preview";
@@ -99,7 +99,7 @@ register_plugin!(Graphviz, views);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     #[test]
     fn reports_become_problems_on_their_line() {

@@ -14,7 +14,7 @@ import { flatFileNodes, toLogChanges, type LogChange } from "./logChanges";
 import { KIND_COLOR, dirName, fileCount } from "./model";
 import styles from "./common.module.css";
 
-const GROUP_KEY = "openidea.vcs.push.groupByDirectory";
+const GROUP_KEY = "oxidea.vcs.push.groupByDirectory";
 
 function readGroupByDirectory(): boolean {
   try {

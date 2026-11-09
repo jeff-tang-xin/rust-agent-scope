@@ -45,7 +45,7 @@ const located = (path: string[]): TestEvent => ({
 });
 
 /** Starts a record of the IDE's own Minitest reporter (`ide-run/src/ruby_reporter`); a JSON object follows. */
-export const RECORD_MARK = "@@OPENIDEA@@";
+export const RECORD_MARK = "@@OXIDEA@@";
 
 interface ReporterRecord {
   t: "start" | "result" | "summary";

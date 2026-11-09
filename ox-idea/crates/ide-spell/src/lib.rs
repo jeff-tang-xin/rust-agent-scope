@@ -695,8 +695,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let dic = dir.join("team.dic");
         std::fs::write(&dic, "2\nfrobnicate/S\nQuuxify\n").unwrap();
-        let s = Speller::new(["Openidea"], std::slice::from_ref(&dic));
-        assert!(s.is_correct("openidea"));
+        let s = Speller::new(["Oxidea"], std::slice::from_ref(&dic));
+        assert!(s.is_correct("oxidea"));
         assert!(s.is_correct("frobnicate"));
         assert!(s.is_correct("quuxify"));
         assert!(!s.is_correct("zorblax"));

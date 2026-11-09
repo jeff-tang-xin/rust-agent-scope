@@ -229,7 +229,7 @@ mod tests {
             Ok(d)
         })))
         .unwrap();
-        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
                    [[contributes.badges]]\ntext = \"hi\"";
         let pkg = Package::new(Manifest::parse(src).unwrap(), PathBuf::from("/x"));
         let rev = store.revision();

@@ -326,7 +326,7 @@ pub(crate) fn interactive_rebase(
         return Err(IdeError::invalid("the first commit cannot be squashed or fixed up into a previous one"));
     }
 
-    let work = r.git_dir.join("openidea-rebase");
+    let work = r.git_dir.join("oxidea-rebase");
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
     let quote = |p: &std::path::Path| format!("'{}'", p.to_string_lossy().replace('\\', "/").replace('\'', "'\\''"));
@@ -380,7 +380,7 @@ pub(crate) fn finish_operation(r: &Repo) -> IdeResult<()> {
     if r.branch_info()?.operation.is_some() {
         return Ok(());
     }
-    let _ = std::fs::remove_dir_all(r.git_dir.join("openidea-rebase"));
+    let _ = std::fs::remove_dir_all(r.git_dir.join("oxidea-rebase"));
     crate::preserve::restore(r)
 }
 

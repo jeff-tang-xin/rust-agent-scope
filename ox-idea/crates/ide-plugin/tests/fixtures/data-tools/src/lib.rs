@@ -1,4 +1,4 @@
-use openidea_plugin::{Error, Invocation, McpProvider, Plugin, PluginDataSource, host, register_plugin};
+use oxidea_plugin::{Error, Invocation, McpProvider, Plugin, PluginDataSource, host, register_plugin};
 #[derive(Default)]
 struct DataTools;
 impl Plugin for DataTools {

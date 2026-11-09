@@ -1,5 +1,5 @@
 [package]
-name = "openidea-test-inlay-hints"
+name = "oxidea-test-inlay-hints"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-openidea-plugin = { path = "../../../../../sdk/rust/openidea-plugin" }
+oxidea-plugin = { path = "../../../../../sdk/rust/oxidea-plugin" }
 
 [profile.release]
 opt-level = "s"

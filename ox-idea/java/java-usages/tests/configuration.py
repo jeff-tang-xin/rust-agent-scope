@@ -15,8 +15,8 @@ import time
 import zipfile
 
 home = pathlib.Path(sys.argv[1]).resolve()
-bundle = pathlib.Path(__file__).resolve().parents[1] / 'openidea-java-usages.jar'
-work = pathlib.Path(tempfile.mkdtemp(prefix='openidea-configuration-'))
+bundle = pathlib.Path(__file__).resolve().parents[1] / 'oxidea-java-usages.jar'
+work = pathlib.Path(tempfile.mkdtemp(prefix='oxidea-configuration-'))
 project = work / 'project'
 source_dir = project / 'src'
 source_dir.mkdir(parents=True)
@@ -72,7 +72,7 @@ class Consumers {
 class Fake { String getProperty(String name) { return name; } }
 '''
 file = write('demo/Settings.java', source)
-if os.environ.get('OPENIDEA_CONFIGURATION_STRESS') == '1':
+if os.environ.get('OXIDEA_CONFIGURATION_STRESS') == '1':
     for i in range(3000):
         write(f'noise/Plain{i}.java', f'package noise; class Plain{i} {{ int number; }}')
     for i in range(100):
@@ -104,7 +104,7 @@ sourcejar = work / 'library-sources.jar'
 with zipfile.ZipFile(sourcejar, 'w') as z:
     z.write(libsource, 'vendor/LibrarySettings.java')
 (project / '.project').write_text('<projectDescription><name>configuration</name><buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name></buildCommand></buildSpec><natures><nature>org.eclipse.jdt.core.javanature</nature></natures></projectDescription>')
-spring_jar = os.environ.get('OPENIDEA_SPRING_BOOT_JAR')
+spring_jar = os.environ.get('OXIDEA_SPRING_BOOT_JAR')
 extra_classpath = f'<classpathentry kind="lib" path="{pathlib.Path(spring_jar).resolve()}"/>' if spring_jar else ''
 (project / '.classpath').write_text(f'<classpath><classpathentry kind="src" path="src"/><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/><classpathentry kind="lib" path="{library}" sourcepath="{sourcejar}"/>{extra_classpath}<classpathentry kind="output" path="bin"/></classpath>')
 config = work / 'config'
@@ -150,7 +150,7 @@ def request(method, params):
             return msg.get('result')
     raise TimeoutError(method)
 def query(key, uri=None, line=0, col=0):
-    return request('workspace/executeCommand', {'command': 'openidea.java.configuration', 'arguments': [uri or (project / 'application.yml').as_uri(), key, line, col, key is None, False]})
+    return request('workspace/executeCommand', {'command': 'oxidea.java.configuration', 'arguments': [uri or (project / 'application.yml').as_uri(), key, line, col, key is None, False]})
 def names(result):
     return {p['name'] for p in result['keys']}
 try:
@@ -158,9 +158,9 @@ try:
     send({'jsonrpc': '2.0', 'method': 'initialized', 'params': {}})
     send({'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': file.as_uri(), 'languageId': 'java', 'version': 1, 'text': source}}})
     request('java/buildWorkspace', True)
-    assert 'openidea.java.configuration' in init['capabilities']['executeCommandProvider']['commands'], init
+    assert 'oxidea.java.configuration' in init['capabilities']['executeCommandProvider']['commands'], init
     def warmup(action='start'):
-        return request('workspace/executeCommand', {'command': 'openidea.java.configuration.warmup', 'arguments': [action, [(project / 'application.yml').as_uri()]]})
+        return request('workspace/executeCommand', {'command': 'oxidea.java.configuration.warmup', 'arguments': [action, [(project / 'application.yml').as_uri()]]})
     # Queuing is cheap and idempotent; the index is built by a background job.
     queued_at = time.perf_counter()
     queued = warmup()
@@ -202,7 +202,7 @@ try:
     assert query('newer.url')['locations']
     assert not query('extra.url')['locations']
     # Property references include member usages and consumers, without declarations.
-    references = request('workspace/executeCommand', {'command': 'openidea.java.configuration',
+    references = request('workspace/executeCommand', {'command': 'oxidea.java.configuration',
         'arguments': [(project / 'application.yml').as_uri(), 'app.time-out', 0, 0, True, False]})
     assert references['locations'], references
     assert any(loc['range']['start']['line'] == next(i for i, line in enumerate(source.splitlines()) if 'getProperty(KEY)' in line) for loc in references['locations']), references
@@ -265,7 +265,7 @@ try:
     assert restored['locations'], restored
     cancelled = warmup('cancel')
     assert not cancelled['scheduled'] and cancelled['pending'] == 0, cancelled
-    evidence = {'stress': os.environ.get('OPENIDEA_CONFIGURATION_STRESS') == '1', 'prewarmSeconds': prewarm_seconds, 'editRebuildMs': edit_ms, 'cases': results, 'warmMedianMs': sorted(warm)[len(warm)//2] * 1000, 'warmMaxMs': max(warm) * 1000, 'generations': [generation, after_save, after_close]}
+    evidence = {'stress': os.environ.get('OXIDEA_CONFIGURATION_STRESS') == '1', 'prewarmSeconds': prewarm_seconds, 'editRebuildMs': edit_ms, 'cases': results, 'warmMedianMs': sorted(warm)[len(warm)//2] * 1000, 'warmMaxMs': max(warm) * 1000, 'generations': [generation, after_save, after_close]}
     (work / 'evidence.json').write_text(json.dumps(evidence, indent=2))
     print(json.dumps(evidence, indent=2))
 finally:

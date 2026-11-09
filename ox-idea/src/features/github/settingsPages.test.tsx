@@ -5,7 +5,7 @@ import { activateSettingsPages } from "./settingsPages";
 import { GithubSettingsPage } from "./diff/GithubSettingsPage";
 import { setReviewDiffSettings, useReviewDiffSettings } from "./diff/settings";
 
-const KEY = "openidea.github.reviewDiff.v1";
+const KEY = "oxidea.github.reviewDiff.v1";
 
 beforeEach(() => {
   localStorage.removeItem(KEY);

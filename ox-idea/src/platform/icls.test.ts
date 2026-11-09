@@ -242,7 +242,7 @@ describe(".icls schemes", () => {
     const xml = `<scheme name="Python identifiers"><attributes>${names
       .map(
         ([id, value]) =>
-          `<option name="OPENIDEA_${id}"><value><option name="FOREGROUND" value="${value}"/></value></option>`,
+          `<option name="OXIDEA_${id}"><value><option name="FOREGROUND" value="${value}"/></value></option>`,
       )
       .join("")}</attributes></scheme>`;
     const { id, customs } = importScheme({}, parseIcls(xml).scheme);

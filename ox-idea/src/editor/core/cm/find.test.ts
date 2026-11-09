@@ -66,8 +66,8 @@ describe("find backgrounds", () => {
       ],
       selection: EditorSelection.single(1, 6),
     });
-    expect(view.contentDOM.querySelector(".token .cm-openidea-findMatch")?.textContent).toBe("Session");
-    expect(view.contentDOM.querySelector(".cm-openidea-findMatch .cm-openidea-selected")?.textContent).toBe("essio");
+    expect(view.contentDOM.querySelector(".token .cm-oxidea-findMatch")?.textContent).toBe("Session");
+    expect(view.contentDOM.querySelector(".cm-oxidea-findMatch .cm-oxidea-selected")?.textContent).toBe("essio");
   });
 });
 

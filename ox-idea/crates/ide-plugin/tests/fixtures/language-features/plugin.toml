@@ -1,7 +1,7 @@
 id = "test.language-features"
 name = "Language features fixture"
 version = "0.1.0"
-engines.openidea = "^1.4"
+engines.oxidea = "^1.4"
 wasm = "dist/plugin.wasm"
 
 [[contributes.providers]]

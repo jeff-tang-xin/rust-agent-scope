@@ -1,7 +1,7 @@
 /**
  * Native menu ↔ action system.
  *
- * The backend emits `openidea://menu` `{ action, arg }` to the focused window when
+ * The backend emits `oxidea://menu` `{ action, arg }` to the focused window when
  * an IDE menu item is clicked; we run `executeAction(action, arg)`. In the
  * other direction we push localised labels (`menu.*` catalog keys) and the
  * native accelerator of every keymap binding, which the macOS menu shows as a key
@@ -27,7 +27,7 @@ import { statusWidgetRows } from "@/workbench/statusBarWidgets";
 import { useToolWindowLayouts } from "@/workbench/toolwindows/layouts";
 import { hostOs, type HostOs } from "./host";
 
-export const MENU_EVENT = "openidea://menu";
+export const MENU_EVENT = "oxidea://menu";
 
 export interface MenuRoute {
   action: string;

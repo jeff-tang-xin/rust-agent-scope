@@ -1,7 +1,7 @@
 /**
  * Backend smoke tests (`pnpm smoke`): the frontend's own modules driving a real
- * `openidea-server` and real toolchains. Not part of `pnpm test`: they need the server
- * built (`cargo build -p ide-host --bin openidea-server`) and each language's tools.
+ * `oxidea-server` and real toolchains. Not part of `pnpm test`: they need the server
+ * built (`cargo build -p ide-host --bin oxidea-server`) and each language's tools.
  */
 import { defineConfig, mergeConfig } from "vitest/config";
 import viteConfig from "../vite.config.ts";

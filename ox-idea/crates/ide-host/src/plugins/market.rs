@@ -4,7 +4,7 @@
 //! (`market-index.json`), checks signatures against it, and disables what it
 //! revokes — at start-up and on every refresh (the desktop refreshes daily).
 //! Release builds pin the official publisher to the keys they were built
-//! with, so no index can sign `openidea.*` plugins with another key.
+//! with, so no index can sign `oxidea.*` plugins with another key.
 
 use super::icons::{MAX_PLUGIN_ICON, sanitize_svg};
 use super::{PackageFile, PluginEvent, PluginHost, PluginSource, PluginStatus, PluginUpdate, install};
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub const OFFICIAL_INDEX: &str = "https://github.com/jeff-tang-xin/rust-agent-scope/releases/latest/download/plugins-index.json";
 
 /// The publisher of the official plugins.
-pub const OFFICIAL_PUBLISHER: &str = "openidea";
+pub const OFFICIAL_PUBLISHER: &str = "oxidea";
 
 /// The last index read, in the plugins directory.
 pub const INDEX_FILE: &str = "market-index.json";
@@ -56,15 +56,15 @@ impl MarketPlugin {
 }
 
 /// The official publisher's keys this IDE was built with
-/// (`OPENIDEA_OFFICIAL_PLUGIN_KEYS`: base64, comma-separated). Development
+/// (`OXIDEA_OFFICIAL_PLUGIN_KEYS`: base64, comma-separated). Development
 /// builds have none: the index decides.
 pub(super) fn built_in_official_keys() -> Vec<String> {
-    let keys = option_env!("OPENIDEA_OFFICIAL_PLUGIN_KEYS").unwrap_or_default();
+    let keys = option_env!("OXIDEA_OFFICIAL_PLUGIN_KEYS").unwrap_or_default();
     keys.split(',').map(str::trim).filter(|k| !k.is_empty()).map(str::to_owned).collect()
 }
 
 fn pinned(mut index: Index, official_keys: &[String]) -> Index {
-    index.pin_publisher(OFFICIAL_PUBLISHER, "OpenIDEA", official_keys);
+    index.pin_publisher(OFFICIAL_PUBLISHER, "OXidea", official_keys);
     index
 }
 
@@ -204,7 +204,7 @@ impl PluginHost {
         self.apply_revocations();
         if let Some(format) = newer {
             return Err(IdeError::unavailable(format!(
-                "the marketplace needs a newer OpenIDEA (index format {format}); its revocations still apply"
+                "the marketplace needs a newer OXidea (index format {format}); its revocations still apply"
             )));
         }
         let plugins = self.market_plugins();
@@ -272,7 +272,7 @@ impl PluginHost {
             .ok_or_else(|| IdeError::not_found(format!("{id} is not in the marketplace")))?;
         if !compatible {
             return Err(IdeError::unavailable(format!(
-                "{} {} needs plugin API {}: update OpenIDEA",
+                "{} {} needs plugin API {}: update OXidea",
                 entry.name, entry.version, entry.engine
             )));
         }

@@ -47,7 +47,7 @@ useGhRepository.subscribe((s, prev) => {
 
 // ---------------------------------------------------------------------------
 
-const GROUPING_KEY = "openidea.github.changesGrouping.v1";
+const GROUPING_KEY = "oxidea.github.changesGrouping.v1";
 
 function loadGrouping(): boolean {
   try {

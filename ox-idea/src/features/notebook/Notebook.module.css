@@ -121,7 +121,7 @@
 .rawCell pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: var(--openidea-editor-font-size, var(--fs-code)) / var(--openidea-editor-line-height, var(--lh-code, 1.5))
+  font: var(--oxidea-editor-font-size, var(--fs-code)) / var(--oxidea-editor-line-height, var(--lh-code, 1.5))
     var(--font-mono);
   margin: 0;
   user-select: text;

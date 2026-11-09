@@ -1,5 +1,5 @@
 //! Docker and Compose run targets against a real daemon. Ignored by default:
-//! `OPENIDEA_DOCKER_TEST_DIR` names an empty folder the daemon can bind-mount
+//! `OXIDEA_DOCKER_TEST_DIR` names an empty folder the daemon can bind-mount
 //! (on this machine, or at the same path in a VM such as OrbStack's), and
 //! `docker` with the Compose plugin must be on `PATH`.
 #![cfg(unix)]
@@ -81,9 +81,9 @@ fn containers(label: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a Docker daemon and OPENIDEA_DOCKER_TEST_DIR"]
+#[ignore = "requires a Docker daemon and OXIDEA_DOCKER_TEST_DIR"]
 async fn runs_in_docker_and_compose_containers() {
-    let root = PathBuf::from(std::env::var("OPENIDEA_DOCKER_TEST_DIR").expect("OPENIDEA_DOCKER_TEST_DIR"));
+    let root = PathBuf::from(std::env::var("OXIDEA_DOCKER_TEST_DIR").expect("OXIDEA_DOCKER_TEST_DIR"));
     let root = dunce::canonicalize(root).unwrap();
     let name = root.file_name().unwrap().to_string_lossy().into_owned();
     std::fs::write(
@@ -127,7 +127,7 @@ async fn runs_in_docker_and_compose_containers() {
         assert_eq!((file.uid(), file.gid()), (folder.uid(), folder.gid()), "written as the folder's owner");
     }
     std::fs::remove_file(&written).unwrap();
-    assert_eq!(containers("label=openidea.run=docker-main"), "", "removed when the run ends");
+    assert_eq!(containers("label=oxidea.run=docker-main"), "", "removed when the run ends");
 
     let (_, out) = start(&host, config("compose-main", "app", &root, &["main.py"])).await;
     let out = finished(&out, 120).await;
@@ -144,17 +144,17 @@ async fn runs_in_docker_and_compose_containers() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_ne!(containers("label=openidea.run=sleep"), "", "{}", out.lock());
+    assert_ne!(containers("label=oxidea.run=sleep"), "", "{}", out.lock());
     ops::run::stop(&host, "main", id).unwrap();
     let out = finished(&out, 30).await;
-    assert!(out.contains(" stop openidea-sleep-"), "{out}");
+    assert!(out.contains(" stop oxidea-sleep-"), "{out}");
     for _ in 0..100 {
-        if containers("label=openidea.run=sleep").is_empty() {
+        if containers("label=oxidea.run=sleep").is_empty() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(containers("label=openidea.run=sleep"), "", "{out}");
+    assert_eq!(containers("label=oxidea.run=sleep"), "", "{out}");
     Command::new("docker").args(["compose", "down"]).current_dir(&root).status().unwrap();
 }
 
@@ -212,9 +212,9 @@ impl Dap {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a Docker daemon, OPENIDEA_DOCKER_TEST_DIR, and pip to fetch debugpy"]
+#[ignore = "requires a Docker daemon, OXIDEA_DOCKER_TEST_DIR, and pip to fetch debugpy"]
 async fn debugs_python_in_a_container() {
-    let root = PathBuf::from(std::env::var("OPENIDEA_DOCKER_TEST_DIR").expect("OPENIDEA_DOCKER_TEST_DIR"));
+    let root = PathBuf::from(std::env::var("OXIDEA_DOCKER_TEST_DIR").expect("OXIDEA_DOCKER_TEST_DIR"));
     // A project of its own: the other test may run at the same time.
     let root = dunce::canonicalize(root).unwrap().join("debug");
     std::fs::create_dir_all(&root).unwrap();
@@ -264,7 +264,7 @@ async fn debugs_python_in_a_container() {
     let ready = ready.unwrap_or_else(|| panic!("{}", out.lock()));
     let (port, folder) = ready.split_once(", project folder ").unwrap();
     assert_eq!(folder, format!("/workspaces/{name}"));
-    let address = format!("{}:{port}", std::env::var("OPENIDEA_DOCKER_TEST_HOST").unwrap_or("127.0.0.1".into()));
+    let address = format!("{}:{port}", std::env::var("OXIDEA_DOCKER_TEST_HOST").unwrap_or("127.0.0.1".into()));
 
     // Attach with the project mapped, stop at a breakpoint set on the local file, continue.
     let local = main.to_string_lossy().into_owned();
@@ -301,6 +301,6 @@ async fn debugs_python_in_a_container() {
     assert_eq!(stopped_at.2, 3);
     let out = finished(&out, 60).await;
     assert!(out.contains("value=hello") && out.contains("exit code 0"), "{out}");
-    assert_eq!(containers("label=openidea.run=debug-main"), "", "removed when the run ends");
+    assert_eq!(containers("label=oxidea.run=debug-main"), "", "removed when the run ends");
     std::fs::remove_dir_all(&root).unwrap();
 }

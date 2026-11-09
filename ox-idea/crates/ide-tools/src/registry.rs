@@ -716,9 +716,9 @@ pub static TOOLS: &[ToolSpec] = &[
         // Return to Maven Central once an official release includes all of these fixes.
         // Source commit, build instructions and checksum: java/lombok/README.md.
         method: Method::Bundled {
-            filename: "lombok-1.18.48-openidea.3.jar",
-            version: "1.18.48-openidea.3",
-            bytes: include_bytes!("../../../java/lombok/lombok-1.18.48-openidea.3.jar"),
+            filename: "lombok-1.18.48-oxidea.3.jar",
+            version: "1.18.48-oxidea.3",
+            bytes: include_bytes!("../../../java/lombok/lombok-1.18.48-oxidea.3.jar"),
         },
         fallback: None,
         version: V,

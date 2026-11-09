@@ -1,9 +1,9 @@
 ---
 name: verify
-description: Build, launch and drive the OpenIDEA desktop app through the Tauri MCP bridge to verify a change at runtime.
+description: Build, launch and drive the OXidea desktop app through the Tauri MCP bridge to verify a change at runtime.
 ---
 
-# Verify OpenIDEA in the running app
+# Verify OXidea in the running app
 
 ## Launch
 
@@ -48,7 +48,7 @@ description: Build, launch and drive the OpenIDEA desktop app through the Tauri 
 ## Fixture
 
 `fixtures/` has sample projects (go-app, rust-app, ts-app, kotlin-gradle, polyglot). Copy one into
-your scratch directory before editing it, and don't commit the IDE state it creates (`.openidea/`).
+your scratch directory before editing it, and don't commit the IDE state it creates (`.oxidea/`).
 
 ## Flows worth driving
 

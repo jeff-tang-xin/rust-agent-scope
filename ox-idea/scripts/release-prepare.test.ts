@@ -28,7 +28,7 @@ function repo(wit: Record<string, string>, snapshot: Record<string, string>): st
   }
   return root;
 }
-const pkg = (version: string) => `package openidea:plugin@${version};\n`;
+const pkg = (version: string) => `package oxidea:plugin@${version};\n`;
 
 describe("versions", () => {
   it("accepts x.y.z with or without a leading v", () => {
@@ -60,7 +60,7 @@ describe("versions", () => {
   });
 
   it("keeps a JSON file's formatting", () => {
-    const json = '{\n  "name": "openidea",\n  "version": "0.1.37",\n  "private": true\n}\n';
+    const json = '{\n  "name": "oxidea",\n  "version": "0.1.37",\n  "private": true\n}\n';
     expect(setJsonVersion(json, "0.1.38")).toBe(json.replace("0.1.37", "0.1.38"));
   });
 });

@@ -209,7 +209,7 @@ mod tests {
              [[language-servers]]\nname = \"solc\"\ncommand = \"solc\"\nargs = [\"--lsp\"]\n",
         )
         .unwrap();
-        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
                    [[contributes.languages]]\npath = \"l/sol.toml\"";
         let pkg = Package::new(Manifest::parse(src).unwrap(), tmp.path().to_path_buf());
         let store = PluginLanguages::new();

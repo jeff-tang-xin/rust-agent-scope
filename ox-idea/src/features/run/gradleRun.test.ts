@@ -26,7 +26,7 @@ vi.mock("@/platform/ipc", async (original) => {
     call: (value: unknown) => value,
     commands: {
       ...real.commands,
-      runGradleInitScript: () => Promise.resolve("/tmp/openidea-gradle-run.gradle"),
+      runGradleInitScript: () => Promise.resolve("/tmp/oxidea-gradle-run.gradle"),
       fsReadText: () => Promise.resolve("distributionUrl=https://x/gradle-8.10-bin.zip"),
     },
   };
@@ -47,7 +47,7 @@ const gradle = {
 const ctx = {
   root: ROOT,
   gradle,
-  script: "/tmp/openidea-gradle-run.gradle",
+  script: "/tmp/oxidea-gradle-run.gradle",
   offline: false,
   configurationCache: false,
 };
@@ -75,23 +75,23 @@ describe("Build and run using: Gradle", () => {
     expect(run.args).toEqual([
       "--console=plain",
       "--init-script",
-      "/tmp/openidea-gradle-run.gradle",
-      "-Dopenidea.run.project=:billing:core",
-      "-Dopenidea.run.main=com.example.ShopApplication",
-      "-Dopenidea.run.sourceSet=main",
-      '-Dopenidea.run.args=["--port","8081 x"]',
-      '-Dopenidea.run.jvmArgs=["-Xmx1g"]',
-      `-Dopenidea.run.workingDir=${CORE}`,
-      ":billing:core:openideaRun",
+      "/tmp/oxidea-gradle-run.gradle",
+      "-Doxidea.run.project=:billing:core",
+      "-Doxidea.run.main=com.example.ShopApplication",
+      "-Doxidea.run.sourceSet=main",
+      '-Doxidea.run.args=["--port","8081 x"]',
+      '-Doxidea.run.jvmArgs=["-Xmx1g"]',
+      `-Doxidea.run.workingDir=${CORE}`,
+      ":billing:core:oxideaRun",
     ]);
   });
 
   it("uses the test classpath, a project-relative module and offline mode", () => {
     const test = applicationConfig({ className: "a.Tool" }, "app/src/test/java/a/Tool.java", []);
     const run = delegatedGradleConfig(test, "app", { ...ctx, offline: true })!;
-    expect(run.args).toContain("-Dopenidea.run.sourceSet=test");
-    expect(run.args).toContain("-Dopenidea.run.workingDir=/w/shop/app");
-    expect(run.args.slice(-2)).toEqual(["--offline", ":app:openideaRun"]);
+    expect(run.args).toContain("-Doxidea.run.sourceSet=test");
+    expect(run.args).toContain("-Doxidea.run.workingDir=/w/shop/app");
+    expect(run.args.slice(-2)).toEqual(["--offline", ":app:oxideaRun"]);
   });
 
   it("reuses Gradle's configuration cache on Gradle 8.1+ wrappers", () => {
@@ -100,7 +100,7 @@ describe("Build and run using: Gradle", () => {
     expect(run.args.slice(-3)).toEqual([
       "--configuration-cache",
       "--configuration-cache-problems=warn",
-      ":app:openideaRun",
+      ":app:oxideaRun",
     ]);
     const props = (url: string) => `distributionBase=GRADLE_USER_HOME\ndistributionUrl=${url}\n`;
     expect(wrapperGradleVersion(props("https\\://services.gradle.org/distributions/gradle-8.10.2-bin.zip"))).toEqual([
@@ -129,7 +129,7 @@ describe("Build and run using: Gradle", () => {
     };
     const main = (file: string) => applicationConfig({ className: "a.Main" }, file, []);
     const lib = delegatedGradleConfig(main("/w/lib/core/src/main/java/a/Main.java"), "/w/lib/core", nested)!;
-    expect(lib.args.at(-1)).toBe(":lib:core:openideaRun");
+    expect(lib.args.at(-1)).toBe(":lib:core:oxideaRun");
     expect(delegatedGradleConfig(main("buildSrc/src/main/java/a/Main.java"), "buildSrc", nested)).toBeNull();
   });
 
@@ -141,12 +141,12 @@ describe("Build and run using: Gradle", () => {
   });
 
   it("gives Gradle BootRun a dynamic JDWP port when debugging", () => {
-    expect(BOOT_SCRIPT).toContain("openidea.run.debug");
+    expect(BOOT_SCRIPT).toContain("oxidea.run.debug");
     expect(BOOT_SCRIPT).toContain("address=127.0.0.1:0");
   });
 
   it("gives Gradle test workers a dynamic JDWP port when debugging", () => {
-    expect(TESTS_SCRIPT).toContain("openidea.run.debug");
+    expect(TESTS_SCRIPT).toContain("oxidea.run.debug");
     expect(TESTS_SCRIPT).toContain("address=127.0.0.1:0");
   });
 
@@ -161,7 +161,7 @@ describe("Build and run using: Gradle", () => {
 });
 
 describe("Gradle test runs", () => {
-  const script = "/tmp/openidea-gradle-tests.gradle";
+  const script = "/tmp/oxidea-gradle-tests.gradle";
   it("add the init script that reports each test", () => {
     expect(
       withTestEvents({ kind: "gradle", command: "./gradlew", args: ["test", "--tests", "*OrderTest"] }, script).args,
@@ -206,7 +206,7 @@ describe("Gradle launch routing", () => {
 
   it("adds reporting scripts without enabling JDWP for plain Run", async () => {
     for (const config of [await gradleBootLaunch(boot), await gradleTestLaunch(test)]) {
-      expect(config.args.slice(0, 2)).toEqual(["--init-script", "/tmp/openidea-gradle-run.gradle"]);
+      expect(config.args.slice(0, 2)).toEqual(["--init-script", "/tmp/oxidea-gradle-run.gradle"]);
       expect(config.args).not.toContain(DELEGATED_DEBUG);
       expect(config.args).not.toContain("--debug-jvm");
     }
@@ -238,7 +238,7 @@ describe("delegation across independent builds", () => {
     const run = await gradleDelegation(app);
     expect(run).toMatchObject({ command: `${ROOT}/second/gradlew`, cwd: "second", env: { JAVA_HOME: "/second/jdk" } });
     expect(run!.args).toContain("--offline");
-    expect(run!.args.at(-1)).toBe(":app:openideaRun");
+    expect(run!.args.at(-1)).toBe(":app:oxideaRun");
   });
 
   it("prefers the directly linked owner over a longer sibling composite root", async () => {
@@ -262,7 +262,7 @@ describe("delegation across independent builds", () => {
     };
     const run = await gradleDelegation(app);
     expect(run).toMatchObject({ command: `${ROOT}/b/gradlew`, cwd: "b" });
-    expect(run!.args.at(-1)).toBe(":app:openideaRun");
+    expect(run!.args.at(-1)).toBe(":app:oxideaRun");
   });
 });
 

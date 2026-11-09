@@ -770,7 +770,7 @@ impl Pool {
                     .host(&source.host)
                     .port(source.port.unwrap_or(5432))
                     .username(&source.user)
-                    .application_name(setup.application_name.as_deref().unwrap_or("OpenIDEA"))
+                    .application_name(setup.application_name.as_deref().unwrap_or("OXidea"))
                     .ssl_mode(match source.ssl {
                         DbSslMode::Disable => PgSslMode::Disable,
                         DbSslMode::Prefer => PgSslMode::Prefer,

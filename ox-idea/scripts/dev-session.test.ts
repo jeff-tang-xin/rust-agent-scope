@@ -50,7 +50,7 @@ describe("development worktrees", () => {
   });
 
   it("matches the Rust identity and separates paths, including Unicode", () => {
-    expect(worktreeId("/repo/idea")).toBe("ai.l0ng.openidea.dev.w158e9c5954b7bf64");
+    expect(worktreeId("/repo/idea")).toBe("ai.l0ng.oxidea.dev.w158e9c5954b7bf64");
     expect(worktreeId("/repo/idea")).not.toBe(worktreeId("/repo/idea-other"));
     expect(worktreeId("/repo/项目")).not.toBe(worktreeId("/repo/项目2"));
   });

@@ -769,7 +769,7 @@ mod maven_path_tests {
                 .write(true)
                 .create(true)
                 .truncate(false)
-                .open(std::env::temp_dir().join("openidea-sdk-subst.lock"))
+                .open(std::env::temp_dir().join("oxidea-sdk-subst.lock"))
                 .unwrap();
             lock.lock().unwrap();
             let marker = format!("{}.subst", target.file_name().unwrap().to_string_lossy());

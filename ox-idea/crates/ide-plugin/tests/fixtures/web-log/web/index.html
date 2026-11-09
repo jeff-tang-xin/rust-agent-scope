@@ -1,7 +1,7 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Log Probe</title>
 <style>
-body { background: var(--openidea-bg); color: var(--openidea-fg); font-family: var(--openidea-font, sans-serif); padding: 12px; }
+body { background: var(--oxidea-bg); color: var(--oxidea-fg); font-family: var(--oxidea-font, sans-serif); padding: 12px; }
 button { font: inherit; padding: 6px; } pre { white-space: pre-wrap; }
 </style></head><body>
 <h2>Streaming log tab</h2>
@@ -18,14 +18,14 @@ while true; do
   if [ "$i" = 1 ]; then printf 'WARN a long line for wrapping: %0200d\n' 0; fi
   read -t 1 ignored || true
 done`;
-const send = (program) => openidea.postMessage(JSON.stringify({
+const send = (program) => oxidea.postMessage(JSON.stringify({
   op: 'open-log-tab', key: 'probe', title: 'Probe logs', program,
   args: ['--noprofile', '--norc', '-c', script, 'log-probe'],
   toggles: [{ id: 'verbose', label: 'Verbose', args: ['--verbose'] }]
 }));
 document.querySelector('#open').onclick = () => send('bash');
 document.querySelector('#denied').onclick = () => send('sh');
-openidea.onMessage(text => {
+oxidea.onMessage(text => {
   if (text === 'open' || text === 'denied') { send(text === 'open' ? 'bash' : 'sh'); return; }
   let m; try { m = JSON.parse(text); } catch { return; }
   if (m.op === 'log-error') document.querySelector('#status').textContent = m.error;

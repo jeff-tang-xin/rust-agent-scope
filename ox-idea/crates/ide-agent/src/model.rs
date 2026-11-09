@@ -434,6 +434,8 @@ pub enum AgentCommandReadOnlyReason {
     PackageRunner,
     Registry,
     CustomAgent,
+    /// The agent runs in-process (the OX agent): there is no executable to point at.
+    InProcess,
 }
 
 /// Where an agent comes from.

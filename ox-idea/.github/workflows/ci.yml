@@ -118,8 +118,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { key: server-musl }
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: cargo build --locked -p ide-host --bin openidea-server --target x86_64-unknown-linux-musl
-      - run: target/x86_64-unknown-linux-musl/debug/openidea-server --version
+      - run: cargo build --locked -p ide-host --bin oxidea-server --target x86_64-unknown-linux-musl
+      - run: target/x86_64-unknown-linux-musl/debug/oxidea-server --version
 
   # The plugin SDK, the official plugins and the test fixtures build in their
   # own workspaces (the root excludes them), so the jobs above don't see them.
@@ -144,7 +144,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for dir in sdk/rust/openidea-plugin plugins/official/*/ crates/ide-plugin/tests/fixtures/*/; do
+          for dir in sdk/rust/oxidea-plugin plugins/official/*/ crates/ide-plugin/tests/fixtures/*/; do
             [ -f "$dir/Cargo.toml" ] || continue
             echo "::group::$dir"
             cargo fmt --check --manifest-path "$dir/Cargo.toml"

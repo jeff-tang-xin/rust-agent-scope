@@ -4,7 +4,7 @@
 //! id = "acme.rust-tools"          # optional publisher namespace before the first '.'
 //! name = "Rust Tools"
 //! version = "1.2.0"
-//! engines.openidea = "^1.0"
+//! engines.oxidea = "^1.0"
 //! wasm = "plugin.wasm"
 //! activation = ["on-language:rust", "on-command:check"]
 //!
@@ -21,7 +21,7 @@
 //! validated by the extension point registered under that id
 //! ([`crate::ExtensionRegistry`]), so new contribution types need no change here.
 //!
-//! Manifests in the 0.1 format (`openidea-api = "0.1"`, `permissions = [...]`)
+//! Manifests in the 0.1 format (`oxidea-api = "0.1"`, `permissions = [...]`)
 //! still parse: permissions become required capabilities and the plugin is
 //! activated at start-up, as before.
 
@@ -58,7 +58,7 @@ pub struct Manifest {
     pub icon: Option<PathBuf>,
     /// Its variant for dark themes.
     pub icon_dark: Option<PathBuf>,
-    /// `engines.openidea` (a semver requirement), or the legacy `openidea-api`.
+    /// `engines.oxidea` (a semver requirement), or the legacy `oxidea-api`.
     pub engine: String,
     /// Written in the 0.1 format.
     pub legacy: bool,
@@ -199,7 +199,7 @@ struct Raw {
     engines: Option<Engines>,
     /// 0.1 format.
     #[serde(default)]
-    openidea_api: Option<String>,
+    oxidea_api: Option<String>,
     #[serde(default)]
     wasm: Option<PathBuf>,
     #[serde(default)]
@@ -216,7 +216,7 @@ struct Raw {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Engines {
-    openidea: String,
+    oxidea: String,
 }
 
 #[derive(Deserialize)]
@@ -231,14 +231,14 @@ struct RawCapabilities {
 impl Manifest {
     pub fn parse(src: &str) -> Result<Self, String> {
         let raw: Raw = toml::from_str(src).map_err(|e| e.to_string())?;
-        let (engine, legacy) = match (raw.engines, raw.openidea_api) {
-            (Some(e), None) => (e.openidea, false),
+        let (engine, legacy) = match (raw.engines, raw.oxidea_api) {
+            (Some(e), None) => (e.oxidea, false),
             (None, Some(api)) => (api, true),
-            (Some(_), Some(_)) => return Err("use `engines.openidea`, not `openidea-api`".into()),
-            (None, None) => return Err("missing `engines.openidea` (e.g. \"^1.0\")".into()),
+            (Some(_), Some(_)) => return Err("use `engines.oxidea`, not `oxidea-api`".into()),
+            (None, None) => return Err("missing `engines.oxidea` (e.g. \"^1.0\")".into()),
         };
         if legacy && raw.capabilities.is_some() {
-            return Err("`capabilities` requires `engines.openidea`; 0.1 manifests use `permissions`".into());
+            return Err("`capabilities` requires `engines.oxidea`; 0.1 manifests use `permissions`".into());
         }
         if !legacy && raw.permissions.is_some() {
             return Err("`permissions` is the 0.1 format; use `[capabilities] required = [...]`".into());
@@ -293,12 +293,12 @@ impl Manifest {
         Self::parse(&src).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    /// Refuses `what`, new in plugin API 1.`minor`, while `engines.openidea`
+    /// Refuses `what`, new in plugin API 1.`minor`, while `engines.oxidea`
     /// still admits an older 1.x: those IDEs reject the manifest at install.
     pub fn needs_api(&self, what: &str, minor: u64) -> Result<(), String> {
         let older = |m| engine_compatible_with(&self.engine, &semver::Version::new(1, m, u64::MAX));
         if self.legacy || (0..minor).any(older) {
-            return Err(format!("{what} is new in plugin API 1.{minor}: set engines.openidea to \"^1.{minor}\""));
+            return Err(format!("{what} is new in plugin API 1.{minor}: set engines.oxidea to \"^1.{minor}\""));
         }
         Ok(())
     }
@@ -314,11 +314,11 @@ impl Manifest {
         if !engine_compatible(&self.engine, self.legacy) {
             return Err(if self.legacy {
                 format!(
-                    "unsupported openidea-api {:?} (this IDE implements {LEGACY_API} and {ENGINE_VERSION})",
+                    "unsupported oxidea-api {:?} (this IDE implements {LEGACY_API} and {ENGINE_VERSION})",
                     self.engine
                 )
             } else {
-                format!("engines.openidea {:?} does not match this IDE's plugin API {ENGINE_VERSION}", self.engine)
+                format!("engines.oxidea {:?} does not match this IDE's plugin API {ENGINE_VERSION}", self.engine)
             });
         }
         if let Some(wasm) = &self.wasm {
@@ -496,7 +496,7 @@ mod tests {
         id = "acme.rust-tools"
         name = "Rust Tools"
         version = "1.2.0"
-        engines.openidea = "^1.0"
+        engines.oxidea = "^1.0"
         wasm = "plugin.wasm"
         activation = ["on-language:rust", "on-command:check", "on-schedule:300"]
 
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn categories_are_declared_or_implied() {
-        let head = "id = \"acme.x\"\nname = \"X\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n";
+        let head = "id = \"acme.x\"\nname = \"X\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n";
         let m = |rest: &str| Manifest::parse(&format!("{head}{rest}"));
         // Declared, in the catalogue's order; unknown ones (a newer IDE's) are ignored.
         let declared = m("categories = [\"tools\", \"vcs\", \"robots\"]\n").unwrap();
@@ -569,7 +569,7 @@ mod tests {
     #[test]
     fn parses_the_01_format() {
         let m = Manifest::parse(
-            "id = \"hello\"\nname = \"Hello\"\nversion = \"0.1.0\"\nopenidea-api = \"0.1\"\nwasm = \"dist/plugin.wasm\"\n\
+            "id = \"hello\"\nname = \"Hello\"\nversion = \"0.1.0\"\noxidea-api = \"0.1\"\nwasm = \"dist/plugin.wasm\"\n\
              permissions = [\"project-read\", \"editor-write\"]\n[[contributes.commands]]\nid = \"x\"\ntitle = \"X\"",
         )
         .unwrap();
@@ -586,37 +586,37 @@ mod tests {
     #[test]
     fn rejects_invalid_manifests() {
         let base = |extra: &str| format!("id = \"ok\"\nname = \"N\"\nversion = \"1.0.0\"\n{extra}");
-        assert!(err(&base("")).contains("engines.openidea"));
-        assert!(err(&base("engines.openidea = \"^0.3\"")).contains("does not match"));
-        assert!(err(&base("engines.openidea = \"^2\"")).contains("does not match"));
-        assert!(err(&base("engines.openidea = \"^0.2\"")).contains("does not match"));
-        assert!(err(&base("openidea-api = \"0.2\"")).contains("unsupported"));
-        assert!(err(&base("engines.openidea = \"^1.0\"\npermissions = [\"project-read\"]")).contains("0.1 format"));
+        assert!(err(&base("")).contains("engines.oxidea"));
+        assert!(err(&base("engines.oxidea = \"^0.3\"")).contains("does not match"));
+        assert!(err(&base("engines.oxidea = \"^2\"")).contains("does not match"));
+        assert!(err(&base("engines.oxidea = \"^0.2\"")).contains("does not match"));
+        assert!(err(&base("oxidea-api = \"0.2\"")).contains("unsupported"));
+        assert!(err(&base("engines.oxidea = \"^1.0\"\npermissions = [\"project-read\"]")).contains("0.1 format"));
         assert!(
-            err(&base("engines.openidea = \"^1.0\"\n[capabilities]\nrequired = [\"network\"]")).contains("unknown")
+            err(&base("engines.oxidea = \"^1.0\"\n[capabilities]\nrequired = [\"network\"]")).contains("unknown")
         );
-        assert!(err(&base("engines.openidea = \"^1.0\"\nwasm = \"../x.wasm\"")).contains("relative path"));
-        assert!(err(&base("engines.openidea = \"^1.0\"\nactivation = [\"on-command:x\"]")).contains("needs `wasm`"));
+        assert!(err(&base("engines.oxidea = \"^1.0\"\nwasm = \"../x.wasm\"")).contains("relative path"));
+        assert!(err(&base("engines.oxidea = \"^1.0\"\nactivation = [\"on-command:x\"]")).contains("needs `wasm`"));
         assert!(
-            err(&base("engines.openidea = \"^1.0\"\nwasm = \"p.wasm\"\nactivation = [\"on-boot\"]"))
+            err(&base("engines.oxidea = \"^1.0\"\nwasm = \"p.wasm\"\nactivation = [\"on-boot\"]"))
                 .contains("unknown")
         );
         assert!(
-            err(&base("engines.openidea = \"^1.0\"\nwasm = \"p.wasm\"\nactivation = [\"on-schedule:5\"]"))
+            err(&base("engines.oxidea = \"^1.0\"\nwasm = \"p.wasm\"\nactivation = [\"on-schedule:5\"]"))
                 .contains("60 seconds")
         );
-        assert!(err(&base("engines.openidea = \"^1.0\"\nbogus = 1")).contains("unknown field"));
-        assert!(err(&base("engines.openidea = \"^1.0\"\ncontributes.commands = 3")).contains("table"));
+        assert!(err(&base("engines.oxidea = \"^1.0\"\nbogus = 1")).contains("unknown field"));
+        assert!(err(&base("engines.oxidea = \"^1.0\"\ncontributes.commands = 3")).contains("table"));
         assert!(
-            err("id = \"Bad\"\nname = \"N\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"").contains("plugin id")
+            err("id = \"Bad\"\nname = \"N\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"").contains("plugin id")
         );
         assert!(
-            err("id = \"a..b\"\nname = \"N\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"").contains("plugin id")
+            err("id = \"a..b\"\nname = \"N\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"").contains("plugin id")
         );
-        assert!(err("id = \"ok\"\nname = \"N\"\nversion = \"1.0\"\nengines.openidea = \"^1.0\"").contains("version"));
+        assert!(err("id = \"ok\"\nname = \"N\"\nversion = \"1.0\"\nengines.oxidea = \"^1.0\"").contains("version"));
     }
 
-    const BASE: &str = "id = \"ok\"\nname = \"N\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.2\"\n";
+    const BASE: &str = "id = \"ok\"\nname = \"N\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.2\"\n";
 
     #[test]
     fn files_changed_activation_needs_api_1_3() {
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn ids() {
-        assert!(validate_plugin_id("openidea.material-icons").is_ok());
+        assert!(validate_plugin_id("oxidea.material-icons").is_ok());
         assert!(validate_plugin_id("hello_2").is_ok());
         assert!(validate_plugin_id(".x").is_err());
         assert!(validate_item_id("word-count.v2_x", "command id").is_ok());
@@ -695,7 +695,7 @@ mod api14_tests {
         ] {
             for engine in ["^1.0", "^1.3", "^1.4"] {
                 let manifest = format!(
-                    "id = 'test'\nname = 'Test'\nversion = '0.1.0'\nwasm = 'plugin.wasm'\nengines.openidea = '{engine}'\n{declaration}\n"
+                    "id = 'test'\nname = 'Test'\nversion = '0.1.0'\nwasm = 'plugin.wasm'\nengines.oxidea = '{engine}'\n{declaration}\n"
                 );
                 let parsed = Manifest::parse(&manifest);
                 if engine == "^1.4" {
@@ -713,7 +713,7 @@ mod commands_api_tests {
     use super::*;
     #[test]
     fn ide_commands_requires_api_1_4() {
-        let manifest = "id = \"test\"\nname = \"Test\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.3\"\n[capabilities]\nrequired = [\"ide.commands\"]\n";
+        let manifest = "id = \"test\"\nname = \"Test\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.3\"\n[capabilities]\nrequired = [\"ide.commands\"]\n";
         assert!(Manifest::parse(manifest).unwrap_err().contains("1.4"));
         assert!(Manifest::parse(&manifest.replace("^1.3", "^1.4")).is_ok());
     }

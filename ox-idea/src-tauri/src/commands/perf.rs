@@ -124,7 +124,7 @@ pub async fn app_metrics(app: AppHandle, state: State<'_, AppState>) -> IdeResul
                 0..0,
                 memory::responsible_webkit_helpers(&table, me)
                     .into_iter()
-                    .map(|(pid, label)| openidea_root(pid, label.into(), None)),
+                    .map(|(pid, label)| oxidea_root(pid, label.into(), None)),
             );
         }
         Ok(memory::attribute(&table, me, &roots, memory::footprint_bytes))
@@ -145,7 +145,7 @@ fn process_root(pid: u32, label: String, kind: &str) -> MemoryRoot {
     MemoryRoot { pid, category: MemoryCategory::Process, label, detail: Some(kind.into()), with_children: true }
 }
 
-fn openidea_root(pid: u32, label: String, detail: Option<String>) -> MemoryRoot {
+fn oxidea_root(pid: u32, label: String, detail: Option<String>) -> MemoryRoot {
     MemoryRoot { pid, category: MemoryCategory::App, label, detail, with_children: false }
 }
 
@@ -191,12 +191,12 @@ async fn webview_processes(app: &AppHandle, state: &AppState) -> Vec<MemoryRoot>
         .into_iter()
         .map(|(pid, mut windows)| {
             windows.sort();
-            openidea_root(pid, "Web content".into(), Some(windows.join(", ")))
+            oxidea_root(pid, "Web content".into(), Some(windows.join(", ")))
         })
         .collect();
     let mut shared: Vec<(u32, &str)> = shared.into_iter().collect();
     shared.sort_by_key(|(_, label)| *label);
-    roots.extend(shared.into_iter().map(|(pid, label)| openidea_root(pid, label.into(), None)));
+    roots.extend(shared.into_iter().map(|(pid, label)| oxidea_root(pid, label.into(), None)));
     roots
 }
 

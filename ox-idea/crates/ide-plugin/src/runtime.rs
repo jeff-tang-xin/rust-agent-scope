@@ -1,4 +1,4 @@
-//! Wasmtime glue for the `openidea:plugin@1.0.0` world (`wit/`): one shared
+//! Wasmtime glue for the `oxidea:plugin@1.0.0` world (`wit/`): one shared
 //! engine, one `Store` per plugin. Everything a call may do outside the
 //! sandbox goes through [`HostApi`], implemented by the host; the imports
 //! themselves are in `wit_host`.
@@ -16,8 +16,8 @@ use crate::types::{
     FieldValue, ServiceLog, ServiceLogToggle, ServicePane, ServiceTab, TableSort, View, ViewBody, ViewButton,
     ViewEvent, ViewField, ViewListItem, ViewTable, ViewTreeItem, Viewport,
 };
-use crate::wit_host::injections_bindings::exports::openidea::plugin::injections as wit_inj;
-use crate::wit_host::language_features_bindings::exports::openidea::plugin::language_features as wit_lf;
+use crate::wit_host::injections_bindings::exports::oxidea::plugin::injections as wit_inj;
+use crate::wit_host::language_features_bindings::exports::oxidea::plugin::language_features as wit_lf;
 use crate::wit_host::{
     bindings, commit_checks_bindings, details_bindings, endpoints_bindings, file_actions_bindings, hover_bindings,
     indexing_bindings, inlay_bindings, providers_bindings, semantic_bindings, syntax_bindings, views_bindings,
@@ -35,23 +35,23 @@ use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDea
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
-use crate::wit_host::run_configurations_bindings::exports::openidea::plugin::run_configurations as wit_configs;
-use crate::wit_host::test_results_bindings::exports::openidea::plugin::test_results as wit_tests;
-use bindings::openidea::plugin::events as wit_events;
-use bindings::openidea::plugin::types as wit_types;
-use commit_checks_bindings::exports::openidea::plugin::commit_checker as wit_cc;
-use details_bindings::exports::openidea::plugin::detail_provider as wit_detail;
-use details_bindings::openidea::plugin::detail_types as wit_dt;
-use endpoints_bindings::exports::openidea::plugin::endpoints_provider as wit_endpoints;
-use file_actions_bindings::exports::openidea::plugin::file_actions as wit_fa;
-use hover_bindings::exports::openidea::plugin::hover_provider as wit_hover;
-use indexing_bindings::exports::openidea::plugin::document_indexer as wit_index;
-use inlay_bindings::exports::openidea::plugin::inlay_hints_provider as wit_inlay;
-use providers_bindings::exports::openidea::plugin::providers as wit_prov;
-use semantic_bindings::exports::openidea::plugin::semantic_tokens_provider as wit_sem;
-use syntax_bindings::exports::openidea::plugin::syntax_provider as wit_syntax;
-use views_bindings::exports::openidea::plugin::view_provider as wit_view;
-use views_bindings::openidea::plugin::view_types as wit_vt;
+use crate::wit_host::run_configurations_bindings::exports::oxidea::plugin::run_configurations as wit_configs;
+use crate::wit_host::test_results_bindings::exports::oxidea::plugin::test_results as wit_tests;
+use bindings::oxidea::plugin::events as wit_events;
+use bindings::oxidea::plugin::types as wit_types;
+use commit_checks_bindings::exports::oxidea::plugin::commit_checker as wit_cc;
+use details_bindings::exports::oxidea::plugin::detail_provider as wit_detail;
+use details_bindings::oxidea::plugin::detail_types as wit_dt;
+use endpoints_bindings::exports::oxidea::plugin::endpoints_provider as wit_endpoints;
+use file_actions_bindings::exports::oxidea::plugin::file_actions as wit_fa;
+use hover_bindings::exports::oxidea::plugin::hover_provider as wit_hover;
+use indexing_bindings::exports::oxidea::plugin::document_indexer as wit_index;
+use inlay_bindings::exports::oxidea::plugin::inlay_hints_provider as wit_inlay;
+use providers_bindings::exports::oxidea::plugin::providers as wit_prov;
+use semantic_bindings::exports::oxidea::plugin::semantic_tokens_provider as wit_sem;
+use syntax_bindings::exports::oxidea::plugin::syntax_provider as wit_syntax;
+use views_bindings::exports::oxidea::plugin::view_provider as wit_view;
+use views_bindings::oxidea::plugin::view_types as wit_vt;
 
 /// The API version of the world above, `major.minor` of [`host_api`].
 pub const API_VERSION: &str = "1.4";
@@ -669,12 +669,12 @@ impl PluginEngine {
 fn link_error(detail: &str) -> String {
     format!(
         "the component doesn't match the plugin API of this IDE ({API_VERSION}): {detail}. \
-         If it was built for a newer OpenIDEA, update OpenIDEA; otherwise rebuild it with the {API_VERSION} SDK"
+         If it was built for a newer OXidea, update OXidea; otherwise rebuild it with the {API_VERSION} SDK"
     )
 }
 
-/// Interface names of the plugin API start with this (`openidea:plugin/log@1.0.0`).
-const PLUGIN_PACKAGE_PREFIX: &str = "openidea:plugin/";
+/// Interface names of the plugin API start with this (`oxidea:plugin/log@1.0.0`).
+const PLUGIN_PACKAGE_PREFIX: &str = "oxidea:plugin/";
 
 /// The plugin API this host implements: the version of the `wit/` package.
 pub fn host_api() -> semver::Version {
@@ -682,7 +682,7 @@ pub fn host_api() -> semver::Version {
 }
 
 /// The plugin API version a component was built for: the highest version on
-/// its `openidea:plugin/*` imports and exports. An unversioned plugin
+/// its `oxidea:plugin/*` imports and exports. An unversioned plugin
 /// interface is an error, since nothing could tell compatible hosts apart.
 pub fn component_api<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<Option<semver::Version>, String> {
     let mut highest: Option<semver::Version> = None;
@@ -713,7 +713,7 @@ pub fn check_api(built_for: &semver::Version, host: &semver::Version) -> Result<
     let newer = b > h;
     let (b, h) = (format!("{}.{}", b.0, b.1), format!("{}.{}", h.0, h.1));
     Err(if newer {
-        format!("the component was built for plugin API {b}, newer than this IDE's {h}: update OpenIDEA")
+        format!("the component was built for plugin API {b}, newer than this IDE's {h}: update OXidea")
     } else {
         format!("the component was built for plugin API {b}; this IDE runs {h}: rebuild it with the {h} SDK")
     })
@@ -922,14 +922,14 @@ struct Exports {
     views: Option<wit_view::Guest>,
     semantic: Option<wit_sem::Guest>,
     details: Option<wit_detail::Guest>,
-    diagnostics: Option<crate::wit_host::diagnostics_bindings::exports::openidea::plugin::diagnostics_provider::Guest>,
+    diagnostics: Option<crate::wit_host::diagnostics_bindings::exports::oxidea::plugin::diagnostics_provider::Guest>,
     hover: Option<wit_hover::Guest>,
     commit_checks: Option<wit_cc::Guest>,
     inlay: Option<wit_inlay::Guest>,
     endpoints: Option<wit_endpoints::Guest>,
     run_configurations: Option<wit_configs::Guest>,
     test_results: Option<wit_tests::Guest>,
-    mcp: Option<crate::wit_host::mcp_bindings::exports::openidea::plugin::mcp_provider::Guest>,
+    mcp: Option<crate::wit_host::mcp_bindings::exports::oxidea::plugin::mcp_provider::Guest>,
 }
 
 /// Most results one syntax call may return (more are dropped).
@@ -1030,7 +1030,7 @@ impl Runtime {
         arm(&mut store, &setup.limits, setup.limits.timeout).map_err(|e| e.to_string())?;
         let api_hint = |e: wasmtime::Error| {
             let msg = describe_trap(&e, &setup.limits);
-            if msg.contains("openidea:plugin/") { link_error(&msg) } else { msg }
+            if msg.contains("oxidea:plugin/") { link_error(&msg) } else { msg }
         };
         let pre = engine.linker.instantiate_pre(component).map_err(api_hint)?;
         let plugin_indices = bindings::PluginIndices::new(&pre).map_err(api_hint)?;
@@ -1041,7 +1041,7 @@ impl Runtime {
         let view_indices = wit_view::GuestIndices::new(&pre).ok();
         let semantic_indices = wit_sem::GuestIndices::new(&pre).ok();
         let detail_indices = wit_detail::GuestIndices::new(&pre).ok();
-        use crate::wit_host::diagnostics_bindings::exports::openidea::plugin::diagnostics_provider as wit_diag;
+        use crate::wit_host::diagnostics_bindings::exports::oxidea::plugin::diagnostics_provider as wit_diag;
         let diagnostics_indices = wit_diag::GuestIndices::new(&pre).ok();
         let hover_indices = wit_hover::GuestIndices::new(&pre).ok();
         let commit_check_indices = wit_cc::GuestIndices::new(&pre).ok();
@@ -1052,7 +1052,7 @@ impl Runtime {
         let lf_indices = wit_lf::GuestIndices::new(&pre).ok();
         let inj_indices = wit_inj::GuestIndices::new(&pre).ok();
         let mcp_indices =
-            crate::wit_host::mcp_bindings::exports::openidea::plugin::mcp_provider::GuestIndices::new(&pre).ok();
+            crate::wit_host::mcp_bindings::exports::oxidea::plugin::mcp_provider::GuestIndices::new(&pre).ok();
         let instance = pre.instantiate(&mut store).map_err(api_hint)?;
         let mcp = mcp_indices.map(|i| i.load(&mut store, &instance)).transpose().map_err(api_hint)?;
         let run_configurations =
@@ -1491,7 +1491,7 @@ impl Runtime {
         doc: &ProviderDocument,
         timeout: Duration,
     ) -> Result<Vec<ide_core::Diagnostic>, CallError> {
-        use crate::wit_host::diagnostics_bindings::exports::openidea::plugin::diagnostics_provider as w;
+        use crate::wit_host::diagnostics_bindings::exports::oxidea::plugin::diagnostics_provider as w;
         if self.exports.diagnostics.is_none() {
             return Err(CallError::missing_export("diagnostics-provider"));
         }
@@ -1573,7 +1573,7 @@ impl Runtime {
             capabilities: data.granted.iter().map(|c| c.to_string()).collect(),
         };
         self.call(Invocation::default(), self.limits.timeout, |e, store| {
-            e.plugin.openidea_plugin_lifecycle().call_activate(store, &ctx)
+            e.plugin.oxidea_plugin_lifecycle().call_activate(store, &ctx)
         })
         .and_then(|r| r.map_err(|e| CallError::Guest(e.into())))
     }
@@ -1587,7 +1587,7 @@ impl Runtime {
         let result = self.call(invocation, self.limits.timeout, |e, store| {
             let ctx = store.data_mut().new_invocation()?;
             store.data_mut().interactive = true;
-            let r = e.plugin.openidea_plugin_commands().call_run(
+            let r = e.plugin.oxidea_plugin_commands().call_run(
                 &mut *store,
                 id,
                 wasmtime::component::Resource::new_borrow(ctx.rep()),
@@ -1730,7 +1730,7 @@ impl Runtime {
         self.call(invocation, self.limits.timeout, |e, store| {
             let ctx = store.data_mut().new_invocation()?;
             store.data_mut().interactive = true;
-            let r = e.plugin.openidea_plugin_event_handler().call_handle(
+            let r = e.plugin.oxidea_plugin_event_handler().call_handle(
                 &mut *store,
                 &events,
                 wasmtime::component::Resource::new_borrow(ctx.rep()),
@@ -1743,7 +1743,7 @@ impl Runtime {
     /// Best effort; errors are logged.
     pub fn deactivate(&mut self) {
         if let Err(e) = self.call(Invocation::default(), self.limits.timeout, |e, store| {
-            e.plugin.openidea_plugin_lifecycle().call_deactivate(store)
+            e.plugin.oxidea_plugin_lifecycle().call_deactivate(store)
         }) {
             tracing::warn!(plugin = %self.store.data().plugin_id, "deactivate failed: {e}");
         }
@@ -2073,9 +2073,9 @@ fn view_from_wit(v: wit_vt::View) -> View {
         wit_vt::Body::Other(e) => match e.kind.as_str() {
             "table" => match sortable_table_from_json(&e.data) {
                 Some(t) => ViewBody::Table(t),
-                None => ViewBody::Message("This view needs a newer version of OpenIDEA (table).".into()),
+                None => ViewBody::Message("This view needs a newer version of OXidea (table).".into()),
             },
-            _ => ViewBody::Message(format!("This view needs a newer version of OpenIDEA ({}).", clip(e.kind, 64))),
+            _ => ViewBody::Message(format!("This view needs a newer version of OXidea ({}).", clip(e.kind, 64))),
         },
         wit_vt::Body::Tree(items) => ViewBody::Tree(
             items
@@ -2661,7 +2661,7 @@ mod tests {
     fn bodies_and_fields_of_a_newer_api_degrade() {
         let view = |body| wit_vt::View { toolbar: Vec::new(), body, status: None };
         let shown = view_from_wit(view(wit_vt::Body::Other(ext("markdown"))));
-        assert_eq!(shown.body, ViewBody::Message("This view needs a newer version of OpenIDEA (markdown).".into()));
+        assert_eq!(shown.body, ViewBody::Message("This view needs a newer version of OXidea (markdown).".into()));
         let field = |key: &str, value| wit_vt::Field { key: key.into(), label: key.into(), value };
         let form = view_from_wit(view(wit_vt::Body::Form(vec![
             field("color", wit_vt::FieldValue::Other(ext("color"))),

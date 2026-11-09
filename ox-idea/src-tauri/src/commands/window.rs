@@ -334,14 +334,14 @@ pub struct CliInstallation {
     pub path_directory: Option<ide_core::IpcPath>,
 }
 
-/// Installs the `openidea` command for this user.
+/// Installs the `oxidea` command for this user.
 #[tauri::command]
 #[specta::specta]
 pub async fn app_cli_install() -> IdeResult<CliInstallation> {
     tauri::async_runtime::spawn_blocking(crate::cli::install).await.map_err(|e| IdeError::internal(e.to_string()))?
 }
 
-/// Removes the installed `openidea` command; returns the links removed.
+/// Removes the installed `oxidea` command; returns the links removed.
 #[tauri::command]
 #[specta::specta]
 pub async fn app_cli_uninstall() -> IdeResult<Vec<ide_core::IpcPath>> {
@@ -352,7 +352,7 @@ pub async fn app_cli_uninstall() -> IdeResult<Vec<ide_core::IpcPath>> {
 #[serde(rename_all = "camelCase")]
 pub struct BuildInfo {
     pub version: String,
-    /// Build id from CI (`OPENIDEA_BUILD` at compile time), else `dev`.
+    /// Build id from CI (`OXIDEA_BUILD` at compile time), else `dev`.
     pub build: String,
     pub profile: String,
     pub os: String,
@@ -367,7 +367,7 @@ pub struct BuildInfo {
 pub fn app_build_info(app: AppHandle) -> BuildInfo {
     BuildInfo {
         version: env!("CARGO_PKG_VERSION").into(),
-        build: option_env!("OPENIDEA_BUILD").unwrap_or("dev").into(),
+        build: option_env!("OXIDEA_BUILD").unwrap_or("dev").into(),
         profile: if cfg!(debug_assertions) { "debug" } else { "release" }.into(),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn chosen_source_is_tried_first_and_the_other_after_it() {
-        let github = "https://github.com/l0ng-ai/openidea/releases/latest/download/latest.json".to_string();
+        let github = "https://github.com/l0ng-ai/oxidea/releases/latest/download/latest.json".to_string();
         assert_eq!(source_endpoints(vec![github.clone()], UpdateSource::Github), [github.clone(), CNB_ENDPOINT.into()]);
         assert_eq!(source_endpoints(vec![github.clone()], UpdateSource::Cnb), [CNB_ENDPOINT.into(), github]);
         // A build without an update endpoint stays without one.

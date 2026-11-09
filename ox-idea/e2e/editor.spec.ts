@@ -49,7 +49,7 @@ test("⌘F opens the find bar and highlights matches; Escape returns to the edit
   const find = page.getByRole("textbox", { name: "Find" });
   await expect(find).toBeFocused();
   await find.fill("Order");
-  await expect(editor.locator(".cm-openidea-findMatch").first()).toBeVisible();
+  await expect(editor.locator(".cm-oxidea-findMatch").first()).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(find).toBeHidden();
   await expect(editor.locator(".cm-content")).toBeFocused();

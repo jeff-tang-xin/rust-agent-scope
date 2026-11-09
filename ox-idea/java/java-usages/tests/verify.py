@@ -12,8 +12,8 @@ import threading
 import time
 
 home, lombok = map(lambda p: pathlib.Path(p).resolve(), sys.argv[1:3])
-bundle = pathlib.Path(__file__).resolve().parents[1] / 'openidea-java-usages.jar'
-work = pathlib.Path(tempfile.mkdtemp(prefix='openidea-usages-'))
+bundle = pathlib.Path(__file__).resolve().parents[1] / 'oxidea-java-usages.jar'
+work = pathlib.Path(tempfile.mkdtemp(prefix='oxidea-usages-'))
 config = work / 'config'
 config.mkdir()
 system, machine = platform.system(), platform.machine().lower()
@@ -108,7 +108,7 @@ def request(method, params):
     raise TimeoutError(method)
 def assert_sources(line, col, full=None):
     """The "sources" scope finds what the full search finds in the workspace's sources."""
-    usages = lambda *scope: request('workspace/executeCommand', {'command':'openidea.java.usages','arguments':[file.as_uri(),line,col,False,*scope]})
+    usages = lambda *scope: request('workspace/executeCommand', {'command':'oxidea.java.usages','arguments':[file.as_uri(),line,col,False,*scope]})
     full = usages() if full is None else full
     sources = usages('sources')
     key = lambda rows: sorted(json.dumps(r, sort_keys=True) for r in rows)
@@ -124,7 +124,7 @@ try:
         line, text = next((i, t) for i,t in enumerate(source.splitlines()) if 'private ' in t and f' {field};' in t)
         col = text.index(field)
         before = request('textDocument/references', {'textDocument':{'uri':file.as_uri()},'position':{'line':line,'character':col},'context':{'includeDeclaration':False}})
-        after = request('workspace/executeCommand', {'command':'openidea.java.usages','arguments':[file.as_uri(),line,col,False]})
+        after = request('workspace/executeCommand', {'command':'oxidea.java.usages','arguments':[file.as_uri(),line,col,False]})
         evidence['cases'][field] = {'before':before,'after':after}
         assert all(any(row['location'] == loc for row in after) for loc in before), 'lost standard references'
         kinds = [r['kind'] for r in after]
@@ -138,7 +138,7 @@ try:
     assert evidence['jdkSources'], 'no JDK method usages in the sources'
     # Respect the existing global preference: the command must not switch it on.
     send({'jsonrpc':'2.0','method':'workspace/didChangeConfiguration','params':{'settings':{'java':{'references':{'includeAccessors':False}}}}})
-    disabled = request('workspace/executeCommand', {'command':'openidea.java.usages','arguments':[file.as_uri(),3,19,False]})
+    disabled = request('workspace/executeCommand', {'command':'oxidea.java.usages','arguments':[file.as_uri(),3,19,False]})
     assert len(disabled) == 2 and all(r['kind'] == 'field' for r in disabled), disabled
     evidence['accessorsDisabled'] = disabled
     (work/'evidence.json').write_text(json.dumps(evidence, indent=2))

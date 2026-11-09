@@ -241,7 +241,7 @@ export class TerminalSession {
       cwd: opts.cwd,
     };
     this.host = document.createElement("div");
-    this.host.className = "openidea-terminal-host";
+    this.host.className = "oxidea-terminal-host";
     this.host.dataset.terminalSession = opts.key;
     this.host.style.width = "100%";
     this.host.style.height = "100%";

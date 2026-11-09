@@ -44,16 +44,16 @@ it("withdraws old interactive markers on reload and does not refresh on idle sta
     state: EditorState.create({ doc: "select", extensions: pluginLineMarkerGutter({ doc: 1 } as EditorDocContext) }),
   });
   await vi.advanceTimersByTimeAsync(450);
-  expect(view.dom.querySelector(".cm-openidea-gutter-pluginMarkers")).not.toBeNull();
+  expect(view.dom.querySelector(".cm-oxidea-gutter-pluginMarkers")).not.toBeNull();
   const calls = mock.markers.mock.calls.length;
   mock.event!({ type: "commandsChanged" });
   await vi.advanceTimersByTimeAsync(450);
   expect(mock.markers).toHaveBeenCalledTimes(calls);
   mock.markers.mockResolvedValue({ status: "ok", data: [] });
   mock.event!({ type: "documentIndexesChanged" });
-  expect(view.dom.querySelector(".cm-openidea-gutter-pluginMarkers")).toBeNull();
+  expect(view.dom.querySelector(".cm-oxidea-gutter-pluginMarkers")).toBeNull();
   await vi.advanceTimersByTimeAsync(450);
-  expect(view.dom.querySelector(".cm-openidea-gutter-pluginMarkers")).toBeNull();
+  expect(view.dom.querySelector(".cm-oxidea-gutter-pluginMarkers")).toBeNull();
   view.destroy();
   view = undefined;
   expect(mock.off).toHaveBeenCalledOnce();

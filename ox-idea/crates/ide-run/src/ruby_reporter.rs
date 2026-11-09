@@ -5,12 +5,12 @@ use crate::RunConfig;
 use std::io;
 use std::path::Path;
 
-/// The Ruby file `RUBYOPT` loads first (`<dir>/openidea_test_hook.rb`).
-pub const FEATURE: &str = "openidea_test_hook";
+/// The Ruby file `RUBYOPT` loads first (`<dir>/oxidea_test_hook.rb`).
+pub const FEATURE: &str = "oxidea_test_hook";
 
 const FILES: [(&str, &str); 2] = [
-    ("openidea_test_hook.rb", include_str!("ruby_reporter/openidea_test_hook.rb")),
-    ("openidea/minitest_reporter.rb", include_str!("ruby_reporter/minitest_reporter.rb")),
+    ("oxidea_test_hook.rb", include_str!("ruby_reporter/oxidea_test_hook.rb")),
+    ("oxidea/minitest_reporter.rb", include_str!("ruby_reporter/minitest_reporter.rb")),
 ];
 
 /// Whether a run takes the reporter: Minitest-style test runs through `ruby` or `rake`, with their output
@@ -47,6 +47,6 @@ mod tests {
         for (name, text) in FILES {
             assert_eq!(std::fs::read_to_string(dir.join(name)).unwrap(), text);
         }
-        assert!(FILES[0].1.contains("OPENIDEA_TEST_REPORT") && FILES[1].1.contains("@@OPENIDEA@@"));
+        assert!(FILES[0].1.contains("OXIDEA_TEST_REPORT") && FILES[1].1.contains("@@OXIDEA@@"));
     }
 }

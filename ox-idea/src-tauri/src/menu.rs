@@ -26,7 +26,7 @@ use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, MenuItemKind, Prede
 use tauri::{AppHandle, Runtime};
 
 /// Event emitted to the focused window when an IDE menu item is clicked.
-pub const MENU_EVENT: &str = "openidea://menu";
+pub const MENU_EVENT: &str = "oxidea://menu";
 /// Prefix of Open Recent item ids; the rest of the id is the project path.
 const RECENT_PREFIX: &str = "recent:";
 /// Prefix of items the frontend lists ([`MenuConfig::dynamic`]): `dyn:<action>` or `dyn:<action>|<arg>`.
@@ -200,8 +200,8 @@ pub fn spec(os: Os) -> Vec<Entry> {
                 act("app.about", "About OXidea"),
                 act("app.checkForUpdates", "Check for Updates…"),
                 SEP,
-                act("app.installCli", "Install 'openidea' Command"),
-                act("app.uninstallCli", "Uninstall 'openidea' Command"),
+                act("app.installCli", "Install 'oxidea' Command"),
+                act("app.uninstallCli", "Uninstall 'oxidea' Command"),
                 SEP,
                 act("file.settings", "Settings…"),
                 SEP,
@@ -753,8 +753,8 @@ pub fn spec(os: Os) -> Vec<Entry> {
     if !mac {
         tools.extend([
             SEP,
-            act("app.installCli", "Install 'openidea' Command"),
-            act("app.uninstallCli", "Uninstall 'openidea' Command"),
+            act("app.installCli", "Install 'oxidea' Command"),
+            act("app.uninstallCli", "Uninstall 'oxidea' Command"),
         ]);
     }
     menus.push(sub("tools", "Tools", tools));
@@ -1934,14 +1934,14 @@ mod tests {
     #[test]
     fn recent_labels_tildify_home() {
         let recent = vec![ide_workspace::RecentProject {
-            path: "/home/me/code/openidea".into(),
-            name: "openidea".into(),
+            path: "/home/me/code/oxidea".into(),
+            name: "oxidea".into(),
             opened_at_ms: 0.0,
             branch: None,
         }];
         let items = recent_items(&recent, Some(Path::new("/home/me")));
-        assert_eq!(items[0].label, "openidea  —  ~/code/openidea");
-        assert_eq!(items[0].path, "/home/me/code/openidea");
+        assert_eq!(items[0].label, "oxidea  —  ~/code/oxidea");
+        assert_eq!(items[0].path, "/home/me/code/oxidea");
     }
 
     #[test]

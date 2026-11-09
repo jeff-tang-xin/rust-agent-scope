@@ -1,6 +1,6 @@
 {"type":"meta","scenario":"multi_turn","source":"hand-written: codex-cli 0.146.0 on the recording machine was signed out; frames follow the shapes of the real recordings here and of real codex 0.156 transcripts"}
 {"dir":"out","frame":{"id":1,"method":"initialize"}}
-{"dir":"in","frame":{"id":1,"result":{"codexHome":"<home>/.codex","platformFamily":"unix","platformOs":"macos","userAgent":"openidea/0.146.0 (Mac OS 26.3.1; arm64) unknown (openidea; 0.1.22)"}}}
+{"dir":"in","frame":{"id":1,"result":{"codexHome":"<home>/.codex","platformFamily":"unix","platformOs":"macos","userAgent":"oxidea/0.146.0 (Mac OS 26.3.1; arm64) unknown (oxidea; 0.1.22)"}}}
 {"dir":"out","frame":{"method":"initialized"}}
 {"dir":"out","frame":{"id":2,"method":"model/list"}}
 {"dir":"in","frame":{"id":2,"result":{"data":[{"id":"gpt-5.6-luna","model":"gpt-5.6-luna","displayName":"GPT-5.6-LUNA","description":"","hidden":false,"isDefault":true,"defaultReasoningEffort":"medium","inputModalities":["text","image"],"supportedReasoningEfforts":[{"reasoningEffort":"low","description":""},{"reasoningEffort":"medium","description":""},{"reasoningEffort":"high","description":""}]},{"id":"gpt-5.5","model":"gpt-5.5","displayName":"GPT-5.5","description":"","hidden":false,"isDefault":false,"defaultReasoningEffort":"medium","inputModalities":["text","image"],"supportedReasoningEfforts":[{"reasoningEffort":"low","description":""},{"reasoningEffort":"medium","description":""},{"reasoningEffort":"high","description":""},{"reasoningEffort":"xhigh","description":""}]}],"nextCursor":null}}}

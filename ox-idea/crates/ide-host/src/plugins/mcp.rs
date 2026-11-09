@@ -139,7 +139,7 @@ mod tests {
         let pkg = |api: &str| {
             Package::new(
                 ide_extension::Manifest::parse(&format!(
-                    "id='test.tools'\nname='Tools'\nversion='1.0.0'\nengines.openidea='{api}'\nwasm='plugin.wasm'"
+                    "id='test.tools'\nname='Tools'\nversion='1.0.0'\nengines.oxidea='{api}'\nwasm='plugin.wasm'"
                 ))
                 .unwrap(),
                 tmp.path().into(),

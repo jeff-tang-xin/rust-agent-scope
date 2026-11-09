@@ -175,7 +175,7 @@ pub fn build(root: &Path, model: &BuildModel, id: &str, cache: &Path) -> IdeResu
                 r#"gradle.projectsEvaluated {{
     def p = gradle.rootProject.project({})
     def warTask = p.tasks.named('war')
-    p.tasks.register('openideaTomcatArtifact') {{
+    p.tasks.register('oxideaTomcatArtifact') {{
         dependsOn warTask
         doLast {{ new File({}).setText(warTask.get().archiveFile.get().asFile.absolutePath, 'UTF-8') }}
     }}
@@ -185,7 +185,7 @@ pub fn build(root: &Path, model: &BuildModel, id: &str, cache: &Path) -> IdeResu
                 groovy_literal(&manifest.to_string_lossy())
             ),
         )?;
-        let task = format!("{}:openideaTomcatArtifact", path.trim_end_matches(':'));
+        let task = format!("{}:oxideaTomcatArtifact", path.trim_end_matches(':'));
         return Ok(WebBuild {
             command: g.command.clone(),
             args: vec!["--init-script".into(), script.to_string_lossy().into_owned(), task],
@@ -269,7 +269,7 @@ mod tests {
         let a = artifacts(tmp.path(), &model);
         assert_eq!(a.len(), 1);
         let plan = build(tmp.path(), &model, &a[0].id, &tmp.path().join("base")).unwrap();
-        assert!(plan.args.contains(&":openideaTomcatArtifact".into()));
+        assert!(plan.args.contains(&":oxideaTomcatArtifact".into()));
         assert!(fs::read_to_string(tmp.path().join("base/war.init.gradle")).unwrap().contains("archiveFile.get()"));
         assert!(!crate::gradle::has_war_plugin("// plugins { war }"));
     }
@@ -294,7 +294,7 @@ mod tests {
             let model = crate::load(tmp.path(), &tmp.path().join("cache"), None);
             let cache = tmp.path().join("工作 cache");
             let plan = build(tmp.path(), &model, &format!("gradle:{module}"), &cache).unwrap();
-            assert!(plan.args.contains(&format!("{}:openideaTomcatArtifact", module.trim_end_matches(':'))));
+            assert!(plan.args.contains(&format!("{}:oxideaTomcatArtifact", module.trim_end_matches(':'))));
             let script = fs::read_to_string(cache.join("war.init.gradle")).unwrap();
             assert!(script.contains(&format!("rootProject.project('{}')", module)));
             assert!(script.contains("archiveFile.get().asFile.absolutePath, 'UTF-8'"));

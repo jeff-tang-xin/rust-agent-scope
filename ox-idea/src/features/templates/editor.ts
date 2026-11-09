@@ -65,14 +65,14 @@ export const templateDoc = Facet.define<TemplateDocInfo, TemplateDocInfo>({
  * The LSP completion uses `override`, so it must merge sources found under
  * this key (`state.languageDataAt<CompletionSource>(EXTRA_COMPLETION_KEY, pos)`).
  */
-const EXTRA_COMPLETION_KEY = "openideaCompletion";
+const EXTRA_COMPLETION_KEY = "oxideaCompletion";
 
 /**
  * Language-data key for a lookup restricted to one source: `(state) =>
  * CompletionSource | null`. While one returns a source, the LSP completion
  * queries only that source (⌘J lists live templates only).
  */
-export const EXCLUSIVE_COMPLETION_KEY = "openideaExclusiveCompletion";
+export const EXCLUSIVE_COMPLETION_KEY = "oxideaExclusiveCompletion";
 
 function userName(): string {
   const root = useProject.getState().project?.root ?? "";
@@ -218,7 +218,7 @@ export function wordBefore(state: EditorState, pos: number): { from: number; tex
  * Language-data key under which features report finer template contexts at a
  * position: `(state, pos) => readonly string[]` (e.g. SQL `sql-statement`).
  */
-export const TEMPLATE_CONTEXT_KEY = "openideaTemplateContexts";
+export const TEMPLATE_CONTEXT_KEY = "oxideaTemplateContexts";
 
 type ContextProvider = (state: EditorState, pos: number) => readonly string[];
 

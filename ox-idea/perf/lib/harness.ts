@@ -32,7 +32,7 @@ export class Harness {
    */
   async load(): Promise<number> {
     await this.page.goto("/");
-    await this.page.waitForFunction(() => "__openideaPerf" in window && "__perf" in window);
+    await this.page.waitForFunction(() => "__oxideaPerf" in window && "__perf" in window);
     const ready = await this.inPage((p) =>
       p.waitShown('[role="tree"][aria-label="Project"] [role="treeitem"]', null, 30_000),
     );
@@ -52,7 +52,7 @@ export class Harness {
   /** Effective keymap binding of an action, as Playwright key sequences ("Shift Shift" → two presses). */
   async keysFor(actionId: string): Promise<string[]> {
     const bindings = await this.page.evaluate(
-      (id) => (window as never as { __openideaPerf: { bindings(id: string): string[] } }).__openideaPerf.bindings(id),
+      (id) => (window as never as { __oxideaPerf: { bindings(id: string): string[] } }).__oxideaPerf.bindings(id),
       actionId,
     );
     const binding = bindings[0];
@@ -156,7 +156,7 @@ export class Harness {
   async seed(path: string, text: string) {
     await this.page.evaluate(
       ({ path, text }) =>
-        (window as never as { __openideaPerf: { seed(p: string, t: string): void } }).__openideaPerf.seed(path, text),
+        (window as never as { __oxideaPerf: { seed(p: string, t: string): void } }).__oxideaPerf.seed(path, text),
       { path, text },
     );
   }
@@ -167,9 +167,9 @@ export class Harness {
     const name = path.slice(path.lastIndexOf("/") + 1);
     return this.page.evaluate(
       async ({ path, name }) => {
-        const w = window as never as { __perf: InPage; __openideaPerf: { openFile(p: string): Promise<void> } };
+        const w = window as never as { __perf: InPage; __oxideaPerf: { openFile(p: string): Promise<void> } };
         const t0 = performance.now();
-        void w.__openideaPerf.openFile(path);
+        void w.__oxideaPerf.openFile(path);
         await w.__perf.waitShown('[role="tab"][aria-selected="true"]', name, 15_000);
         await w.__perf.waitShown(".cm-content .cm-line", null, 15_000);
         return performance.now() - t0;
@@ -181,7 +181,7 @@ export class Harness {
   /** Waits until the active editor's background parse has caught up (steady-state editing). */
   async parserIdle(timeoutMs = 20_000) {
     await this.page.waitForFunction(
-      () => !(window as never as { __openideaPerf: { parsing(): boolean } }).__openideaPerf.parsing(),
+      () => !(window as never as { __oxideaPerf: { parsing(): boolean } }).__oxideaPerf.parsing(),
       undefined,
       { timeout: timeoutMs, polling: 100 },
     );
@@ -189,7 +189,7 @@ export class Harness {
 
   async setCursor(offset: number) {
     await this.page.evaluate(
-      (o) => (window as never as { __openideaPerf: { setCursor(o: number): void } }).__openideaPerf.setCursor(o),
+      (o) => (window as never as { __oxideaPerf: { setCursor(o: number): void } }).__oxideaPerf.setCursor(o),
       offset,
     );
   }
@@ -197,8 +197,8 @@ export class Harness {
   async editorState() {
     return this.page.evaluate(() =>
       (
-        window as never as { __openideaPerf: { editorState(): { length: number; lines: number; head: number } | null } }
-      ).__openideaPerf.editorState(),
+        window as never as { __oxideaPerf: { editorState(): { length: number; lines: number; head: number } | null } }
+      ).__oxideaPerf.editorState(),
     );
   }
 }

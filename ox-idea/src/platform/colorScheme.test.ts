@@ -137,7 +137,7 @@ describe("color schemes", () => {
     const previous = useProject.getState().settings;
     useProject.setState({ settings: { editor: { colorScheme: "dark" } } as unknown as Settings });
     const dispose = installColorScheme();
-    const sheet = () => document.getElementById("openidea-editor-color-scheme")?.textContent ?? "";
+    const sheet = () => document.getElementById("oxidea-editor-color-scheme")?.textContent ?? "";
     try {
       expect(sheet()).toBe("");
       root.dataset.pluginTheme = "theme-one/one-dark";

@@ -1,6 +1,6 @@
 /**
  * UI performance harness: builds the workbench in `--mode perf` (production
- * bundle + sample project + `__openideaPerf` probe), drives interaction scenarios
+ * bundle + sample project + `__oxideaPerf` probe), drives interaction scenarios
  * in Chromium and checks the medians against `perf/budgets.json` and the local
  * baseline.
  *
@@ -34,7 +34,7 @@ const { values: args } = parseArgs({
     runs: { type: "string", default: "3" },
     warmup: { type: "string", default: "1" },
     cpu: { type: "string", default: "1" },
-    channel: { type: "string", default: process.env.OPENIDEA_PERF_CHANNEL ?? "chromium" },
+    channel: { type: "string", default: process.env.OXIDEA_PERF_CHANNEL ?? "chromium" },
     headed: { type: "boolean", default: false },
     "no-build": { type: "boolean", default: false },
     "save-baseline": { type: "boolean", default: false },

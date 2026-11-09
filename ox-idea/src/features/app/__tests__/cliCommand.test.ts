@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 it("explains the Linux PATH step when the user bin is missing from PATH", async () => {
-  install.mockResolvedValue({ path: "/home/user/.local/bin/openidea", pathDirectory: "/home/user/.local/bin" });
+  install.mockResolvedValue({ path: "/home/user/.local/bin/oxidea", pathDirectory: "/home/user/.local/bin" });
   await run("app.installCli");
   expect(notify).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -32,7 +32,7 @@ it("explains the Linux PATH step when the user bin is missing from PATH", async 
 });
 
 it("tells users to open a new terminal after installation", async () => {
-  install.mockResolvedValue({ path: "C:/Users/user/OpenIDEA/bin/openidea.cmd", pathDirectory: null });
+  install.mockResolvedValue({ path: "C:/Users/user/OXidea/bin/oxidea.cmd", pathDirectory: null });
   await run("app.installCli");
   expect(notify).toHaveBeenCalledWith(
     expect.objectContaining({ body: expect.stringContaining("Open a new terminal") }),
@@ -42,7 +42,7 @@ it("tells users to open a new terminal after installation", async () => {
 it("reports an absent command on repeated uninstall", async () => {
   uninstall.mockResolvedValue([]);
   await run("app.uninstallCli");
-  expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "The openidea command is not installed" }));
+  expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "The oxidea command is not installed" }));
 });
 
 it("reports an install failure and stays quiet when an administrator prompt is cancelled", async () => {

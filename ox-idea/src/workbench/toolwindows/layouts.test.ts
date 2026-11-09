@@ -84,7 +84,7 @@ describe("tool window layouts", () => {
     _reloadLayouts();
     expect(layoutNames()).toEqual(["Kept"]);
     localStorage.setItem(
-      "openidea.toolWindowLayouts.v1",
+      "oxidea.toolWindowLayouts.v1",
       JSON.stringify({ layouts: [{ name: "" }, { nope: 1 }, { name: "X", layout: 5 }] }),
     );
     _reloadLayouts();

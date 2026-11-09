@@ -13,7 +13,7 @@ Build from the repository root:
 ```sh
 plugins/build.sh official/blame-annotations
 cargo test --manifest-path plugins/official/blame-annotations/Cargo.toml
-cargo run -p ide-host --bin openidea-plugin -- check plugins/official/blame-annotations
+cargo run -p ide-host --bin oxidea-plugin -- check plugins/official/blame-annotations
 ```
 
 Install the built package folder through Settings › Plugins › Install from

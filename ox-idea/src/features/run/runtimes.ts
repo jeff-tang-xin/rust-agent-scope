@@ -145,7 +145,7 @@ export async function toolEnv(
   ]);
   return {
     tool: (n) => tools.get(n),
-    compileDir: compileDir ?? "/tmp/openidea-run",
+    compileDir: compileDir ?? "/tmp/oxidea-run",
     windows: isWindows(),
     python: py,
     php: phpInterpreter,

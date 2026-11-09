@@ -50,7 +50,7 @@ describe("LightEdit window", () => {
     expect(screen.queryByText("branch widget")).toBeNull();
     const items = [...document.querySelectorAll("[data-status-item]")].map((el) => el.getAttribute("data-status-item"));
     expect(items).toEqual(["editor.caret"]);
-    expect(screen.queryByText("Welcome to OpenIDEA")).toBeNull();
+    expect(screen.queryByText("Welcome to OXidea")).toBeNull();
   });
 
   it("keeps a standalone log visible without a project or LightEdit session", () => {
@@ -59,7 +59,7 @@ describe("LightEdit window", () => {
     render(<Workbench />);
     expect(screen.getByText("External Git Log")).toBeInTheDocument();
     expect(document.querySelector("[data-editor-area]")).not.toBeNull();
-    expect(screen.queryByText("Welcome to OpenIDEA")).toBeNull();
+    expect(screen.queryByText("Welcome to OXidea")).toBeNull();
     expect(document.querySelector("[data-stripe-side]")).toBeNull();
   });
 

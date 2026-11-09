@@ -67,7 +67,7 @@ test("plugin markers render names and package SVG variants and keep the indexed 
     );
     await editorService().openFile(source);
   });
-  const markers = page.locator(".cm-openidea-gutter-pluginMarkers");
+  const markers = page.locator(".cm-oxidea-gutter-pluginMarkers");
   await expect(markers.locator('[title="Run marker"] svg')).toHaveAttribute("data-icon", "gutter-run");
   await expect(markers.locator('[title="Database marker"] svg')).toHaveAttribute("data-icon", "database");
   const custom = markers.locator('[title="Package marker"] svg');

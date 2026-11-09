@@ -20,12 +20,12 @@ describe("File › New Project…", () => {
 describe("Manage IDE Settings › Export Settings…", () => {
   it("exports templates, macros, layouts and view options, not per-project state", () => {
     const data: Record<string, string> = {
-      "openidea.liveTemplates.v1": "[]",
-      "openidea.macros.v1": "{}",
-      "openidea.toolWindowLayouts.v1": "{}",
-      "openidea.projectTree.options": '{"singleClickOpen":true}',
-      "openidea.projectTree.expanded:/p": "[]",
-      "openidea.runAnything.history.v1:/p": "[]",
+      "oxidea.liveTemplates.v1": "[]",
+      "oxidea.macros.v1": "{}",
+      "oxidea.toolWindowLayouts.v1": "{}",
+      "oxidea.projectTree.options": '{"singleClickOpen":true}',
+      "oxidea.projectTree.expanded:/p": "[]",
+      "oxidea.runAnything.history.v1:/p": "[]",
     };
     const keys = Object.keys(data);
     const storage = {
@@ -34,10 +34,10 @@ describe("Manage IDE Settings › Export Settings…", () => {
       getItem: (k: string) => data[k] ?? null,
     };
     expect(Object.keys(exportedStorage(storage)).sort()).toEqual([
-      "openidea.liveTemplates.v1",
-      "openidea.macros.v1",
-      "openidea.projectTree.options",
-      "openidea.toolWindowLayouts.v1",
+      "oxidea.liveTemplates.v1",
+      "oxidea.macros.v1",
+      "oxidea.projectTree.options",
+      "oxidea.toolWindowLayouts.v1",
     ]);
   });
 });

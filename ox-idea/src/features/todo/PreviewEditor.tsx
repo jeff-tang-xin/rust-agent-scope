@@ -16,8 +16,8 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { history, historyKeymap, defaultKeymap } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
 import { syntaxHighlighting } from "@codemirror/language";
-import { openideaTheme } from "@/editor/core/cm/theme";
-import { openideaHighlightStyle } from "@/editor/core/cm/highlight";
+import { oxideaTheme } from "@/editor/core/cm/theme";
+import { oxideaHighlightStyle } from "@/editor/core/cm/highlight";
 import { findLanguageDescription, loadSupport } from "@/editor/core/cm/languages";
 import { attachDocument, embeddedEditorExtensions, type DocumentAttachment } from "@/editor/api";
 import { previewColors } from "@/editor/lineTokens";
@@ -84,8 +84,8 @@ export function PreviewEditor({
           state: EditorState.create({
             doc: att.text(),
             extensions: [
-              openideaTheme,
-              syntaxHighlighting(openideaHighlightStyle),
+              oxideaTheme,
+              syntaxHighlighting(oxideaHighlightStyle),
               lineNumbers(),
               highlightActiveLine(),
               history(),

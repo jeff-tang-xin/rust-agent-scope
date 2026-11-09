@@ -138,11 +138,11 @@ describe("Commit tool window Preview Diff (#1599)", () => {
     const toggle = screen.getByRole("button", { name: "Preview Diff" });
     act(() => toggle.click());
     expect(useCommit.getState().commitDiffPreview).toBe(true);
-    expect(localStorage.getItem("openidea.vcs.commitDiffPreview")).toBe("true");
+    expect(localStorage.getItem("oxidea.vcs.commitDiffPreview")).toBe("true");
     expect(screen.getByTestId("diff-preview")).toHaveAttribute("data-path", "/p/a.ts");
     act(() => toggle.click());
     expect(useCommit.getState().commitDiffPreview).toBe(false);
-    expect(localStorage.getItem("openidea.vcs.commitDiffPreview")).toBe("false");
+    expect(localStorage.getItem("oxidea.vcs.commitDiffPreview")).toBe("false");
     expect(screen.queryByTestId("diff-preview")).toBeNull();
     expect(previewHandle()).toBeUndefined();
     // The tree keeps its selection across the toggling.

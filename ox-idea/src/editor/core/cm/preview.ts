@@ -9,8 +9,8 @@ import { syntaxHighlighting } from "@codemirror/language";
 import { editorsFor } from "@/editor/api";
 import type { EditorSettings } from "@/platform/ipc";
 import type { DocBackend } from "../backend";
-import { openideaHighlightStyle } from "./highlight";
-import { openideaTheme } from "./theme";
+import { oxideaHighlightStyle } from "./highlight";
+import { oxideaTheme } from "./theme";
 import { findLanguageDescription, loadSupport, loadedSupport, uiModeForPath } from "./languages";
 import { fontExtension } from "./setup";
 import { tx } from "@/platform/i18n";
@@ -29,10 +29,10 @@ export async function previewExtensions(
   const support = desc ? (loadedSupport(desc) ?? (await loadSupport(desc))) : null;
   return [
     fontExtension(settings),
-    openideaTheme,
+    oxideaTheme,
     lineNumbers(),
     highlightSpecialChars(),
-    syntaxHighlighting(openideaHighlightStyle),
+    syntaxHighlighting(oxideaHighlightStyle),
     EditorState.readOnly.of(!editable),
     EditorView.editable.of(editable),
     // Read-only previews still support selection, Copy and keyboard focus.

@@ -12,4 +12,6 @@ commit-msg.txt
 .ox_cfg.json
 .ox_cfg_appdata.json
 .ox_state.json
+# 任务临时产物（替换脚本/中转文件），不入库
+.tmp/
 

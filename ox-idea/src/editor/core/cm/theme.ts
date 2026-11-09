@@ -16,19 +16,19 @@ export const findLocals = {
 
 /** Find in file highlights (cm/find.ts), also for viewers with their own theme (diff). */
 export const findStyles = {
-  ".cm-openidea-findMatch": {
+  ".cm-oxidea-findMatch": {
     backgroundColor: "var(--editor-search)",
     color: "var(--fg-search-match, inherit)",
     borderRadius: "2px",
   },
-  ".cm-openidea-findExcluded": {
+  ".cm-oxidea-findExcluded": {
     textDecoration: "line-through",
     textDecorationColor: "var(--fg-muted)",
   },
-  ".cm-openidea-findScope": {
+  ".cm-oxidea-findScope": {
     backgroundColor: "var(--editor-selection-inactive, var(--bg-editor-selection-inactive))",
   },
-  ".cm-openidea-findMatch-current": {
+  ".cm-oxidea-findMatch-current": {
     backgroundColor: "var(--editor-search-current)",
     color: "var(--fg-search-match, inherit)",
     outline: "1px solid color-mix(in srgb, var(--editor-search-current) 60%, var(--fg-strong))",
@@ -42,33 +42,33 @@ export const caretStyles = {
     marginLeft: "-1px",
   },
   // Use block caret (Settings › Editor › General › Appearance)
-  "&.cm-openidea-blockCaret .cm-cursor": {
+  "&.cm-oxidea-blockCaret .cm-cursor": {
     borderLeft: "none",
     width: "1ch",
     marginLeft: "0",
     background: "color-mix(in srgb, var(--caret, var(--fg-strong)) 55%, transparent)",
   },
   // Use smooth caret blinking: fade through CodeMirror's blink keyframes instead of stepping; rounded caret.
-  "&.cm-openidea-smoothCaretBlink.cm-focused > .cm-scroller > .cm-cursorLayer": {
+  "&.cm-oxidea-smoothCaretBlink.cm-focused > .cm-scroller > .cm-cursorLayer": {
     animationTimingFunction: "cubic-bezier(0.7, 0, 0.3, 1)",
   },
-  "&.cm-openidea-smoothCaretBlink .cm-cursor": { borderRadius: "1px" },
-  "&.cm-openidea-smoothCaretBlink.cm-openidea-blockCaret .cm-cursor": { borderRadius: "2px" },
+  "&.cm-oxidea-smoothCaretBlink .cm-cursor": { borderRadius: "1px" },
+  "&.cm-oxidea-smoothCaretBlink.cm-oxidea-blockCaret .cm-cursor": { borderRadius: "2px" },
   // Use smooth caret movement: Snappy lands at once and settles, Gliding travels visibly.
-  "&.cm-openidea-caretMotion-snappy": { "--openidea-caret-motion": "110ms cubic-bezier(0.16, 1, 0.3, 1)" },
-  "&.cm-openidea-caretMotion-gliding": { "--openidea-caret-motion": "180ms cubic-bezier(0.45, 0, 0.25, 1)" },
-  ".cm-cursorLayer.cm-openidea-caretGlide > .cm-cursor": {
+  "&.cm-oxidea-caretMotion-snappy": { "--oxidea-caret-motion": "110ms cubic-bezier(0.16, 1, 0.3, 1)" },
+  "&.cm-oxidea-caretMotion-gliding": { "--oxidea-caret-motion": "180ms cubic-bezier(0.45, 0, 0.25, 1)" },
+  ".cm-cursorLayer.cm-oxidea-caretGlide > .cm-cursor": {
     transition:
-      "left var(--openidea-caret-motion), top var(--openidea-caret-motion), width var(--openidea-caret-motion), height var(--openidea-caret-motion)",
+      "left var(--oxidea-caret-motion), top var(--oxidea-caret-motion), width var(--oxidea-caret-motion), height var(--oxidea-caret-motion)",
   },
   "@media (prefers-reduced-motion: reduce)": {
-    ".cm-cursorLayer.cm-openidea-caretGlide > .cm-cursor": { transition: "none" },
+    ".cm-cursorLayer.cm-oxidea-caretGlide > .cm-cursor": { transition: "none" },
   },
 };
 
 /** The error stripe and scrollbar lane (cm/lanes.ts), also for the VCS viewers. */
 export const overviewStyles = {
-  ".cm-openidea-overview": {
+  ".cm-oxidea-overview": {
     position: "absolute",
     top: "0",
     right: "0",
@@ -78,13 +78,13 @@ export const overviewStyles = {
     zIndex: "3",
   },
   // Over an outer scroller (an aligned diff): stays at the top of its viewport, taking no room.
-  ".cm-openidea-overview-sticky": {
+  ".cm-oxidea-overview-sticky": {
     position: "sticky",
     bottom: "auto",
     flex: "none",
     alignSelf: "flex-end",
   },
-  ".cm-openidea-overviewMark": {
+  ".cm-oxidea-overviewMark": {
     position: "absolute",
     left: "3px",
     width: "6px",
@@ -93,14 +93,14 @@ export const overviewStyles = {
     pointerEvents: "auto",
     cursor: "pointer",
   },
-  ".cm-openidea-overviewMark-thin": { left: "4px", width: "4px", minHeight: "2px" },
-  ".cm-openidea-overviewMark-full": { left: "0", width: "100%", minHeight: "2px", borderRadius: "0" },
+  ".cm-oxidea-overviewMark-thin": { left: "4px", width: "4px", minHeight: "2px" },
+  ".cm-oxidea-overviewMark-full": { left: "0", width: "100%", minHeight: "2px", borderRadius: "0" },
   // The scrollbar thumb wins over the marks under it (cm/lanes.ts, #752).
-  ".cm-openidea-overview-onThumb .cm-openidea-overviewMark": { pointerEvents: "none" },
+  ".cm-oxidea-overview-onThumb .cm-oxidea-overviewMark": { pointerEvents: "none" },
   // The lane owns the scrollbar and its thumb (cm/lanes.ts): the native one is hidden so a press
   // on the scrollbar can never reach the text layer and start a text selection.
-  "&.cm-openidea-withOverview .cm-scroller::-webkit-scrollbar:vertical": { width: "0" },
-  ".cm-openidea-overviewThumb": {
+  "&.cm-oxidea-withOverview .cm-scroller::-webkit-scrollbar:vertical": { width: "0" },
+  ".cm-oxidea-overviewThumb": {
     position: "absolute",
     right: "2px",
     width: "6px",
@@ -109,8 +109,8 @@ export const overviewStyles = {
     pointerEvents: "auto",
     cursor: "default",
   },
-  ".cm-openidea-overview-onThumb .cm-openidea-overviewThumb": { background: "var(--scrollbar-thumb-hover)" },
-  ".cm-openidea-overviewCaret": {
+  ".cm-oxidea-overview-onThumb .cm-oxidea-overviewThumb": { background: "var(--scrollbar-thumb-hover)" },
+  ".cm-oxidea-overviewCaret": {
     position: "absolute",
     left: "2px",
     right: "2px",
@@ -120,7 +120,7 @@ export const overviewStyles = {
   },
 };
 
-export const openideaTheme = EditorView.theme({
+export const oxideaTheme = EditorView.theme({
   "&": {
     height: "100%",
     backgroundColor: "var(--bg-editor, var(--bg-island, var(--bg-app)))",
@@ -133,7 +133,7 @@ export const openideaTheme = EditorView.theme({
     "--editor-selection-inactive":
       "var(--bg-editor-selection-inactive, color-mix(in srgb, var(--accent) 14%, transparent))",
     "--editor-indent-guide": "var(--border-indent-guide, var(--border))",
-    "--openidea-guide": "linear-gradient(var(--editor-indent-guide), var(--editor-indent-guide))",
+    "--oxidea-guide": "linear-gradient(var(--editor-indent-guide), var(--editor-indent-guide))",
     ...findLocals,
     "--editor-brace": "var(--bg-matched-brace, color-mix(in srgb, var(--accent) 22%, transparent))",
     "--editor-fold-chip": "var(--bg-fold-placeholder, color-mix(in srgb, var(--fg-muted) 14%, transparent))",
@@ -141,10 +141,10 @@ export const openideaTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": {
     // The scroll container keeps the arrow cursor so its scrollbar does not turn into the I-beam.
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
-    fontSize: "var(--openidea-editor-font-size, var(--fs-code))",
-    lineHeight: "var(--openidea-editor-line-height, var(--lh-code))",
+    fontSize: "var(--oxidea-editor-font-size, var(--fs-code))",
+    lineHeight: "var(--oxidea-editor-line-height, var(--lh-code))",
     fontVariantLigatures: "none",
     overscrollBehavior: "contain",
   },
@@ -155,40 +155,40 @@ export const openideaTheme = EditorView.theme({
   },
   ".cm-line": { padding: "0 16px 0 6px" },
   ...caretStyles,
-  "&.cm-openidea-ligatures .cm-scroller, &.cm-openidea-ligatures .cm-openidea-sticky": {
+  "&.cm-oxidea-ligatures .cm-scroller, &.cm-oxidea-ligatures .cm-oxidea-sticky": {
     fontVariantLigatures: "normal",
   },
-  "&.cm-openidea-methodSeparators .cm-openidea-methodSeparator": {
+  "&.cm-oxidea-methodSeparators .cm-oxidea-methodSeparator": {
     boxShadow: "inset 0 1px 0 var(--border-method-separator, var(--border))",
   },
-  "&.cm-openidea-hideGutter-run .cm-openidea-gutter-run, &.cm-openidea-hideGutter-bookmarks .cm-openidea-bookmarks, &.cm-openidea-hideGutter-colors .cm-openidea-gutter-colors":
+  "&.cm-oxidea-hideGutter-run .cm-oxidea-gutter-run, &.cm-oxidea-hideGutter-bookmarks .cm-oxidea-bookmarks, &.cm-oxidea-hideGutter-colors .cm-oxidea-gutter-colors":
     {
       display: "none !important",
     },
   // Inheritance markers share one gutter: each group hides its own icons.
-  "&.cm-openidea-hideGutter-inheritors :is(.cm-openidea-lineMarker-implemented, .cm-openidea-lineMarker-overridden), &.cm-openidea-hideGutter-supers :is(.cm-openidea-lineMarker-implementing, .cm-openidea-lineMarker-overriding)":
+  "&.cm-oxidea-hideGutter-inheritors :is(.cm-oxidea-lineMarker-implemented, .cm-oxidea-lineMarker-overridden), &.cm-oxidea-hideGutter-supers :is(.cm-oxidea-lineMarker-implementing, .cm-oxidea-lineMarker-overriding)":
     { display: "none" },
   // Distraction Free Mode: no gutter; the text column (n chars + line padding) is centred.
-  "&.cm-openidea-distractionFree": { "--openidea-df-width": "calc(var(--openidea-df-columns, 80) * 1ch + 22px)" },
-  "&.cm-openidea-distractionFree .cm-gutters": { display: "none" },
-  "&.cm-openidea-distractionFree .cm-content": {
-    marginInlineStart: "max(0px, calc((100% - var(--openidea-df-width)) / 2))",
+  "&.cm-oxidea-distractionFree": { "--oxidea-df-width": "calc(var(--oxidea-df-columns, 80) * 1ch + 22px)" },
+  "&.cm-oxidea-distractionFree .cm-gutters": { display: "none" },
+  "&.cm-oxidea-distractionFree .cm-content": {
+    marginInlineStart: "max(0px, calc((100% - var(--oxidea-df-width)) / 2))",
   },
-  "&.cm-openidea-distractionFree .cm-content.cm-lineWrapping": { maxWidth: "var(--openidea-df-width)" },
+  "&.cm-oxidea-distractionFree .cm-content.cm-lineWrapping": { maxWidth: "var(--oxidea-df-width)" },
   ".cm-fat-cursor": { background: "color-mix(in srgb, var(--caret, var(--fg-strong)) 45%, transparent)" },
   ".cm-selectionBackground": { background: "var(--editor-selection-inactive)" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
     background: "var(--editor-selection)",
   },
   // Row backgrounds go on a pseudo-element under the selection layer: on the line itself they would hide it.
-  ".cm-activeLine": { backgroundColor: "transparent", "--openidea-line-bg": "var(--editor-caret-row)" },
-  ".cm-activeLine, .cm-openidea-lineBg": { position: "relative" },
-  ".cm-activeLine::before, .cm-openidea-lineBg::before": {
+  ".cm-activeLine": { backgroundColor: "transparent", "--oxidea-line-bg": "var(--editor-caret-row)" },
+  ".cm-activeLine, .cm-oxidea-lineBg": { position: "relative" },
+  ".cm-activeLine::before, .cm-oxidea-lineBg::before": {
     content: '""',
     position: "absolute",
     inset: "0",
     zIndex: "-1000",
-    background: "var(--openidea-line-bg)",
+    background: "var(--oxidea-line-bg)",
     pointerEvents: "none",
   },
   ".cm-selectionMatch": {
@@ -229,9 +229,9 @@ export const openideaTheme = EditorView.theme({
   },
   ".cm-activeLineGutter": { backgroundColor: "var(--editor-caret-row)" },
   ".cm-lineNumbers .cm-activeLineGutter": { color: "var(--editor-line-number-current)" },
-  ".cm-openidea-lane": { width: "4px" },
-  ".cm-openidea-lane .cm-gutterElement": { padding: "0", position: "relative" },
-  ".cm-openidea-laneBar": {
+  ".cm-oxidea-lane": { width: "4px" },
+  ".cm-oxidea-lane .cm-gutterElement": { padding: "0", position: "relative" },
+  ".cm-oxidea-laneBar": {
     position: "absolute",
     top: "0",
     bottom: "0",
@@ -240,7 +240,7 @@ export const openideaTheme = EditorView.theme({
     borderRadius: "0 1px 1px 0",
     background: "var(--lane-color)",
   },
-  ".cm-openidea-laneDeleted": {
+  ".cm-oxidea-laneDeleted": {
     position: "absolute",
     left: "0",
     top: "-3px",
@@ -260,9 +260,9 @@ export const openideaTheme = EditorView.theme({
     cursor: "pointer",
     transition: "opacity var(--dur-fast) var(--ease)",
   },
-  ".cm-foldGutter .cm-openidea-foldOpen": { opacity: "0", display: "inline-flex" },
-  ".cm-foldGutter .cm-openidea-foldClosed": { display: "inline-flex" },
-  ".cm-gutters:hover .cm-foldGutter .cm-openidea-foldOpen": { opacity: "1" },
+  ".cm-foldGutter .cm-oxidea-foldOpen": { opacity: "0", display: "inline-flex" },
+  ".cm-foldGutter .cm-oxidea-foldClosed": { display: "inline-flex" },
+  ".cm-gutters:hover .cm-foldGutter .cm-oxidea-foldOpen": { opacity: "1" },
   ".cm-foldGutter .cm-gutterElement:hover": { color: "var(--fg-secondary)" },
   ".cm-foldPlaceholder": {
     backgroundColor: "var(--editor-fold-chip)",
@@ -277,14 +277,14 @@ export const openideaTheme = EditorView.theme({
 
   // Indent guides (cm/indentGuides.ts): one 1px strip per guide, positioned per guide.
   // Above the text so a selection, or a mark's background, never covers part of a guide.
-  ".cm-openidea-guides, .cm-openidea-guidesOn .cm-openidea-lens": { position: "relative" },
-  ".cm-openidea-guides::after, .cm-openidea-guidesOn .cm-openidea-lens::after": {
+  ".cm-oxidea-guides, .cm-oxidea-guidesOn .cm-oxidea-lens": { position: "relative" },
+  ".cm-oxidea-guides::after, .cm-oxidea-guidesOn .cm-oxidea-lens::after": {
     content: '""',
     position: "absolute",
     inset: "0",
     pointerEvents: "none",
-    backgroundImage: "var(--openidea-guide-images, none)",
-    backgroundPosition: "var(--openidea-guide-positions, 0 0)",
+    backgroundImage: "var(--oxidea-guide-images, none)",
+    backgroundPosition: "var(--oxidea-guide-positions, 0 0)",
     backgroundSize: "1px 100%",
     backgroundRepeat: "no-repeat",
   },
@@ -342,7 +342,7 @@ export const openideaTheme = EditorView.theme({
   ...overviewStyles,
 
   // Sticky lines (cm/stickyScroll.ts)
-  ".cm-openidea-sticky": {
+  ".cm-oxidea-sticky": {
     position: "absolute",
     top: "0",
     left: "0",
@@ -351,23 +351,23 @@ export const openideaTheme = EditorView.theme({
     backgroundColor: "var(--bg-editor, var(--bg-island, var(--bg-app)))",
     borderBottom: "1px solid var(--editor-gutter-border)",
     boxShadow: "0 3px 6px -2px color-mix(in srgb, var(--fg-strong) 12%, transparent)",
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
-    fontSize: "var(--openidea-editor-font-size, var(--fs-code))",
-    lineHeight: "var(--openidea-editor-line-height, var(--lh-code))",
+    fontSize: "var(--oxidea-editor-font-size, var(--fs-code))",
+    lineHeight: "var(--oxidea-editor-line-height, var(--lh-code))",
     overflow: "hidden",
     cursor: "pointer",
   },
-  ".cm-openidea-stickyLine": { display: "flex", whiteSpace: "pre" },
-  ".cm-openidea-stickyLine:hover": { backgroundColor: "var(--editor-caret-row)" },
-  ".cm-openidea-stickyNumber": {
+  ".cm-oxidea-stickyLine": { display: "flex", whiteSpace: "pre" },
+  ".cm-oxidea-stickyLine:hover": { backgroundColor: "var(--editor-caret-row)" },
+  ".cm-oxidea-stickyNumber": {
     flex: "none",
     textAlign: "right",
     color: "var(--editor-line-number)",
     boxSizing: "border-box",
     paddingRight: "8px",
   },
-  ".cm-openidea-stickyText": { flex: "1", overflow: "hidden" },
+  ".cm-oxidea-stickyText": { flex: "1", overflow: "hidden" },
 
   // Soft-wrap: continuation rows indent slightly, like IDEA's wrap sign column.
   "&.cm-lineWrapping .cm-line, .cm-lineWrapping .cm-line": { paddingRight: "24px" },

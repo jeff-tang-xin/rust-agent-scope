@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn nvm_versions_newest_first() {
-        let dir = std::env::temp_dir().join(format!("openidea-nvm-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oxidea-nvm-{}", std::process::id()));
         for v in ["v9.11.2", "v20.9.0", "v22.1.0", "v20.10.0"] {
             std::fs::create_dir_all(dir.join(v).join("bin")).unwrap();
         }

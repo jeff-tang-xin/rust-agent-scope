@@ -1,14 +1,14 @@
 {
-  "name": "openidea-fixture-shop",
+  "name": "oxidea-fixture-shop",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenIDEA QA fixture: a tiny shopping cart library",
+  "description": "OXidea QA fixture: a tiny shopping cart library",
   "type": "module",
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
     "build": "tsc -p .",
     "test": "vitest run",
-    "test:failing": "OPENIDEA_FAIL=1 vitest run",
+    "test:failing": "OXIDEA_FAIL=1 vitest run",
     "lint": "tsc -p . --noEmit"
   },
   "devDependencies": {

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Table, TableLike};
 
-/// Layered settings: defaults → `<app-config>/settings.toml` → `<project>/.openidea/settings.toml`.
+/// Layered settings: defaults → `<app-config>/settings.toml` → `<project>/.oxidea/settings.toml`.
 /// Writes go through `toml_edit` so user comments survive.
 ///
 /// TOML keys use the camelCase names of the serde [`Settings`] struct, e.g.
@@ -308,9 +308,9 @@ impl SettingsStore {
     pub fn import_bundle(&self, path: &Path) -> IdeResult<(Settings, BTreeMap<String, String>)> {
         let bytes = std::fs::read(path)?;
         let bundle: SettingsBundle = serde_json::from_slice(&bytes)
-            .map_err(|e| IdeError::invalid(format!("not an OpenIDEA settings file: {e}")))?;
+            .map_err(|e| IdeError::invalid(format!("not an OXidea settings file: {e}")))?;
         if bundle.format != BUNDLE_FORMAT || bundle.version > BUNDLE_VERSION {
-            return Err(IdeError::invalid("not an OpenIDEA settings file, or one from a newer version"));
+            return Err(IdeError::invalid("not an OXidea settings file, or one from a newer version"));
         }
         let layer = parse_layer(&bundle.settings).map_err(|e| IdeError::invalid(format!("invalid settings: {e}")))?;
         try_merge(&mut defaults_json(), layer).map_err(|e| IdeError::invalid(format!("invalid settings: {e}")))?;
@@ -323,12 +323,12 @@ impl SettingsStore {
 }
 
 /// A JetBrains IDE's File › Manage IDE Settings › Export Settings… archive: every
-/// entry name, and the text of the entries OpenIDEA maps (the frontend does the mapping).
+/// entry name, and the text of the entries OXidea maps (the frontend does the mapping).
 #[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct JetBrainsSettings {
     pub entries: Vec<String>,
-    /// Entry name → text, for `colors/*.icls` and the `options/*.xml` files OpenIDEA reads.
+    /// Entry name → text, for `colors/*.icls` and the `options/*.xml` files OXidea reads.
     pub files: BTreeMap<String, String>,
 }
 
@@ -364,7 +364,7 @@ pub fn read_jetbrains_settings(path: &Path) -> IdeResult<JetBrainsSettings> {
     Ok(JetBrainsSettings { entries, files })
 }
 
-const BUNDLE_FORMAT: &str = "openidea-settings";
+const BUNDLE_FORMAT: &str = "oxidea-settings";
 const BUNDLE_VERSION: u32 = 1;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -387,7 +387,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = tmp.path().join("cfg");
         let proj = tmp.path().join("proj");
-        std::fs::create_dir_all(proj.join(".openidea")).unwrap();
+        std::fs::create_dir_all(proj.join(".oxidea")).unwrap();
         let store = SettingsStore::load(&cfg, Some(&proj));
         let schemes = json!({"custom-forest": {"name": "Forest", "parent": "dark", "attributes": {
             "keyword": {"foreground": "#99dd77", "bold": true}
@@ -405,7 +405,7 @@ mod tests {
         );
         assert!(store.set(SettingsScope::Project, "editor", json!({"customSchemes": schemes})).is_err());
         std::fs::write(
-            proj.join(".openidea/settings.toml"),
+            proj.join(".oxidea/settings.toml"),
             "[editor.customSchemes.custom-forest]\nname = \"Project\"\nparent = \"light\"\nattributes = {}\n",
         )
         .unwrap();
@@ -420,10 +420,10 @@ mod tests {
         let cfg = tmp.path().join("cfg");
         let proj = tmp.path().join("proj");
         std::fs::create_dir_all(&cfg).unwrap();
-        std::fs::create_dir_all(proj.join(".openidea")).unwrap();
+        std::fs::create_dir_all(proj.join(".oxidea")).unwrap();
         std::fs::write(cfg.join("settings.toml"), "keymap = \"vscode\"\n[editor]\nfontSize = 15\ntabSize = 2\n")
             .unwrap();
-        std::fs::write(proj.join(".openidea/settings.toml"), "[editor]\ntabSize = 8\n").unwrap();
+        std::fs::write(proj.join(".oxidea/settings.toml"), "[editor]\ntabSize = 8\n").unwrap();
 
         let s = SettingsStore::load(&cfg, Some(&proj)).effective();
         assert_eq!(s.keymap, "vscode");
@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(s.editor.font_family, "JetBrains Mono");
 
         // Invalid project layer: ignored, global still applies.
-        std::fs::write(proj.join(".openidea/settings.toml"), "[editor]\ntabSize = \"wide\"\n").unwrap();
+        std::fs::write(proj.join(".oxidea/settings.toml"), "[editor]\ntabSize = \"wide\"\n").unwrap();
         let store = SettingsStore::load(&cfg, Some(&proj));
         assert_eq!(store.effective().editor.tab_size, 2);
         // Broken TOML in the global layer: defaults.
@@ -534,7 +534,7 @@ mod tests {
         // Project layer is created on demand and wins.
         let s = store.set(SettingsScope::Project, "editor.fontSize", json!(12)).unwrap();
         assert_eq!(s.editor.font_size, 12.0);
-        assert_eq!(std::fs::read_to_string(proj.join(".openidea/settings.toml")).unwrap(), "[editor]\nfontSize = 12\n");
+        assert_eq!(std::fs::read_to_string(proj.join(".oxidea/settings.toml")).unwrap(), "[editor]\nfontSize = 12\n");
         let s = store.set(SettingsScope::Project, "editor.fontSize", json!(null)).unwrap();
         assert_eq!(s.editor.font_size, 16.0);
 
@@ -575,7 +575,7 @@ mod tests {
         source.set(SettingsScope::Global, "editor.fontSize", json!(17)).unwrap();
         source.set(SettingsScope::Global, "general.powerSaveMode", json!(true)).unwrap();
         let file = tmp.path().join("settings.json");
-        let storage = BTreeMap::from([("openidea.macros.v1".to_owned(), "[]".to_owned())]);
+        let storage = BTreeMap::from([("oxidea.macros.v1".to_owned(), "[]".to_owned())]);
         source.export_bundle(&file, storage.clone()).unwrap();
 
         let target = SettingsStore::load(&b, None);
@@ -586,7 +586,7 @@ mod tests {
         assert_eq!(target.effective(), source.effective());
 
         let bad = tmp.path().join("bad.json");
-        std::fs::write(&bad, r#"{"format":"openidea-settings","version":1,"settings":"[editor]\nfontSize = \"x\"\n"}"#)
+        std::fs::write(&bad, r#"{"format":"oxidea-settings","version":1,"settings":"[editor]\nfontSize = \"x\"\n"}"#)
             .unwrap();
         assert!(target.import_bundle(&bad).is_err());
         std::fs::write(&bad, r#"{"format":"other","version":1,"settings":""}"#).unwrap();
@@ -664,8 +664,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let config = tmp.path().join("config");
         let project = tmp.path().join("project");
-        std::fs::create_dir_all(project.join(".openidea")).unwrap();
-        std::fs::write(project.join(".openidea/settings.toml"), "[mcpServer]\nenabled = true\n").unwrap();
+        std::fs::create_dir_all(project.join(".oxidea")).unwrap();
+        std::fs::write(project.join(".oxidea/settings.toml"), "[mcpServer]\nenabled = true\n").unwrap();
         let settings = SettingsStore::load(&config, Some(&project));
         assert!(!settings.effective().mcp_server.enabled);
         assert!(settings.set(SettingsScope::Project, "mcpServer.enabled", serde_json::json!(true)).is_err());

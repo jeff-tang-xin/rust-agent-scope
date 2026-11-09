@@ -278,7 +278,7 @@ impl TempConfig {
     pub fn new() -> IdeResult<Self> {
         let nanos =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("openidea-docker-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oxidea-docker-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         #[cfg(unix)]
         {

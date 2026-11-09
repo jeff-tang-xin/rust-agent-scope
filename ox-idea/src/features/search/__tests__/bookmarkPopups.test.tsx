@@ -140,7 +140,7 @@ describe("bookmark gutter", () => {
       state: EditorState.create({ doc: "a\nb\n", extensions: bookmarkGutter("/p/a", () => {}) }),
     });
     await act(() => new Promise((r) => setTimeout(r, 0)));
-    expect(view.dom.querySelector(".cm-openidea-bookmarkMnemonic")?.textContent).toBe("Q");
+    expect(view.dom.querySelector(".cm-oxidea-bookmarkMnemonic")?.textContent).toBe("Q");
     view.destroy();
   });
 });

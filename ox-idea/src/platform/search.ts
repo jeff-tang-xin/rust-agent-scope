@@ -68,7 +68,7 @@ function save(key: string, value: unknown) {
   }
 }
 
-const HISTORY_KEYS = { find: "openidea.search.findHistory.v1", replace: "openidea.search.replaceHistory.v1" };
+const HISTORY_KEYS = { find: "oxidea.search.findHistory.v1", replace: "oxidea.search.replaceHistory.v1" };
 const MAX_HISTORY = 20;
 
 /** Recent search (or replace) strings, newest first; shared by the find bar and Find in Files. */
@@ -99,7 +99,7 @@ interface CustomScopesState {
 
 export const useCustomScopes = create<CustomScopesState>(() => ({ root: null, scopes: [] }));
 
-const scopesKey = (root: string) => `openidea.scopes.v1:${root}`;
+const scopesKey = (root: string) => `oxidea.scopes.v1:${root}`;
 
 function validScopes(v: unknown): CustomScope[] {
   if (!Array.isArray(v)) return [];

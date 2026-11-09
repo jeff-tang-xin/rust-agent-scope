@@ -15,7 +15,7 @@ const MULTIPLE: ReadonlySet<AuxKind> = new Set(["comparison"]);
 const KINDS: readonly AuxKind[] = ["settings", "comparison", "deployment"];
 
 /** An auxiliary window reports to its parent whether it closed, and which documents it released. */
-export const AUX_CLOSED = "openidea://auxiliary/closed";
+export const AUX_CLOSED = "oxidea://auxiliary/closed";
 
 export interface AuxCloseResult {
   label: string;

@@ -7,7 +7,7 @@ it reads the saved JSON array and reports success through a notification.
 This fixture checks the settings/action flow; it does not contact a provider.
 
 Build with `plugins/build.sh crates/ide-plugin/tests/fixtures/settings-pages`.
-Install or link this directory with `openidea-plugin link` and open
+Install or link this directory with `oxidea-plugin link` and open
 Settings › Plugins › Model Profiles. Edit without Apply and Cancel to discard;
 Apply or OK saves. Running Test also saves pending edits before the command,
 so Cancel after Test does not undo those already-applied edits.

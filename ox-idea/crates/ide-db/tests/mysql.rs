@@ -1,5 +1,5 @@
 //! Introspection against a real MySQL / MariaDB server, skipped unless
-//! `OPENIDEA_TEST_MYSQL=host:port:user:password` names a throwaway server.
+//! `OXIDEA_TEST_MYSQL=host:port:user:password` names a throwaway server.
 
 use ide_core::{CancellationToken, IdeResult};
 use ide_db::{DataSource, DbDriver, DbManager, DbOptions};
@@ -7,7 +7,7 @@ use ide_db::{DataSource, DbDriver, DbManager, DbOptions};
 const SCHEMAS: [&str; 2] = ["oi_bin_meta", "oi_数据"];
 
 fn server() -> Option<(String, u16, String, String)> {
-    let v = std::env::var("OPENIDEA_TEST_MYSQL").ok()?;
+    let v = std::env::var("OXIDEA_TEST_MYSQL").ok()?;
     let mut it = v.splitn(4, ':');
     Some((it.next()?.into(), it.next()?.parse().ok()?, it.next()?.into(), it.next().unwrap_or("").into()))
 }

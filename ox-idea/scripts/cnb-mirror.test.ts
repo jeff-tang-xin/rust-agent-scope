@@ -3,24 +3,24 @@ import { describe, expect, it } from "vitest";
 import { KEEP, mirrorManifest, releasesToPrune } from "./cnb-mirror.ts";
 
 describe("mirrorManifest", () => {
-  const gh = "https://github.com/l0ng-ai/openidea/releases/download/v0.1.38";
+  const gh = "https://github.com/l0ng-ai/oxidea/releases/download/v0.1.38";
   const manifest = {
     version: "0.1.38",
     notes: "",
     pub_date: "2026-11-06T00:00:00Z",
     platforms: {
-      "darwin-aarch64": { signature: "sig-mac", url: `${gh}/OpenIDEA_aarch64.app.tar.gz` },
-      "windows-x86_64-nsis": { signature: "sig-win", url: `${gh}/OpenIDEA_0.1.38_x64-setup.exe` },
+      "darwin-aarch64": { signature: "sig-mac", url: `${gh}/OXidea_aarch64.app.tar.gz` },
+      "windows-x86_64-nsis": { signature: "sig-win", url: `${gh}/OXidea_0.1.38_x64-setup.exe` },
     },
   };
 
   it("points every bundle at the CNB release and keeps the signatures", () => {
-    const cnb = "https://cnb.cool/l0ng-ai/openidea/-/releases/download/v0.1.38";
+    const cnb = "https://cnb.cool/l0ng-ai/oxidea/-/releases/download/v0.1.38";
     expect(mirrorManifest(manifest, "v0.1.38")).toEqual({
       ...manifest,
       platforms: {
-        "darwin-aarch64": { signature: "sig-mac", url: `${cnb}/OpenIDEA_aarch64.app.tar.gz` },
-        "windows-x86_64-nsis": { signature: "sig-win", url: `${cnb}/OpenIDEA_0.1.38_x64-setup.exe` },
+        "darwin-aarch64": { signature: "sig-mac", url: `${cnb}/OXidea_aarch64.app.tar.gz` },
+        "windows-x86_64-nsis": { signature: "sig-win", url: `${cnb}/OXidea_0.1.38_x64-setup.exe` },
       },
     });
   });

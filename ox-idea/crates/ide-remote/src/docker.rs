@@ -45,11 +45,11 @@ pub struct ContainerDebug<'a> {
 
 /// The script that starts a debugged program in the container: it prints a line
 /// starting with [`DEBUG_READY`] once debugpy listens, then runs the program.
-pub const DEBUG_BOOTSTRAP: &str = include_str!("openidea_debug.py");
-pub const DEBUG_BOOTSTRAP_NAME: &str = "openidea_debug.py";
+pub const DEBUG_BOOTSTRAP: &str = include_str!("oxidea_debug.py");
+pub const DEBUG_BOOTSTRAP_NAME: &str = "oxidea_debug.py";
 /// Where the bootstrap folder and the IDE's debugpy are mounted (read-only).
-const DEBUG_DIR: &str = "/opt/openidea/debug";
-const DEBUGPY_DIR: &str = "/opt/openidea/debugpy-lib";
+const DEBUG_DIR: &str = "/opt/oxidea/debug";
+const DEBUGPY_DIR: &str = "/opt/oxidea/debugpy-lib";
 /// Start of the line the bootstrap prints when the debugger can attach.
 pub const DEBUG_READY: &str = "debugpy is waiting for the debugger on port ";
 
@@ -68,7 +68,7 @@ pub fn container_name(config_id: &str, unique: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') { c } else { '-' })
         .take(40)
         .collect();
-    format!("openidea-{}-{unique}", id.trim_matches('-'))
+    format!("oxidea-{}-{unique}", id.trim_matches('-'))
 }
 
 /// `config` as a local run of the docker CLI that runs it in a new container.
@@ -113,7 +113,7 @@ pub fn container_config(config: &RunConfig, run: &ContainerRun) -> IdeResult<Run
         }
         RunTargetKind::Ssh => return Err(IdeError::internal("an SSH target does not run in a container")),
     }
-    args.extend(["--name".into(), run.name.to_owned(), "--label".into(), format!("openidea.run={}", config.id)]);
+    args.extend(["--name".into(), run.name.to_owned(), "--label".into(), format!("oxidea.run={}", config.id)]);
     args.extend(["--workdir".into(), command.cwd.clone()]);
     let mut docker_env = run.endpoint_env.clone();
     for (key, value) in &env {
@@ -339,7 +339,7 @@ mod tests {
             docker: "/usr/local/bin/docker",
             endpoint_env: endpoint,
             file_env: files,
-            name: "openidea-app-1",
+            name: "oxidea-app-1",
             user: Some((501, 20)),
             debug: None,
         }
@@ -371,7 +371,7 @@ mod tests {
         assert_eq!(
             out.args.join(" "),
             "run --rm --interactive --init --volume /work/proj:/workspaces/proj \
-             --name openidea-app-1 --label openidea.run=app --workdir /workspaces/proj \
+             --name oxidea-app-1 --label oxidea.run=app --workdir /workspaces/proj \
              --env DATA --env PATH=/opt/bin --env PYTHONUNBUFFERED --env SECRET \
              --publish 8000:8000 --user 501:20 --network host --label a b \
              python:3.12 python3 -u /workspaces/proj/main.py"
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(out.cwd.as_deref(), Some(Path::new("/work/proj")));
         assert_eq!(out.extras.target, None);
         assert!(out.extras.env_files.is_empty() && out.extras.include_system_env);
-        assert_eq!(out.extras.stop_command.as_deref(), Some("/usr/local/bin/docker stop openidea-app-1"));
+        assert_eq!(out.extras.stop_command.as_deref(), Some("/usr/local/bin/docker stop oxidea-app-1"));
         assert_eq!(out.kind, "python", "test and output parsers still apply");
 
         let mut c = config("npm run dev", &[]);
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(
             out.args.join(" "),
             "compose --file /work/proj/compose.yaml --file /work/proj/compose.dev.yaml run --rm --no-TTY \
-             --name openidea-app-1 --label openidea.run=app --workdir /app/backend \
+             --name oxidea-app-1 --label oxidea.run=app --workdir /app/backend \
              --env DATA --env PYTHONUNBUFFERED --user 501:20 web python3 manage.py test"
         );
         assert_eq!(out.env["DATA"], "/app/data");
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn debug_runs_the_program_under_the_bootstrap() {
         let target = RunTarget { kind: RunTargetKind::Docker, image: "python:3.12".into(), ..Default::default() };
-        let boot = "/opt/openidea/debug/openidea_debug.py 41234 /workspaces/proj";
+        let boot = "/opt/oxidea/debug/oxidea_debug.py 41234 /workspaces/proj";
         assert!(DEBUG_BOOTSTRAP.contains(&format!("\"{DEBUG_READY}%d, project folder %s\"")));
         let line = |c: RunConfig| {
             let args = debugged(&target, &c).unwrap();
@@ -458,8 +458,8 @@ mod tests {
         assert!(
             args.contains(
                 "--user 501:20 --publish 127.0.0.1:41234:41234 \
-                 --volume /data/container-debug:/opt/openidea/debug:ro \
-                 --volume /data/tools/debugpy/lib:/opt/openidea/debugpy-lib:ro python:3.12"
+                 --volume /data/container-debug:/opt/oxidea/debug:ro \
+                 --volume /data/tools/debugpy/lib:/opt/oxidea/debugpy-lib:ro python:3.12"
             ),
             "{args}"
         );
@@ -498,7 +498,7 @@ mod tests {
         r.debug =
             Some(ContainerDebug { port: 41234, bootstrap_dir: Path::new("/data/container-debug"), debugpy: None });
         let args = container_config(&config("python3", &["main.py"]), &r).unwrap().args.join(" ");
-        assert!(args.contains("openidea/debug:ro python:3.12") && !args.contains("debugpy-lib"), "{args}");
+        assert!(args.contains("oxidea/debug:ro python:3.12") && !args.contains("debugpy-lib"), "{args}");
     }
 
     #[cfg(unix)]
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn names_and_default_folder() {
-        assert_eq!(container_name("workspace:a/b:Run app", "k3x"), "openidea-workspace-a-b-Run-app-k3x");
+        assert_eq!(container_name("workspace:a/b:Run app", "k3x"), "oxidea-workspace-a-b-Run-app-k3x");
         assert_eq!(default_container_root(Path::new("/work/my proj")), "/workspaces/my-proj");
     }
 

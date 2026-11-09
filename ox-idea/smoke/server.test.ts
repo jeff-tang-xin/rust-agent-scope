@@ -12,12 +12,12 @@ import { Server, repoRoot } from "./server.ts";
 const options = { skip: process.platform === "win32", timeout: 30_000 };
 
 async function fixture(mode = "graceful") {
-  const home = mkdtempSync(join(tmpdir(), "openidea-server-close-"));
-  const previous = process.env.OPENIDEA_SERVER;
-  process.env.OPENIDEA_SERVER = join(repoRoot, "smoke", "fixtures", "server.cjs");
+  const home = mkdtempSync(join(tmpdir(), "oxidea-server-close-"));
+  const previous = process.env.OXIDEA_SERVER;
+  process.env.OXIDEA_SERVER = join(repoRoot, "smoke", "fixtures", "server.cjs");
   onTestFinished(async () => {
-    if (previous === undefined) delete process.env.OPENIDEA_SERVER;
-    else process.env.OPENIDEA_SERVER = previous;
+    if (previous === undefined) delete process.env.OXIDEA_SERVER;
+    else process.env.OXIDEA_SERVER = previous;
     if (existsSync(join(home, "pids.json"))) {
       const pids = JSON.parse(readFileSync(join(home, "pids.json"), "utf8"));
       for (const pid of Object.values(pids) as number[]) {
@@ -88,7 +88,7 @@ test("signal exit after EOF also cleans up independent tool groups", options, as
 
 test("spawn failure rejects without waiting for an exit event", options, async () => {
   const { home } = await fixture();
-  process.env.OPENIDEA_SERVER = join(home, "missing-server");
+  process.env.OXIDEA_SERVER = join(home, "missing-server");
   await assert.rejects(Server.start(home), { code: "ENOENT" });
 });
 
@@ -110,8 +110,8 @@ test("missing ps preserves forced cleanup of the server's inherited group", opti
 
 test("fixture consumes multiple requests including coalesced frames", options, async () => {
   const { home } = await fixture();
-  const child = spawn(process.env.OPENIDEA_SERVER!, [], {
-    env: { ...process.env, OPENIDEA_SERVER_HOME: home, SMOKE_SERVER_MODE: "graceful" },
+  const child = spawn(process.env.OXIDEA_SERVER!, [], {
+    env: { ...process.env, OXIDEA_SERVER_HOME: home, SMOKE_SERVER_MODE: "graceful" },
     detached: true,
   });
   const exited = once(child, "exit");

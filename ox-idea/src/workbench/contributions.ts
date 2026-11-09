@@ -551,7 +551,7 @@ export interface OpenEditorTab {
 }
 
 /** MIME of a dragged editor tab: the payload is `{ paneId, tabId }` as JSON. */
-export const EDITOR_TAB_MIME = "application/x-openidea-editor-tab";
+export const EDITOR_TAB_MIME = "application/x-oxidea-editor-tab";
 
 export interface EditorService {
   openFile(path: string, options?: OpenOptions): Promise<void>;

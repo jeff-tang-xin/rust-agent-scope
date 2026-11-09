@@ -296,7 +296,7 @@ describe("launch", () => {
     expect(opened).toEqual(["/x/notes/a.txt (focus)"]);
   });
 
-  it("places the caret where the command line asked (openidea --line --column)", async () => {
+  it("places the caret where the command line asked (oxidea --line --column)", async () => {
     windowTakeLaunch.mockResolvedValueOnce({
       project: "/x/notes",
       files: ["/x/notes/a.txt", "/x/notes/b.txt"],
@@ -306,7 +306,7 @@ describe("launch", () => {
     expect(opened).toEqual(["/x/notes/a.txt @119:7", "/x/notes/b.txt (focus)"]);
   });
 
-  it("opens the CLI diff pair in LightEdit without a project (openidea diff a b)", async () => {
+  it("opens the CLI diff pair in LightEdit without a project (oxidea diff a b)", async () => {
     windowTakeLaunch.mockResolvedValueOnce({ project: null, files: [], diff: { left: "/x/a.txt", right: "/x/b.txt" } });
     await consumeLaunch();
     expect(lightEditOpen).toHaveBeenCalledWith("/x/b.txt");

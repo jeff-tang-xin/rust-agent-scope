@@ -16,7 +16,7 @@ const outDir = path.resolve(import.meta.dirname, "../web");
 
 function excalidrawFonts(): Plugin {
   return {
-    name: "openidea:excalidraw-fonts",
+    name: "oxidea:excalidraw-fonts",
     apply: "build",
     closeBundle() {
       const fonts = path.resolve(path.dirname(require.resolve("@excalidraw/excalidraw")), "fonts");

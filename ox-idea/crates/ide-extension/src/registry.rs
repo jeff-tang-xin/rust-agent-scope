@@ -274,7 +274,7 @@ mod tests {
     }
 
     fn pkg(contributes: &str) -> Package {
-        let src = format!("id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n{contributes}");
+        let src = format!("id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n{contributes}");
         Package::new(Manifest::parse(&src).unwrap(), PathBuf::from("/nonexistent"))
     }
 

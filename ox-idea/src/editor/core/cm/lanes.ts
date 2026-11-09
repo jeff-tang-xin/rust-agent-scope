@@ -8,7 +8,7 @@ import { EditorView, ViewPlugin, gutter, type ViewUpdate } from "@codemirror/vie
 import { gutterLaneMarkers, scrollbarMarks, type ScrollbarMark } from "@/editor/api";
 
 export const changeLane: Extension = gutter({
-  class: "cm-openidea-lane",
+  class: "cm-oxidea-lane",
   markers: (view) => view.state.facet(gutterLaneMarkers),
 });
 
@@ -59,7 +59,7 @@ export function unfoldAround(state: EditorState, pos: number): StateEffect<unkno
 }
 
 /** The class an outer scroller gets while a lane draws its scrollbar (its native one is hidden). */
-const OUTER_SCROLLER = "cm-openidea-overviewScroller";
+const OUTER_SCROLLER = "cm-oxidea-overviewScroller";
 
 class OverviewLane {
   dom: HTMLElement;
@@ -82,10 +82,10 @@ class OverviewLane {
   ) {
     this.scroller = outer ?? view.scrollDOM;
     this.dom = document.createElement("div");
-    this.dom.className = outer ? "cm-openidea-overview cm-openidea-overview-sticky" : "cm-openidea-overview";
+    this.dom.className = outer ? "cm-oxidea-overview cm-oxidea-overview-sticky" : "cm-oxidea-overview";
     this.dom.setAttribute("aria-hidden", "true");
     this.thumb = document.createElement("div");
-    this.thumb.className = "cm-openidea-overviewThumb";
+    this.thumb.className = "cm-oxidea-overviewThumb";
     this.dom.addEventListener("mousedown", this.onMouseDown);
     this.thumb.addEventListener("mousedown", this.onThumbMouseDown);
     view.dom.addEventListener("mousemove", this.onPointerMove);
@@ -173,8 +173,8 @@ class OverviewLane {
           const el = document.createElement("div");
           el.className =
             r.mark.kind === "thin" || r.mark.kind === "full"
-              ? `cm-openidea-overviewMark cm-openidea-overviewMark-${r.mark.kind}`
-              : "cm-openidea-overviewMark";
+              ? `cm-oxidea-overviewMark cm-oxidea-overviewMark-${r.mark.kind}`
+              : "cm-oxidea-overviewMark";
           el.style.top = `${r.top}${unit}`;
           el.style.height = `${r.height}${unit}`;
           el.style.background = r.mark.color;
@@ -183,7 +183,7 @@ class OverviewLane {
           frag.appendChild(el);
         }
         const c = document.createElement("div");
-        c.className = "cm-openidea-overviewCaret";
+        c.className = "cm-oxidea-overviewCaret";
         c.style.top = `${caret}${unit}`;
         frag.appendChild(c);
         frag.appendChild(this.thumb);
@@ -227,7 +227,7 @@ class OverviewLane {
       const y = p.y - s.getBoundingClientRect().top;
       over = !!thumb && p.x >= lane.left && p.x <= lane.right && y >= thumb.top && y <= thumb.bottom;
     }
-    this.dom.classList.toggle("cm-openidea-overview-onThumb", over);
+    this.dom.classList.toggle("cm-oxidea-overview-onThumb", over);
   }
 
   private onPointerMove = (e: MouseEvent) => {
@@ -273,7 +273,7 @@ class OverviewLane {
 
   private onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
-    const marks = [...this.dom.querySelectorAll<HTMLElement>(".cm-openidea-overviewMark")].map((el) => {
+    const marks = [...this.dom.querySelectorAll<HTMLElement>(".cm-oxidea-overviewMark")].map((el) => {
       const r = el.getBoundingClientRect();
       return { top: r.top, bottom: r.bottom, pos: Number(el.dataset.pos) };
     });
@@ -323,5 +323,5 @@ export function overviewLaneIn(scroller: (view: EditorView) => HTMLElement | nul
 
 export const overviewLane: Extension = [
   ViewPlugin.define((view) => new OverviewLane(view)),
-  EditorView.editorAttributes.of({ class: "cm-openidea-withOverview" }),
+  EditorView.editorAttributes.of({ class: "cm-oxidea-withOverview" }),
 ];

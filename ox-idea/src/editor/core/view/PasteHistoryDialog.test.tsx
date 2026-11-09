@@ -60,7 +60,7 @@ describe("Paste from History chooser", () => {
     const preview = EditorView.findFromDOM(content)!;
     expect(preview.state.readOnly).toBe(true);
     expect(preview.state.facet(language)?.name).toBe("javascript");
-    expect(preview.dom.style.getPropertyValue("--openidea-editor-font-size")).toBe("17px");
+    expect(preview.dom.style.getPropertyValue("--oxidea-editor-font-size")).toBe("17px");
     expect(preview.state.doc.toString()).toBe("const newest = 1;\n// detail");
     expect(content.querySelector("span")).not.toBeNull();
     fireEvent.click(options()[1]!);

@@ -41,9 +41,9 @@ export function isMnemonic(c: unknown): c is string {
   return typeof c === "string" && /^[0-9A-Z]$/.test(c);
 }
 
-const KEY_PREFIX = "openidea.bookmarks.v1:";
+const KEY_PREFIX = "oxidea.bookmarks.v1:";
 /** Lists and file / folder bookmarks; line bookmarks stay under `KEY_PREFIX` (readable by older versions). */
-const LISTS_PREFIX = "openidea.bookmarkLists.v1:";
+const LISTS_PREFIX = "oxidea.bookmarkLists.v1:";
 export const DEFAULT_LIST_ID = "default";
 
 // --- pure helpers -----------------------------------------------------------

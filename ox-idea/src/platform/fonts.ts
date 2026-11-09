@@ -96,7 +96,7 @@ export function familyFaces(family: string): readonly string[] {
   let entry = userFonts.get(key);
   if (!entry) {
     if (fontAvailable(name)) return [quoteFontFamily(name)];
-    const alias = `OpenIDEA User Font ${userFonts.size}`;
+    const alias = `OXidea User Font ${userFonts.size}`;
     const loaded = loadUserFont(name, alias).catch(() => {
       /* retain local-name and bundled fallbacks */
     });

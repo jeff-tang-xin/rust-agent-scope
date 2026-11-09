@@ -1,4 +1,4 @@
-//! Data sources: per-project connection settings in `.openidea/data-sources.toml`, and
+//! Data sources: per-project connection settings in `.oxidea/data-sources.toml`, and
 //! global ones (IDEA's Make Global: listed in every project) in `data-sources.toml` of the
 //! app data directory. Passwords never go there: saved ones live in [`crate::secrets`],
 //! the others only in memory for the session.

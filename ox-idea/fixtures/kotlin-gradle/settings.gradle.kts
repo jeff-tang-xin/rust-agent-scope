@@ -1,1 +1,1 @@
-rootProject.name = "openidea-fixture-library"
+rootProject.name = "oxidea-fixture-library"

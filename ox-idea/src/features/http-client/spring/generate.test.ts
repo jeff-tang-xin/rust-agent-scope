@@ -6,7 +6,7 @@ import { generateRequests } from "./editor";
 
 // `appDataDir()` is a native path: `\`-separated on Windows.
 vi.mock("@tauri-apps/api/path", () => ({
-  appDataDir: async () => String.raw`C:\Users\me\AppData\Roaming\ai.l0ng.openidea`,
+  appDataDir: async () => String.raw`C:\Users\me\AppData\Roaming\ai.l0ng.oxidea`,
 }));
 
 // No backend here: the file commands answer like a project without Spring
@@ -25,7 +25,7 @@ vi.mock("@/platform/ipc", async (importOriginal) => {
   };
 });
 
-const SCRATCH = "C:/Users/me/AppData/Roaming/ai.l0ng.openidea/scratches/generated-requests.http";
+const SCRATCH = "C:/Users/me/AppData/Roaming/ai.l0ng.oxidea/scratches/generated-requests.http";
 
 const JAVA = `package com.example.demo.web;
 

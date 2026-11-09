@@ -127,16 +127,16 @@ fn cargo_workspace() {
         ("crates/core/src/lib.rs", ""),
         ("crates/skip/Cargo.toml", "[package]\nname = \"skip\"\n"),
         ("crates/skip/src/main.rs", ""),
-        ("cli/Cargo.toml", "[package]\nname = \"openidea-cli\"\n"),
+        ("cli/Cargo.toml", "[package]\nname = \"oxidea-cli\"\n"),
         ("cli/src/main.rs", ""),
     ]);
     let c = detect(dir.path());
     assert_eq!(
         ids(&c),
         [
-            "cargo:run:openidea-cli",
+            "cargo:run:oxidea-cli",
             "cargo:test:core",
-            "cargo:test:openidea-cli",
+            "cargo:test:oxidea-cli",
             "cargo:test",
             "cargo:build",
             "cargo:run:skip:crates/skip",
@@ -144,7 +144,7 @@ fn cargo_workspace() {
             "cargo:build:crates/skip"
         ]
     );
-    assert_eq!(cmdline(&c[0]), "cargo run -p openidea-cli --bin openidea-cli");
+    assert_eq!(cmdline(&c[0]), "cargo run -p oxidea-cli --bin oxidea-cli");
     assert_eq!(cmdline(find(&c, "cargo:test")), "cargo test --workspace");
     let test = find(&c, "cargo:test:core");
     assert_eq!(test.extras.module.as_deref(), Some("crates/core"));
@@ -423,7 +423,7 @@ fn go_projects() {
 fn nested_go_modules_keep_their_working_directories() {
     let dir = project(&[
         ("Cargo.toml", "[package]\nname = 'workspace'\n"),
-        ("fixtures/go-app/go.mod", "module example.com/openidea/notes\n"),
+        ("fixtures/go-app/go.mod", "module example.com/oxidea/notes\n"),
         ("fixtures/go-app/cmd/server/main.go", "package main\nfunc main() {}\n"),
         ("services/backend/api/go.mod", "module example.com/api\n"),
         ("services/backend/api/main.go", "package main\nfunc main() {}\n"),
@@ -880,7 +880,7 @@ fn go_default_build_output_is_ignored_by_version_control() {
     let mut config = detect(dir.path()).into_iter().find(|c| c.kind == "go" && !c.is_test).unwrap();
     config.extras.params.insert("goKind".into(), "package".into());
     assert!(ide_run::go::plan(dir.path(), &config).unwrap().is_some());
-    let ignore = fs::read_to_string(dir.path().join(".openidea/.gitignore")).unwrap();
+    let ignore = fs::read_to_string(dir.path().join(".oxidea/.gitignore")).unwrap();
     assert!(ignore.lines().any(|l| l == "/bin/"), "{ignore}");
 }
 

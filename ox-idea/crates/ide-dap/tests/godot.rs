@@ -83,7 +83,7 @@ async fn breakpoints_stepping_and_variables_in_a_real_godot() {
         eprintln!("GODOT_BIN not set; skipping");
         return;
     };
-    let dir = std::env::temp_dir().join(format!("openidea-godot-dap-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("oxidea-godot-dap-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let root = std::fs::canonicalize(&dir).unwrap();
     project(&root);

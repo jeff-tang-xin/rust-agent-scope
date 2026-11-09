@@ -64,7 +64,7 @@
 .diff {
   margin: 0;
   padding: 6px 0;
-  font-family: var(--openidea-editor-font, var(--font-mono));
+  font-family: var(--oxidea-editor-font, var(--font-mono));
   font-weight: var(--fw-code);
   font-size: var(--fs-small);
   color: var(--fg-editor);

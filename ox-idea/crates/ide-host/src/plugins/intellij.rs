@@ -1,4 +1,4 @@
-//! IntelliJ theme plugins, read for import as OpenIDEA theme plugins: a
+//! IntelliJ theme plugins, read for import as OXidea theme plugins: a
 //! Marketplace download (a `.jar`, or a `.zip` holding the plugin's
 //! `lib/*.jar`), an installed plugin's folder or a loose `.theme.json`; and the
 //! theme plugins of the JetBrains IDEs on this machine, with the theme each IDE

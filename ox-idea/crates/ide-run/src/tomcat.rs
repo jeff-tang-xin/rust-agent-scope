@@ -967,7 +967,7 @@ pub fn prepare(root: &Path, cache: &Path, config: &mut RunConfig) -> IdeResult<(
         parse_optional_port(&config.extras.params, "shutdownPort", "Shutdown port")?.map_or_else(free_port, Ok)?;
     let jmx = parse_optional_port(&config.extras.params, "jmxPort", "JMX port")?.map_or_else(free_port, Ok)?;
     let secret = format!(
-        "OPENIDEA_{}_{}",
+        "OXIDEA_{}_{}",
         std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(invalid)?.as_nanos()
     );

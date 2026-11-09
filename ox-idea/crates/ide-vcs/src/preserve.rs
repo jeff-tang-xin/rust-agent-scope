@@ -9,7 +9,7 @@ use crate::write::unmerged_paths;
 use ide_core::{IdeError, IdeResult};
 
 /// `.git/<MARKER>` holds the id of the stash the changes went to.
-const MARKER: &str = "openidea-saved-changes";
+const MARKER: &str = "oxidea-saved-changes";
 
 /// Stashes the local changes of tracked files, if any.
 pub(crate) fn save(r: &Repo, message: &str) -> IdeResult<()> {

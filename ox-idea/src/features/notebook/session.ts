@@ -30,7 +30,7 @@ export const notebookBackend = {
 type Pending = { edit: NotebookEdit | { type: "undo" } | { type: "redo" }; committed: boolean };
 type ErrorOwner = "load" | "mutation" | "save" | "execution" | "kernel" | "environment" | "reload" | "other";
 
-const PYTHON_KEY = "openidea.notebook.python:";
+const PYTHON_KEY = "oxidea.notebook.python:";
 function savedPython(path: string): string | null {
   try {
     return globalThis.localStorage?.getItem(PYTHON_KEY + path) || null;

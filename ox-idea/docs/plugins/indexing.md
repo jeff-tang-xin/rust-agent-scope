@@ -11,7 +11,7 @@ calling the plugin.
 extensions = ["java", "xml"]
 ```
 
-Implement `openidea_plugin::indexing::DocumentIndexer` and register with
+Implement `oxidea_plugin::indexing::DocumentIndexer` and register with
 `register_plugin!(Plugin, indexing)` (or `register_plugin!(Plugin, providers, indexing)`
 when the plugin also has interactive providers). Components built with other
 tools target the `plugin-indexing` world. Indexers require `project.read` and run

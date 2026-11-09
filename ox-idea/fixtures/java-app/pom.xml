@@ -5,15 +5,15 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.example</groupId>
-  <artifactId>openidea-fixture-orders</artifactId>
+  <artifactId>oxidea-fixture-orders</artifactId>
   <version>0.1.0</version>
-  <description>OpenIDEA QA fixture: a tiny order book</description>
+  <description>OXidea QA fixture: a tiny order book</description>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <!-- `mvn test -DopenideaFail=true` runs the intentionally failing test. -->
-    <openideaFail>false</openideaFail>
+    <!-- `mvn test -DoxideaFail=true` runs the intentionally failing test. -->
+    <oxideaFail>false</oxideaFail>
   </properties>
 
   <dependencies>
@@ -33,7 +33,7 @@
         <version>3.5.2</version>
         <configuration>
           <systemPropertyVariables>
-            <openidea.fail>${openideaFail}</openidea.fail>
+            <oxidea.fail>${oxideaFail}</oxidea.fail>
           </systemPropertyVariables>
         </configuration>
       </plugin>

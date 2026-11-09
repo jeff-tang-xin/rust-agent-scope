@@ -66,7 +66,7 @@ afterEach(() =>
   act(() => {
     dismissUsagesPopup();
     useUsageAccessOptions.setState({ read: true, write: true });
-    localStorage.removeItem("openidea.usages.accessFilter.v1");
+    localStorage.removeItem("oxidea.usages.accessFilter.v1");
   }),
 );
 

@@ -276,9 +276,9 @@ describe("types added to Services", () => {
 
   it("defaults to Spring Boot and persists the user's list per project", () => {
     expect(readTypes("/p")).toEqual(["spring-boot"]);
-    localStorage.setItem("openidea.services.runTypes:/p", JSON.stringify(["npm"]));
+    localStorage.setItem("oxidea.services.runTypes:/p", JSON.stringify(["npm"]));
     expect(readTypes("/p")).toEqual(["npm"]);
-    localStorage.setItem("openidea.services.runTypes:/p", "[]");
+    localStorage.setItem("oxidea.services.runTypes:/p", "[]");
     expect(readTypes("/p")).toEqual([]);
     expect(readTypes("/q")).toEqual(["spring-boot"]);
   });
@@ -291,7 +291,7 @@ describe("configurations that ran", () => {
 
   it("persists the ran configuration ids per project", () => {
     expect(readRan("/p")).toEqual([]);
-    localStorage.setItem("openidea.services.ran:/p", JSON.stringify(["dev"]));
+    localStorage.setItem("oxidea.services.ran:/p", JSON.stringify(["dev"]));
     expect(readRan("/p")).toEqual(["dev"]);
     expect(readRan("/q")).toEqual([]);
   });
@@ -371,7 +371,7 @@ describe("hidden configurations", () => {
   it("persists hidden ids per project", () => {
     localStorage.clear();
     expect(readHidden("/p")).toEqual({});
-    localStorage.setItem("openidea.services.runHidden:/p", JSON.stringify({ "spring-boot": ["a"] }));
+    localStorage.setItem("oxidea.services.runHidden:/p", JSON.stringify({ "spring-boot": ["a"] }));
     expect(readHidden("/p")).toEqual({ "spring-boot": ["a"] });
     expect(readHidden("/q")).toEqual({});
     expect(readHidden(null)).toEqual({});
@@ -571,7 +571,7 @@ describe("group batch actions", () => {
 
   it("uses the saved display order and leaves other types alone", async () => {
     useProject.setState({ project: { root: "/group-order" } as never });
-    localStorage.setItem("openidea.services.runOrder:/group-order", JSON.stringify({ "spring-boot": ["c", "a", "b"] }));
+    localStorage.setItem("oxidea.services.runOrder:/group-order", JSON.stringify({ "spring-boot": ["c", "a", "b"] }));
     const configs = [
       config("a", "spring-boot"),
       config("b", "spring-boot"),
@@ -657,8 +657,8 @@ describe("removing a workspace member from Services", () => {
       temporary: ["dev"],
       sessions: [session("s1", main, "finished", 1), session("s2", vue, "running", 2, { runId: 7 })],
     });
-    localStorage.setItem("openidea.services.runTypes:/w/main", JSON.stringify(["spring-boot", "npm"]));
-    localStorage.setItem("openidea.services.ran:/w/main", JSON.stringify(["app", "dev"]));
+    localStorage.setItem("oxidea.services.runTypes:/w/main", JSON.stringify(["spring-boot", "npm"]));
+    localStorage.setItem("oxidea.services.ran:/w/main", JSON.stringify(["app", "dev"]));
 
     await cleanupRemovedProject("/w/vue");
 
@@ -675,7 +675,7 @@ describe("removing a workspace member from Services", () => {
     const other = { ...config("serve", "npm"), cwd: "/w/main" };
     const sibling = { ...config("dev2", "npm"), cwd: "/w/vue2" };
     useRun.setState({ configs: [main, other, vue, sibling], sessions: [] });
-    localStorage.setItem("openidea.services.runTypes:/w/main", JSON.stringify(["npm"]));
+    localStorage.setItem("oxidea.services.runTypes:/w/main", JSON.stringify(["npm"]));
     // What the backend lists once /w/vue is no longer a workspace member.
     ipc.runConfigs.mockImplementation(async () => ({ status: "ok", data: [main, other, sibling] }));
 

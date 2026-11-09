@@ -188,10 +188,10 @@ fn persists_user_decisions_locations_revocation_and_one_time_migration() {
     let data = tmp.path().join("data");
     let a = tmp.path().join("projects/a");
     let b = tmp.path().join("projects/b");
-    std::fs::create_dir_all(a.join(".openidea")).unwrap();
-    std::fs::create_dir_all(b.join(".openidea")).unwrap();
-    std::fs::write(a.join(".openidea/project-trust.json"), r#"{"trusted":true}"#).unwrap();
-    std::fs::write(b.join(".openidea/project-trust.json"), r#"{"trusted":true}"#).unwrap();
+    std::fs::create_dir_all(a.join(".oxidea")).unwrap();
+    std::fs::create_dir_all(b.join(".oxidea")).unwrap();
+    std::fs::write(a.join(".oxidea/project-trust.json"), r#"{"trusted":true}"#).unwrap();
+    std::fs::write(b.join(".oxidea/project-trust.json"), r#"{"trusted":true}"#).unwrap();
     let recent = ide_workspace::RecentProjects::load(&config);
     recent.touch(&a, None).unwrap();
     let trust = TrustStore::load(&config, &data);
@@ -245,14 +245,14 @@ fn script(root: &Path, name: &str, marker: &str) {
 async fn malicious_project_stays_editable_then_starts_in_place_after_trust() {
     let tmp = tempfile::tempdir().unwrap();
     let root = dunce::canonicalize(tmp.path()).unwrap().join("malicious");
-    std::fs::create_dir_all(root.join(".openidea")).unwrap();
+    std::fs::create_dir_all(root.join(".oxidea")).unwrap();
     script(&root, "hook", "hook.marker");
     script(&root, "server", "lsp.marker");
     script(&root, "gradlew", "build.marker");
     std::fs::write(root.join("build.gradle"), "plugins { id 'java' }").unwrap();
     std::fs::write(root.join("main.py"), "print('safe')\n").unwrap();
     std::fs::write(root.join(".devcontainer.json"), r#"{"postStartCommand":["./hook"]}"#).unwrap();
-    std::fs::write(root.join(".openidea/settings.toml"), format!(
+    std::fs::write(root.join(".oxidea/settings.toml"), format!(
         "[languageServers.trust-witness]\nlanguages = ['python']\ncommand = {:?}\n[languageServers.pyright]\nenabled = false\n", root.join("server").to_str().unwrap()
     )).unwrap();
     let host = host(&tmp.path().join("app"), true);
@@ -399,7 +399,7 @@ async fn restricted_git_views_ignore_project_executables_and_mutations_cannot_ru
     use std::os::unix::fs::PermissionsExt;
     let tmp = tempfile::tempdir().unwrap();
     let root = dunce::canonicalize(tmp.path()).unwrap().join("project");
-    std::fs::create_dir_all(root.join(".openidea")).unwrap();
+    std::fs::create_dir_all(root.join(".oxidea")).unwrap();
     let git = |args: &[&str]| {
         let output = std::process::Command::new("git").current_dir(&root).args(args).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -412,11 +412,11 @@ async fn restricted_git_views_ignore_project_executables_and_mutations_cannot_ru
     let file = root.join("safe.txt");
     std::fs::write(&file, "safe\n").unwrap();
     script(&root, ".git/hooks/pre-commit", "git-hook.marker");
-    let executable = root.join(".openidea/git-witness");
+    let executable = root.join(".oxidea/git-witness");
     std::fs::write(&executable, "#!/bin/sh\nprintf executed > git-executable.marker\nexec git \"$@\"\n").unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(
-        root.join(".openidea/settings.toml"),
+        root.join(".oxidea/settings.toml"),
         format!("[vcs.git]\nexecutable = {:?}\n", executable.to_str().unwrap()),
     )
     .unwrap();

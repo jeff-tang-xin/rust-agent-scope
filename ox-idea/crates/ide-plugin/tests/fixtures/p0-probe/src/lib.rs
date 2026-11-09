@@ -6,8 +6,8 @@ wit_bindgen::generate!({ world: "probe-full", path: "wit", generate_all });
 #[cfg(not(feature = "full"))]
 wit_bindgen::generate!({ world: "probe-min", path: "wit", generate_all });
 
-use exports::openidea::probe::base;
-use openidea::probe::host_api;
+use exports::oxidea::probe::base;
+use oxidea::probe::host_api;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static CALLS: AtomicU32 = AtomicU32::new(0);
@@ -52,14 +52,14 @@ impl base::Guest for Probe {
 }
 
 #[cfg(feature = "full")]
-impl exports::openidea::probe::code_actions::Guest for Probe {
+impl exports::oxidea::probe::code_actions::Guest for Probe {
     fn actions(path: String) -> Vec<String> {
         vec![format!("fix:{path}")]
     }
 }
 
 #[cfg(feature = "full")]
-impl exports::openidea::probe::completion::Guest for Probe {
+impl exports::oxidea::probe::completion::Guest for Probe {
     fn complete(prefix: String) -> Vec<String> {
         vec![format!("{prefix}1"), format!("{prefix}2")]
     }

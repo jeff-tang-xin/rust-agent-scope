@@ -343,7 +343,7 @@ describe("docking a conversation in the tool window", () => {
     act(() => openTask("one"));
     expect(useAgents.getState().docked).toBe("one");
     expect(backend.openInput).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem("openidea.agents.sessionLocation.v1")!)).toBe("toolWindow");
+    expect(JSON.parse(localStorage.getItem("oxidea.agents.sessionLocation.v1")!)).toBe("toolWindow");
     act(() => setSessionLocation("editor"));
     expect(useAgents.getState().docked).toBeNull();
     expect(backend.openInput).toHaveBeenLastCalledWith(expect.objectContaining({ key: "agent:one" }), { focus: true });

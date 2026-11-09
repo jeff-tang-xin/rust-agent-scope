@@ -135,7 +135,7 @@ test("Split Right gives the Terminal a tab group with its own header; Unsplit me
   await expect(terminal.locator("header").nth(0)).toContainText("Terminal");
   await expect(terminal.locator("header").nth(1).getByRole("button", { name: "Options", exact: true })).toHaveCount(1);
   await expect(terminal.locator("header").nth(0).getByRole("button", { name: "Options", exact: true })).toHaveCount(0);
-  if (process.env.OPENIDEA_E2E_SHOTS) await terminal.screenshot({ path: process.env.OPENIDEA_E2E_SHOTS });
+  if (process.env.OXIDEA_E2E_SHOTS) await terminal.screenshot({ path: process.env.OXIDEA_E2E_SHOTS });
 
   await strips.nth(1).getByRole("tab", { name: "Local (2)" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Unsplit" }).click();

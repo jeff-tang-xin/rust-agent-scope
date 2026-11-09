@@ -25,7 +25,7 @@ it("does not mistake regex detection strings or named groups for newer syntax", 
 });
 
 it("checks the entry's static imports and all lazy chunks for syntax", () => {
-  const dir = mkdtempSync(join(tmpdir(), "openidea-webkit-"));
+  const dir = mkdtempSync(join(tmpdir(), "oxidea-webkit-"));
   try {
     mkdirSync(join(dir, "assets"));
     writeFileSync(join(dir, "index.html"), '<script type="module" src="/assets/entry.js"></script>');

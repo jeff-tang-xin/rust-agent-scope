@@ -10,9 +10,9 @@ import { usePlatform } from "@/platform/platformInfo";
 
 describe("window title", () => {
   it("is `<project> – <file>` like IDEA", () => {
-    expect(windowTitle("openidea", "/p/openidea/src/main.rs")).toBe("openidea – main.rs");
-    expect(windowTitle("openidea", null)).toBe("openidea");
-    expect(windowTitle(null, null)).toBe("OpenIDEA");
+    expect(windowTitle("oxidea", "/p/oxidea/src/main.rs")).toBe("oxidea – main.rs");
+    expect(windowTitle("oxidea", null)).toBe("oxidea");
+    expect(windowTitle(null, null)).toBe("OXidea");
   });
   it("names the host of a remote project", () => {
     expect(windowTitle("rproj", "/home/me/rproj/a.ts", false, "me@server")).toBe("rproj [me@server] – a.ts");

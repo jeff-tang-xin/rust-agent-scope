@@ -1,4 +1,4 @@
-//! `openidea-server --connect <host> <port>`: one forwarded connection. The desktop starts it
+//! `oxidea-server --connect <host> <port>`: one forwarded connection. The desktop starts it
 //! in a dev container (`docker exec -i`) for each connection to a forwarded port and pipes the
 //! connection through stdin / stdout, so a port of the container is reachable wherever the
 //! container's network is not.
@@ -13,7 +13,7 @@ const EOF_GRACE: Duration = Duration::from_secs(5);
 
 /// `<host> <port>` from the arguments after `--connect`.
 pub fn parse_args(args: &[String]) -> Result<(String, u16), String> {
-    let [host, port] = args else { return Err("usage: openidea-server --connect <host> <port>".into()) };
+    let [host, port] = args else { return Err("usage: oxidea-server --connect <host> <port>".into()) };
     if host.is_empty() || host.starts_with('-') || host.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err(format!("invalid host {host:?}"));
     }

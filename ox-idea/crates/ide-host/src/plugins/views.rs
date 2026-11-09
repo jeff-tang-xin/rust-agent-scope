@@ -1,7 +1,7 @@
 //! Declarative views and custom editors as the
 //! window commands `plugin_view_render` / `plugin_view_event` (and, for services views,
 //! `plugin_service_detail` / `plugin_service_log`) serve them —
-//! the desktop for local projects, `openidea-server` for remote ones.
+//! the desktop for local projects, `oxidea-server` for remote ones.
 
 use super::{PluginEditor, PluginHost, PluginOutputLine};
 use ide_core::{DocId, IdeError, IdeResult};

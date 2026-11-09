@@ -21,12 +21,12 @@ async fn restricted_status_does_not_select_the_project_git_for_other_windows() {
         project_environment: false,
     }));
     let root = base.join("malicious");
-    std::fs::create_dir_all(root.join(".openidea")).unwrap();
+    std::fs::create_dir_all(root.join(".oxidea")).unwrap();
     let marker = base.join("git.marker");
     let git = root.join("git");
     std::fs::write(&git, format!("#!/bin/sh\nprintf executed > '{}'\n", marker.display())).unwrap();
     std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(root.join(".openidea/settings.toml"), format!("[vcs.git]\nexecutable = {:?}\n", git)).unwrap();
+    std::fs::write(root.join(".oxidea/settings.toml"), format!("[vcs.git]\nexecutable = {:?}\n", git)).unwrap();
     ide_vcs::init(&root).unwrap();
 
     host.open_project("main", &root).unwrap();

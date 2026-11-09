@@ -6,12 +6,12 @@ import { syntaxHighlighting } from "@codemirror/language";
 import { caretRowHighlight } from "@/editor/core/cm/caretRow";
 import { findExtension, findResultLines, findScope, type FindOptions } from "@/editor/core/cm/find";
 import { foldingExtension } from "@/editor/core/cm/folding";
-import { openideaHighlightStyle } from "@/editor/core/cm/highlight";
+import { oxideaHighlightStyle } from "@/editor/core/cm/highlight";
 import { overviewLane } from "@/editor/core/cm/lanes";
 import { findLanguageDescription, loadSupport } from "@/editor/core/cm/languages";
 import { caretExtension, fontZoom, setFontZoom, stepFontZoom } from "@/editor/core/cm/prefs";
 import { fontExtension, heavyExtension, lineNumbersExtension } from "@/editor/core/cm/setup";
-import { openideaTheme } from "@/editor/core/cm/theme";
+import { oxideaTheme } from "@/editor/core/cm/theme";
 import { FindPanel, searchAgain, seedFind, type FindTarget } from "@/editor/core/view/FindBar";
 import { executeAction } from "@/platform/actions";
 import { editorPrefs } from "@/platform/editorSettings";
@@ -420,9 +420,9 @@ function PluginContentEditorBody({ input, initialData }: { input: EditorInput; i
           fontZoom,
           wheelZoom,
           caretRowHighlight,
-          openideaTheme,
+          oxideaTheme,
           highlightSpecialChars(),
-          syntaxHighlighting(openideaHighlightStyle),
+          syntaxHighlighting(oxideaHighlightStyle),
           history(),
           findExtension(),
           overviewLane,

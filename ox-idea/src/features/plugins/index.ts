@@ -162,7 +162,7 @@ export function activate(): () => void {
     // Gutter icons from plugins' `line-markers` providers (next to the LSP ones).
     registerEditorContribution({ id: "plugins.languageFeatures", order: 58, extensions: pluginLanguageVisuals }),
     registerEditorContribution({ id: "plugins.lineMarkers", order: 57, extensions: pluginLineMarkerGutter }),
-    // Dev plugins (`<project>/.openidea/plugins`) depend on the open project.
+    // Dev plugins (`<project>/.oxidea/plugins`) depend on the open project.
     useProject.subscribe((s, prev) => {
       if (s.project?.root !== prev.project?.root || s.project?.trusted !== prev.project?.trusted) void refreshPlugins();
     }),

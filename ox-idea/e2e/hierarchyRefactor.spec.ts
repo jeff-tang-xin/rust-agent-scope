@@ -5,7 +5,7 @@
 import type { Page } from "@playwright/test";
 import { expect, openFromTree, test } from "./fixtures";
 
-const captureDir = process.env.OPENIDEA_ACCEPTANCE_DIR;
+const captureDir = process.env.OXIDEA_ACCEPTANCE_DIR;
 
 /** Opens the dialog as the action does after the server answered, for the editor's view. */
 async function openDialog(page: Page, kind: "pullUp" | "pushDown") {

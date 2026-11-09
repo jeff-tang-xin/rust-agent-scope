@@ -13,7 +13,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-const PREFIX: &str = "openidea";
+const PREFIX: &str = "oxidea";
 const SUFFIX: &str = "log";
 
 static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -28,7 +28,7 @@ pub fn log_dir_for(identifier: &str) -> Option<PathBuf> {
 }
 
 fn filter() -> EnvFilter {
-    EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,openidea_lib=debug".into())
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,oxidea_lib=debug".into())
 }
 
 pub fn init(identifier: &str) {
@@ -100,20 +100,20 @@ mod tests {
 
     #[test]
     fn latest_log_picks_newest_matching_file() {
-        let dir = std::env::temp_dir().join(format!("openidea-log-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oxidea-log-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("other.txt"), "x").unwrap();
         assert_eq!(latest_log(&dir), None);
-        std::fs::write(dir.join("openidea.2026-01-01.log"), "x").unwrap();
-        assert_eq!(latest_log(&dir), Some(dir.join("openidea.2026-01-01.log")));
+        std::fs::write(dir.join("oxidea.2026-01-01.log"), "x").unwrap();
+        assert_eq!(latest_log(&dir), Some(dir.join("oxidea.2026-01-01.log")));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn panic_record_names_thread_location_and_message() {
-        let dir = std::env::temp_dir().join(format!("openidea-panic-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oxidea-panic-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("openidea.2026-01-01.log"), "earlier\n").unwrap();
+        std::fs::write(dir.join("oxidea.2026-01-01.log"), "earlier\n").unwrap();
         let record = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let sink = record.clone();
         let default = std::panic::take_hook();
@@ -125,7 +125,7 @@ mod tests {
         assert!(record.contains(&location), "{record}");
         assert!(record.contains("boom"), "{record}");
         append(&dir, &record).unwrap();
-        let log = std::fs::read_to_string(dir.join("openidea.2026-01-01.log")).unwrap();
+        let log = std::fs::read_to_string(dir.join("oxidea.2026-01-01.log")).unwrap();
         assert!(log.starts_with("earlier\n") && log.ends_with(&record));
         std::fs::remove_dir_all(&dir).unwrap();
     }

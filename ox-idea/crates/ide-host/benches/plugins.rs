@@ -72,7 +72,7 @@ fn install_50(plugins: &Path, work: &Path) {
         install(
             root.join("plugins/official/solidity"),
             vec![
-                ("openidea.solidity", format!("bench.solidity{i}")),
+                ("oxidea.solidity", format!("bench.solidity{i}")),
                 ("id = \"solidity\"", format!("id = \"solidity{i}\"")),
                 ("extensions = [\"sol\"]", format!("extensions = [\"sol{i}\"]")),
                 ("on-language:solidity", format!("on-language:solidity{i}")),
@@ -85,7 +85,7 @@ fn install_50(plugins: &Path, work: &Path) {
         install(
             root.join("plugins/official/material-icons"),
             vec![
-                ("openidea.material-icons", format!("bench.icons{i}")),
+                ("oxidea.material-icons", format!("bench.icons{i}")),
                 ("id = \"material\"", format!("id = \"material{i}\"")),
             ],
         );
@@ -96,7 +96,7 @@ fn install_50(plugins: &Path, work: &Path) {
         std::fs::write(
             dir.join("plugin.toml"),
             format!(
-                "id = \"bench.static{i}\"\nname = \"Static {i}\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n\
+                "id = \"bench.static{i}\"\nname = \"Static {i}\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n\
                  [[contributes.commands]]\nid = \"a\"\ntitle = \"Static {i}: A\"\nwhen = \"editorLang == rust\"\n"
             ),
         )

@@ -415,7 +415,7 @@ pub fn sync_gradle_model(
     let mut model = model.clone();
     let cache_dir = gradle::cache_dir(cache_dir, &model.dir);
     std::fs::create_dir_all(&cache_dir)?;
-    let init_script = cache_dir.join("openidea-model.gradle");
+    let init_script = cache_dir.join("oxidea-model.gradle");
     std::fs::write(&init_script, MODEL_INIT_SCRIPT)?;
     let mut args: Vec<String> = vec![
         "--console=plain".into(),
@@ -532,7 +532,7 @@ mod tests {
             let launcher = build.join("gradlew");
             std::fs::write(
                 &launcher,
-                format!("#!/bin/sh\npwd > actual-cwd\nprintf '%s' \"$JAVA_HOME\" > actual-env\nprintf '%s\\n' '@openidea-model\t{report}' 'Build tasks' '-----------' 'app:custom{dir} - custom task'\n"),
+                format!("#!/bin/sh\npwd > actual-cwd\nprintf '%s' \"$JAVA_HOME\" > actual-env\nprintf '%s\\n' '@oxidea-model\t{report}' 'Build tasks' '-----------' 'app:custom{dir} - custom task'\n"),
             ).unwrap();
             std::fs::set_permissions(launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
@@ -699,7 +699,7 @@ mod tests {
             .unwrap();
         std::fs::write(billing.join("modules/core/build.gradle"), "apply plugin: 'java'").unwrap();
         // Built with serde: a Windows path holds backslashes, which raw JSON text would leave unescaped.
-        let line = |p: ReportedProject| format!("@openidea-model\t{}\n", serde_json::to_string(&p).unwrap());
+        let line = |p: ReportedProject| format!("@oxidea-model\t{}\n", serde_json::to_string(&p).unwrap());
         let (r, b) = (root.display().to_string(), billing.display().to_string());
         let core_src = |p: &str| format!("{b}/modules/core/src/{p}");
         let set = |name: &str, test: bool, src: &[&str], res: &[&str]| gradle::ReportedSourceSet {
@@ -710,7 +710,7 @@ mod tests {
         };
         // A settings script's own println comes first; task listing lines follow.
         let out = format!(
-            "configuring billing\n{}{}{}@openidea-model\t{{broken\n\nOther tasks\n-----------\nbilling:core:jar\n",
+            "configuring billing\n{}{}{}@oxidea-model\t{{broken\n\nOther tasks\n-----------\nbilling:core:jar\n",
             line(ReportedProject { path: ":".into(), dir: r.clone(), ..ReportedProject::default() }),
             line(ReportedProject {
                 path: ":billing".into(),

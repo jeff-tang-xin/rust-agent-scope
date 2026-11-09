@@ -45,7 +45,7 @@ impl Process {
             iopub_port: ports[4],
             signature_scheme: "hmac-sha256".into(),
             key: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-            kernel_name: Some("openidea-python".into()),
+            kernel_name: Some("oxidea-python".into()),
         };
         let connection = directory.path().join("connection.json");
         write_private(&connection, &serde_json::to_vec(&info).map_err(protocol_error)?)?;
@@ -60,7 +60,7 @@ impl Process {
         // argv array is also the launch source of truth, without shell quoting.
         let spec = serde_json::json!({
             "argv": argv.iter().map(|v| v.to_string_lossy().into_owned()).collect::<Vec<_>>(),
-            "display_name": "OpenIDEA Python", "language": "python", "interrupt_mode": "signal"
+            "display_name": "OXidea Python", "language": "python", "interrupt_mode": "signal"
         });
         write_private(&directory.path().join("kernel.json"), &serde_json::to_vec(&spec).map_err(protocol_error)?)?;
         let mut command = Command::new(python);
@@ -271,12 +271,12 @@ k.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
 k.WaitForSingleObject.restype = ctypes.c_uint32
 k.CloseHandle.argtypes = [ctypes.c_void_p]
 k.CloseHandle.restype = ctypes.c_int
-interrupt = k.OpenEventW(0x00100002, 0, os.environ.pop('OPENIDEA_INTERRUPT_EVENT'))
-gate = k.OpenEventW(0x00100000, 0, os.environ.pop('OPENIDEA_LAUNCH_EVENT'))
+interrupt = k.OpenEventW(0x00100002, 0, os.environ.pop('OXIDEA_INTERRUPT_EVENT'))
+gate = k.OpenEventW(0x00100000, 0, os.environ.pop('OXIDEA_LAUNCH_EVENT'))
 if not interrupt or not gate:
     raise ctypes.WinError(ctypes.get_last_error())
 if k.WaitForSingleObject(gate, 30000) != 0:
-    raise RuntimeError('OpenIDEA kernel launch gate failed')
+    raise RuntimeError('OXidea kernel launch gate failed')
 k.CloseHandle(gate)
 os.environ['JPY_INTERRUPT_EVENT'] = str(interrupt)
 try:
@@ -371,8 +371,8 @@ finally:
     }
     impl Resources {
         pub fn new() -> IdeResult<Self> {
-            let interrupt_name = format!("Local\\OpenIDEA-interrupt-{}", Uuid::new_v4());
-            let gate_name = format!("Local\\OpenIDEA-launch-{}", Uuid::new_v4());
+            let interrupt_name = format!("Local\\OXidea-interrupt-{}", Uuid::new_v4());
+            let gate_name = format!("Local\\OXidea-launch-{}", Uuid::new_v4());
             fn event(name: &str) -> IdeResult<Handle> {
                 let name = name.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
                 // Event-specific rights; owner and SYSTEM only. File inheritance
@@ -421,7 +421,7 @@ finally:
             Ok(Self { interrupt, gate, job, interrupt_name, gate_name })
         }
         pub fn configure(&self, command: &mut Command) {
-            command.env("OPENIDEA_INTERRUPT_EVENT", &self.interrupt_name).env("OPENIDEA_LAUNCH_EVENT", &self.gate_name);
+            command.env("OXIDEA_INTERRUPT_EVENT", &self.interrupt_name).env("OXIDEA_LAUNCH_EVENT", &self.gate_name);
         }
         pub fn assign_and_release(&self, child: &Child) -> IdeResult<()> {
             let handle = child

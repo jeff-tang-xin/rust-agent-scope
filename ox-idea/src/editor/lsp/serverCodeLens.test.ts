@@ -19,7 +19,7 @@ afterEach(() => {
 });
 it("renders LSP and plugin lens commands in the shared facet and invokes their commands", async () => {
   vi.useFakeTimers();
-  const command = { title: "Run fixture", command: "openidea.plugin-language:p:run", arguments: ['"lens"'] };
+  const command = { title: "Run fixture", command: "oxidea.plugin-language:p:run", arguments: ['"lens"'] };
   ipc.lspCodeLens.mockResolvedValue({
     status: "ok",
     data: [{ range: { start: { line: 0, col: 0 }, end: { line: 0, col: 1 } }, command }],

@@ -7,16 +7,16 @@ import (
 	"os"
 	"strconv"
 
-	"example.com/openidea/notes/internal/store"
+	"example.com/oxidea/notes/internal/store"
 )
 
 func main() {
 	s := store.New()
-	s.Create("Welcome", "This is the OpenIDEA Go fixture.")
+	s.Create("Welcome", "This is the OXidea Go fixture.")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /notes", func(w http.ResponseWriter, r *http.Request) {
-		// Set a breakpoint here (QA: debugger) and request http://localhost:8080/notes?q=openidea
+		// Set a breakpoint here (QA: debugger) and request http://localhost:8080/notes?q=oxidea
 		writeJSON(w, s.Search(r.URL.Query().Get("q")))
 	})
 	mux.HandleFunc("GET /notes/{id}", func(w http.ResponseWriter, r *http.Request) {

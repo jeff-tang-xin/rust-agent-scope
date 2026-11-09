@@ -31,7 +31,7 @@ import { UsageAccessFilter, filterUsageAccess, useUsageAccessOptions } from "./U
 
 const close = dismissUsagesPopup;
 
-const PREVIEW_KEY = "openidea.usages.popupPreview.v1";
+const PREVIEW_KEY = "oxidea.usages.popupPreview.v1";
 
 function loadPreviewOption(): boolean {
   try {

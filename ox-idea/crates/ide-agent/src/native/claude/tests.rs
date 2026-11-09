@@ -203,7 +203,7 @@ async fn steer(h: &Harness) -> (Outcome, String) {
     let steer = async {
         tokio::time::sleep(Duration::from_millis(2500)).await;
         h.request(
-            "_openidea/steer",
+            "_oxidea/steer",
             json!({ "sessionId": s, "prompt": [{ "type": "text", "text": "Also end your answer with the word BANANA." }] }),
         )
         .await
@@ -787,7 +787,7 @@ async fn a_failed_turn_reports_its_failure() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "drives the real claude CLI (signed in)"]
 async fn live_fork_and_rollback() {
-    let base = tempfile::Builder::new().prefix("openidea-claude-").tempdir_in("/tmp").unwrap();
+    let base = tempfile::Builder::new().prefix("oxidea-claude-").tempdir_in("/tmp").unwrap();
     let cwd = base.path().to_path_buf(); // /tmp/…: a symlink on macOS
     let pending = tempfile::tempdir().unwrap();
     let config_dir = cli::config_dir(&[]).unwrap();
@@ -810,7 +810,7 @@ async fn live_fork_and_rollback() {
     let h2 = connect().await;
     h2.request("session/load", json!({ "sessionId": f, "cwd": cwd, "mcpServers": [] })).await.unwrap();
     assert!(h2.text(&f, "user_message_chunk").contains("BOAT"), "history replayed");
-    h2.request("_openidea/rollback", json!({ "sessionId": f, "turns": 1 })).await.unwrap();
+    h2.request("_oxidea/rollback", json!({ "sessionId": f, "turns": 1 })).await.unwrap();
     h2.prompt(&f, words).await.unwrap();
     h2.settle().await;
     let answer = last(&h2, &f);
@@ -822,7 +822,7 @@ async fn live_fork_and_rollback() {
     assert!(last(&h, &s).contains("BOAT"), "original: {}", last(&h, &s));
 
     // Undo in the original, then reload it elsewhere before prompting: the undo holds.
-    h.request("_openidea/rollback", json!({ "sessionId": s, "turns": 2 })).await.unwrap();
+    h.request("_oxidea/rollback", json!({ "sessionId": s, "turns": 2 })).await.unwrap();
     let h3 = connect().await;
     h3.request("session/load", json!({ "sessionId": s, "cwd": cwd, "mcpServers": [] })).await.unwrap();
     assert!(!h3.text(&s, "user_message_chunk").contains("List every"), "the undone turns are gone");
@@ -894,7 +894,7 @@ fn how_results_end_turns() {
         ),
         TurnEnd::Fail {
             message: "You've hit your limit · resets 3pm".into(),
-            data: Some(json!({"openidea": {"usageLimit": {"resetsAtMs": 1.5e12}}})),
+            data: Some(json!({"oxidea": {"usageLimit": {"resetsAtMs": 1.5e12}}})),
         }
     );
     let TurnEnd::Fail { message, .. } =
@@ -919,7 +919,7 @@ fn failures_reported_as_assistant_messages() {
         limit,
         TurnEnd::Fail {
             message: "You've hit your limit · resets 5pm".into(),
-            data: Some(json!({"openidea": {"usageLimit": {"resetsAtMs": 7.0}}})),
+            data: Some(json!({"oxidea": {"usageLimit": {"resetsAtMs": 7.0}}})),
         }
     );
     let TurnEnd::Fail { message, data: None } =
@@ -1176,14 +1176,14 @@ fn mcp_servers_become_an_mcp_config() {
     assert_eq!(mcp_config(&json!({ "mcpServers": [] })), None);
     assert_eq!(mcp_config(&json!({})), None);
     let config = mcp_config(&json!({ "mcpServers": [
-        { "type": "http", "name": "openidea", "url": "http://127.0.0.1:1/mcp",
+        { "type": "http", "name": "oxidea", "url": "http://127.0.0.1:1/mcp",
           "headers": [{ "name": "Authorization", "value": "Bearer t" }] },
         { "name": "local", "command": "srv", "args": ["-x"], "env": [{ "name": "K", "value": "V" }] },
     ] }))
     .unwrap();
     let v: Value = serde_json::from_str(&config).unwrap();
     assert_eq!(
-        v["mcpServers"]["openidea"],
+        v["mcpServers"]["oxidea"],
         json!({ "type": "http", "url": "http://127.0.0.1:1/mcp", "headers": { "Authorization": "Bearer t" } })
     );
     assert_eq!(v["mcpServers"]["local"], json!({ "command": "srv", "args": ["-x"], "env": { "K": "V" } }));

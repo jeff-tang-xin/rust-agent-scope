@@ -267,7 +267,7 @@ test("the context menus decide the changes under the caret", async ({ page }) =>
 test("applies the non-conflicting changes on opening when asked to, and that is not a step to undo", async ({
   page,
 }) => {
-  await page.addInitScript(() => localStorage.setItem("openidea.merge.autoApplyNonConflicting", "true"));
+  await page.addInitScript(() => localStorage.setItem("oxidea.merge.autoApplyNonConflicting", "true"));
   await mountMerge(page);
   await expect(status(page)).toHaveText("2 changes left, 2 conflicts");
   expect(await text(result(page))).toContain("\nC\n");

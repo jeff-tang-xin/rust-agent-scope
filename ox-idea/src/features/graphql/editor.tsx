@@ -256,7 +256,7 @@ function configExtension(path: string): Extension {
   return [
     field,
     gutter({
-      class: `${styles.runGutter} cm-openidea-gutter-graphql`,
+      class: `${styles.runGutter} cm-oxidea-gutter-graphql`,
       markers: (view) => view.state.field(field),
       initialSpacer: () => new EndpointMarker(""),
       domEventHandlers: {

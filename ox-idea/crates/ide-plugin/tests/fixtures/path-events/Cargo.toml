@@ -1,5 +1,5 @@
 [package]
-name = "openidea-test-path-events"
+name = "oxidea-test-path-events"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-openidea-plugin = { path = "../../../../../sdk/rust/openidea-plugin" }
+oxidea-plugin = { path = "../../../../../sdk/rust/oxidea-plugin" }
 
 [profile.release]
 opt-level = "s"

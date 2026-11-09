@@ -5,7 +5,7 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = Number(process.env.OPENIDEA_E2E_PORT ?? 1450);
+const PORT = Number(process.env.OXIDEA_E2E_PORT ?? 1450);
 
 export default defineConfig({
   testDir: "./e2e",

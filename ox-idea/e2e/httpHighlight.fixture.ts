@@ -2,7 +2,7 @@ import "../src/styles/tokens.css";
 import { EditorView } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
 import { registerLanguageMode } from "../src/editor/api";
-import { openideaHighlightStyle } from "../src/editor/core/cm/highlight";
+import { oxideaHighlightStyle } from "../src/editor/core/cm/highlight";
 import { findLanguageDescription, loadSupport } from "../src/editor/core/cm/languages";
 import { httpLanguageDescription } from "../src/features/http-client/language";
 
@@ -39,7 +39,7 @@ WEBSOCKET ws://localhost:8080/events
 POST https://example.test/messages
 
 {"message": "HTTP still works", "count": 1}`,
-  extensions: [support!, syntaxHighlighting(openideaHighlightStyle)],
+  extensions: [support!, syntaxHighlighting(oxideaHighlightStyle)],
 });
 
 const json = document.createElement("div");
@@ -50,6 +50,6 @@ new EditorView({
   doc: '{"name": "World", "count": 12, "enabled": true, "ready": false, "empty": null, "items": [1]}',
   extensions: [
     await loadSupport(findLanguageDescription("JSON", "body.json")!),
-    syntaxHighlighting(openideaHighlightStyle),
+    syntaxHighlighting(oxideaHighlightStyle),
   ],
 });

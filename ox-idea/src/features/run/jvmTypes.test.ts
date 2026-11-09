@@ -10,7 +10,7 @@ vi.mock("@/platform/ipc", async (orig) => {
       ...real.commands,
       runGradleJvmArgsScript: (jvmArgs: string[]) => {
         scripts.push(jvmArgs);
-        return Promise.resolve({ status: "ok", data: "/tmp/openidea-gradle/jvm-args-1.init.gradle" });
+        return Promise.resolve({ status: "ok", data: "/tmp/oxidea-gradle/jvm-args-1.init.gradle" });
       },
     },
   };
@@ -229,14 +229,14 @@ describe("Maven / Gradle: VM options of the forked JVM", () => {
     expect(c.args).toEqual(["bootRun"]);
     const launched = await gradle().prepareLaunch!(c);
     expect(scripts).toEqual([gradleJvmArgs(params)]);
-    expect(launched.args).toEqual(["--init-script", "/tmp/openidea-gradle/jvm-args-1.init.gradle", "bootRun"]);
+    expect(launched.args).toEqual(["--init-script", "/tmp/oxidea-gradle/jvm-args-1.init.gradle", "bootRun"]);
     // Debugging keeps them: the BootRun init script gives the forked JVM a dynamic port.
     const debug = await gradle().prepareLaunch!(jdwpLaunch(c)!);
     expect(debug.args).toEqual([
       "--init-script",
-      "/tmp/openidea-gradle/jvm-args-1.init.gradle",
+      "/tmp/oxidea-gradle/jvm-args-1.init.gradle",
       "bootRun",
-      "-Dopenidea.run.debug=true",
+      "-Doxidea.run.debug=true",
     ]);
   });
 

@@ -5,12 +5,12 @@ import { defaultKeymap } from "@codemirror/commands";
 import { LanguageSupport, syntaxHighlighting } from "@codemirror/language";
 import { caretRowHighlight } from "@/editor/core/cm/caretRow";
 import { findExtension, findResultLines, findScope, type FindOptions } from "@/editor/core/cm/find";
-import { openideaHighlightStyle } from "@/editor/core/cm/highlight";
+import { oxideaHighlightStyle } from "@/editor/core/cm/highlight";
 import { overviewLane } from "@/editor/core/cm/lanes";
 import { logLanguage } from "@/editor/core/cm/log";
 import { caretExtension, fontZoom, setFontZoom, softWrapActive, stepFontZoom } from "@/editor/core/cm/prefs";
 import { fontExtension, heavyExtension, lineNumbersExtension, prefsOf } from "@/editor/core/cm/setup";
-import { openideaTheme } from "@/editor/core/cm/theme";
+import { oxideaTheme } from "@/editor/core/cm/theme";
 import { FindPanel, searchAgain, seedFind, type FindTarget } from "@/editor/core/view/FindBar";
 import { executeAction } from "@/platform/actions";
 import { editorPrefs } from "@/platform/editorSettings";
@@ -165,9 +165,9 @@ function PluginLogEditorBody({ input, data }: { input: EditorInput; data: Plugin
           fontZoom,
           wheelZoom,
           caretRowHighlight,
-          openideaTheme,
+          oxideaTheme,
           highlightSpecialChars(),
-          syntaxHighlighting(openideaHighlightStyle),
+          syntaxHighlighting(oxideaHighlightStyle),
           new LanguageSupport(logLanguage),
           findExtension(),
           overviewLane,

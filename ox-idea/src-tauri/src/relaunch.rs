@@ -39,7 +39,7 @@ fn wait_then_open(pid: u32, opener: &Path, bundle: &Path, args: &[OsString]) -> 
     command
         .arg("-c")
         .arg(WAIT_THEN_OPEN)
-        .arg("openidea-restart")
+        .arg("oxidea-restart")
         .arg(pid.to_string())
         .arg(opener)
         .arg(bundle)
@@ -62,8 +62,8 @@ mod tests {
             app_bundle(Path::new("/Applications/OXidea.app/Contents/MacOS/oxidea")),
             Some(PathBuf::from("/Applications/OXidea.app"))
         );
-        assert_eq!(app_bundle(Path::new("/repo/target/debug/openidea")), None);
-        assert_eq!(app_bundle(Path::new("/x/MacOS/openidea")), None);
+        assert_eq!(app_bundle(Path::new("/repo/target/debug/oxidea")), None);
+        assert_eq!(app_bundle(Path::new("/x/MacOS/oxidea")), None);
     }
 
     #[test]

@@ -210,7 +210,7 @@ export function resolveLogBranches(remembered: readonly string[] | undefined, br
   return valid.length ? valid : ["HEAD"];
 }
 
-const branchMemoryKey = (repo: string) => `openidea.vcs.logBranches:${repo}`;
+const branchMemoryKey = (repo: string) => `oxidea.vcs.logBranches:${repo}`;
 
 /** The main Log's branch filter last chosen for `repo`; undefined when none was. */
 export function rememberedLogBranches(repo: string): string[] | undefined {
@@ -550,7 +550,7 @@ export function installGitLog(): () => void {
 }
 
 let restoring = false;
-const sessionKey = (root: string) => `openidea.vcs.logSession.v1:${root}`;
+const sessionKey = (root: string) => `oxidea.vcs.logSession.v1:${root}`;
 
 function parseFilters(value: unknown): LogFilters {
   if (!value || typeof value !== "object") return emptyFilters();
@@ -678,7 +678,7 @@ export function toggleCommitBookmark(commit: Commit) {
 export function recentFilterValues<K extends keyof LogFilters>(name: K): LogFilters[K][] {
   try {
     return JSON.parse(
-      localStorage.getItem(`openidea.vcs.logRecent.v1:${useVcs.getState().root}:${name}`) ?? "[]",
+      localStorage.getItem(`oxidea.vcs.logRecent.v1:${useVcs.getState().root}:${name}`) ?? "[]",
     ) as LogFilters[K][];
   } catch {
     return [];
@@ -688,7 +688,7 @@ export function recentFilterValues<K extends keyof LogFilters>(name: K): LogFilt
 export function recentLogFilters(): LogFilters[] {
   try {
     const raw: unknown = JSON.parse(
-      localStorage.getItem(`openidea.vcs.logFilters.v1:${useVcs.getState().root}`) ?? "[]",
+      localStorage.getItem(`oxidea.vcs.logFilters.v1:${useVcs.getState().root}`) ?? "[]",
     );
     return Array.isArray(raw) ? raw.slice(0, 10).map(parseFilters) : [];
   } catch {
@@ -702,7 +702,7 @@ function rememberRecentFilters(before: LogFilters) {
     if (value == null || value === "" || (Array.isArray(value) && !value.length)) continue;
     try {
       localStorage.setItem(
-        `openidea.vcs.logRecent.v1:${useVcs.getState().root}:${name}`,
+        `oxidea.vcs.logRecent.v1:${useVcs.getState().root}:${name}`,
         JSON.stringify(
           [value, ...recentFilterValues(name).filter((v) => JSON.stringify(v) !== JSON.stringify(value))].slice(0, 10),
         ),
@@ -717,7 +717,7 @@ function rememberRecentFilters(before: LogFilters) {
         0,
         10,
       );
-      localStorage.setItem(`openidea.vcs.logFilters.v1:${useVcs.getState().root}`, JSON.stringify(recent));
+      localStorage.setItem(`oxidea.vcs.logFilters.v1:${useVcs.getState().root}`, JSON.stringify(recent));
     } catch {
       /* Recent filters are optional session state. */
     }

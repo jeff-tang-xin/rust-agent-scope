@@ -128,7 +128,7 @@ describe("Ruby test reporting", () => {
 
 // Captured from a run with the IDE's reporter (Minitest 6.0.6): records end with their own newline, so the
 // progress dots stay on one line once they are taken out.
-const M = "@@OPENIDEA@@";
+const M = "@@OXIDEA@@";
 const F = "/p/test/mixed_test.rb";
 const REPORTER_STREAM = [
   "# Running:",

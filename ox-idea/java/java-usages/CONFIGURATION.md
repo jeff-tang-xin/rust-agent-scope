@@ -1,6 +1,6 @@
 # Spring configuration navigation
 
-`openidea.java.configuration` bridges YAML / properties to the existing JDT LS
+`oxidea.java.configuration` bridges YAML / properties to the existing JDT LS
 Java model. It is bundled with the Java usages extension; it does not install a
 second language server, run a build, change the application's dependencies, or
 connect to external configuration services.
@@ -68,7 +68,7 @@ text in unrelated projects.
 Trusted projects with a Maven/Gradle/Eclipse build file at the root start Java a
 moment after opening, even without a Java editor open. Once JDT reports
 ServiceReady and compiler defaults are applied, the app asks the extension to warm
-the configuration index (`openidea.java.configuration.warmup`). A low-priority
+the configuration index (`oxidea.java.configuration.warmup`). A low-priority
 system job waits for workspace builds, then builds the same snapshot navigation
 uses, one Java project at a time: modules with open YAML/properties files first,
 then modules with open Java editors. At most 64 modules are queued, each attempt
@@ -139,8 +139,8 @@ Use the JDT LS distribution / Java version documented in [README](README.md).
 ```sh
 python3 java/java-usages/build.py /path/to/jdtls
 python3 java/java-usages/tests/configuration.py /path/to/jdtls
-OPENIDEA_CONFIGURATION_STRESS=1 python3 java/java-usages/tests/configuration.py /path/to/jdtls
-OPENIDEA_SPRING_BOOT_JAR=/path/to/spring-boot-autoconfigure.jar python3 java/java-usages/tests/configuration.py /path/to/jdtls
+OXIDEA_CONFIGURATION_STRESS=1 python3 java/java-usages/tests/configuration.py /path/to/jdtls
+OXIDEA_SPRING_BOOT_JAR=/path/to/spring-boot-autoconfigure.jar python3 java/java-usages/tests/configuration.py /path/to/jdtls
 cargo test -p ide-language -p ide-lsp
 ```
 

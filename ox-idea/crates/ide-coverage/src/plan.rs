@@ -5,7 +5,7 @@ use ide_run::RunConfig;
 use ide_run::wrap::{self, program_name};
 use std::path::Path;
 
-const GRADLE_INIT: &str = r#"// Written by OpenIDEA for Run with Coverage.
+const GRADLE_INIT: &str = r#"// Written by OXidea for Run with Coverage.
 allprojects {
     plugins.withId('java') {
         apply plugin: 'jacoco'
@@ -141,7 +141,7 @@ fn gradle(config: &RunConfig, dir: &Path, out: &Path) -> CoveragePrepared {
     if !runs_tests(&config.args) {
         return unsupported("Coverage runs Gradle configurations that run tests (`test`, `check`).");
     }
-    let script = out.join("openidea-jacoco.init.gradle");
+    let script = out.join("oxidea-jacoco.init.gradle");
     if let Err(e) = std::fs::write(&script, GRADLE_INIT) {
         return unsupported(format!("Cannot write the Gradle init script: {e}"));
     }
@@ -236,7 +236,7 @@ fn c8(root: &Path, config: &RunConfig, dir: &Path, out: &Path) -> CoveragePrepar
 }
 
 /// Loaded first (`ide_run::ruby_preload`) when the project never starts SimpleCov itself.
-const SIMPLECOV_PRELOAD: &str = r#"# Written by OpenIDEA for Run with Coverage.
+const SIMPLECOV_PRELOAD: &str = r#"# Written by OXidea for Run with Coverage.
 begin
   require "simplecov"
 rescue LoadError
@@ -244,7 +244,7 @@ rescue LoadError
   # the load path; the Ruby it starts loads bundler/setup first and finds SimpleCov.
   return
 end
-SimpleCov.coverage_dir(ENV.fetch("OPENIDEA_COVERAGE_DIR"))
+SimpleCov.coverage_dir(ENV.fetch("OXIDEA_COVERAGE_DIR"))
 SimpleCov.start do
   add_filter %r{^/(test|spec|features)/}
   enable_coverage :branch
@@ -281,13 +281,13 @@ fn ruby(root: &Path, config: &RunConfig, dir: &Path, out: &Path) -> CoveragePrep
         let _ = std::fs::remove_file(results.join(".resultset.json"));
         results.join(".resultset.json")
     } else {
-        let preload = out.join("openidea_simplecov.rb");
+        let preload = out.join("oxidea_simplecov.rb");
         if let Err(e) = std::fs::write(&preload, SIMPLECOV_PRELOAD) {
             return unsupported(format!("Cannot write the SimpleCov preload: {e}"));
         }
-        config.env.insert(s("OPENIDEA_COVERAGE_DIR"), path(out));
+        config.env.insert(s("OXIDEA_COVERAGE_DIR"), path(out));
         // `out` lives under the IDE's data directory, which may have spaces (RUBYOPT cannot take them).
-        ide_run::ruby_preload::add(&mut config.env, out, "openidea_simplecov", true);
+        ide_run::ruby_preload::add(&mut config.env, out, "oxidea_simplecov", true);
         out.join(".resultset.json")
     };
     let report = CoverageReportSpec::SimpleCov { path: resultset.into(), base: dir.to_path_buf().into() };
@@ -465,12 +465,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("out dir");
         std::fs::create_dir_all(&out).unwrap();
-        std::fs::write(out.join("openidea_simplecov.rb"), SIMPLECOV_PRELOAD).unwrap();
+        std::fs::write(out.join("oxidea_simplecov.rb"), SIMPLECOV_PRELOAD).unwrap();
         let status = std::process::Command::new("ruby")
             .args(["-e", "exit 0"])
             .env("RUBYLIB", &out)
-            .env("RUBYOPT", "-ropenidea_simplecov")
-            .env("OPENIDEA_COVERAGE_DIR", &out)
+            .env("RUBYOPT", "-roxidea_simplecov")
+            .env("OXIDEA_COVERAGE_DIR", &out)
             .env("GEM_HOME", dir.path().join("empty gems"))
             .env("GEM_PATH", dir.path().join("empty gems"))
             .status();
@@ -504,10 +504,10 @@ mod tests {
             (l.command.as_str(), l.args.as_slice()),
             ("bundle", ["exec".to_owned(), "rspec".to_owned()].as_slice())
         );
-        assert!(l.env["RUBYOPT"].contains("-ropenidea_simplecov"));
+        assert!(l.env["RUBYOPT"].contains("-roxidea_simplecov"));
         assert!(std::env::split_paths(&l.env["RUBYLIB"]).any(|d| d == out));
-        assert_eq!(l.env["OPENIDEA_COVERAGE_DIR"], out.to_string_lossy());
-        assert!(out.join("openidea_simplecov.rb").is_file());
+        assert_eq!(l.env["OXIDEA_COVERAGE_DIR"], out.to_string_lossy());
+        assert!(out.join("oxidea_simplecov.rb").is_file());
         assert!(
             matches!(report, CoverageReportSpec::SimpleCov { path, .. } if (path.as_ref() as &Path).starts_with(&out))
         );

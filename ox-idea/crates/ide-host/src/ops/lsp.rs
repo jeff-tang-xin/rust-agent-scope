@@ -1208,7 +1208,7 @@ pub async fn lsp_code_lens(host: &Host, window: &str, doc: DocId) -> IdeResult<V
         range: i.range,
         command: Some(Command {
             title: i.title,
-            command: format!("openidea.plugin-language:{plugin}:{}", i.command),
+            command: format!("oxidea.plugin-language:{plugin}:{}", i.command),
             arguments: vec![serde_json::json!(serde_json::to_string(&i.argument).unwrap_or_default())],
         }),
     }));
@@ -1333,7 +1333,7 @@ pub async fn redo_workspace_edit(host: &Host, window: &str, id: u32) -> IdeResul
 /// Runs a server command (`workspace/executeCommand`), e.g. a completion item's
 /// follow-up command. Edits the server requests arrive via `workspace/applyEdit`.
 pub async fn lsp_execute_command(host: &Host, window: &str, doc: DocId, command: Command) -> IdeResult<()> {
-    if let Some(rest) = command.command.strip_prefix("openidea.plugin-language:") {
+    if let Some(rest) = command.command.strip_prefix("oxidea.plugin-language:") {
         let (plugin, command_id) =
             rest.split_once(':').ok_or_else(|| ide_core::IdeError::invalid("Invalid plugin command"))?;
         let plugins = crate::plugins::editor_plugin_host()

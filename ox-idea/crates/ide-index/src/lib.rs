@@ -133,7 +133,7 @@ impl ProjectIndex {
         let worker = {
             let shared = shared.clone();
             std::thread::Builder::new()
-                .name("openidea-index".into())
+                .name("oxidea-index".into())
                 .spawn(move || shared.run(scan))
                 .map_err(|e| ide_core::IdeError::internal(format!("cannot start indexer: {e}")))?
         };

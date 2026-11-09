@@ -89,13 +89,13 @@ describe("Install and Restart", () => {
   it("runs as a background task with download progress, then restarts", async () => {
     const done = installUpdate("0.1.22");
     expect(notes.at(-1)).toMatchObject({
-      title: "Downloading OpenIDEA 0.1.22",
+      title: "Downloading OXidea 0.1.22",
       key: UPDATE_KEY,
       sticky: true,
       userInitiated: true,
     });
     expect(notes.at(-1)!.actions![0]!.label).toBe("Cancel");
-    expect(task(INSTALL_TASK_ID)).toMatchObject({ title: "Downloading OpenIDEA 0.1.22", fraction: null, done: false });
+    expect(task(INSTALL_TASK_ID)).toMatchObject({ title: "Downloading OXidea 0.1.22", fraction: null, done: false });
     expect(task(INSTALL_TASK_ID)?.cancel).toBeTypeOf("function");
 
     channel!.onmessage({ type: "downloading", downloaded: 21 * 1024 * 1024, total: 84 * 1024 * 1024 });
@@ -109,7 +109,7 @@ describe("Install and Restart", () => {
     expect(task(INSTALL_TASK_ID)?.done).toBe(true);
     expect(appRestart).toHaveBeenCalledTimes(1);
     const installed = notes.at(-1)!;
-    expect(installed).toMatchObject({ title: "OpenIDEA 0.1.22 is installed", key: UPDATE_KEY, sticky: true });
+    expect(installed).toMatchObject({ title: "OXidea 0.1.22 is installed", key: UPDATE_KEY, sticky: true });
     installed.actions![0]!.run();
     expect(appRestart).toHaveBeenCalledTimes(2);
   });
@@ -128,7 +128,7 @@ describe("Install and Restart", () => {
       ok({ enabled: true, update: { version: "0.1.22", currentVersion: "0.1.21", notes: null, date: null } }),
     );
     await checked;
-    expect(notes.map((n) => n.title)).toEqual(["OpenIDEA 0.1.22 is available", "Downloading OpenIDEA 0.1.22"]);
+    expect(notes.map((n) => n.title)).toEqual(["OXidea 0.1.22 is available", "Downloading OXidea 0.1.22"]);
 
     install.resolve(ok(null));
     await tick();
@@ -191,14 +191,14 @@ describe("Check for Updates", () => {
     check.resolve(ok({ enabled: true, update: null }));
     await first;
     expect(task(CHECK_TASK_ID)?.done).toBe(true);
-    expect(notes.at(-1)).toMatchObject({ title: "OpenIDEA 0.1.21 is up to date" });
+    expect(notes.at(-1)).toMatchObject({ title: "OXidea 0.1.21 is up to date" });
   });
 
   it.each([
     [ok({ enabled: false, update: null }), "Automatic updates are not configured"],
     [
       ok({ enabled: true, update: { version: "0.1.22", currentVersion: "0.1.21", notes: null, date: null } }),
-      "OpenIDEA 0.1.22 is available",
+      "OXidea 0.1.22 is available",
     ],
     [
       { status: "error", error: { kind: "unavailable", message: "offline" } } as Result<UpdateCheck>,
@@ -217,7 +217,7 @@ describe("Check for Updates", () => {
     expect(notes[0]).toMatchObject({ level: "info", title: "Checking for updates…", key: UPDATE_KEY });
     check.resolve(ok({ enabled: true, update: null }));
     await done;
-    expect(notes.at(-1)).toMatchObject({ title: "OpenIDEA 0.1.21 is up to date", key: UPDATE_KEY });
+    expect(notes.at(-1)).toMatchObject({ title: "OXidea 0.1.21 is up to date", key: UPDATE_KEY });
   });
 
   it("marks the manual check's progress as the user's own request", async () => {
@@ -235,7 +235,7 @@ describe("Check for Updates", () => {
       date: null,
     });
     await checkForUpdatesOnStartup();
-    expect(notes.at(-1)).toMatchObject({ title: "OpenIDEA 0.1.22 is available" });
+    expect(notes.at(-1)).toMatchObject({ title: "OXidea 0.1.22 is available" });
     expect(notes.at(-1)?.userInitiated).toBe(false);
   });
 
@@ -265,7 +265,7 @@ describe("Check for Updates", () => {
       expect(useNotifications.getState().items[0]).toMatchObject({
         key: UPDATE_KEY,
         balloon: true,
-        title: "OpenIDEA 0.1.21 is up to date",
+        title: "OXidea 0.1.21 is up to date",
       });
     } finally {
       useNotifications.setState({ items: [] });
@@ -278,7 +278,7 @@ describe("Check for Updates", () => {
     expect(notes).toHaveLength(0);
     check.resolve(ok({ enabled: true, update: null }));
     await done;
-    expect(notes.at(-1)?.title).toBe("OpenIDEA 0.1.21 is up to date");
+    expect(notes.at(-1)?.title).toBe("OXidea 0.1.21 is up to date");
   });
 });
 

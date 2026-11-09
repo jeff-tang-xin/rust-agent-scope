@@ -115,7 +115,7 @@ impl Host {
         {
             let history = history.clone();
             let retention = history_retention(&settings.effective());
-            std::thread::Builder::new().name("openidea-history-prune".into()).spawn(move || {
+            std::thread::Builder::new().name("oxidea-history-prune".into()).spawn(move || {
                 if let Err(e) = history.apply_retention(retention) {
                     tracing::warn!("local history: {e}");
                 }
@@ -513,7 +513,7 @@ impl Host {
             let (root, repos, settings, sink) = (root.clone(), repos.clone(), settings.clone(), sink.clone());
             let build_cache = build_cache.clone();
             std::thread::Builder::new()
-                .name("openidea-vcs-roots".into())
+                .name("oxidea-vcs-roots".into())
                 .spawn(move || scan_repositories(&root, &repos, &settings, &sink, &build_cache))?;
         }
         mark("git");

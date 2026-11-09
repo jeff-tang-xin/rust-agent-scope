@@ -248,7 +248,7 @@ describe("log controls", () => {
       document.elementFromPoint = original;
     }
     expect(useLogOptions.getState().columnOrder).toEqual(["hash", "author", "unknown", "date", "subject"]);
-    expect(JSON.parse(localStorage.getItem("openidea.vcs.logOptions")!).columnOrder).toEqual(
+    expect(JSON.parse(localStorage.getItem("oxidea.vcs.logOptions")!).columnOrder).toEqual(
       useLogOptions.getState().columnOrder,
     );
     const row = within(list).getAllByRole("option")[0]!;

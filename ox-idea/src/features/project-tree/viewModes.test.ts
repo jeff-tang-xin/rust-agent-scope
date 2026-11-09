@@ -183,7 +183,7 @@ describe("project view modes", () => {
     setViewMode("scratches");
     expect(labels()).toEqual(["Scratches"]);
     expect(useProjectTree.getState().expanded.has("/data/scratches")).toBe(true);
-    expect(localStorage.getItem("openidea.projectTree.mode")).toBe(JSON.stringify("scratches"));
+    expect(localStorage.getItem("oxidea.projectTree.mode")).toBe(JSON.stringify("scratches"));
   });
 
   it("keeps each pane's expansion", () => {

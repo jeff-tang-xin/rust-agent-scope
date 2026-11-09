@@ -6,7 +6,7 @@ func TestGreeting(t *testing.T) {
 	if got := greeting(""); got != "Hello, world!" {
 		t.Fatalf("got %q", got)
 	}
-	if got := greeting("OpenIDEA"); got != "Hello, OpenIDEA!" {
+	if got := greeting("OXidea"); got != "Hello, OXidea!" {
 		t.Fatalf("got %q", got)
 	}
 }

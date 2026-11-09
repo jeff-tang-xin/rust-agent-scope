@@ -59,16 +59,16 @@ fn server_environment_from_login_shell_and_devcontainer() {
         // The PATH cache goes under the temporary home.
         std::env::set_var("HOME", tmp.join("home"));
         std::env::set_var("XDG_CACHE_HOME", tmp.join("home/.cache"));
-        std::env::remove_var("OPENIDEA_SKIP_SHELL_ENV");
+        std::env::remove_var("OXIDEA_SKIP_SHELL_ENV");
     }
 
     // Two server starts: each reads the login shell again (not the cached PATH).
-    write(&rc, "export OPENIDEA_RC_VAR=one\nexport PATH=/start-one/bin:/usr/bin:/bin\n");
-    ide_host::shell_env::inherit_login_shell_env("openidea-server-test");
-    assert_eq!(std::env::var("OPENIDEA_RC_VAR").unwrap(), "one");
-    write(&rc, "export OPENIDEA_RC_VAR=two\nexport PATH=/start-two/bin:/usr/bin:/bin\n");
-    ide_host::shell_env::inherit_login_shell_env("openidea-server-test");
-    assert_eq!(std::env::var("OPENIDEA_RC_VAR").unwrap(), "two");
+    write(&rc, "export OXIDEA_RC_VAR=one\nexport PATH=/start-one/bin:/usr/bin:/bin\n");
+    ide_host::shell_env::inherit_login_shell_env("oxidea-server-test");
+    assert_eq!(std::env::var("OXIDEA_RC_VAR").unwrap(), "one");
+    write(&rc, "export OXIDEA_RC_VAR=two\nexport PATH=/start-two/bin:/usr/bin:/bin\n");
+    ide_host::shell_env::inherit_login_shell_env("oxidea-server-test");
+    assert_eq!(std::env::var("OXIDEA_RC_VAR").unwrap(), "two");
     assert!(std::env::var("PATH").unwrap().starts_with("/start-two/bin:"), "{:?}", std::env::var("PATH"));
     let base = tmp.join("server");
     ide_tools::extend_process_path(&base.join("data"));
@@ -95,7 +95,7 @@ fn server_environment_from_login_shell_and_devcontainer() {
         r#"{
             // remoteEnv sees the login shell's variables
             "remoteEnv": {
-                "FROM_PROJECT": "${containerEnv:OPENIDEA_RC_VAR}-${localWorkspaceFolderBasename}",
+                "FROM_PROJECT": "${containerEnv:OXIDEA_RC_VAR}-${localWorkspaceFolderBasename}",
                 "PATH": "/project/bin:${containerEnv:PATH}",
             },
             "postStartCommand": ["/bin/sh", "-c", "echo \"$FROM_PROJECT\" >> started.txt; echo post-start-output"],
@@ -105,7 +105,7 @@ fn server_environment_from_login_shell_and_devcontainer() {
     runtime.block_on(ide_host::ops::project::open(&host, "main", &project)).unwrap();
     assert_eq!(child_var("FROM_PROJECT"), "two-demo");
     assert!(child_var("PATH").starts_with("/project/bin:"), "{}", child_var("PATH"));
-    assert_eq!(child_var("OPENIDEA_RC_VAR"), "two");
+    assert_eq!(child_var("OXIDEA_RC_VAR"), "two");
     // PTY spawners (terminals, runs in a terminal) take the same variables.
     assert!(ide_core::process::host_env_fixes().iter().any(|(k, v)| k == "FROM_PROJECT" && v.is_some()));
     let started = project.join("started.txt");
@@ -123,29 +123,29 @@ fn server_environment_from_login_shell_and_devcontainer() {
     ));
 
     // Reload Environment: the edited rc file and the project file apply to new children.
-    write(&rc, "export OPENIDEA_RC_VAR=three\nexport OPENIDEA_RC_NEW=new\nexport PATH=/start-two/bin:/usr/bin:/bin\n");
+    write(&rc, "export OXIDEA_RC_VAR=three\nexport OXIDEA_RC_NEW=new\nexport PATH=/start-two/bin:/usr/bin:/bin\n");
     let reloaded = runtime.block_on(ide_host::ops::env::reload(&host, "main")).unwrap();
     assert!(reloaded.shell_read);
-    for name in ["FROM_PROJECT", "OPENIDEA_RC_NEW", "OPENIDEA_RC_VAR"] {
+    for name in ["FROM_PROJECT", "OXIDEA_RC_NEW", "OXIDEA_RC_VAR"] {
         assert!(reloaded.changed.iter().any(|c| c == name), "{name} in {:?}", reloaded.changed);
     }
     assert!(!reloaded.changed.iter().any(|c| c == "PATH"), "{:?}", reloaded.changed);
     assert!(reloaded.devcontainer.as_deref().is_some_and(|p| p.ends_with("devcontainer.json")));
-    assert_eq!(child_var("OPENIDEA_RC_VAR"), "three");
-    assert_eq!(child_var("OPENIDEA_RC_NEW"), "new");
+    assert_eq!(child_var("OXIDEA_RC_VAR"), "three");
+    assert_eq!(child_var("OXIDEA_RC_NEW"), "new");
     assert_eq!(child_var("FROM_PROJECT"), "three-demo");
     // This process keeps its own environment; only children change.
-    assert_eq!(std::env::var("OPENIDEA_RC_VAR").unwrap(), "two");
+    assert_eq!(std::env::var("OXIDEA_RC_VAR").unwrap(), "two");
 
     // A variable the rc file stops exporting goes away for new children, whether this
     // process started with it or a reload added it.
     write(&rc, "export PATH=/start-two/bin:/usr/bin:/bin\n");
     let reloaded = runtime.block_on(ide_host::ops::env::reload(&host, "main")).unwrap();
-    for name in ["FROM_PROJECT", "OPENIDEA_RC_NEW", "OPENIDEA_RC_VAR"] {
+    for name in ["FROM_PROJECT", "OXIDEA_RC_NEW", "OXIDEA_RC_VAR"] {
         assert!(reloaded.changed.iter().any(|c| c == name), "{name} in {:?}", reloaded.changed);
     }
-    assert_eq!(child_var("OPENIDEA_RC_NEW"), "");
-    assert_eq!(child_var("OPENIDEA_RC_VAR"), "");
+    assert_eq!(child_var("OXIDEA_RC_NEW"), "");
+    assert_eq!(child_var("OXIDEA_RC_VAR"), "");
     assert_eq!(child_var("FROM_PROJECT"), "-demo");
 
     // The shell starts from the environment this process started with: an rc file that

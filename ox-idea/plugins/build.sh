@@ -46,7 +46,7 @@ list() {
 
 # Prints the fingerprint of everything plugin $1's component is built from.
 fingerprint() {
-  { list "$1" .; list "$repo" sdk/rust/openidea-plugin/Cargo.toml sdk/rust/openidea-plugin/src sdk/rust/openidea-plugin/wit wit; } |
+  { list "$1" .; list "$repo" sdk/rust/oxidea-plugin/Cargo.toml sdk/rust/oxidea-plugin/src sdk/rust/oxidea-plugin/wit wit; } |
     sha256 | cut -d' ' -f1
 }
 

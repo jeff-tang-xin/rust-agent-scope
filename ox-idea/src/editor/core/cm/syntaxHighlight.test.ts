@@ -3,7 +3,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { highlightingFor, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
-import { openideaHighlightStyle, parameter } from "./highlight";
+import { oxideaHighlightStyle, parameter } from "./highlight";
 import { findLanguageDescription, loadSupport } from "./languages";
 import { setSyntaxHighlights, syntaxHighlightField } from "./syntaxHighlight";
 
@@ -22,7 +22,7 @@ describe("syntaxHighlightField", () => {
   const create = () =>
     EditorState.create({
       doc: "def hi, do: :ok",
-      extensions: [syntaxHighlighting(openideaHighlightStyle), syntaxHighlightField],
+      extensions: [syntaxHighlighting(oxideaHighlightStyle), syntaxHighlightField],
     });
 
   it("styles backend ranges with the active highlight style and maps them through edits", () => {
@@ -51,7 +51,7 @@ describe("syntaxHighlightField", () => {
     const view = new EditorView({
       parent: document.body,
       doc: "fun greet(prefix: String) {}",
-      extensions: [support!, syntaxHighlightField, syntaxHighlighting(openideaHighlightStyle)],
+      extensions: [support!, syntaxHighlightField, syntaxHighlighting(oxideaHighlightStyle)],
     });
     views.push(view);
     view.dispatch({

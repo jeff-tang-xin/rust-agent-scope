@@ -465,7 +465,7 @@ mod database_tests {
         assert!(!Capability::ProjectWrite.covers(&cap));
         for (api, valid) in [("^1.3", false), ("^1.4", true)] {
             let text = format!(
-                "id='db-test'\nname='DB'\nversion='1.0.0'\nengines.openidea='{api}'\n[capabilities]\nrequired=['database.sources']"
+                "id='db-test'\nname='DB'\nversion='1.0.0'\nengines.oxidea='{api}'\n[capabilities]\nrequired=['database.sources']"
             );
             assert_eq!(crate::Manifest::parse(&text).is_ok(), valid);
         }

@@ -30,7 +30,7 @@ const MAX_CANDIDATE_BYTES: u64 = 1 << 20;
 /// How long a search that found nothing waits for a server to finish indexing.
 const INDEX_WAIT: Duration = Duration::from_secs(10);
 /// Optional server command: candidate URIs in, already analysed candidate URIs out.
-const COVERED_FILES: &str = "openidea.workspace.coveredFiles";
+const COVERED_FILES: &str = "oxidea.workspace.coveredFiles";
 
 /// Project files that may mention a symbol.
 #[derive(Clone, Debug)]

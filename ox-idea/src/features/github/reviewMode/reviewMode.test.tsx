@@ -464,7 +464,7 @@ describe("review in the editor", () => {
   it("puts the Review Mode group in the editor's corner and hides the review when disabled", async () => {
     openEditor(HEAD);
     await waitFor(() => expect(inlay("T1")).not.toBeNull());
-    const button = document.querySelector<HTMLElement>(".cm-openidea-corner [data-review-mode]")!;
+    const button = document.querySelector<HTMLElement>(".cm-oxidea-corner [data-review-mode]")!;
     expect(button.dataset.reviewMode).toBe("on");
     expect(button.dataset.tooltip).toBe(
       "In Review Mode, you can see review comments and proposed changes right in the editor",

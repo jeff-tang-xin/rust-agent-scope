@@ -12,14 +12,14 @@ import styles from "./McpServer.module.css";
 export function httpConfig(status: McpServerStatus): string | null {
   if (!status.url || !status.token) return null;
   const server = { type: "http", url: status.url, headers: { Authorization: `Bearer ${status.token}` } };
-  return JSON.stringify({ mcpServers: { openidea: server } }, null, 2);
+  return JSON.stringify({ mcpServers: { oxidea: server } }, null, 2);
 }
 
-/** The same through the stdio bridge: no token, works for as long as OpenIDEA runs. */
+/** The same through the stdio bridge: no token, works for as long as OXidea runs. */
 export function stdioConfig(status: McpServerStatus): string | null {
   const [command, ...args] = status.stdioCommand;
   if (!command) return null;
-  return JSON.stringify({ mcpServers: { openidea: { type: "stdio", command, args } } }, null, 2);
+  return JSON.stringify({ mcpServers: { oxidea: { type: "stdio", command, args } } }, null, 2);
 }
 
 function useStatus(): McpServerStatus | null {
@@ -77,7 +77,7 @@ function McpServerEndpoint() {
         label="Endpoint"
         hint={
           status.project
-            ? "For this window's project. Agents name the project with the X-OpenIDEA-Project header or the ?project= query."
+            ? "For this window's project. Agents name the project with the X-OXidea-Project header or the ?project= query."
             : "Open a project to get its endpoint."
         }
       >
@@ -93,7 +93,7 @@ function McpServerEndpoint() {
       <Row
         label="Client configuration"
         stacked
-        hint="The HTTP configuration holds this run's token and stops working when OpenIDEA restarts. The stdio one starts OpenIDEA's executable, which relays to the running IDE."
+        hint="The HTTP configuration holds this run's token and stops working when OXidea restarts. The stdio one starts OXidea's executable, which relays to the running IDE."
       >
         <div className={styles.buttons}>
           <Button size="small" disabled={!http} onClick={() => copy("http", http)}>
@@ -126,7 +126,7 @@ export const MCP_SERVER_PAGE: PageSpec = {
           kind: "toggle",
           key: "mcpServer.enabled",
           label: "Enable MCP server",
-          hint: "Agents can read, edit, and run projects open in OpenIDEA through its built-in tools. Run tools ask for confirmation. The server listens on 127.0.0.1 only and requires a token.",
+          hint: "Agents can read, edit, and run projects open in OXidea through its built-in tools. Run tools ask for confirmation. The server listens on 127.0.0.1 only and requires a token.",
         },
         {
           kind: "custom",

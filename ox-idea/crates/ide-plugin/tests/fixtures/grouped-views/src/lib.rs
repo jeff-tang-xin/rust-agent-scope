@@ -1,5 +1,5 @@
-use openidea_plugin::views::{Body, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Error, Invocation, Plugin, host, register_plugin};
+use oxidea_plugin::views::{Body, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Error, Invocation, Plugin, host, register_plugin};
 
 #[derive(Default)]
 struct GroupedViews;

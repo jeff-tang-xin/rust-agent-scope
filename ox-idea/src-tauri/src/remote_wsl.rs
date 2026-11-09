@@ -1,4 +1,4 @@
-//! WSL transport of remote development: `openidea-server --stdio` started with
+//! WSL transport of remote development: `oxidea-server --stdio` started with
 //! `wsl.exe --exec` inside a distro, instead of over SSH.
 //!
 //! Every command goes through `--exec`, which runs the program directly without a shell on
@@ -28,7 +28,7 @@ pub(crate) struct Probe {
     pub home: String,
     /// `uname -sm`.
     pub uname: String,
-    /// Installed builds of this version (paths of `openidea-server`).
+    /// Installed builds of this version (paths of `oxidea-server`).
     pub installed: Vec<String>,
 }
 
@@ -103,7 +103,7 @@ pub(crate) fn version_dir(home: &str, version: &str) -> String {
     format!("{}/{SERVER_DIR}/{version}", home.trim_end_matches('/'))
 }
 
-/// Streams `data` into `<version_dir>/<build>/openidea-server` of `distro` and removes the other
+/// Streams `data` into `<version_dir>/<build>/oxidea-server` of `distro` and removes the other
 /// builds of the version. Returns the installed path.
 pub(crate) async fn install(
     distro: &str,
@@ -120,7 +120,7 @@ pub(crate) async fn install(
     if out.status.success() { Ok(format!("{build_dir}/{SERVER_BIN}")) } else { Err(failure(distro, &out)) }
 }
 
-/// Reads the server from stdin into `$1/openidea-server` and removes the builds of version folder
+/// Reads the server from stdin into `$1/oxidea-server` and removes the builds of version folder
 /// `$2` other than `$3`. Per install file: another window may be installing the same build.
 pub(crate) fn install_script() -> String {
     format!(

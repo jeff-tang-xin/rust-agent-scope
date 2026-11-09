@@ -33,7 +33,7 @@ def test_tags():
     assert len(tasks.by_tag("y")) == 2
 
 
-@pytest.mark.skipif(not os.environ.get("OPENIDEA_FAIL"), reason="set OPENIDEA_FAIL=1 to run")
+@pytest.mark.skipif(not os.environ.get("OXIDEA_FAIL"), reason="set OXIDEA_FAIL=1 to run")
 def test_intentionally_failing():
     # FIXME: wrong on purpose (QA: failing test in the test tree)
     assert len(TaskList()) == 1

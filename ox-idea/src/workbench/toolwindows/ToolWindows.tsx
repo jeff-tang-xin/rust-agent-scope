@@ -151,7 +151,7 @@ async function setShowToolWindowNames(on: boolean) {
 const STRIPE_MIN = 44;
 const STRIPE_DEFAULT = 56;
 const STRIPE_MAX = 96;
-const STRIPE_KEY = "openidea.stripes.v1";
+const STRIPE_KEY = "oxidea.stripes.v1";
 
 type StripeSide = "left" | "right";
 /** Per stripe: button width with names, and names shown or hidden by a drag (unset: the setting decides). */

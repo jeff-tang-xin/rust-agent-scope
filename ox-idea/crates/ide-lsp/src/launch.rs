@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn root_detection() {
-        let tmp = std::env::temp_dir().join(format!("openidea-lsp-root-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("oxidea-lsp-root-{}", std::process::id()));
         let member = tmp.join("crates/a/src");
         std::fs::create_dir_all(&member).unwrap();
         std::fs::write(tmp.join("crates/a/Cargo.toml"), "").unwrap();

@@ -15,7 +15,7 @@ import type { RunConfig } from "@/platform/ipc";
 import { useProject } from "@/platform/project";
 import { adoptTemporary, loadConfigs, resetRuns, useRun } from "./store";
 
-const KEY = "openidea.run.temporary.v2:/p";
+const KEY = "oxidea.run.temporary.v2:/p";
 const ok = <T>(data: T) => Promise.resolve({ status: "ok" as const, data });
 
 /** A Maven test run made from the tool window, with the settings of the day baked in. */

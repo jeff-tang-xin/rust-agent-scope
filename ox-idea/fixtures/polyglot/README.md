@@ -1,6 +1,6 @@
 # Acme (polyglot QA fixture)
 
-A small monorepo touching many languages so OpenIDEA's language detection,
+A small monorepo touching many languages so OXidea's language detection,
 highlighting, Search Everywhere and per-language servers can be checked in one
 window.
 

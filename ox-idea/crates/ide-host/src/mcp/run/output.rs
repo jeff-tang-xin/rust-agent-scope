@@ -121,7 +121,7 @@ fn output_dir() -> IdeResult<PathBuf> {
     {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt};
         let uid = rustix::process::getuid().as_raw();
-        let dir = std::env::temp_dir().join(format!("openidea-mcp-{uid}"));
+        let dir = std::env::temp_dir().join(format!("oxidea-mcp-{uid}"));
         match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -138,7 +138,7 @@ fn output_dir() -> IdeResult<PathBuf> {
     }
     #[cfg(not(unix))]
     {
-        let dir = std::env::temp_dir().join("openidea-mcp");
+        let dir = std::env::temp_dir().join("oxidea-mcp");
         std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }

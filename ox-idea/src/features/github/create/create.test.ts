@@ -34,8 +34,8 @@ const branch = (name: string, extra: Partial<Branch> = {}): Branch => ({
 });
 const remote = (name: string, commit?: string) => branch(name, { remote: true, commit });
 
-const origin: GHRemote = { owner: "l0ng-ai", name: "openidea", remote: "origin", url: "" };
-const fork: GHRemote = { owner: "me", name: "openidea", remote: "fork", url: "" };
+const origin: GHRemote = { owner: "l0ng-ai", name: "oxidea", remote: "origin", url: "" };
+const fork: GHRemote = { owner: "me", name: "oxidea", remote: "fork", url: "" };
 
 const branches = [
   branch("feature", { current: true, upstream: "fork/feature", commit: "a1" }),
@@ -93,11 +93,11 @@ describe("merge direction", () => {
       headRepo: origin,
       headBranch: { kind: "local", name: "feature" },
     };
-    expect(baseText(same)).toBe("openidea:main");
-    expect(headText(same)).toBe("openidea:feature");
+    expect(baseText(same)).toBe("oxidea:main");
+    expect(headText(same)).toBe("oxidea:feature");
     const forked: Direction = { ...same, headRepo: fork, headBranch: { kind: "remote", remote: "fork", name: "x" } };
-    expect(baseText(forked)).toBe("l0ng-ai/openidea:main");
-    expect(headText(forked)).toBe("me/openidea:fork/x");
+    expect(baseText(forked)).toBe("l0ng-ai/oxidea:main");
+    expect(headText(forked)).toBe("me/oxidea:fork/x");
     expect(baseText({ ...same, baseBranch: null })).toBeNull();
     expect(headText({ ...same, headRepo: null })).toBeNull();
   });

@@ -7,7 +7,7 @@
 //! no links leaving the package), copied on install and covered by the
 //! package digest and signature. The client loads the page in a sandboxed
 //! frame (an opaque origin with no network and no IDE API) and fetches its
-//! files through [`PluginHost::web_file`] (the desktop's `openidea-plugin`
+//! files through [`PluginHost::web_file`] (the desktop's `oxidea-plugin`
 //! URL scheme); the page talks to the IDE only through the frame bridge.
 
 use super::PluginHost;
@@ -95,7 +95,7 @@ pub(super) fn web_files(pkg: &Package, entry: &str, what: &str) -> Result<Vec<Pa
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WebPage {
-    /// `<plugin id>/<revision>/<entry>` under the `openidea-plugin` scheme. The
+    /// `<plugin id>/<revision>/<entry>` under the `oxidea-plugin` scheme. The
     /// revision changes with the installed package, so a cached file is never
     /// stale; relative URLs in the page resolve to the package's files.
     pub path: String,
@@ -423,7 +423,7 @@ mod tests {
     use ide_extension::Manifest;
 
     fn pkg(dir: &Path) -> Package {
-        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n";
+        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n";
         Package::new(Manifest::parse(src).unwrap(), dir.to_path_buf())
     }
 

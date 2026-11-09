@@ -50,7 +50,7 @@ pub fn plan(root: &Path, model: &BuildModel, module: &Path, cache: &Path) -> Ide
                 r#"gradle.projectsEvaluated {{
     def p = gradle.rootProject.project({})
     def resources = p.tasks.named('processResources')
-    p.tasks.register('openideaUpdateResources') {{
+    p.tasks.register('oxideaUpdateResources') {{
         dependsOn resources
         doLast {{ new File({}).setText(resources.get().destinationDir.absolutePath, 'UTF-8') }}
     }}
@@ -65,7 +65,7 @@ pub fn plan(root: &Path, model: &BuildModel, module: &Path, cache: &Path) -> Ide
             args: vec![
                 "--init-script".into(),
                 script.to_string_lossy().into_owned(),
-                format!("{}:openideaUpdateResources", p.path.trim_end_matches(':')),
+                format!("{}:oxideaUpdateResources", p.path.trim_end_matches(':')),
             ],
             cwd: g.dir.clone(),
             env: g.env.clone(),
@@ -170,7 +170,7 @@ mod tests {
         }];
         let gradle = plan(&root, &model, Path::new("app"), &cache).unwrap();
         assert_eq!(gradle.command, "/tools/gradlew");
-        assert_eq!(gradle.args.last().unwrap(), ":app:openideaUpdateResources");
+        assert_eq!(gradle.args.last().unwrap(), ":app:oxideaUpdateResources");
         let script = fs::read_to_string(cache.join("resources.init.gradle")).unwrap();
         assert!(script.contains("processResources") && script.contains("destinationDir.absolutePath"));
         assert!(!script.contains("build/resources/main")); // The task owns custom output locations.

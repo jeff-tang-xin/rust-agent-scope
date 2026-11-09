@@ -208,7 +208,7 @@ impl RemoteFs {
         }
         if matches!(self, Self::Local) {
             let name = format!(
-                ".openidea-write-test-{}-{}",
+                ".oxidea-write-test-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
             );

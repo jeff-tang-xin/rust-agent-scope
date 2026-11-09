@@ -15,7 +15,7 @@ describe("scene files", () => {
     expect(own.source).toBe("https://excalidraw.com");
     const none = JSON.parse(serializeScene(scene('{"type":"excalidraw","elements":[]}')));
     expect(none.source).toBe(SOURCE);
-    for (const page of ["openidea-plugin://localhost", "http://openidea-plugin.localhost"]) {
+    for (const page of ["oxidea-plugin://localhost", "http://oxidea-plugin.localhost"]) {
       const fixed = JSON.parse(serializeScene(scene(`{"type":"excalidraw","source":"${page}","elements":[]}`)));
       expect(fixed.source).toBe(SOURCE);
     }

@@ -11,8 +11,8 @@ import { progressFraction } from "./model";
 import logo from "../../../src-tauri/icons/128x128.png";
 import styles from "./clone.module.css";
 
-const PARENT_KEY = "openidea.vcs.cloneParent";
-const RECENT_URLS_KEY = "openidea.vcs.cloneRecentUrls";
+const PARENT_KEY = "oxidea.vcs.cloneParent";
+const RECENT_URLS_KEY = "oxidea.vcs.cloneRecentUrls";
 const MAX_RECENT_URLS = 10;
 
 /** Folder name git would pick for `url` (`https://h/o/repo.git` → `repo`, `git@h:o/r` → `r`). */

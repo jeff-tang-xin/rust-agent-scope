@@ -59,7 +59,7 @@ const SEVERITY_LABEL: Record<SeverityKey, string> = {
 // View options (persisted), in the tool window's ⋮ menu. IDEA's defaults:
 // grouped by inspection, no autoscroll.
 
-const OPTIONS_KEY = "openidea.inspection.view.v1";
+const OPTIONS_KEY = "oxidea.inspection.view.v1";
 
 interface InspectionOptions {
   groupBySeverity: boolean;

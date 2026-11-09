@@ -11,7 +11,7 @@ languages / platforms / entry points too?". Answer that before anyone asks.
 
 ## 1. Read and reproduce
 
-- `gh issue view <n> --comments` (repo `l0ng-ai/openidea`). Read attached logs/screenshots
+- `gh issue view <n> --comments` (repo `l0ng-ai/oxidea`). Read attached logs/screenshots
   closely: OS, language, toolchain versions, exact error text.
 - Locate the code path and confirm the claim in code, with `file:line` evidence.
   Say plainly whether it is a real bug, a missing feature, or user environment.
@@ -71,7 +71,7 @@ Search systematically, not by memory:
 ## 6. PR
 
 - One branch `fix/<slug>`, one PR unless the user asks otherwise; `Fixes #<n>` in the body.
-- Don't stage untracked IDE-state dirs (`.ideal/`, `.openidea/`) or screenshots.
+- Don't stage untracked IDE-state dirs (`.ideal/`, `.oxidea/`) or screenshots.
 - PR body follows `.github/pull_request_template.md`: `Closes #<n>`, then
   **What and why** (user-visible change + root cause at class level, 2–4 sentences),
   **How it was verified** (commands run and results, siblings fixed/deferred, what could break and how

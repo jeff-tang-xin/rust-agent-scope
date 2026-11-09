@@ -1,5 +1,5 @@
-use openidea_plugin::diagnostics::{DiagnosticsProvider, Document};
-use openidea_plugin::{Diagnostic, Error, Invocation, Plugin, Range, Severity, host, register_plugin, text};
+use oxidea_plugin::diagnostics::{DiagnosticsProvider, Document};
+use oxidea_plugin::{Diagnostic, Error, Invocation, Plugin, Range, Severity, host, register_plugin, text};
 use std::time::Duration;
 
 #[derive(Default)]
@@ -65,74 +65,74 @@ impl DiagnosticsProvider for Fixture {
     }
 }
 
-impl openidea_plugin::hover::HoverProvider for Fixture {
-    fn hover(&mut self, _: &Document, _: openidea_plugin::Position) -> Option<openidea_plugin::hover::Hover> {
+impl oxidea_plugin::hover::HoverProvider for Fixture {
+    fn hover(&mut self, _: &Document, _: oxidea_plugin::Position) -> Option<oxidea_plugin::hover::Hover> {
         None
     }
 }
 
-impl openidea_plugin::inlay_hints::InlayHints for Fixture {
-    fn inlay_hints(&mut self, _: &Document, _: Range) -> Vec<openidea_plugin::inlay_hints::InlayHint> {
+impl oxidea_plugin::inlay_hints::InlayHints for Fixture {
+    fn inlay_hints(&mut self, _: &Document, _: Range) -> Vec<oxidea_plugin::inlay_hints::InlayHint> {
         Vec::new()
     }
 }
 
-impl openidea_plugin::providers::Providers for Fixture {}
+impl oxidea_plugin::providers::Providers for Fixture {}
 
-impl openidea_plugin::endpoints::EndpointsProvider for Fixture {
-    fn endpoints(&mut self, _: &Invocation) -> Result<Vec<openidea_plugin::endpoints::Endpoint>, Error> {
+impl oxidea_plugin::endpoints::EndpointsProvider for Fixture {
+    fn endpoints(&mut self, _: &Invocation) -> Result<Vec<oxidea_plugin::endpoints::Endpoint>, Error> {
         Ok(Vec::new())
     }
 }
 
-impl openidea_plugin::views::Views for Fixture {
+impl oxidea_plugin::views::Views for Fixture {
     fn render(
         &mut self,
         _: &str,
-        _: Option<openidea_plugin::views::Viewport>,
+        _: Option<oxidea_plugin::views::Viewport>,
         _: &Invocation,
-    ) -> Result<openidea_plugin::views::View, Error> {
-        Ok(openidea_plugin::views::View::message(""))
+    ) -> Result<oxidea_plugin::views::View, Error> {
+        Ok(oxidea_plugin::views::View::message(""))
     }
 }
 
-impl openidea_plugin::indexing::DocumentIndexer for Fixture {
-    fn index(&mut self, _: &openidea_plugin::indexing::Document) -> openidea_plugin::indexing::Edges {
-        openidea_plugin::indexing::Edges::default()
+impl oxidea_plugin::indexing::DocumentIndexer for Fixture {
+    fn index(&mut self, _: &oxidea_plugin::indexing::Document) -> oxidea_plugin::indexing::Edges {
+        oxidea_plugin::indexing::Edges::default()
     }
 }
 
-impl openidea_plugin::syntax::SyntaxProvider for Fixture {
-    fn highlights(&mut self, _: &str, _: &str) -> Vec<openidea_plugin::syntax::Token> {
+impl oxidea_plugin::syntax::SyntaxProvider for Fixture {
+    fn highlights(&mut self, _: &str, _: &str) -> Vec<oxidea_plugin::syntax::Token> {
         Vec::new()
     }
 }
 
-impl openidea_plugin::semantic_tokens::SemanticTokens for Fixture {
-    fn semantic_tokens(&mut self, _: &Document) -> Vec<openidea_plugin::semantic_tokens::SemanticToken> {
+impl oxidea_plugin::semantic_tokens::SemanticTokens for Fixture {
+    fn semantic_tokens(&mut self, _: &Document) -> Vec<oxidea_plugin::semantic_tokens::SemanticToken> {
         Vec::new()
     }
 }
 
-impl openidea_plugin::details::Details for Fixture {
-    fn detail(&mut self, _: &str, _: &str, _: &Invocation) -> Result<Vec<openidea_plugin::details::Tab>, Error> {
+impl oxidea_plugin::details::Details for Fixture {
+    fn detail(&mut self, _: &str, _: &str, _: &Invocation) -> Result<Vec<oxidea_plugin::details::Tab>, Error> {
         Ok(Vec::new())
     }
 }
 
-impl openidea_plugin::commit::CommitChecks for Fixture {
+impl oxidea_plugin::commit::CommitChecks for Fixture {
     fn check(
         &mut self,
         _: &str,
-        _: &openidea_plugin::CommitDraft,
+        _: &oxidea_plugin::CommitDraft,
         _: &Invocation,
-    ) -> Result<Vec<openidea_plugin::commit::CommitProblem>, Error> {
+    ) -> Result<Vec<oxidea_plugin::commit::CommitProblem>, Error> {
         Ok(Vec::new())
     }
 }
 
-impl openidea_plugin::file_actions::FileActions for Fixture {
-    fn file_actions(&mut self, _: &Document, _: Range) -> Vec<openidea_plugin::file_actions::FileAction> {
+impl oxidea_plugin::file_actions::FileActions for Fixture {
+    fn file_actions(&mut self, _: &Document, _: Range) -> Vec<oxidea_plugin::file_actions::FileAction> {
         Vec::new()
     }
 }

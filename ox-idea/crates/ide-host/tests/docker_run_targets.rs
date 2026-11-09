@@ -1,5 +1,5 @@
 //! Docker run targets through `ops::run::start`, with a stand-in `docker`
-//! (`OPENIDEA_DOCKER`) that prints what it was given.
+//! (`OXIDEA_DOCKER`) that prints what it was given.
 #![cfg(unix)]
 
 use ide_core::NullSink;
@@ -81,7 +81,7 @@ async fn docker_targets_run_through_the_docker_cli() {
     std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
     // SAFETY: the only test of this binary, before any thread looks docker up.
     unsafe {
-        std::env::set_var("OPENIDEA_DOCKER", &docker);
+        std::env::set_var("OXIDEA_DOCKER", &docker);
         std::env::remove_var("DOCKER_HOST");
     }
 
@@ -131,17 +131,17 @@ async fn docker_targets_run_through_the_docker_cli() {
     let port = publish.strip_prefix("127.0.0.1:").and_then(|p| p.split_once(':')).unwrap();
     assert_eq!(port.0, port.1, "{out}");
     let bootstrap = host.data_dir.join("container-debug");
-    assert!(args.contains(&format!("{}:/opt/openidea/debug:ro", bootstrap.display()).as_str()), "{out}");
-    assert!(args.contains(&format!("{}:/opt/openidea/debugpy-lib:ro", lib.display()).as_str()), "{out}");
+    assert!(args.contains(&format!("{}:/opt/oxidea/debug:ro", bootstrap.display()).as_str()), "{out}");
+    assert!(args.contains(&format!("{}:/opt/oxidea/debugpy-lib:ro", lib.display()).as_str()), "{out}");
     assert_eq!(
-        std::fs::read_to_string(bootstrap.join("openidea_debug.py")).unwrap(),
+        std::fs::read_to_string(bootstrap.join("oxidea_debug.py")).unwrap(),
         ide_remote::docker::DEBUG_BOOTSTRAP
     );
     assert!(
         args.ends_with(&[
             "python:3.12",
             "python3",
-            "/opt/openidea/debug/openidea_debug.py",
+            "/opt/oxidea/debug/oxidea_debug.py",
             port.0,
             "/workspaces/proj",
             "/workspaces/proj/main.py"

@@ -122,9 +122,9 @@ interface ProjectTreeState {
   outlines: ReadonlyMap<string, readonly OutlineItem[]>;
 }
 
-const OPTIONS_KEY = "openidea.projectTree.options";
-const MODE_KEY = "openidea.projectTree.mode";
-const expandedKey = (root: string) => `openidea.projectTree.expanded:${root}`;
+const OPTIONS_KEY = "oxidea.projectTree.options";
+const MODE_KEY = "oxidea.projectTree.mode";
+const expandedKey = (root: string) => `oxidea.projectTree.expanded:${root}`;
 const MAX_PERSISTED = 3000;
 
 function readJson<T>(key: string): T | null {

@@ -669,7 +669,7 @@ pub(crate) fn run_in_terminal(s: &Arc<Session>, args: &Value) -> Result<Value, S
     let reader = pair.master.try_clone_reader().map_err(|e| format!("terminal of {program}: {e}"))?;
     let writer = pair.master.take_writer().map_err(|e| format!("terminal of {program}: {e}"))?;
     let writer = ide_core::input::InputWriter::new(
-        format!("openidea-debug-input-{}", s.id.0),
+        format!("oxidea-debug-input-{}", s.id.0),
         writer,
         #[cfg(unix)]
         wait_writable,
@@ -704,7 +704,7 @@ fn forward_terminal_output(
 ) {
     let session = s.id;
     let sink = s.owner.sink.clone();
-    let _ = std::thread::Builder::new().name(format!("openidea-debuggee-{}", session.0)).spawn(move || {
+    let _ = std::thread::Builder::new().name(format!("oxidea-debuggee-{}", session.0)).spawn(move || {
         let mut buf = vec![0u8; 8192];
         let mut pending: Vec<u8> = Vec::new();
         loop {

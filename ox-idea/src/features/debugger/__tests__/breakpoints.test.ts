@@ -119,7 +119,7 @@ describe("suspend and logging (IDEA's independent options)", () => {
 
   it("migrates stored log messages to non-suspending breakpoints", () => {
     localStorage.setItem(
-      "openidea.debugger.breakpoints:/old",
+      "oxidea.debugger.breakpoints:/old",
       JSON.stringify({
         files: {
           "/x": [
@@ -174,11 +174,11 @@ describe("breakpoint store", () => {
   });
 
   it("ignores corrupt storage", () => {
-    localStorage.setItem("openidea.debugger.breakpoints:/bad", "{nope");
+    localStorage.setItem("oxidea.debugger.breakpoints:/bad", "{nope");
     loadBreakpoints("/bad");
     expect(useBreakpoints.getState().byFile).toEqual({});
     localStorage.setItem(
-      "openidea.debugger.breakpoints:/bad2",
+      "oxidea.debugger.breakpoints:/bad2",
       JSON.stringify({ files: { "/x": [{ line: "a" }, { line: 3 }] } }),
     );
     loadBreakpoints("/bad2");

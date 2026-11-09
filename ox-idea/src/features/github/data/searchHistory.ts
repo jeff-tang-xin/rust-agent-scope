@@ -7,8 +7,8 @@ import { useProject } from "@/platform/project";
 import { DEFAULT_SEARCH, filterCount, normalizeSearch, sameSearch, type PrSearchValue } from "./model";
 
 const MAX_HISTORY = 10;
-const historyKey = (root: string) => `openidea.github.prSearchHistory.v2:${root}`;
-const lastKey = (root: string) => `openidea.github.prLastSearch.v2:${root}`;
+const historyKey = (root: string) => `oxidea.github.prSearchHistory.v2:${root}`;
+const lastKey = (root: string) => `oxidea.github.prLastSearch.v2:${root}`;
 const projectRoot = () => useProject.getState().project?.root ?? null;
 
 function load(key: string): unknown {

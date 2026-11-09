@@ -1,7 +1,7 @@
 /**
  * Localisation.
  *
- *   t("app.unsaved.body", { count: 3, project: "openidea" })
+ *   t("app.unsaved.body", { count: 3, project: "oxidea" })
  *   const t = useT();            // in components: re-renders on locale change
  *
  * Catalogs are flat JSON maps in `platform/locales/<locale>.json`; keys are

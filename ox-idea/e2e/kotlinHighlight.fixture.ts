@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
 import { schemeCss } from "../src/platform/colorScheme";
-import { openideaHighlightStyle } from "../src/editor/core/cm/highlight";
+import { oxideaHighlightStyle } from "../src/editor/core/cm/highlight";
 import { findLanguageDescription, loadSupport } from "../src/editor/core/cm/languages";
 import { syntaxHighlightField, setSyntaxHighlights } from "../src/editor/core/cm/syntaxHighlight";
 import { commands } from "../src/platform/ipc";
@@ -39,7 +39,7 @@ const view = new EditorView({
   extensions: [
     support!,
     syntaxHighlightField,
-    syntaxHighlighting(openideaHighlightStyle),
+    syntaxHighlighting(oxideaHighlightStyle),
     ...(semantic
       ? [
           lspTheme,

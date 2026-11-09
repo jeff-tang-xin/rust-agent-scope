@@ -15,7 +15,7 @@ Build from the repository root:
 ```sh
 plugins/build.sh official/todo-finder
 cargo test --manifest-path plugins/official/todo-finder/Cargo.toml
-cargo run -p ide-host --bin openidea-plugin -- check plugins/official/todo-finder
+cargo run -p ide-host --bin oxidea-plugin -- check plugins/official/todo-finder
 ```
 
 Install the built package folder through Settings › Plugins › Install from

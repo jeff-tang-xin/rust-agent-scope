@@ -127,7 +127,7 @@ export function inlineValuesFor(
 function lineDecorations(state: EditorState, exec: Exec | null): DecorationSet {
   if (!exec || exec.line >= state.doc.lines) return Decoration.none;
   const line = state.doc.line(exec.line + 1);
-  return Decoration.set([Decoration.line({ class: `${styles.execLine} cm-openidea-lineBg` }).range(line.from)]);
+  return Decoration.set([Decoration.line({ class: `${styles.execLine} cm-oxidea-lineBg` }).range(line.from)]);
 }
 
 export function executionPoint(ctx: EditorDocContext): Extension {

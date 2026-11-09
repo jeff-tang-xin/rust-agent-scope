@@ -31,7 +31,7 @@ and copy this file into its source directory as `Bean.java`. For Maven, use JDK
 </project>
 ```
 
-Open the project in OpenIDEA, allow JDT LS import/indexing to finish and verify
+Open the project in OXidea, allow JDT LS import/indexing to finish and verify
 there are no Java error diagnostics. Leave `java.references.includeAccessors`
 enabled. Invoke Show Usages on the **declaration** of `Bean.count` (Cmd-click on
 macOS, or the corresponding navigation action). Use the declaration to avoid

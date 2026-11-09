@@ -414,7 +414,7 @@ fn commit_selected(
     options: &CommitOptions,
     encoding: &dyn Fn(&Path) -> IdeResult<TextEncoding>,
 ) -> IdeResult<()> {
-    let tmp = TempIndex(r.git_dir.join("openidea-partial-index"));
+    let tmp = TempIndex(r.git_dir.join("oxidea-partial-index"));
     let env = [("GIT_INDEX_FILE", tmp.0.as_os_str())];
     let rels = select_into(r, &tmp, options, encoding)?;
     cli::run_env(r.root(), commit_args, stdin, &env)?;
@@ -500,7 +500,7 @@ pub(crate) fn pending_changes(
 ) -> IdeResult<Vec<PendingChange>> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = TempIndex(r.git_dir.join(format!("openidea-pending-index-{}-{n}", std::process::id())));
+    let tmp = TempIndex(r.git_dir.join(format!("oxidea-pending-index-{}-{n}", std::process::id())));
     let env_tmp = [("GIT_INDEX_FILE", tmp.0.as_os_str())];
     let env: &[(&str, &std::ffi::OsStr)] = if selects(options) {
         select_into(r, &tmp, options, encoding)?;

@@ -43,14 +43,14 @@ describe("Vim mode toggle", () => {
     expect(JSON.parse(localStorage.getItem(VIM_SETTINGS_KEY)!).enabled).toBe(true);
     await until(hasContribution);
     expect(getContext().vimMode).toBe(true);
-    expect(diffSide.dom.hasAttribute("data-openidea-vim")).toBe(true);
+    expect(diffSide.dom.hasAttribute("data-oxidea-vim")).toBe(true);
     expect(getCM(diffSide)).not.toBeNull();
 
     await executeAction("vim.toggle");
     expect(useVimSettings.getState().enabled).toBe(false);
     expect(hasContribution()).toBe(false);
     expect(getContext()["vim.mode"]).toBe("");
-    expect(diffSide.dom.hasAttribute("data-openidea-vim")).toBe(false);
+    expect(diffSide.dom.hasAttribute("data-oxidea-vim")).toBe(false);
     expect(getCM(diffSide)).toBeNull();
     diffSide.destroy();
   });
@@ -79,7 +79,7 @@ describe("Vim engine", () => {
     Vim.mapclear();
   });
 
-  it(":action runs OpenIDEA actions by IdeaVim or OpenIDEA id", async () => {
+  it(":action runs OXidea actions by IdeaVim or OXidea id", async () => {
     const view = makeView();
     _handleEx(view, "action GotoDeclaration");
     _handleEx(view, "action code.reformat");

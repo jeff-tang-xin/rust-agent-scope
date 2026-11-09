@@ -38,7 +38,7 @@ export interface EditorSession {
   files: Record<string, FileViewState>;
 }
 
-const STORAGE_PREFIX = "openidea.editorSession.v1:";
+const STORAGE_PREFIX = "oxidea.editorSession.v1:";
 
 const isFileTab = (t: Tab) => t.input.kind === "file" && !!t.input.path;
 

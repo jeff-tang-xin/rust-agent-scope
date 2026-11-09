@@ -1,4 +1,4 @@
-//! The `openidea` command.
+//! The `oxidea` command.
 //!
 //! The command is the app's own executable run in CLI mode: it parses its
 //! arguments ([`args`]), sends one [`Request`] to the running app over a local

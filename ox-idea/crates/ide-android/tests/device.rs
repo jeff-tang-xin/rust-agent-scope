@@ -3,7 +3,7 @@
 //! cancelling stops both the stream and its `adb` process.
 //!
 //! Ignored by default (needs a connected device). Run with
-//! `OPENIDEA_ADB_DEVICE=<serial> cargo test -p ide-android --test device -- --ignored --nocapture`
+//! `OXIDEA_ADB_DEVICE=<serial> cargo test -p ide-android --test device -- --ignored --nocapture`
 //! — without the variable, the connected device is used when there is exactly one.
 
 use ide_android::*;
@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn serial() -> Option<String> {
-    if let Ok(serial) = std::env::var("OPENIDEA_ADB_DEVICE") {
+    if let Ok(serial) = std::env::var("OXIDEA_ADB_DEVICE") {
         return Some(serial);
     }
     let online = devices().ok()?.into_iter().filter(AndroidDevice::is_online).collect::<Vec<_>>();
@@ -22,7 +22,7 @@ fn serial() -> Option<String> {
 #[test]
 #[ignore]
 fn finds_the_adb_executable() {
-    let adb = adb_executable().expect("adb (set ANDROID_HOME or OPENIDEA_ADB)");
+    let adb = adb_executable().expect("adb (set ANDROID_HOME or OXIDEA_ADB)");
     println!("adb: {}", adb.display());
     assert!(adb.is_file());
 }
@@ -40,7 +40,7 @@ fn lists_connected_devices() {
 #[test]
 #[ignore]
 fn streams_batches_and_stops_on_cancel() {
-    let serial = serial().expect("a single connected device, or OPENIDEA_ADB_DEVICE");
+    let serial = serial().expect("a single connected device, or OXIDEA_ADB_DEVICE");
     let cancel = CancellationToken::new();
     let stop = cancel.clone();
     let received = Arc::new(Mutex::new(Vec::<LogcatLine>::new()));

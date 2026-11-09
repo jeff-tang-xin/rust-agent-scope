@@ -1,7 +1,7 @@
 /**
  * Change lists: the default "Changes" list plus user lists in the Commit tool
  * window. Every changed file belongs to exactly one list (new changes go to the
- * active one); the state is persisted per project in `.openidea/changelists.json`.
+ * active one); the state is persisted per project in `.oxidea/changelists.json`.
  */
 import { create } from "zustand";
 import type { Changelist, ChangelistState, FileStatus } from "@/bindings";

@@ -25,7 +25,7 @@ fn groovy_string(s: &str) -> String {
 pub fn init_script(jvm_args: &[String]) -> String {
     let list = jvm_args.iter().map(|a| groovy_string(a)).collect::<Vec<_>>().join(", ");
     format!(
-        "// Written by OpenIDEA: VM options of the run configuration.\n\
+        "// Written by OXidea: VM options of the run configuration.\n\
          allprojects {{\n    \
              tasks.withType(JavaExec).configureEach {{ jvmArgs([{list}]) }}\n    \
              tasks.withType(Test).configureEach {{ jvmArgs([{list}]) }}\n\
@@ -35,7 +35,7 @@ pub fn init_script(jvm_args: &[String]) -> String {
 
 /// Where the scripts are written.
 pub fn default_dir() -> PathBuf {
-    std::env::temp_dir().join("openidea-gradle")
+    std::env::temp_dir().join("oxidea-gradle")
 }
 
 /// Writes the script for `jvm_args` under `dir` (named by its content, so launches share

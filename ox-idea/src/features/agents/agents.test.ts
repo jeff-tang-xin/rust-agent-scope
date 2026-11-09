@@ -182,7 +182,7 @@ describe("agent composer", () => {
     const permissions = option("allow_all", ["off", "on"], "off");
     permissions.category = "permissions";
     expect(mainOptions([...config, permissions]).map((o) => o.id)).toEqual(["model", "mode", permissions.id]);
-    const approvals = { ...option("openidea.cursor.approval", ["ask", "bypass"], "ask"), category: "approval" };
+    const approvals = { ...option("oxidea.cursor.approval", ["ask", "bypass"], "ask"), category: "approval" };
     expect(mainOptions([...config, permissions, approvals]).map((o) => o.id)).toEqual([
       "model",
       "mode",

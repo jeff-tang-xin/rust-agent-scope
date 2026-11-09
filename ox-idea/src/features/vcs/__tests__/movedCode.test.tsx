@@ -199,7 +199,7 @@ describe("moved code in the diff viewer", () => {
 
   it("omits inner edits in Highlight lines mode", async () => {
     texts.after = second + third + first.replace("'first'", "'changed'");
-    localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ highlight: "lines" }));
+    localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ highlight: "lines" }));
     render(<DiffEditor input={input} />);
     expect(await screen.findByRole("button", { name: "Go to moved code at line 7" })).toHaveTextContent("(edited)");
     expect(document.querySelector(".cm-diffMoveEdit")).toBeNull();
@@ -223,7 +223,7 @@ describe("moved code in the diff viewer", () => {
 
   it("respects Do not highlight", async () => {
     texts.after = second + third + first.replace("'first'", "'changed'");
-    localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ highlight: "none" }));
+    localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ highlight: "none" }));
     render(<DiffEditor input={input} />);
     await screen.findByText(/1 moved block/);
     expect(document.querySelector(".cm-diffMoved")).toBeNull();
@@ -234,7 +234,7 @@ describe("moved code in the diff viewer", () => {
   it("explains ignored whitespace rather than displaying No differences", async () => {
     texts.before = "let a = 1;\n";
     texts.after = "  let a = 1;\n";
-    localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ ignore: "whitespace" }));
+    localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ ignore: "whitespace" }));
     render(<DiffEditor input={input} />);
     expect(await screen.findByText("Whitespace-only changes")).toBeInTheDocument();
     expect(screen.queryByText("No differences")).toBeNull();

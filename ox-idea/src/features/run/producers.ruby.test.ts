@@ -14,7 +14,7 @@ import { produceContext, produceDirectory, produceFile, type ToolEnv } from "./p
 
 const env: ToolEnv = {
   tool: (n) => (n === "ruby" ? { path: "/bin/ruby", version: null } : null),
-  compileDir: "/tmp/openidea-run",
+  compileDir: "/tmp/oxidea-run",
 };
 const input = (path: string) => ({ path, root: "/work/app", configs: [], content: undefined, line: undefined });
 

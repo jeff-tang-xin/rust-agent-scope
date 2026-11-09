@@ -3,7 +3,7 @@
  * Gradle module keeps its settings, only its launch becomes a Gradle run of a `JavaExec`
  * task (`gradleRun.gradle`) on the source set's runtime classpath. Gradle compiles the
  * module and its dependencies and processes resources first; the debugger attaches to
- * the forked JVM (`-Dopenidea.run.debug`), not to the Gradle daemon.
+ * the forked JVM (`-Doxidea.run.debug`), not to the Gradle daemon.
  */
 import RUN_SCRIPT from "./gradleRun.gradle?raw";
 import TESTS_SCRIPT from "./gradleTests.gradle?raw";
@@ -16,9 +16,9 @@ import { maybeEditorService } from "@/workbench/contributions";
 import { applyBuildPolicyToCommand } from "./buildCommand";
 
 /** System property that marks a delegated run (read by `jdwpLaunch` to add the debug flag). */
-export const DELEGATED_MAIN = "-Dopenidea.run.main=";
-export const DELEGATED_DEBUG = "-Dopenidea.run.debug=true";
-const TASK = "openideaRun";
+export const DELEGATED_MAIN = "-Doxidea.run.main=";
+export const DELEGATED_DEBUG = "-Doxidea.run.debug=true";
+const TASK = "oxideaRun";
 
 const isAbsolute = (p: string) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
 const absolute = (root: string, p: string) => (isAbsolute(p) ? p : p ? `${root}/${p}` : root);
@@ -66,12 +66,12 @@ export function delegatedGradleConfig(config: RunConfig, module: string, ctx: De
     "--console=plain",
     "--init-script",
     ctx.script,
-    `-Dopenidea.run.project=${project.path}`,
+    `-Doxidea.run.project=${project.path}`,
     `${DELEGATED_MAIN}${parsed.mainClass}`,
-    `-Dopenidea.run.sourceSet=${parsed.classpath === "test" ? "test" : "main"}`,
-    `-Dopenidea.run.args=${JSON.stringify(parsed.programArgs)}`,
-    `-Dopenidea.run.jvmArgs=${JSON.stringify(parsed.vmArgs)}`,
-    `-Dopenidea.run.workingDir=${config.cwd ? absolute(ctx.root, config.cwd) : dir}`,
+    `-Doxidea.run.sourceSet=${parsed.classpath === "test" ? "test" : "main"}`,
+    `-Doxidea.run.args=${JSON.stringify(parsed.programArgs)}`,
+    `-Doxidea.run.jvmArgs=${JSON.stringify(parsed.vmArgs)}`,
+    `-Doxidea.run.workingDir=${config.cwd ? absolute(ctx.root, config.cwd) : dir}`,
     ...(ctx.offline ? ["--offline"] : []),
     // Problems only warn: a build with incompatible plugins still runs, uncached.
     ...(ctx.configurationCache ? ["--configuration-cache", "--configuration-cache-problems=warn"] : []),
@@ -125,7 +125,7 @@ export function withTestEvents<T extends Pick<RunConfig, "kind" | "command" | "a
 export async function gradleTestLaunch<T extends RunConfig>(config: T): Promise<T> {
   if (!isTauri() || !config.isTest || !isGradleCommand(config)) return config;
   try {
-    return withTestEvents(config, await writeScript("openidea-gradle-tests", TESTS_SCRIPT));
+    return withTestEvents(config, await writeScript("oxidea-gradle-tests", TESTS_SCRIPT));
   } catch (e) {
     console.warn("Gradle test init script not written", e);
     return config;
@@ -136,7 +136,7 @@ export async function gradleTestLaunch<T extends RunConfig>(config: T): Promise<
 export async function gradleBootLaunch<T extends RunConfig>(config: T): Promise<T> {
   if (!isTauri() || !isGradleCommand(config) || !config.args.some((a) => /(^|:)bootRun$/.test(a))) return config;
   try {
-    return withTestEvents(config, await writeScript("openidea-gradle-boot", BOOT_SCRIPT));
+    return withTestEvents(config, await writeScript("oxidea-gradle-boot", BOOT_SCRIPT));
   } catch (e) {
     console.warn("Gradle BootRun init script not written", e);
     return config;
@@ -177,7 +177,7 @@ export async function gradleDelegation(config: RunConfig): Promise<RunConfig | n
   };
   if (!delegatedGradleConfig(config, module, ctx)) return null;
   const [script, configurationCache] = await Promise.all([
-    writeScript("openidea-gradle-run", RUN_SCRIPT),
+    writeScript("oxidea-gradle-run", RUN_SCRIPT),
     supportsConfigurationCache(ctx),
   ]);
   return delegatedGradleConfig(config, module, { ...ctx, script, configurationCache });

@@ -9,7 +9,7 @@ import { call, commands } from "@/platform/ipc";
 import { useRemote } from "@/platform/remote";
 import { notifications } from "@/workbench/contributions";
 
-const SAVED_KEY = "openidea.remote.ports:";
+const SAVED_KEY = "oxidea.remote.ports:";
 
 function savedKey(): string | null {
   const session = useRemote.getState().session;

@@ -15,7 +15,7 @@ def main():
     home, lombok = (pathlib.Path(p).resolve() for p in sys.argv[1:3])
     ecj, = (home / "plugins").glob("org.eclipse.jdt.core.compiler.batch_*.jar")
     source = pathlib.Path(__file__).with_name("BuilderCompactConstructor.java")
-    with tempfile.TemporaryDirectory(prefix="openidea-lombok-builders-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="oxidea-lombok-builders-") as tmp:
         for compiler in ("javac", "ecj"):
             output = pathlib.Path(tmp) / compiler
             output.mkdir()

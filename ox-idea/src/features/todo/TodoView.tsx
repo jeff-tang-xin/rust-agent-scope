@@ -45,7 +45,7 @@ import { tx } from "@/platform/i18n";
 
 type Tab = "project" | "file" | "scope" | "changes";
 
-const SCOPE_KEY = "openidea.todo.scope.v1";
+const SCOPE_KEY = "oxidea.todo.scope.v1";
 
 function loadScope(): TodoScope {
   try {
@@ -94,7 +94,7 @@ export const useTodoView = create<ViewState>((set) => ({
 
 // View options (persisted), in the tool window's ⋮ menu. IDEA's defaults:
 // preview on, no autoscroll.
-const OPTIONS_KEY = "openidea.todo.view.v1";
+const OPTIONS_KEY = "oxidea.todo.view.v1";
 
 interface TodoViewOptions {
   preview: boolean;

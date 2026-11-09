@@ -518,15 +518,15 @@ mod tests {
         assert_eq!(err.kind, ErrorKind::InvalidInput, "{err:?}");
     }
 
-    /// Downloads a real JDK from Adoptium: `OPENIDEA_LIVE_JDK=25 cargo nextest run -p ide-tools live_download`;
-    /// `OPENIDEA_LIVE_JDK_OS=windows|linux` fetches and unpacks another platform's archive (not run).
+    /// Downloads a real JDK from Adoptium: `OXIDEA_LIVE_JDK=25 cargo nextest run -p ide-tools live_download`;
+    /// `OXIDEA_LIVE_JDK_OS=windows|linux` fetches and unpacks another platform's archive (not run).
     #[test]
     fn live_download() {
-        let Some(feature) = std::env::var("OPENIDEA_LIVE_JDK").ok().and_then(|v| v.parse::<u32>().ok()) else {
+        let Some(feature) = std::env::var("OXIDEA_LIVE_JDK").ok().and_then(|v| v.parse::<u32>().ok()) else {
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
-        let other = match std::env::var("OPENIDEA_LIVE_JDK_OS").as_deref() {
+        let other = match std::env::var("OXIDEA_LIVE_JDK_OS").as_deref() {
             Ok("windows") => Some(WIN_X64),
             Ok("linux") => Some(LINUX_X64),
             _ => None,

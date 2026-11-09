@@ -119,7 +119,7 @@ impl Handler for FakeAgent {
 
     fn on_request_with_data(&self, method: &str, params: Value) -> Result<Value, (i64, String, Option<Value>)> {
         if method == "session/prompt" && params.pointer("/prompt/0/text") == Some(&json!("limit")) {
-            let data = json!({"openidea": {"usageLimit": {"resetsAtMs": 1234.0}}});
+            let data = json!({"oxidea": {"usageLimit": {"resetsAtMs": 1234.0}}});
             return Err((codes::INTERNAL_ERROR, "You've hit your usage limit".into(), Some(data)));
         }
         self.on_request(method, params).map_err(|(code, message)| (code, message, None))
@@ -150,7 +150,7 @@ impl Handler for FakeAgent {
                 }
                 Ok(
                     json!({"protocolVersion": 1, "authMethods": self.auth_methods, "agentCapabilities": {"loadSession": !self.no_load,
-                    "sessionCapabilities": {"fork": {}}, "_meta": {"openidea": {"rollback": true, "steer": true, "backgroundTasks": true}}}}),
+                    "sessionCapabilities": {"fork": {}}, "_meta": {"oxidea": {"rollback": true, "steer": true, "backgroundTasks": true}}}}),
                 )
             }
             "session/new" => {
@@ -163,11 +163,11 @@ impl Handler for FakeAgent {
                 "configOptions": options}))
             }
             "session/fork" => Ok(json!({"sessionId": "s2"})),
-            "_openidea/stop_task" => {
+            "_oxidea/stop_task" => {
                 self.calls.lock().push(format!("{method} {}", params["taskId"]));
                 Ok(json!({}))
             }
-            "_openidea/rollback" | "_openidea/steer" => {
+            "_oxidea/rollback" | "_oxidea/steer" => {
                 let detail = params.get("turns").cloned().unwrap_or_else(|| params["prompt"][0]["text"].clone());
                 self.calls.lock().push(format!("{method} {detail}"));
                 Ok(json!({}))
@@ -341,7 +341,6 @@ fn manager(dir: &Path, agent: Arc<FakeAgent>) -> AgentManager {
 fn manager_at(dir: &Path, models_file: &Path, agent: Arc<FakeAgent>) -> AgentManager {
     // These tests speak to FakeAgent, never an installed CLI, including after a provider reload.
     let agents = dir.join("agents");
-    provider::set_builtin_command(&agents, "claude", Some(&dir.join("missing-claude").to_string_lossy())).unwrap();
     let connector: Connector = Arc::new(move |_spec, _cwd, client, _stderr| {
         let (a, b) = duplex(1 << 20);
         let (ar, aw) = tokio::io::split(a);
@@ -430,7 +429,7 @@ for line in sys.stdin:
         let mgr = manager(root, Arc::new(FakeAgent::default()));
         {
             let mut providers = mgr.shared.providers.write();
-            let spec = providers.iter_mut().find(|p| p.id == "claude").unwrap();
+            let spec = providers.iter_mut().find(|p| p.id == "ox-hareness").unwrap();
             if outcome != "missing" {
                 spec.command = script.to_string_lossy().into_owned();
             }
@@ -451,24 +450,24 @@ for line in sys.stdin:
                     { "id": "effort", "category": "thought_level", "type": "select", "currentValue": "low",
                       "options": [{ "value": "default" }, { "value": "low" }, { "value": "high" }] }
                 ] }));
-                mgr.shared.remember("claude", Some(&reported), None, Some("default"));
+                mgr.shared.remember("ox-hareness", Some(&reported), None, Some("default"));
                 std::fs::write(root.join("continue"), "").unwrap();
             }
-            mgr.commands("claude", None).await
+            mgr.commands("ox-hareness", None).await
         };
-        let (first, concurrent) = tokio::join!(mgr.commands("claude", None), concurrent);
+        let (first, concurrent) = tokio::join!(mgr.commands("ox-hareness", None), concurrent);
         let first = first.unwrap();
         assert_eq!(first, concurrent.unwrap());
-        assert_eq!(first, mgr.commands("claude", None).await.unwrap());
+        assert_eq!(first, mgr.commands("ox-hareness", None).await.unwrap());
         let names: Vec<_> = first.iter().map(|c| c.name.as_str()).collect();
         if matches!(outcome, "success" | "session_report" | "settings_timeout") {
             assert_eq!(names, ["compact", "clear", "model", "context", "triage"]);
             assert_eq!(first[0].hint.as_deref(), Some("[instructions]"));
             let restored = manager(root, Arc::new(FakeAgent::default()));
-            assert_eq!(first, restored.commands("claude", None).await.unwrap());
+            assert_eq!(first, restored.commands("ox-hareness", None).await.unwrap());
             // The same handshake lists the models, so the composer has them before any task.
             for mgr in [&mgr, &restored] {
-                let claude = mgr.providers().into_iter().find(|p| p.id == "claude").unwrap();
+                let claude = mgr.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap();
                 let model = claude.config.iter().find(|o| o.category.as_deref() == Some("model")).unwrap();
                 assert_eq!(model.current.as_deref(), Some("default"));
                 let values: Vec<_> = model.values.iter().map(|v| v.value.as_str()).collect();
@@ -487,7 +486,7 @@ for line in sys.stdin:
         } else {
             assert_eq!(names, ["triage"], "{outcome}");
             assert_eq!(root.join("models.json").exists(), outcome == "empty");
-            let claude = mgr.providers().into_iter().find(|p| p.id == "claude").unwrap();
+            let claude = mgr.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap();
             assert!(!claude.config.iter().any(|o| o.category.as_deref() == Some("model")), "{outcome}");
         }
         assert!(mgr.tasks.read().is_empty());
@@ -525,16 +524,25 @@ for line in sys.stdin:
 async fn authentication_failures_name_the_session_executable_at_start_and_during_prompts() {
     for auth_on_new in [true, false] {
         let tmp = tempfile::tempdir().unwrap();
-        let agent = Arc::new(FakeAgent { auth_on_new, ..Default::default() });
+        let agent = Arc::new(FakeAgent {
+            auth_on_new,
+            auth_methods: vec![json!({"type": "terminal", "id": "cli", "name": "CLI", "args": ["login"]})],
+            ..Default::default()
+        });
         let mgr = manager(tmp.path(), agent);
         let program = tmp.path().join("Agent Tools").join("renamed-cursor.cmd");
-        mgr.shared.providers.write().iter_mut().find(|s| s.id == "cursor").unwrap().command =
-            program.to_string_lossy().into_owned();
+        {
+            let mut providers = mgr.shared.providers.write();
+            let spec = providers.iter_mut().find(|s| s.id == "ox-hareness").unwrap();
+            spec.driver = provider::Driver::Acp;
+            spec.source = crate::AgentSource::Registry { version: "1.4.5".into(), update: None };
+            spec.command = program.to_string_lossy().into_owned();
+        }
         let task = mgr
             .create(NewAgentTask {
                 project_root: None,
                 prompt: text("again"),
-                provider: "cursor".into(),
+                provider: "ox-hareness".into(),
                 config: vec![],
                 isolation: Isolation::Local,
                 base: None,
@@ -544,7 +552,7 @@ async fn authentication_failures_name_the_session_executable_at_start_and_during
         if !auth_on_new {
             wait_for(&mgr, &task.id, AgentStatus::Ready).await;
             // A settings change must not redirect guidance for the already running process.
-            mgr.shared.providers.write().iter_mut().find(|s| s.id == "cursor").unwrap().command =
+            mgr.shared.providers.write().iter_mut().find(|s| s.id == "ox-hareness").unwrap().command =
                 "different-cursor".into();
             mgr.prompt(&task.id, text("auth"), false).await.unwrap();
         }
@@ -557,7 +565,7 @@ async fn authentication_failures_name_the_session_executable_at_start_and_during
                 _ => None,
             })
             .expect("authentication error");
-        assert!(error.starts_with("Cursor needs you to sign in. Run `"), "{error}");
+        assert!(error.starts_with("OX Hareness needs you to sign in. Run `"), "{error}");
         assert!(error.contains(&*program.to_string_lossy()), "{error}");
         assert!(error.ends_with(" login` in a terminal.\n\nAuthentication required"), "{error}");
         mgr.shutdown();
@@ -584,7 +592,7 @@ async fn sign_in_errors_preserve_details_and_leave_unrelated_errors_unchanged() 
                 .create(NewAgentTask {
                     project_root: None,
                     prompt: text("again"),
-                    provider: "cursor".into(),
+                    provider: "ox-hareness".into(),
                     config: vec![],
                     isolation: Isolation::Local,
                     base: None,
@@ -605,7 +613,7 @@ async fn sign_in_errors_preserve_details_and_leave_unrelated_errors_unchanged() 
                 })
                 .unwrap();
             if sign_in {
-                assert!(error.starts_with("Cursor needs you to sign in. Run `"), "{error}");
+                assert!(error.starts_with("OX Hareness needs you to sign in. Configure the model provider"), "{error}");
                 assert!(error.ends_with(&format!("\n\n{message}")), "{error}");
             } else {
                 assert_eq!(error, message);
@@ -628,7 +636,8 @@ async fn registry_sign_in_errors_use_the_advertised_terminal_login() {
         });
         let mgr = manager(tmp.path(), agent);
         let program = tmp.path().join("Registry Tools").join("antigravity.cmd");
-        let mut spec = provider::builtin_spec("cursor").unwrap();
+        let mut spec = provider::builtin_spec("ox-hareness").unwrap();
+        spec.driver = provider::Driver::Acp;
         spec.id = "antigravity".into();
         spec.name = "Google Antigravity".into();
         spec.command = program.to_string_lossy().into_owned();
@@ -678,12 +687,12 @@ async fn commands_are_remembered_per_project_and_merged_with_skills_on_disk() {
 
     let mgr_a = manager_at(&a, &models, Arc::new(FakeAgent::default()));
     // Before any session: only the skills on disk.
-    assert_eq!(names(mgr_a.commands("claude", None).await.unwrap()), ["triage"]);
+    assert_eq!(names(mgr_a.commands("ox-hareness", None).await.unwrap()), ["triage"]);
     let task = mgr_a
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Fix the lexer"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: Vec::new(),
             isolation: Isolation::Local,
             base: None,
@@ -691,22 +700,22 @@ async fn commands_are_remembered_per_project_and_merged_with_skills_on_disk() {
         .await
         .unwrap();
     wait_for(&mgr_a, &task.id, AgentStatus::NeedsInput).await;
-    assert_eq!(names(mgr_a.commands("claude", None).await.unwrap()), ["review", "triage"]);
-    assert_eq!(names(mgr_a.commands("claude", Some(&task.id)).await.unwrap()), ["review", "triage"]);
-    // Other agents get only what they offered.
-    assert!(mgr_a.commands("codex", None).await.unwrap().is_empty());
+    assert_eq!(names(mgr_a.commands("ox-hareness", None).await.unwrap()), ["review", "triage"]);
+    assert_eq!(names(mgr_a.commands("ox-hareness", Some(&task.id)).await.unwrap()), ["review", "triage"]);
+    // Other agents get only what they offered (no skills discovery for them).
+    assert!(mgr_a.commands("custom", None).await.unwrap().is_empty());
     mgr_a.cancel(&task.id, None).unwrap();
     wait_for(&mgr_a, &task.id, AgentStatus::Ready).await;
     mgr_a.shutdown();
 
     // Another project shares the settings but not the commands.
     let mgr_b = manager_at(&b, &models, Arc::new(FakeAgent::default()));
-    let claude = mgr_b.providers().into_iter().find(|p| p.id == "claude").unwrap();
-    assert_eq!(claude.config.len(), 2);
+    let claude = mgr_b.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap();
+    assert_eq!(claude.config.len(), 3);
     assert!(claude.commands.is_empty());
-    assert!(mgr_b.commands("claude", None).await.unwrap().is_empty());
+    assert!(mgr_b.commands("ox-hareness", None).await.unwrap().is_empty());
     let mgr_a = manager_at(&a, &models, Arc::new(FakeAgent::default()));
-    assert_eq!(names(mgr_a.providers().into_iter().find(|p| p.id == "claude").unwrap().commands), ["review"]);
+    assert_eq!(names(mgr_a.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap().commands), ["review"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -714,16 +723,15 @@ async fn builtin_commands_only_fill_verified_gaps_and_preserve_advertised_metada
     let tmp = tempfile::tempdir().unwrap();
     let agent = Arc::new(FakeAgent::default());
     let mgr = manager_at(tmp.path(), &tmp.path().join("models.json"), agent);
-    for provider in ["claude", "claude-acp", "opencode2", "codex", "custom"] {
+    for provider in ["ox-hareness", "ox-hareness", "ox-hareness", "ox-hareness", "custom"] {
         assert!(mgr.commands(provider, None).await.unwrap().is_empty(), "{provider}");
     }
-    let commands = mgr.commands("opencode", None).await.unwrap();
-    assert_eq!(commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["compact"]);
+    // The in-process OX agent has no built-in command fill-ins; what it advertises wins.
     let task = mgr
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Hello"),
-            provider: "opencode".into(),
+            provider: "ox-hareness".into(),
             config: Vec::new(),
             isolation: Isolation::Local,
             base: None,
@@ -739,7 +747,7 @@ async fn builtin_commands_only_fill_verified_gaps_and_preserve_advertised_metada
     };
     mgr.task(&task.id).unwrap().state.lock().task.commands = vec![advertised.clone()];
     // The task's provider wins over the caller's provider; metadata is not replaced.
-    let commands = mgr.commands("claude", Some(&task.id)).await.unwrap();
+    let commands = mgr.commands("ox-hareness", Some(&task.id)).await.unwrap();
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].name, advertised.name);
     assert_eq!(commands[0].description, advertised.description);
@@ -781,7 +789,7 @@ async fn a_task_runs_asks_for_permission_and_survives_a_restart() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Fix the lexer\nmore detail"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: "model".into(), value: "small".into() }],
             isolation: Isolation::Local,
             base: None,
@@ -868,8 +876,11 @@ async fn a_task_runs_asks_for_permission_and_survives_a_restart() {
         )));
     }
     let providers = mgr.providers();
-    let claude = providers.iter().find(|p| p.id == "claude").unwrap();
-    assert_eq!(claude.config.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["model", "mode"]);
+    let claude = providers.iter().find(|p| p.id == "ox-hareness").unwrap();
+    assert_eq!(
+        claude.config.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        ["model", "mode", "oxidea.cursor.approval"]
+    );
     assert_eq!(claude.commands.len(), 1);
 
     // A new manager (IDE restart) finds the task and resumes its session without duplicating history.
@@ -878,7 +889,7 @@ async fn a_task_runs_asks_for_permission_and_survives_a_restart() {
     let mgr2 = manager(tmp.path(), agent2.clone());
     assert_eq!(mgr2.entries(&task.id, None).unwrap().len(), 5);
     assert_eq!(mgr2.task(&task.id).unwrap().state.lock().task.title, "Lexer fix");
-    assert_eq!(mgr2.providers().iter().find(|p| p.id == "claude").unwrap().config.len(), 2);
+    assert_eq!(mgr2.providers().iter().find(|p| p.id == "ox-hareness").unwrap().config.len(), 3);
     mgr2.prompt(&task.id, text("again"), false).await.unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
     wait_for(&mgr2, &task.id, AgentStatus::Ready).await;
@@ -904,7 +915,7 @@ async fn messages_sent_while_busy_are_queued_and_send_now_interrupts() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("wait"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -959,7 +970,7 @@ async fn subagents_get_their_own_conversation() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("delegate"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1054,7 +1065,7 @@ async fn claude_questions_keep_the_answer_object_as_the_option_id() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("ask"),
-            provider: "codex".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1103,7 +1114,7 @@ async fn qwen_questions_answer_by_index_beside_the_submit_option() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("qwen ask"),
-            provider: "codex".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1171,7 +1182,7 @@ async fn skipped_qwen_questions_cancel_the_request() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("qwen ask"),
-            provider: "codex".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1210,7 +1221,7 @@ async fn cancelling_resolves_the_open_permission_and_delete_forgets_the_task() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("do it"),
-            provider: "codex".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1232,7 +1243,7 @@ async fn cancelling_resolves_the_open_permission_and_delete_forgets_the_task() {
         mgr.create(NewAgentTask {
             project_root: None,
             prompt: text(" "),
-            provider: "codex".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None
@@ -1243,11 +1254,11 @@ async fn cancelling_resolves_the_open_permission_and_delete_forgets_the_task() {
 }
 
 /// Drives the real Claude Code adapter (needs `npx`, network and a signed-in `claude`):
-/// `OPENIDEA_AGENT_E2E=1 cargo test -p ide-agent real_claude -- --ignored --nocapture`.
+/// `OXIDEA_AGENT_E2E=1 cargo test -p ide-agent real_claude -- --ignored --nocapture`.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn real_claude_task_in_a_worktree() {
-    if std::env::var_os("OPENIDEA_AGENT_E2E").is_none() {
+    if std::env::var_os("OXIDEA_AGENT_E2E").is_none() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
@@ -1278,7 +1289,7 @@ async fn real_claude_task_in_a_worktree() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Create a file named hello.txt containing the single word hi. Do nothing else."),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: "model".into(), value: "haiku".into() }],
             isolation: Isolation::Worktree,
             base: None,
@@ -1315,7 +1326,7 @@ async fn real_claude_task_in_a_worktree() {
     let changes = mgr.changes(&task.id).await.unwrap();
     assert!(changes.iter().any(|c| c.rel_path == "hello.txt"), "{changes:?}");
     assert!(!repo.join("hello.txt").exists(), "the project checkout is untouched");
-    assert!(!mgr.providers().iter().find(|p| p.id == "claude").unwrap().config.is_empty());
+    assert!(!mgr.providers().iter().find(|p| p.id == "ox-hareness").unwrap().config.is_empty());
     mgr.shutdown();
 }
 
@@ -1328,7 +1339,7 @@ async fn renamed_titles_survive_updates_forks_and_restart() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: Vec::new(),
             isolation: Isolation::Local,
             base: None,
@@ -1365,7 +1376,7 @@ async fn forks_rollbacks_and_steering() {
     let new = |prompt: &str| NewAgentTask {
         project_root: None,
         prompt: text(prompt),
-        provider: "claude".into(),
+        provider: "ox-hareness".into(),
         config: Vec::new(),
         isolation: Isolation::Local,
         base: None,
@@ -1386,20 +1397,20 @@ async fn forks_rollbacks_and_steering() {
     {
         let calls = agent.calls.lock();
         let load = calls.iter().rposition(|c| c == "session/load").unwrap();
-        assert!(calls[load..].iter().any(|c| c == "_openidea/rollback 1"));
+        assert!(calls[load..].iter().any(|c| c == "_oxidea/rollback 1"));
     }
 
     // Undoing the last turn hands its message back.
     let undone = mgr.rollback(&task.id, 1).await.unwrap().unwrap();
     assert_eq!(undone.text, "again");
     assert_eq!(turn_starts(&mgr.entries(&task.id, None).unwrap()).len(), 1);
-    assert!(agent.calls.lock().iter().any(|c| c == "_openidea/rollback 1"));
+    assert!(agent.calls.lock().iter().any(|c| c == "_oxidea/rollback 1"));
 
     // A message sent now while the agent works joins the turn.
     mgr.prompt(&task.id, text("wait"), false).await.unwrap();
     wait_for(&mgr, &task.id, AgentStatus::Running).await;
     mgr.prompt(&task.id, text("also this"), true).await.unwrap();
-    assert!(agent.calls.lock().iter().any(|c| c == "_openidea/steer \"also this\""));
+    assert!(agent.calls.lock().iter().any(|c| c == "_oxidea/steer \"also this\""));
     let entries = mgr.entries(&task.id, None).unwrap();
     assert!(matches!(entries.last(), Some(AgentEntry::User { steered: true, .. })));
     assert!(mgr.task(&task.id).unwrap().state.lock().task.queue.is_empty());
@@ -1416,14 +1427,14 @@ async fn forks_rollbacks_and_steering() {
         );
     }
     handle.state.lock().conversation.main.entries.insert(0, AgentEntry::Agent { text: "Welcome".into() });
-    let rewinds = agent.calls.lock().iter().filter(|c| c.starts_with("_openidea/rollback")).count();
+    let rewinds = agent.calls.lock().iter().filter(|c| c.starts_with("_oxidea/rollback")).count();
     let first = mgr.rollback(&task.id, 0).await.unwrap().unwrap();
     assert_eq!(first.text, "again");
     assert!(mgr.entries(&task.id, None).unwrap().is_empty());
     assert!(mgr.task(&task.id).unwrap().state.lock().session_id.is_none());
     assert!(handle.state.lock().conversation.saved_subagents().is_empty());
     assert!(handle.state.lock().task.usage.is_none());
-    assert_eq!(agent.calls.lock().iter().filter(|c| c.starts_with("_openidea/rollback")).count(), rewinds);
+    assert_eq!(agent.calls.lock().iter().filter(|c| c.starts_with("_oxidea/rollback")).count(), rewinds);
     mgr.shutdown();
     let restored = manager(tmp.path(), agent.clone());
     assert!(restored.entries(&task.id, None).unwrap().is_empty());
@@ -1443,7 +1454,7 @@ async fn usage_limits_and_late_settings() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("limit"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             // `effort` isn't offered until the session runs.
             config: vec![AgentConfigChoice { id: "effort".into(), value: "high".into() }],
             isolation: Isolation::Local,
@@ -1470,7 +1481,7 @@ async fn usage_limits_and_late_settings() {
             .shared
             .known
             .lock()
-            .get("claude")
+            .get("ox-hareness")
             .and_then(|k| k.thought_levels.get("big"))
             .and_then(|levels| levels.first())
             .and_then(|o| o.current.as_deref())
@@ -1480,7 +1491,7 @@ async fn usage_limits_and_late_settings() {
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(mgr.shared.known.lock()["claude"].thought_levels["big"][0].current.as_deref(), Some("high"));
+    assert_eq!(mgr.shared.known.lock()["ox-hareness"].thought_levels["big"][0].current.as_deref(), Some("high"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1497,7 +1508,7 @@ async fn remembered_settings_drop_per_model_choices_for_the_next_task() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1506,7 +1517,7 @@ async fn remembered_settings_drop_per_model_choices_for_the_next_task() {
         .unwrap();
     wait_for(&mgr, &task.id, AgentStatus::Ready).await;
 
-    let provider = mgr.providers().into_iter().find(|p| p.id == "claude").unwrap();
+    let provider = mgr.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap();
     assert!(provider.config.iter().all(|o| o.id != "effort"), "a per-model option isn't offered stale");
     let model = provider.config.iter().find(|o| o.id == "model").unwrap();
     assert_eq!(model.current.as_deref(), Some("big"), "the model choice survives");
@@ -1531,7 +1542,7 @@ async fn thinking_levels_are_remembered_per_provider_and_model() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1542,7 +1553,7 @@ async fn thinking_levels_are_remembered_per_provider_and_model() {
     mgr.set_config(&task.id, "model", "small".into()).await.unwrap();
     mgr.set_config(&task.id, "effort", "medium".into()).await.unwrap();
     mgr.set_config(&task.id, "model", "plain".into()).await.unwrap();
-    let p = mgr.providers().into_iter().find(|p| p.id == "claude").unwrap();
+    let p = mgr.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap();
     let big = &p.thought_levels["big"][0];
     assert_eq!(big.current.as_deref(), Some("high"));
     assert_eq!(big.values.iter().map(|v| v.value.as_str()).collect::<Vec<_>>(), ["low", "high"]);
@@ -1551,13 +1562,12 @@ async fn thinking_levels_are_remembered_per_provider_and_model() {
     assert_eq!(small.values.iter().map(|v| v.value.as_str()).collect::<Vec<_>>(), ["minimal", "medium"]);
     assert!(p.thought_levels["plain"].is_empty());
     assert!(!p.thought_levels.contains_key("unknown"));
-    assert!(mgr.providers().iter().find(|p| p.id == "codex").unwrap().thought_levels.is_empty());
     let saved: HashMap<String, Known> =
         serde_json::from_slice(&std::fs::read(&mgr.shared.paths.models_file).unwrap()).unwrap();
-    assert_eq!(saved["claude"].thought_levels, p.thought_levels);
+    assert_eq!(saved["ox-hareness"].thought_levels, p.thought_levels);
     mgr.shutdown();
     let restored = manager(tmp.path(), agent);
-    assert_eq!(restored.providers().into_iter().find(|p| p.id == "claude").unwrap().thought_levels, p.thought_levels);
+    assert_eq!(restored.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap().thought_levels, p.thought_levels);
     restored.shutdown();
 }
 
@@ -1575,7 +1585,7 @@ async fn upfront_effort_is_validated_after_changing_model_before_the_prompt() {
             .create(NewAgentTask {
                 project_root: None,
                 prompt: text("again"),
-                provider: "claude".into(),
+                provider: "ox-hareness".into(),
                 // Reversed on purpose: model must be set before validating effort.
                 config: vec![
                     AgentConfigChoice { id: "effort".into(), value: effort.into() },
@@ -1610,7 +1620,7 @@ async fn unreported_model_switch_does_not_cache_the_previous_models_levels() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1619,7 +1629,7 @@ async fn unreported_model_switch_does_not_cache_the_previous_models_levels() {
         .unwrap();
     wait_for(&mgr, &task.id, AgentStatus::Ready).await;
     mgr.set_config(&task.id, "model", "small".into()).await.unwrap();
-    let p = mgr.providers().into_iter().find(|p| p.id == "claude").unwrap();
+    let p = mgr.providers().into_iter().find(|p| p.id == "ox-hareness").unwrap();
     assert!(!p.thought_levels.contains_key("small"));
     assert_eq!(p.thought_levels["big"][0].current.as_deref(), Some("high"));
     mgr.shutdown();
@@ -1634,7 +1644,7 @@ async fn cached_effort_is_not_sent_without_real_session_options() {
     let new = |config| NewAgentTask {
         project_root: None,
         prompt: text("again"),
-        provider: "claude".into(),
+        provider: "ox-hareness".into(),
         config,
         isolation: Isolation::Local,
         base: None,
@@ -1669,7 +1679,7 @@ async fn reported_levels_refresh_even_without_a_model_option() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -1681,12 +1691,12 @@ async fn reported_levels_refresh_even_without_a_model_option() {
         agent.update("s1", json!({"sessionUpdate": "config_option_update", "configOptions": levels}));
         let expected = config::parse_options(&json!(levels));
         for _ in 0..100 {
-            if mgr.shared.known.lock()["claude"].thought_levels["big"] == expected {
+            if mgr.shared.known.lock()["ox-hareness"].thought_levels["big"] == expected {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(mgr.shared.known.lock()["claude"].thought_levels["big"], expected);
+        assert_eq!(mgr.shared.known.lock()["ox-hareness"].thought_levels["big"], expected);
     }
     mgr.shutdown();
 }
@@ -1722,7 +1732,7 @@ async fn cursor_approval_switch_resolves_pending_and_survives_restart() {
     let new = || NewAgentTask {
         project_root: None,
         prompt: text("Fix"),
-        provider: "cursor".into(),
+        provider: "ox-hareness".into(),
         config: Vec::new(),
         isolation: Isolation::Local,
         base: None,
@@ -1771,7 +1781,7 @@ async fn bypass_approvals_keeps_both_question_dialects_pending_but_allows_permis
                 .create(NewAgentTask {
                     project_root: None,
                     prompt: text(prompt),
-                    provider: "cursor".into(),
+                    provider: "ox-hareness".into(),
                     config: if bypass_at_start {
                         vec![AgentConfigChoice { id: config::CURSOR_APPROVAL.into(), value: "bypass".into() }]
                     } else {
@@ -1826,7 +1836,7 @@ async fn cursor_approval_choice_applies_before_first_prompt() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Fix"),
-            provider: "cursor".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: config::CURSOR_APPROVAL.into(), value: "bypass".into() }],
             isolation: Isolation::Local,
             base: None,
@@ -1850,7 +1860,7 @@ async fn a_full_access_mode_approves_tool_requests() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Fix"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: "mode".into(), value: "full-access".into() }],
             isolation: Isolation::Local,
             base: None,
@@ -1871,7 +1881,7 @@ async fn a_full_access_mode_approves_tool_requests() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Fix"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: Vec::new(),
             isolation: Isolation::Local,
             base: None,
@@ -1899,7 +1909,7 @@ async fn a_late_full_access_option_approves_a_pending_request() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("late full access"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: "mode".into(), value: "full-access".into() }],
             isolation: Isolation::Local,
             base: None,
@@ -1946,7 +1956,7 @@ async fn an_allow_all_permissions_option_approves_tool_requests() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("Fix"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![AgentConfigChoice { id: "allow_all".into(), value: "on".into() }],
             isolation: Isolation::Local,
             base: None,
@@ -1973,7 +1983,7 @@ async fn archived_tasks_can_be_restored_and_continue_their_session() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Local,
             base: None,
@@ -2025,7 +2035,7 @@ async fn task_project_root_controls_local_and_worktree_repositories() {
             .create(NewAgentTask {
                 project_root: Some(IpcPath(member.clone())),
                 prompt: text("member task"),
-                provider: "claude".into(),
+                provider: "ox-hareness".into(),
                 config: vec![],
                 isolation,
                 base: None,
@@ -2151,7 +2161,7 @@ async fn idle_agents_stop_and_resume_their_session_on_the_next_message() {
     let new = || NewAgentTask {
         project_root: None,
         prompt: text("again"),
-        provider: "claude".into(),
+        provider: "ox-hareness".into(),
         config: Vec::new(),
         isolation: Isolation::Local,
         base: None,
@@ -2208,7 +2218,7 @@ async fn an_idle_agent_waits_for_its_background_tasks_before_it_stops() {
     let new = || NewAgentTask {
         project_root: None,
         prompt: text("background"),
-        provider: "claude".into(),
+        provider: "ox-hareness".into(),
         config: Vec::new(),
         isolation: Isolation::Local,
         base: None,
@@ -2242,7 +2252,7 @@ async fn the_task_shows_what_runs_in_the_background() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("background"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: Vec::new(),
             isolation: Isolation::Local,
             base: None,
@@ -2294,7 +2304,7 @@ async fn a_background_task_is_stopped_on_its_own() {
         .create(NewAgentTask {
             project_root: None,
             prompt: text("again"),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: Vec::new(),
             isolation: Isolation::Local,
             base: None,
@@ -2303,7 +2313,7 @@ async fn a_background_task_is_stopped_on_its_own() {
         .unwrap();
     wait_for(&mgr, &task.id, AgentStatus::Ready).await;
     mgr.stop_background(&task.id, "b1").await.unwrap();
-    assert!(agent.calls.lock().contains(&"_openidea/stop_task \"b1\"".to_owned()));
+    assert!(agent.calls.lock().contains(&"_oxidea/stop_task \"b1\"".to_owned()));
     mgr.shutdown();
 }
 
@@ -2379,7 +2389,7 @@ async fn delete_running_agent(no_load: bool) {
         .create(NewAgentTask {
             project_root: None,
             prompt: text(if no_load { "again" } else { "Fix the lexer" }),
-            provider: "claude".into(),
+            provider: "ox-hareness".into(),
             config: vec![],
             isolation: Isolation::Worktree,
             base: None,
@@ -2422,13 +2432,13 @@ async fn delete_running_agent(no_load: bool) {
 #[test]
 fn mcp_servers_follow_server_state_and_agent_capabilities() {
     let root = std::path::Path::new("/project");
-    let exe = std::path::Path::new("/app/openidea");
+    let exe = std::path::Path::new("/app/oxidea");
     assert!(super::stdio_mcp_servers(None, true, root).is_empty());
     assert!(super::stdio_mcp_servers(Some(exe), false, root).is_empty());
     let servers = super::stdio_mcp_servers(Some(exe), true, root);
     assert_eq!(
         servers,
-        vec![json!({"name":"OpenIDEA","command":"/app/openidea",
+        vec![json!({"name":"OXidea","command":"/app/oxidea",
         "args":["--mcp-stdio","--project","/project"],"env":[]})]
     );
 }
@@ -2449,14 +2459,14 @@ async fn session_settings_win_over_discovery_in_memory_and_on_disk() {
         let saved = options("saved", "low");
         let discovered = options("discovered", "high");
         if discovery_first {
-            mgr.shared.remember_discovered("claude", &discovered, &[]);
+            mgr.shared.remember_discovered("ox-hareness", &discovered, &[]);
         }
-        mgr.shared.remember("claude", Some(&saved), None, Some("saved"));
-        mgr.shared.remember_discovered("claude", &discovered, &[]);
+        mgr.shared.remember("ox-hareness", Some(&saved), None, Some("saved"));
+        mgr.shared.remember_discovered("ox-hareness", &discovered, &[]);
         let restored = manager(tmp.path(), Arc::new(FakeAgent::default()));
         for mgr in [&mgr, &restored] {
-            assert_eq!(model_of(&mgr.shared.known_config("claude")).as_deref(), Some("saved"));
-            assert_eq!(mgr.shared.known.lock()["claude"].thought_levels["saved"], saved[1..]);
+            assert_eq!(model_of(&mgr.shared.known_config("ox-hareness")).as_deref(), Some("saved"));
+            assert_eq!(mgr.shared.known.lock()["ox-hareness"].thought_levels["saved"], saved[1..]);
         }
     }
 }

@@ -1,5 +1,5 @@
 //! ACP（Agent Client Protocol）server 适配器：把 agentscope agent 以 ACP v1
-//! 协议暴露给 ACP client（OpenIDEA / Zed 等）。
+//! 协议暴露给 ACP client（OXidea / Zed 等）。
 //!
 //! 分层：
 //! - [`rpc`]：行分帧 JSON-RPC 连接（读分发 / 写串行 / 出站请求 id 配对）；
@@ -18,21 +18,54 @@ pub mod protocol;
 pub mod rpc;
 pub mod session;
 
+use agentscope_core::Tool;
 use serde_json::{json, Value};
+use std::path::Path;
+use std::sync::{Arc, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 
 use crate::rpc::RpcConn;
 use crate::session::{AcpSessionHub, PromptOutcome};
 
 /// 单个 ACP 连接的服务循环：读入站消息 → 分发到会话/协议处理 → 写响应。
-/// 泛型 IO 便于测试用内存 duplex 替代 stdio。
-pub async fn serve<R, W>(reader: R, writer: W) -> std::io::Result<()>
+/// 泛型 IO 便于测试与进程内宿主用内存 duplex 替代 stdio。
+/// IDE 宿主按任务工作目录提供的上下文：语义工具 + 记忆锚点。
+pub struct OxHostContext {
+    /// IDE 语义工具（搜索/符号/补丁/构建/VCS 等），注册进 agent 的 Toolkit。
+    pub tools: Vec<Arc<dyn Tool>>,
+    /// 记忆工作区锚点（如 `<项目根>/.ox`，与 memory_save 工具同根，跨 worktree
+    /// 共享项目记忆）；`None` 时该会话不接记忆管线。
+    pub memory_root: Option<std::path::PathBuf>,
+}
+
+/// IDE 语义工具与记忆锚点的提供者：按任务工作目录返回上下文。
+/// 宿主（IDE）在启动时通过 [`set_ox_tool_provider`] 注册一次；进程内会话
+/// 装配 agent 时按 cwd 取用（worktree 目录会命中其所属项目）。
+pub type OxToolProvider = Arc<dyn Fn(&Path) -> OxHostContext + Send + Sync>;
+
+static OX_TOOLS: OnceLock<OxToolProvider> = OnceLock::new();
+
+/// 宿主启动时注册 IDE 语义工具的来源。重复注册以第一次为准（进程内单例语义）。
+pub fn set_ox_tool_provider(provider: OxToolProvider) {
+    let _ = OX_TOOLS.set(provider);
+}
+
+/// 装配 agent 时取用：未注册或调用失败都返回空上下文，agent 优雅降级为文件 + shell 工具。
+pub(crate) fn ox_context_for(cwd: &Path) -> OxHostContext {
+    OX_TOOLS
+        .get()
+        .map(|provider| provider(cwd))
+        .unwrap_or(OxHostContext { tools: Vec::new(), memory_root: None })
+}
+
+/// `env` 是模型配置（`AGENTSCOPE_*`），独立进程模式传进程环境，进程内模式由宿主注入。
+pub async fn serve<R, W>(reader: R, writer: W, env: Vec<(String, String)>) -> std::io::Result<()>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin + Send + 'static,
 {
     let conn = RpcConn::new(writer);
-    let hub = AcpSessionHub::new();
+    let hub = AcpSessionHub::new(env);
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();

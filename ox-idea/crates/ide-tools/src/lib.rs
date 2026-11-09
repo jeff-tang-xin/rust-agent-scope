@@ -108,7 +108,7 @@ struct Manifest {
     source: Option<String>,
 }
 
-const MANIFEST: &str = ".openidea-tool.json";
+const MANIFEST: &str = ".oxidea-tool.json";
 
 /// `typescript@6` → `typescript`, `@vue/language-server` unchanged.
 fn npm_name(spec: &str) -> &str {
@@ -950,7 +950,7 @@ impl Tools {
     fn ensure_package_json(&self) -> IdeResult<()> {
         let pj = self.root.join("package.json");
         if !pj.exists() {
-            std::fs::write(pj, "{\n  \"name\": \"openidea-tools\",\n  \"private\": true\n}\n")?;
+            std::fs::write(pj, "{\n  \"name\": \"oxidea-tools\",\n  \"private\": true\n}\n")?;
         }
         Ok(())
     }

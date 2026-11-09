@@ -57,9 +57,9 @@ const CASES: Record<string, Case> = {
     run: { config: "npm:start", prints: "Total: $134.97" },
     tests: {
       config: "npm:test",
-      failing: (c) => env(c, { OPENIDEA_FAIL: "1" }),
+      failing: (c) => env(c, { OXIDEA_FAIL: "1" }),
       passed: 4,
-      failed: "intentionally fails (set OPENIDEA_FAIL=1)",
+      failed: "intentionally fails (set OXIDEA_FAIL=1)",
       file: "tests/cart.test.ts",
     },
   },
@@ -72,7 +72,7 @@ const CASES: Record<string, Case> = {
     },
     tests: {
       config: "pytest",
-      failing: (c) => env(c, { OPENIDEA_FAIL: "1" }),
+      failing: (c) => env(c, { OXIDEA_FAIL: "1" }),
       passed: 4,
       failed: "test_intentionally_failing",
       file: "tests/test_models.py",
@@ -95,7 +95,7 @@ const CASES: Record<string, Case> = {
     run: { config: "go:run:server", prints: "listening on", stop: true },
     tests: {
       config: "go:test",
-      failing: (c) => env(c, { OPENIDEA_FAIL: "1" }),
+      failing: (c) => env(c, { OXIDEA_FAIL: "1" }),
       passed: 3,
       failed: "TestIntentionallyFailing",
       file: "store_test.go",
@@ -105,7 +105,7 @@ const CASES: Record<string, Case> = {
     fixture: "java-app",
     tests: {
       config: "maven:test",
-      failing: (c) => args(c, ["-DopenideaFail=true"]),
+      failing: (c) => args(c, ["-DoxideaFail=true"]),
       passed: 2,
       failed: "intentionallyFails",
       file: "OrderBookTest.java",
@@ -116,7 +116,7 @@ const CASES: Record<string, Case> = {
     run: { config: "gradle:run", prints: "Lent 'Kotlin in Action' until 2024-01-15" },
     tests: {
       config: "gradle:test",
-      failing: (c) => args(c, ["-PopenideaFail"]),
+      failing: (c) => args(c, ["-PoxideaFail"]),
       passed: 3,
       failed: "intentionally failing",
       file: "LibraryTest.kt",
@@ -139,7 +139,7 @@ afterEach(async () => {
 });
 
 async function open(c: Case): Promise<string> {
-  base = realpathSync(mkdtempSync(join(tmpdir(), "openidea-smoke-")));
+  base = realpathSync(mkdtempSync(join(tmpdir(), "oxidea-smoke-")));
   const root = join(base, c.fixture);
   cpSync(join(repoRoot, "fixtures", c.fixture), root, { recursive: true });
   c.setup?.(root);

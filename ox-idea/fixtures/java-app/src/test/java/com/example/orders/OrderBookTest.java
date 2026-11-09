@@ -22,7 +22,7 @@ class OrderBookTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "openidea.fail", matches = "true")
+    @EnabledIfSystemProperty(named = "oxidea.fail", matches = "true")
     void intentionallyFails() {
         assertEquals(1, new OrderBook().size(), "QA: an intentionally failing test");
     }

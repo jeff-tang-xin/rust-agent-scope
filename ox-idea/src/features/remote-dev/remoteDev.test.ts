@@ -116,7 +116,7 @@ describe("remote project locations", () => {
   it("reads recents saved before WSL support, which carried `sshConfig`", () => {
     localStorage.clear();
     localStorage.setItem(
-      "openidea.remote.recent",
+      "oxidea.remote.recent",
       JSON.stringify([
         { sshConfig: "old", path: "/p", name: "p", host: "me@old", openedAtMs: 1 },
         { path: "/no-target" },
@@ -141,7 +141,7 @@ it("migrates only the original remote recents once, scoped to the saved host", (
 it("migrates a snapshot taken before WSL support, and never trusts a WSL distribution", () => {
   localStorage.clear();
   localStorage.setItem(
-    "openidea.remote.trustMigration",
+    "oxidea.remote.trustMigration",
     JSON.stringify([{ sshConfig: "a", path: "/old", host: "me@old", name: "old", openedAtMs: 1 }]),
   );
   expect(takeLegacyRemoteTrust(wsl("a"), "/old", "me@old")).toBe(false);

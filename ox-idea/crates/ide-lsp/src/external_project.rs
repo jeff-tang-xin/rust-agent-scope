@@ -109,7 +109,7 @@ fn source_files(
 }
 
 fn project_name(server: &Server) -> PathBuf {
-    server.root.join(".openidea-external-project")
+    server.root.join(".oxidea-external-project")
 }
 
 async fn request(run: &Running, command: &str, args: Value) -> bool {

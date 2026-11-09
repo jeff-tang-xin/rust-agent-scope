@@ -12,8 +12,8 @@ import time
 import urllib.parse
 
 home = pathlib.Path(sys.argv[1]).resolve()
-bundle = pathlib.Path(__file__).resolve().parents[1] / 'openidea-java-usages.jar'
-work = pathlib.Path(tempfile.mkdtemp(prefix='openidea-implementations-'))
+bundle = pathlib.Path(__file__).resolve().parents[1] / 'oxidea-java-usages.jar'
+work = pathlib.Path(tempfile.mkdtemp(prefix='oxidea-implementations-'))
 config = work / 'config'
 config.mkdir()
 system, machine = platform.system(), platform.machine().lower()
@@ -25,7 +25,7 @@ project = work / 'project'
 (project / 'src/zoo').mkdir(parents=True)
 (project / '.project').write_text('<projectDescription><name>zoo</name><buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name></buildCommand></buildSpec><natures><nature>org.eclipse.jdt.core.javanature</nature></natures></projectDescription>')
 # `kotlin`: the project's compiled Kotlin classes, as the Kotlin bridge attaches them.
-(project / '.classpath').write_text('<classpath><classpathentry kind="src" path="src"/><classpathentry kind="lib" path="kotlin"><attributes><attribute name="ai.openidea.kotlin" value="true"/></attributes></classpathentry><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/><classpathentry kind="output" path="bin"/></classpath>')
+(project / '.classpath').write_text('<classpath><classpathentry kind="src" path="src"/><classpathentry kind="lib" path="kotlin"><attributes><attribute name="ai.oxidea.kotlin" value="true"/></attributes></classpathentry><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/><classpathentry kind="output" path="bin"/></classpath>')
 sources = {
     'Repo.java': '''package zoo;
 
@@ -157,7 +157,7 @@ def command(name, *args):
 
 def implementations(file, needle):
     line, col = position(file, needle)
-    found = command('openidea.java.implementations', uri(file), line, col)
+    found = command('oxidea.java.implementations', uri(file), line, col)
     names = []
     for loc in found['locations']:
         name = pathlib.Path(urllib.parse.unquote(urllib.parse.urlparse(loc['uri']).path)).name
@@ -167,7 +167,7 @@ def implementations(file, needle):
 
 try:
     init = request('initialize', {'processId': None, 'rootUri': project.as_uri(), 'workspaceFolders': [{'uri': project.as_uri(), 'name': 'zoo'}], 'capabilities': {}, 'initializationOptions': {'bundles': [str(bundle)], 'extendedClientCapabilities': {'classFileContentsSupport': True}, 'settings': {'java': {'import': {'gradle': {'enabled': False}, 'maven': {'enabled': False}}}}}})
-    assert 'openidea.java.implementations' in init['capabilities']['executeCommandProvider']['commands']
+    assert 'oxidea.java.implementations' in init['capabilities']['executeCommandProvider']['commands']
     send({'jsonrpc': '2.0', 'method': 'initialized', 'params': {}})
     for name, text in sources.items():
         send({'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': uri(name), 'languageId': 'java', 'version': 1, 'text': text}}})

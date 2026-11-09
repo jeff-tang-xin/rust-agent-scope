@@ -76,9 +76,9 @@ describe("CodePreview", () => {
     });
     expect(out).toEqual([
       "3-3:cm-activeLine",
-      "3-8:cm-openidea-findMatch cm-openidea-findMatch-current",
-      "9-14:cm-openidea-findMatch cm-openidea-findMatch-current",
-      "15-16:cm-openidea-findMatch",
+      "3-8:cm-oxidea-findMatch cm-oxidea-findMatch-current",
+      "9-14:cm-oxidea-findMatch cm-oxidea-findMatch-current",
+      "15-16:cm-oxidea-findMatch",
     ]);
   });
 
@@ -87,7 +87,7 @@ describe("CodePreview", () => {
     await preview(container);
     expect(container.querySelector(".cm-content")?.textContent).toContain("val order = 1");
     expect(container.querySelector(".cm-content")?.getAttribute("contenteditable")).toBe("true");
-    expect(container.querySelector(".cm-openidea-findMatch")?.textContent).toBe("order");
+    expect(container.querySelector(".cm-oxidea-findMatch")?.textContent).toBe("order");
   });
 
   it.each([false, true])("shares edits, document undo and save with a tab (mounted: %s)", async (mounted) => {
@@ -101,7 +101,7 @@ describe("CodePreview", () => {
     act(() => view.dispatch({ changes: { from: 0, insert: "// 😀\n" }, userEvent: "input.type" }));
     expect(tab.currentState().doc.toString()).toBe("// 😀\n" + original);
     expect(model.getMeta().dirty).toBe(true);
-    expect(view.state.doc.lineAt(view.posAtDOM(container.querySelector(".cm-openidea-findMatch")!)).number).toBe(3);
+    expect(view.state.doc.lineAt(view.posAtDOM(container.querySelector(".cm-oxidea-findMatch")!)).number).toBe(3);
     // The tab's Undo removes preview typing; the preview follows immediately.
     act(() => {
       undo({ state: tab.currentState(), dispatch: (tr) => tab.dispatchLocal(tr) });

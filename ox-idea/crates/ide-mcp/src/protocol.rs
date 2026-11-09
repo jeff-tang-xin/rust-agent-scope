@@ -158,15 +158,15 @@ impl Session<'_> {
         let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(LATEST);
         let version = if SUPPORTED.contains(&asked) { asked } else { LATEST };
         let about = match self.project() {
-            Ok(root) => format!("the project open in OpenIDEA at {}", root.display()),
-            Err(_) => "a project open in OpenIDEA".to_owned(),
+            Ok(root) => format!("the project open in OXidea at {}", root.display()),
+            Err(_) => "a project open in OXidea".to_owned(),
         };
         json!({
             "protocolVersion": version,
             "capabilities": { "tools": { "listChanged": false } },
-            "serverInfo": { "name": "OpenIDEA", "version": env!("CARGO_PKG_VERSION") },
+            "serverInfo": { "name": "OXidea", "version": env!("CARGO_PKG_VERSION") },
             "instructions": format!(
-                "Built-in OpenIDEA tools for {about}: they see the files and editors the IDE has open."
+                "Built-in OXidea tools for {about}: they see the files and editors the IDE has open."
             ),
         })
     }
@@ -219,7 +219,7 @@ impl Session<'_> {
                 RpcError::new(
                     NOT_OPEN,
                     format!(
-                        "this folder isn't open in OpenIDEA: {requested}. Open projects: {}",
+                        "this folder isn't open in OXidea: {requested}. Open projects: {}",
                         roots.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
                     ),
                 )
@@ -231,7 +231,7 @@ impl Session<'_> {
         Err(RpcError::new(
             INVALID_PARAMS,
             format!(
-                "Specify projectPath, X-OpenIDEA-Project or ?project=. Open projects: {}",
+                "Specify projectPath, X-OXidea-Project or ?project=. Open projects: {}",
                 roots.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
             ),
         ))

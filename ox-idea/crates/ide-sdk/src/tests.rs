@@ -1552,24 +1552,24 @@ fn angular_language_server_is_found_behind_version_manager_shims() {
     let package = install(&tmp.path().join("asdf/installs/nodejs/24/lib/node_modules"));
     std::fs::write(project.join(".tool-versions"), "nodejs 24\n").unwrap();
     // The only writer in this test binary.
-    ide_core::process::set_shell_env(vec![("OPENIDEA_TEST_SHELL".into(), "1".into())]);
+    ide_core::process::set_shell_env(vec![("OXIDEA_TEST_SHELL".into(), "1".into())]);
     let shims = tmp.path().join(".asdf/shims");
     // The manager's npm runs on the first Node on PATH (`#!/usr/bin/env node`).
     std::fs::write(
         npm_shim(&shims, "npm"),
         if cfg!(windows) {
-            "@if exist .tool-versions if \"%OPENIDEA_TEST_SHELL%\"==\"1\" call node\r\n"
+            "@if exist .tool-versions if \"%OXIDEA_TEST_SHELL%\"==\"1\" call node\r\n"
         } else {
-            "#!/bin/sh\n[ -f .tool-versions ] && [ \"$OPENIDEA_TEST_SHELL\" = 1 ] && exec node\n"
+            "#!/bin/sh\n[ -f .tool-versions ] && [ \"$OXIDEA_TEST_SHELL\" = 1 ] && exec node\n"
         },
     )
     .unwrap();
     std::fs::write(
         npm_shim(&shims, "node"),
         if cfg!(windows) {
-            "@echo %OPENIDEA_TEST_NPM_ROOT%\r\n"
+            "@echo %OXIDEA_TEST_NPM_ROOT%\r\n"
         } else {
-            "#!/bin/sh\necho \"$OPENIDEA_TEST_NPM_ROOT\"\n"
+            "#!/bin/sh\necho \"$OXIDEA_TEST_NPM_ROOT\"\n"
         },
     )
     .unwrap();
@@ -1586,7 +1586,7 @@ fn angular_language_server_is_found_behind_version_manager_shims() {
     let mut s = Settings::default();
     s.languages.node.interpreter = node.join("node").to_string_lossy().into_owned();
     let root = root_of(&package);
-    let env = [("OPENIDEA_TEST_NPM_ROOT", root.as_str())];
+    let env = [("OXIDEA_TEST_NPM_ROOT", root.as_str())];
     assert_eq!(probes(&npm_shim(&shims, "ngserver"), &s, &env), with_project(&package));
     // Not without the manager's own npm, nor for an executable elsewhere: the npm
     // on PATH may be another installation's.

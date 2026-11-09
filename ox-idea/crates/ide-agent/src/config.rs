@@ -8,10 +8,11 @@ use crate::model::{
 use serde_json::{Value, json};
 
 /// Cursor exposes execution modes over ACP, but leaves approval policy to its client.
-pub(crate) const CURSOR_APPROVAL: &str = "openidea.cursor.approval";
+pub(crate) const CURSOR_APPROVAL: &str = "oxidea.cursor.approval";
 
 pub(crate) fn add_client_options(provider: &str, config: &mut Vec<AgentConfigOption>) {
-    if provider != "cursor" || config.iter().any(|o| o.id == CURSOR_APPROVAL) {
+    // The client-side approval policy applies to Cursor and to our in-process OX agent.
+    if !matches!(provider, "cursor" | "ox-hareness") || config.iter().any(|o| o.id == CURSOR_APPROVAL) {
         return;
     }
     config.push(AgentConfigOption {

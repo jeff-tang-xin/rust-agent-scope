@@ -1,4 +1,4 @@
-use openidea_plugin::{host, register_plugin, *};
+use oxidea_plugin::{host, register_plugin, *};
 #[derive(Default)]
 struct Execution;
 impl Plugin for Execution {

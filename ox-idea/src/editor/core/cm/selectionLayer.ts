@@ -24,7 +24,7 @@ const CLASS = "cm-selectionBackground";
 const snappedSelectionLayer = layer({
   above: false,
   class: "cm-selectionLayer",
-  mount: (dom) => dom.classList.add("cm-openidea-selectionLayer"),
+  mount: (dom) => dom.classList.add("cm-oxidea-selectionLayer"),
   markers(view) {
     const dpr = window.devicePixelRatio || 1;
     const out: RectangleMarker[] = [];
@@ -40,7 +40,7 @@ export function seamlessSelection(): Extension {
   return [
     snappedSelectionLayer,
     EditorView.theme({
-      ".cm-selectionLayer:not(.cm-openidea-selectionLayer)": {
+      ".cm-selectionLayer:not(.cm-oxidea-selectionLayer)": {
         display: "none",
       },
     }),

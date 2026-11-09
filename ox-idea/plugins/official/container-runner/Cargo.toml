@@ -1,5 +1,5 @@
 [package]
-name = "openidea-plugin-openidea-container-runner"
+name = "oxidea-plugin-oxidea-container-runner"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -11,7 +11,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-openidea-plugin = { path = "../../../sdk/rust/openidea-plugin" }
+oxidea-plugin = { path = "../../../sdk/rust/oxidea-plugin" }
 
 [profile.release]
 opt-level = "s"

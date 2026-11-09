@@ -98,7 +98,7 @@ export function dockerGutter(ctx: EditorDocContext): Extension {
     detector,
     gutter({
       // Shares the run gutter's class so "Show run icons" hides these too.
-      class: `${styles.gutter} cm-openidea-gutter-run`,
+      class: `${styles.gutter} cm-oxidea-gutter-run`,
       markers: (view) =>
         RangeSet.of(
           view.state.field(targetsField).map((p) => new Marker(p.target, path).range(p.pos)),

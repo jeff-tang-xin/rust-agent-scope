@@ -1,5 +1,5 @@
 //! Change lists (IDE-side grouping of local changes), persisted per project in
-//! `.openidea/changelists.json` like IDEA's `workspace.xml`. Which list a file belongs
+//! `.oxidea/changelists.json` like IDEA's `workspace.xml`. Which list a file belongs
 //! to is decided by the UI; this module only loads and saves the state.
 
 use crate::{Changelist, ChangelistState};
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn round_trip_and_repair() {
         let tmp = tempfile::tempdir().unwrap();
-        let file = tmp.path().join(".openidea/changelists.json");
+        let file = tmp.path().join(".oxidea/changelists.json");
         assert_eq!(load(&file).lists[0].name, "Changes");
 
         let mut st = ChangelistState::initial();

@@ -5,10 +5,10 @@
 //! that is terminated while paused.
 //!
 //! Ignored by default (needs the adapters and runtimes). Run with
-//! `OPENIDEA_DAP_FIXTURES=<dir> cargo test -p ide-dap --test script_debuggers -- --ignored --nocapture`
+//! `OXIDEA_DAP_FIXTURES=<dir> cargo test -p ide-dap --test script_debuggers -- --ignored --nocapture`
 //! where `<dir>` holds `py/app.py`, `node/app.js`, `ts/app.ts`, `tsmap/app.ts` compiled
 //! with `tsc --sourceMap --outDir out`, `tsx/app.ts` (with `npm i tsx` there), `npm/`
-//! (script `start` = `node app.js`) and `deno/app.ts`, all with the same layout (see `LOOP_LINE`). `OPENIDEA_DAP_ONLY=<case>`
+//! (script `start` = `node app.js`) and `deno/app.ts`, all with the same layout (see `LOOP_LINE`). `OXIDEA_DAP_ONLY=<case>`
 //! runs one case. Cases whose adapter or runtime is missing are skipped.
 
 use ide_core::event::DebugEvent;
@@ -364,18 +364,18 @@ fn installed(case: &Case) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs real debug adapters and OPENIDEA_DAP_FIXTURES"]
+#[ignore = "needs real debug adapters and OXIDEA_DAP_FIXTURES"]
 async fn script_debuggers() {
-    let Some(dir) = std::env::var_os("OPENIDEA_DAP_FIXTURES").map(PathBuf::from) else {
-        eprintln!("OPENIDEA_DAP_FIXTURES not set");
+    let Some(dir) = std::env::var_os("OXIDEA_DAP_FIXTURES").map(PathBuf::from) else {
+        eprintln!("OXIDEA_DAP_FIXTURES not set");
         return;
     };
     let dir = dir.canonicalize().unwrap();
     let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).try_init();
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        adapter::set_tools_root(home.join("Library/Application Support/ai.l0ng.openidea/tools"));
+        adapter::set_tools_root(home.join("Library/Application Support/ai.l0ng.oxidea/tools"));
     }
-    let only = std::env::var("OPENIDEA_DAP_ONLY").ok();
+    let only = std::env::var("OXIDEA_DAP_ONLY").ok();
     let mut failures = Vec::new();
     for case in cases(&dir) {
         if only.as_deref().is_some_and(|o| o != case.name) {

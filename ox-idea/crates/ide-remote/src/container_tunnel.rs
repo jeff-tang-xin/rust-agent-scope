@@ -169,10 +169,10 @@ mod tests {
     #[test]
     fn a_forwarded_connection_runs_the_server_as_a_relay() {
         let up = Up { container: ID.into(), user: "vscode".into(), folder: "/w".into() };
-        let exec = Exec { docker: "docker".into(), up, bin: "/s/openidea-server".into() };
+        let exec = Exec { docker: "docker".into(), up, bin: "/s/oxidea-server".into() };
         assert_eq!(
             exec.connect_args(8000),
-            ["exec", "-i", "-u", "vscode", ID, "/s/openidea-server", "--connect", "localhost", "8000"]
+            ["exec", "-i", "-u", "vscode", ID, "/s/oxidea-server", "--connect", "localhost", "8000"]
         );
     }
 
@@ -187,7 +187,7 @@ mod tests {
         std::fs::write(&docker, "#!/bin/sh\necho \"$*\"\nexec cat\n").unwrap();
         std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
         let up = Up { container: ID.into(), user: "root".into(), folder: "/w".into() };
-        let exec = Arc::new(Exec { docker, up, bin: "/s/openidea-server".into() });
+        let exec = Arc::new(Exec { docker, up, bin: "/s/oxidea-server".into() });
         let tunnel = Tunnel::listen(exec, 0, 8000).await.unwrap();
         for _ in 0..2 {
             let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", tunnel.port())).await.unwrap();
@@ -195,7 +195,7 @@ mod tests {
             socket.shutdown().await.unwrap();
             let mut reply = String::new();
             tokio::time::timeout(Duration::from_secs(10), socket.read_to_string(&mut reply)).await.unwrap().unwrap();
-            assert_eq!(reply, format!("exec -i -u root {ID} /s/openidea-server --connect localhost 8000\nping"));
+            assert_eq!(reply, format!("exec -i -u root {ID} /s/oxidea-server --connect localhost 8000\nping"));
         }
         let port = tunnel.port();
         tunnel.close().await;
@@ -210,7 +210,7 @@ mod tests {
         std::fs::write(&docker, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
         let up = Up { container: ID.into(), user: "root".into(), folder: "/w".into() };
-        let exec = Arc::new(Exec::new(docker, up, "/s/openidea-server".into()));
+        let exec = Arc::new(Exec::new(docker, up, "/s/oxidea-server".into()));
         (dir, exec)
     }
 

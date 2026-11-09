@@ -39,7 +39,7 @@ pub struct TauriSink {
 }
 
 /// A debug session stopped on a breakpoint: bounce/flash the taskbar icon
-/// (IDEA) unless the user is already looking at an OpenIDEA window. The focus
+/// (IDEA) unless the user is already looking at an OXidea window. The focus
 /// check and the request both touch the windowing system, so they run on the
 /// main thread; `emit` itself can come from any debug worker thread.
 fn flash_taskbar_unless_focused(app: &AppHandle) {

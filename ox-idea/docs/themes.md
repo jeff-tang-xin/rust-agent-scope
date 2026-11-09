@@ -1,6 +1,6 @@
 # Built-in theme sources
 
-OpenIDEA includes Islands Light, Islands Dark, High Contrast, Solarized Light,
+OXidea includes Islands Light, Islands Dark, High Contrast, Solarized Light,
 Solarized Dark, One Light and One Dark. Select them in Settings › Appearance,
 Welcome › Customize or the existing quick theme menu. The same themes are
 available as explicit editor schemes; “Theme default” follows the UI theme.
@@ -20,7 +20,7 @@ Full MIT notices are preserved in [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICEN
 | One Light UI           | [GitHub / Atom, a27bce3](https://github.com/atom/one-light-ui/tree/a27bce35088ecd323e44f5c2510bcf2d4e9efcf8)        | `styles/ui-variables.less`, `styles/ui-variables-custom.less`                                                          |
 | One Dark UI            | [GitHub / Atom, 18c2143](https://github.com/atom/one-dark-ui/tree/18c2143d41e17b337fff6dc7024562c4d999be17)         | `styles/ui-variables.less`, `styles/ui-variables-custom.less`                                                          |
 
-## Mapping into OpenIDEA
+## Mapping into OXidea
 
 `src/platform/themes.ts` registers the stable ids. `data-theme` retains the
 light/dark kind for icons, native controls and existing selectors;
@@ -42,7 +42,7 @@ approximations: 230° / 1% / 98% light and 220° / 13% / 18% dark editor backgro
 purple keywords, green strings, blue functions, red variables/tags, orange
 numbers and attributes, yellow classes, and the original mono-3 comments.
 UI frame/popup levels use Atom’s relative background lightness formulas with
-the matching syntax theme. OpenIDEA’s shared UI text uses the syntax foreground
+the matching syntax theme. OXidea’s shared UI text uses the syntax foreground
 and mono-2 for readable secondary labels. Selection and cursor-line values
 follow Atom’s syntax variables. Atom does not define a terminal ANSI palette:
 One’s ANSI slots reuse its exact semantic syntax hues, repeating them for bright
@@ -81,7 +81,7 @@ an Islands colour.
 
 These approved screenshots are reused from the original theme implementation on
 0.1.15; regression checks are rerun against the upstream contribution base.
-Captured at 1400 × 900 in Linux Chromium 154 using OpenIDEA's public in-memory
+Captured at 1400 × 900 in Linux Chromium 154 using OXidea's public in-memory
 `acme-api` project / Kotlin fixture and synthetic ANSI terminal output. The
 terminal is a real xterm renderer, without a native PTY or shell. These images
 cover the shell, sidebar, editor, gutter, find matches, terminal, Settings,

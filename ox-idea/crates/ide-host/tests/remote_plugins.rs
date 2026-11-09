@@ -165,12 +165,12 @@ async fn remote_projects_run_the_desktops_code_plugins_on_the_server() {
 
     // Digests first; then the files of what the server lacks; then nothing to do.
     let first = sync(&peer, &desktop, &[]).await;
-    assert_eq!(first.missing, ["openidea.ai-completion", "openidea.checkstyle"], "{first:?}");
-    let second = sync(&peer, &desktop, &["openidea.ai-completion", "openidea.checkstyle"]).await;
+    assert_eq!(first.missing, ["oxidea.ai-completion", "oxidea.checkstyle"], "{first:?}");
+    let second = sync(&peer, &desktop, &["oxidea.ai-completion", "oxidea.checkstyle"]).await;
     assert_eq!(second.installed.len(), 2, "{second:?}");
     assert!(second.failed.is_empty(), "{second:?}");
     assert_eq!(sync(&peer, &desktop, &[]).await, PackageSyncReport::default());
-    let remote = plugins.host().info_of("openidea.checkstyle").unwrap();
+    let remote = plugins.host().info_of("oxidea.checkstyle").unwrap();
     assert_eq!(remote.status, PluginStatus::Inactive, "{:?}", remote.error);
     assert!(remote.capabilities.iter().any(|c| c.id == "process:checkstyle" && c.granted));
 
@@ -188,7 +188,7 @@ async fn remote_projects_run_the_desktops_code_plugins_on_the_server() {
     invoke(&peer, "plugin_post_events", json!({ "events": [saved] })).await.unwrap();
     let published = || {
         client.events.lock().iter().find_map(|m| match &m.event {
-            IdeEvent::Diagnostics { path, source, items } if source == "plugin:openidea.checkstyle" => {
+            IdeEvent::Diagnostics { path, source, items } if source == "plugin:oxidea.checkstyle" => {
                 Some((path.0.clone(), items.clone()))
             }
             _ => None,
@@ -200,15 +200,15 @@ async fn remote_projects_run_the_desktops_code_plugins_on_the_server() {
     assert_eq!((items.len(), items[0].range.start.line), (1, 1));
 
     // Secrets stay on the desktop: the server asks for them when used.
-    let secrets = plugins.host().secrets("openidea.ai-completion").unwrap();
+    let secrets = plugins.host().secrets("oxidea.ai-completion").unwrap();
     assert_eq!(secrets, [("api-key".to_owned(), true)]);
-    assert_eq!(client.secret_requests.lock()[0].plugin, "openidea.ai-completion");
+    assert_eq!(client.secret_requests.lock()[0].plugin, "oxidea.ai-completion");
 
     // A command of a remote plugin, with this window as its client.
     invoke(
         &peer,
         "plugin_run_command",
-        json!({ "pluginId": "openidea.ai-completion", "commandId": "toggle", "arg": null, "editor": null }),
+        json!({ "pluginId": "oxidea.ai-completion", "commandId": "toggle", "arg": null, "editor": null }),
     )
     .await
     .unwrap();
@@ -222,10 +222,10 @@ async fn remote_projects_run_the_desktops_code_plugins_on_the_server() {
     .await;
 
     // Disabled on the desktop: retained but stopped on the server.
-    desktop.set_enabled("openidea.checkstyle", false).unwrap();
+    desktop.set_enabled("oxidea.checkstyle", false).unwrap();
     let removed = sync(&peer, &desktop, &[]).await;
     assert!(removed.removed.is_empty());
-    assert_eq!(plugins.host().info_of("openidea.checkstyle").unwrap().status, PluginStatus::Disabled);
+    assert_eq!(plugins.host().info_of("oxidea.checkstyle").unwrap().status, PluginStatus::Disabled);
     plugins.host().shutdown();
 }
 
@@ -283,14 +283,14 @@ async fn remote_projects_get_plugin_views_and_custom_editors() {
     let _: Value = peer.request("initialize", json!({ "version": rpc::PROTOCOL_VERSION }), None).await.unwrap();
     invoke(&peer, "open_project", json!({ "path": project })).await.unwrap();
     invoke(&peer, "project_trust_set", json!({ "path": project, "trusted": true, "folder": false })).await.unwrap();
-    let report = sync(&peer, &desktop, &["openidea.csv-editor", "jobs", "settings-pages"]).await;
+    let report = sync(&peer, &desktop, &["oxidea.csv-editor", "jobs", "settings-pages"]).await;
     assert_eq!(report.installed.len(), 3, "{report:?}");
 
     // CSV Editor: the document is the server's.
     let opened = invoke(&peer, "doc_open", json!({ "path": project.join("people.csv") })).await.unwrap();
     let doc = opened["id"].as_u64().expect("doc id");
     let args = |extra: Value| {
-        let mut a = json!({ "pluginId": "openidea.csv-editor", "view": "table", "doc": doc });
+        let mut a = json!({ "pluginId": "oxidea.csv-editor", "view": "table", "doc": doc });
         a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         a
     };

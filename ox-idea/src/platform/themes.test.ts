@@ -97,7 +97,7 @@ describe("plugin themes", () => {
   const ref = pluginThemeRef("acme.night", "night");
   afterEach(() => {
     useContributedThemes.setState({ themes: [] });
-    localStorage.removeItem("openidea.themeKinds");
+    localStorage.removeItem("oxidea.themeKinds");
   });
 
   it("are settings values like the built-in ones, in every picker while their plugin is live", () => {

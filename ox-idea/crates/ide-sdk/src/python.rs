@@ -171,7 +171,7 @@ pub(crate) fn venv_args(location: &Path) -> Vec<String> {
 /// that also drops the user site, hiding `pip install --user` packages. `None` (the
 /// inherited directory) if it cannot be created.
 pub(crate) fn neutral_dir() -> Option<tempfile::TempDir> {
-    tempfile::Builder::new().prefix("openidea-python-").tempdir().ok()
+    tempfile::Builder::new().prefix("oxidea-python-").tempdir().ok()
 }
 
 /// How packages of an interpreter are managed.

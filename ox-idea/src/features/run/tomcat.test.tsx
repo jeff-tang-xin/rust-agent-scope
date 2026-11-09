@@ -227,7 +227,7 @@ describe("Tomcat Local", () => {
     expect(params).not.toHaveProperty("serverName");
     expect(params).not.toHaveProperty("tomcatBase");
     expect(params).not.toHaveProperty("tomcatLibraries");
-    expect(JSON.parse(localStorage.getItem("openidea.tomcat.servers.v1")!)).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("oxidea.tomcat.servers.v1")!)).toEqual([]);
   });
   it("keeps Debug environment overrides separate from the backend JDWP agent", () => {
     const config = newConfigOfType(tomcatType, []);

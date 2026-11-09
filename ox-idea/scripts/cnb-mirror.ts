@@ -1,5 +1,5 @@
 /**
- * Mirrors a published release to CNB (cnb.cool/l0ng-ai/openidea), where the updater's
+ * Mirrors a published release to CNB (cnb.cool/l0ng-ai/oxidea), where the updater's
  * CNB source reads `releases/latest/download/latest.json`:
  * `node scripts/cnb-mirror.ts <tag> <dir>` with `CNB_TOKEN` set (scopes `repo-code:r`,
  * `repo-release:rw`). `<dir>` holds the release's assets (`gh release download`) and
@@ -11,8 +11,8 @@ import { openAsBlob, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const CNB_REPO = "l0ng-ai/openidea";
-const GITHUB_REPO = "l0ng-ai/openidea";
+export const CNB_REPO = "l0ng-ai/oxidea";
+const GITHUB_REPO = "l0ng-ai/oxidea";
 const API = `https://api.cnb.cool/${CNB_REPO}`;
 export const KEEP = 10;
 const PARALLEL = 4;

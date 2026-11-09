@@ -48,7 +48,7 @@ async function openCase(page: Page, path: string, opts: Opts = {}): Promise<numb
   const started = Date.now();
   await page.evaluate(
     async ({ path, left, right, options }) => {
-      localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify(options));
+      localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify(options));
       const actions = "/src/platform/actions.ts";
       const { executeAction } = await import(/* @vite-ignore */ actions);
       await executeAction("diff.compareTexts", {

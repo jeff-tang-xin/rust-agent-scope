@@ -67,6 +67,6 @@ it("renders owned gutter commands and drops answers to superseded buffers", asyn
   button.click();
   expect(ipc.lspExecuteCommand).toHaveBeenCalledWith(
     7,
-    expect.objectContaining({ command: "openidea.plugin-language:test:run", arguments: ['"value"'] }),
+    expect.objectContaining({ command: "oxidea.plugin-language:test:run", arguments: ['"value"'] }),
   );
 });

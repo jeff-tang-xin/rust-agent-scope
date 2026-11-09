@@ -1,6 +1,6 @@
 //! A view searches its invoking project afresh, so instance state never mixes windows.
-use openidea_plugin::views::{Body, ListItem, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Error, Invocation, Location, Plugin, StatusItem, TextQuery, host, register_plugin};
+use oxidea_plugin::views::{Body, ListItem, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Error, Invocation, Location, Plugin, StatusItem, TextQuery, host, register_plugin};
 #[derive(Default)]
 pub struct TodoFinder;
 fn query() -> TextQuery {
@@ -55,7 +55,7 @@ register_plugin!(TodoFinder, views);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::{Range, TextMatch, TextSearch, mock::MockHost};
+    use oxidea_plugin::{Range, TextMatch, TextSearch, mock::MockHost};
     #[test]
     fn search_results_open_their_location_and_count_problems() {
         let mock = MockHost::install();

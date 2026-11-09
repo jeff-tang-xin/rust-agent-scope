@@ -73,7 +73,7 @@ describe("Push dialog changes", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.textContent).toContain("service.py");
     expect(rows[0]!.textContent).toContain("src/orders");
-    expect(localStorage.getItem("openidea.vcs.push.groupByDirectory")).toBe("false");
+    expect(localStorage.getItem("oxidea.vcs.push.groupByDirectory")).toBe("false");
   });
 
   it("shows no commit details for several commits", async () => {

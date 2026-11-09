@@ -1,7 +1,7 @@
 Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
-Bundle-Name: OpenIDEA Kotlin binary bridge
-Bundle-SymbolicName: ai.openidea.kotlin;singleton:=true
+Bundle-Name: OXidea Kotlin binary bridge
+Bundle-SymbolicName: ai.oxidea.kotlin;singleton:=true
 Bundle-Version: 1.0.0
 Bundle-RequiredExecutionEnvironment: JavaSE-21
 Require-Bundle: org.eclipse.jdt.ls.core,org.eclipse.jdt.core,

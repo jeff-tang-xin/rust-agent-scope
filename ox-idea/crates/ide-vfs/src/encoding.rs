@@ -331,7 +331,7 @@ pub fn encode(text: &str, encoding: &str, has_bom: bool) -> IdeResult<Vec<u8>> {
 }
 
 static TMP_COUNTER: AtomicU32 = AtomicU32::new(0);
-const TMP_MARKER: &str = ".openidea-tmp-";
+const TMP_MARKER: &str = ".oxidea-tmp-";
 
 fn temp_path_for(target: &Path) -> PathBuf {
     let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

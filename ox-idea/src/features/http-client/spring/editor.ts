@@ -269,7 +269,7 @@ export function springEditorExtension(ctx: EditorDocContext): Extension {
     detector,
     intentionProviders.of(intentions),
     gutter({
-      class: `${styles.runGutter} cm-openidea-gutter-spring`,
+      class: `${styles.runGutter} cm-oxidea-gutter-spring`,
       markers: (view) =>
         RangeSet.of(
           view.state.field(marksField).map((m) => new SpringMarker(m).range(m.pos)),

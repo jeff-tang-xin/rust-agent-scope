@@ -182,7 +182,7 @@ export function runtime(sessionId: string): SessionRuntime | undefined {
 // ---------------------------------------------------------------------------
 // Configurations
 
-const SELECTED_KEY = "openidea.run.selected:";
+const SELECTED_KEY = "oxidea.run.selected:";
 
 function readSelected(root: string): string | null {
   try {
@@ -259,8 +259,8 @@ export function selectConfig(id: string | null) {
   if (root) writeSelected(root, id);
 }
 
-const PINNED_KEY = "openidea.run.pinned:";
-const RECENT_KEY = "openidea.run.recent:";
+const PINNED_KEY = "oxidea.run.pinned:";
+const RECENT_KEY = "oxidea.run.recent:";
 export const MAX_RECENT = 5;
 
 function readIds(key: string, root: string): string[] {
@@ -334,7 +334,7 @@ export function selectedConfig(): RunConfig | undefined {
 // Temporary configurations (IDEA: created by gutter / context runs, at most 5)
 
 // v2: kept without settings-derived values (earlier entries froze the toolchain they were made with).
-const TEMPORARY_KEY = "openidea.run.temporary.v2:";
+const TEMPORARY_KEY = "oxidea.run.temporary.v2:";
 export const MAX_TEMPORARY = 5;
 
 function readTemporary(root: string): RunConfig[] {

@@ -123,7 +123,7 @@ fn jdk_tool(name: &str, jdks: &[crate::java::Jdk]) -> Option<PathBuf> {
 
 /// Directory for binaries compiled from single source files (`rustc`, `clang`).
 pub fn compile_dir() -> PathBuf {
-    std::env::temp_dir().join("openidea-run")
+    std::env::temp_dir().join("oxidea-run")
 }
 
 #[cfg(test)]

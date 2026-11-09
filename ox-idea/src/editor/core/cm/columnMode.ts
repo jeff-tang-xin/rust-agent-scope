@@ -176,6 +176,6 @@ export const columnModeExtension: Extension = [
     ]),
   ),
   EditorView.editorAttributes.compute([columnModeField], (s): Record<string, string> =>
-    isColumnMode(s) ? { class: "cm-openidea-columnMode" } : {},
+    isColumnMode(s) ? { class: "cm-oxidea-columnMode" } : {},
   ),
 ];

@@ -1,4 +1,4 @@
-//! License Header for OpenIDEA: a copyright and SPDX license header at the top
+//! License Header for OXidea: a copyright and SPDX license header at the top
 //! of source files, in the file's own comment syntax.
 //!
 //! - A file without one is reported (an info diagnostic on its first line)
@@ -8,9 +8,9 @@
 //! - *Find Files Without a Header* scans the project in a background task and
 //!   reports every source file that needs one in the Problems view.
 
-use openidea_plugin::host;
-use openidea_plugin::providers::{CodeAction, Document, Providers};
-use openidea_plugin::{
+use oxidea_plugin::host;
+use oxidea_plugin::providers::{CodeAction, Document, Providers};
+use oxidea_plugin::{
     Diagnostic, Error, Event, Invocation, NotificationLevel, Plugin, Position, Project, Range, Severity, TextEdit,
     register_plugin,
 };
@@ -280,7 +280,7 @@ register_plugin!(LicenseHeader, providers);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     fn doc(path: &str, text: &str) -> Document {
         Document { path: path.into(), language: String::new(), version: 1, text: text.into() }

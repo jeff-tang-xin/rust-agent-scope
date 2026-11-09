@@ -362,7 +362,7 @@ export function UsagesView() {
 // ---------------------------------------------------------------------------
 // Preview pane (persisted toggle in the ⋮ menu; on by default, like the Find tool window's).
 
-const OPTIONS_KEY = "openidea.usages.view.v1";
+const OPTIONS_KEY = "oxidea.usages.view.v1";
 
 export const useUsagesOptions = create<{ preview: boolean }>(() => {
   try {

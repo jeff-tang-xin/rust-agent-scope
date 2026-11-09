@@ -171,7 +171,7 @@ pub fn plugin_subscribe(window: Window, on_event: Channel<PluginEvent>) {
 }
 
 /// Installed and linked plugins plus the project plugins of this window's
-/// project (`<project>/.openidea/plugins/*`, rescanned on every call), with
+/// project (`<project>/.oxidea/plugins/*`, rescanned on every call), with
 /// the UI contributions to project.
 #[tauri::command]
 #[specta::specta]
@@ -235,7 +235,7 @@ pub async fn plugin_set_capability(
     blocking(move || host.set_capability(&id, &capability, granted)).await
 }
 
-/// Links a development plugin folder (`openidea-plugin link` does the same from a terminal).
+/// Links a development plugin folder (`oxidea-plugin link` does the same from a terminal).
 #[tauri::command]
 #[specta::specta]
 pub async fn plugin_link(state: State<'_, AppState>, path: PathBuf) -> IdeResult<PluginInfo> {
@@ -603,10 +603,10 @@ pub async fn plugin_log_tab_spawn(
     .map_err(|e| IdeError::internal(e.to_string()))?
 }
 
-/// Largest file a web view saves or opens (`openidea.saveFile` / `openFile`).
+/// Largest file a web view saves or opens (`oxidea.saveFile` / `openFile`).
 const MAX_WEB_VIEW_FILE: u64 = 64 << 20;
 
-/// Writes what a web view saves (`openidea.saveFile`) to the path the user
+/// Writes what a web view saves (`oxidea.saveFile`) to the path the user
 /// chose in the save dialog, on this machine.
 #[tauri::command]
 #[specta::specta]
@@ -624,7 +624,7 @@ pub async fn plugin_web_save_file(path: PathBuf, base64: String) -> IdeResult<()
 }
 
 /// Reads the file the user picked in an open dialog for a web view
-/// (`openidea.openFile`), on this machine; base64.
+/// (`oxidea.openFile`), on this machine; base64.
 #[tauri::command]
 #[specta::specta]
 pub async fn plugin_web_read_file(path: PathBuf) -> IdeResult<String> {
@@ -745,7 +745,7 @@ pub fn plugin_set_secret(
     state.plugins.set_secret(&plugin_id, &name, value.as_deref())
 }
 
-/// Plugin secrets in the login keychain (service `ai.l0ng.openidea.plugin.<id>`).
+/// Plugin secrets in the login keychain (service `ai.l0ng.oxidea.plugin.<id>`).
 #[cfg(target_os = "macos")]
 struct KeychainSecrets;
 
@@ -773,7 +773,7 @@ impl ide_host::plugins::SecretStore for KeychainSecrets {
 #[cfg(target_os = "macos")]
 impl KeychainSecrets {
     fn service(plugin: &str) -> String {
-        format!("ai.l0ng.openidea.plugin.{plugin}")
+        format!("ai.l0ng.oxidea.plugin.{plugin}")
     }
 }
 

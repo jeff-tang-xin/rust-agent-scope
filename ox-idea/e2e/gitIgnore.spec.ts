@@ -67,7 +67,7 @@ for (const destination of ["gitignore", "localExclude"] as const) {
     await page.getByRole("menuitem", { name: "Add to .gitignore", exact: true }).hover();
     await expect(page.getByRole("menuitem", { name: ".gitignore", exact: true })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: ".git/info/exclude", exact: true })).toBeVisible();
-    const captureDir = process.env.OPENIDEA_ACCEPTANCE_DIR;
+    const captureDir = process.env.OXIDEA_ACCEPTANCE_DIR;
     if (captureDir && destination === "gitignore")
       await page.screenshot({ path: `${captureDir}/01-ignore-destinations.png` });
     await page

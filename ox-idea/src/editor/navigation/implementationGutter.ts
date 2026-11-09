@@ -76,7 +76,7 @@ let watching = false;
 
 /** Build output and tool folders: their changes add no implementations. */
 const OUTPUT_PATH =
-  /(?:^|[\\/])(?:\.git|\.gradle|\.idea|\.openidea|node_modules|target|build|out|bin)(?:[\\/]|$)|\.class$/;
+  /(?:^|[\\/])(?:\.git|\.gradle|\.idea|\.oxidea|node_modules|target|build|out|bin)(?:[\\/]|$)|\.class$/;
 
 /** Whether changes to `paths` can invalidate cached markers. */
 export function affectsMarkers(paths: readonly string[]): boolean {
@@ -268,7 +268,7 @@ class InheritanceMarker extends GutterMarker {
   }
   override toDOM(): Node {
     const el = document.createElement("div");
-    el.className = `${styles.marker} cm-openidea-lineMarker-${this.marker.kind}`;
+    el.className = `${styles.marker} cm-oxidea-lineMarker-${this.marker.kind}`;
     el.dataset.kind = this.marker.kind;
     el.title = this.marker.tooltip;
     el.setAttribute("role", "button");
@@ -430,7 +430,7 @@ export function implementationGutter(ctx: EditorDocContext): Extension {
     markersField,
     ViewPlugin.fromClass(MarkersPlugin),
     gutter({
-      class: `${styles.gutter} cm-openidea-gutter-lineMarkers`,
+      class: `${styles.gutter} cm-oxidea-gutter-lineMarkers`,
       markers: (view) => markerSet(view.state.field(markersField)),
       domEventHandlers: {
         mousedown: (view, block, event) => {

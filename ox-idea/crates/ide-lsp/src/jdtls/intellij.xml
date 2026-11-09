@@ -20,7 +20,7 @@
   JDT has a shared blank-line preservation limit and different empty-body/Javadoc handling.
 -->
 <profiles version="23">
-  <profile kind="CodeFormatterProfile" name="OpenIDEA IntelliJ IDEA" version="23">
+  <profile kind="CodeFormatterProfile" name="OXidea IntelliJ IDEA" version="23">
     <!-- IndentOptions.USE_TAB_CHARACTER = false -->
     <setting id="org.eclipse.jdt.core.formatter.tabulation.char" value="space"/>
     <!-- IndentOptions.TAB_SIZE = 4 -->

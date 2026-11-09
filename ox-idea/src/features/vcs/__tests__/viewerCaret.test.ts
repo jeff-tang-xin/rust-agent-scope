@@ -23,10 +23,10 @@ describe("viewer caret", () => {
       state: EditorState.create({ doc: "a", extensions: viewerBase({ readOnly: true }) }),
     });
     views.push(view);
-    expect(view.dom.classList.contains("cm-openidea-blockCaret")).toBe(true);
+    expect(view.dom.classList.contains("cm-oxidea-blockCaret")).toBe(true);
 
     setAppearance({ blockCaret: false, smoothCaretMovement: true, caretMovementStyle: "gliding" });
-    expect(view.dom.classList.contains("cm-openidea-blockCaret")).toBe(false);
-    expect(view.dom.classList.contains("cm-openidea-caretMotion-gliding")).toBe(true);
+    expect(view.dom.classList.contains("cm-oxidea-blockCaret")).toBe(false);
+    expect(view.dom.classList.contains("cm-oxidea-caretMotion-gliding")).toBe(true);
   });
 });

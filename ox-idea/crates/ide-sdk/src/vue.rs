@@ -16,7 +16,7 @@ const PLUGIN: &str = "@vue/typescript-plugin";
 pub(crate) const EXTENSION: &str = "vue";
 const CLI_SERVICE: &str = "@vue/cli-service";
 const CLI_CONFIG_TIMEOUT: Duration = Duration::from_secs(30);
-const ALIASES_MARKER: &str = "openidea-webpack-aliases:";
+const ALIASES_MARKER: &str = "oxidea-webpack-aliases:";
 /// Prints the `resolve.alias` of the webpack configuration module `argv[1]`, after whatever
 /// the configuration itself prints.
 const PRINT_ALIASES: &str = "const c = require(process.argv[1]); const a = (c.resolve && c.resolve.alias) || {}; \

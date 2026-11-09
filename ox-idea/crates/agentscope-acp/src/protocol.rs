@@ -1,6 +1,6 @@
 //! ACP v1 帧构造与入参解析。
 //!
-//! 字段形态的准绳是 OpenIDEA 的 v1 处理层（`ide-agent` 的 normalize/tests）
+//! 字段形态的准绳是 OXidea 的 v1 处理层（`ide-agent` 的 normalize/tests）
 //! 与 ACP v1 规范：`session/update` 以 `update.sessionUpdate` 判别；
 //! `tool_call` 的 `kind`/`status` 用 v1 枚举字符串。
 

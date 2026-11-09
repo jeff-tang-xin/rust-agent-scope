@@ -190,7 +190,7 @@ fn save_preserves_permissions_and_symlinks() {
     let leftovers: Vec<_> = fs::read_dir(&r)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().contains("openidea-tmp"))
+        .filter(|e| e.file_name().to_string_lossy().contains("oxidea-tmp"))
         .collect();
     assert!(leftovers.is_empty());
 }

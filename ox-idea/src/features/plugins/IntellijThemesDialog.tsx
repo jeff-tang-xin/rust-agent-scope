@@ -79,7 +79,7 @@ function IntellijThemesDialog() {
         <p className={styles.muted}>
           <T>
             Theme plugins installed in the JetBrains IDEs on this computer. Importing one installs it with all its
-            themes; choose the theme to use in Settings › Appearance. Colours without an OpenIDEA counterpart keep the
+            themes; choose the theme to use in Settings › Appearance. Colours without an OXidea counterpart keep the
             default theme colours.
           </T>
         </p>

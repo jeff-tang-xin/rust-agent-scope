@@ -646,7 +646,7 @@ mod tests {
         )
         .unwrap();
         let manifest = ide_extension::Manifest::parse(
-            "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"",
+            "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"",
         )
         .unwrap();
         let pkg = Package::new(manifest, dir.to_path_buf());
@@ -690,7 +690,7 @@ mod tests {
         }
         std::fs::write(dir.join("theme.json"), theme).unwrap();
         let manifest = ide_extension::Manifest::parse(
-            "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"",
+            "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"",
         )
         .unwrap();
         let pkg = Package::new(manifest, dir.to_path_buf());

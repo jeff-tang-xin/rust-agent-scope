@@ -5,7 +5,7 @@ async function openChain(page: Page) {
   await page.evaluate(async () => {
     const inputPath = "/src/features/vcs/diffInput.ts";
     const { openDiff, withChain } = await import(inputPath);
-    localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ mode: "split", collapse: false }));
+    localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ mode: "split", collapse: false }));
     const files = ["a.ts", "b.ts"].map((name) => ({
       path: `/dev/acme-api/${name}`,
       left: { type: "text", text: "same\nbefore\ntail\n", label: "HEAD" },

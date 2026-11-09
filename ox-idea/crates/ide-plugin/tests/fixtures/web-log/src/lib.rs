@@ -1,5 +1,5 @@
-use openidea_plugin::details::ProcessLog;
-use openidea_plugin::{Error, Invocation, Plugin, host, register_plugin};
+use oxidea_plugin::details::ProcessLog;
+use oxidea_plugin::{Error, Invocation, Plugin, host, register_plugin};
 
 const SCRIPT: &str = r#"i=0
 while true; do

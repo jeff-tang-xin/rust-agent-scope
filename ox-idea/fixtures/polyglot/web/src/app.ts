@@ -15,4 +15,4 @@ function render(root: HTMLElement, g: Greeting): void {
 
 // TODO: show a spinner while loading
 const root = document.getElementById("app")!;
-fetchGreeting("OpenIDEA").then((g) => render(root, g), (e) => (root.textContent = String(e)));
+fetchGreeting("OXidea").then((g) => render(root, g), (e) => (root.textContent = String(e)));

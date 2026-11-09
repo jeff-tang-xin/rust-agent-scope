@@ -117,7 +117,7 @@ pub fn build(
         });
         let extension_path = std::env::join_paths(extensions).map_err(|e| IdeError::invalid(e.to_string()))?;
         step.args.push(format!("-Dmaven.ext.class.path={}", extension_path.to_string_lossy()));
-        step.args.push(format!("-Dopenidea.kotlin.staging={}", directory.join("staging").display()));
+        step.args.push(format!("-Doxidea.kotlin.staging={}", directory.join("staging").display()));
     }
     let mut messages = Vec::new();
     // Independent linked reactors must still run after another reactor's javac fails.

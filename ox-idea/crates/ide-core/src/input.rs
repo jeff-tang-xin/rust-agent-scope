@@ -164,7 +164,7 @@ impl Drop for InputWriter {
             use std::os::windows::io::AsRawHandle;
             // A cancellation can race with entry into WriteFile, so retry off
             // the caller's thread until the worker observes the closed queue.
-            let _ = std::thread::Builder::new().name("openidea-input-cancel".into()).spawn(move || {
+            let _ = std::thread::Builder::new().name("oxidea-input-cancel".into()).spawn(move || {
                 while !worker.is_finished() {
                     unsafe {
                         windows_sys::Win32::System::IO::CancelSynchronousIo(worker.as_raw_handle());

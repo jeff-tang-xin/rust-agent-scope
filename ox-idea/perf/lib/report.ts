@@ -129,7 +129,7 @@ export function printReport(report: Report, meta: Record<string, unknown>): stri
   );
 
   const md = [
-    "# OpenIDEA performance report",
+    "# OXidea performance report",
     "",
     Object.entries(meta)
       .map(([k, v]) => `${k}: \`${String(v)}\``)

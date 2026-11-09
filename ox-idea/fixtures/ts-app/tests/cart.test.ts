@@ -25,7 +25,7 @@ describe("Cart", () => {
     expect(() => new Cart().add(mouse, 0)).toThrow(RangeError);
   });
 
-  it.skipIf(!process.env.OPENIDEA_FAIL)("intentionally fails (set OPENIDEA_FAIL=1)", () => {
+  it.skipIf(!process.env.OXIDEA_FAIL)("intentionally fails (set OXIDEA_FAIL=1)", () => {
     expect(formatMoney(cents(1999))).toBe("$19.98");
   });
 });

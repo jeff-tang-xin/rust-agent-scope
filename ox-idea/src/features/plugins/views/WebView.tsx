@@ -1,6 +1,6 @@
 /**
  * A plugin's web view (`web = "web/index.html"` on a view or custom editor):
- * a page shipped in the plugin package, loaded from the `openidea-plugin`
+ * a page shipped in the plugin package, loaded from the `oxidea-plugin`
  * scheme into an `<iframe sandbox="allow-scripts">`. The frame is an opaque
  * origin with no network and no IDE API; the desktop serves only the files
  * under the page's directory, with a CSP of their own, and injects the bridge
@@ -110,7 +110,7 @@ function validFilters(value: unknown): FileFilter[] | undefined {
 type PageState = { url: string } | { error: string };
 
 /**
- * The `openidea-plugin` URL of the page, or why there is none. Asked again
+ * The `oxidea-plugin` URL of the page, or why there is none. Asked again
  * whenever the plugin changes (`plugin`: its info, a new object then): the URL
  * names the installed package's revision, so an update, a reinstall or
  * disabling it reach the frame, and the frame only reloads when the URL is new.
@@ -171,8 +171,8 @@ export function WebView({ pluginId, view, label, header = "default", document = 
   const postTheme = useCallback(() => {
     const t = frameTheme();
     if (ownHeader) {
-      t.vars["--openidea-corner-inset-width"] = `${HEADERLESS_CORNER_INSET.width}px`;
-      t.vars["--openidea-corner-inset-height"] = `${HEADERLESS_CORNER_INSET.height}px`;
+      t.vars["--oxidea-corner-inset-width"] = `${HEADERLESS_CORNER_INSET.width}px`;
+      t.vars["--oxidea-corner-inset-height"] = `${HEADERLESS_CORNER_INSET.height}px`;
     }
     post(frameThemeMessage(t));
   }, [ownHeader, post]);

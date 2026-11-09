@@ -42,7 +42,7 @@ pub async fn resolve_read_file(call: &Call, file_path: &str) -> IdeResult<PathBu
             "jar" => rest.to_owned(),
             "jrt" => {
                 return Err(IdeError::invalid(format!(
-                    "File {file_path} can't be opened: OpenIDEA does not read jrt:// (Java runtime image) entries"
+                    "File {file_path} can't be opened: OXidea does not read jrt:// (Java runtime image) entries"
                 )));
             }
             _ => return Err(missing()),

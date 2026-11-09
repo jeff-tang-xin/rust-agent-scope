@@ -1,6 +1,6 @@
 /**
  * Remote development: a window whose project lives on an SSH host, in a WSL distribution or in a
- * dev container. The backend (`openidea-server`) runs there and this window routes its commands
+ * dev container. The backend (`oxidea-server`) runs there and this window routes its commands
  * to it (platform/remote.ts).
  */
 import { registerActions } from "@/platform/actions";

@@ -1,5 +1,5 @@
 //! Plugin languages of a remote project: `Workspace` contributions take effect where the project is, so the
-//! desktop pushes its plugins' language definitions to `openidea-server`
+//! desktop pushes its plugins' language definitions to `oxidea-server`
 //! (`plugin_sync_languages`) together with the `process:` programs the user
 //! granted. The server resolves each granted program on its own `PATH`, pins
 //! the file (path + hash, kept in `plugin-pins.json`) the first time and

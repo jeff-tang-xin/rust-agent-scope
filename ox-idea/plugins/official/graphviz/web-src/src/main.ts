@@ -16,7 +16,7 @@ const MAX_FIT = 4;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-function start(bridge: OpenideaBridge) {
+function start(bridge: OxideaBridge) {
   const stage = $<HTMLDivElement>("stage");
   const canvas = $<HTMLDivElement>("canvas");
   const banner = $<HTMLDivElement>("banner");
@@ -36,7 +36,7 @@ function start(bridge: OpenideaBridge) {
   let timer = 0;
   let lastProblems = "";
 
-  const foreground = () => bridge.theme?.vars["--openidea-fg"] ?? null;
+  const foreground = () => bridge.theme?.vars["--oxidea-fg"] ?? null;
 
   function setZoom(z: number, keepFit = false) {
     zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
@@ -208,6 +208,6 @@ function start(bridge: OpenideaBridge) {
   });
 }
 
-const bridge = window.openidea;
+const bridge = window.oxidea;
 if (bridge) start(bridge);
-else document.body.textContent = "This page runs inside OpenIDEA.";
+else document.body.textContent = "This page runs inside OXidea.";

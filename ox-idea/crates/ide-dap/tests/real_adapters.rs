@@ -3,7 +3,7 @@
 //! Into, Reset Frame, Force Step Over, Force Run to Cursor and Set Value.
 //!
 //! Ignored by default (needs the adapters installed). Run with
-//! `OPENIDEA_DAP_FIXTURES=<dir> cargo test -p ide-dap --test real_adapters -- --ignored --nocapture`
+//! `OXIDEA_DAP_FIXTURES=<dir> cargo test -p ide-dap --test real_adapters -- --ignored --nocapture`
 //! where `<dir>` holds `py/app.py`, `node/app.js`, `go/demo` (built with `-N -l`),
 //! `rust/target/debug/demo` and `c/main`. Adapters not found on `PATH` are skipped.
 
@@ -38,7 +38,7 @@ fn launch(adapter: &str, program: &Path, cwd: &Path, extra: serde_json::Value) -
         program: Some(program.display().to_string()),
         args: vec![],
         cwd: Some(cwd.into()),
-        env: BTreeMap::from([("OPENIDEA_FIXTURE".into(), "1".into())]),
+        env: BTreeMap::from([("OXIDEA_FIXTURE".into(), "1".into())]),
         extra_json: Some(extra.to_string()),
     }
 }
@@ -50,10 +50,10 @@ fn cases(dir: &Path) -> Vec<Case> {
     let rust = dir.join("rust");
     let c = dir.join("c");
     let java = dir.join("java");
-    // java-debug runs inside jdtls: OPENIDEA_JAVA_DEBUG_SERVER is the port the IDE's
+    // java-debug runs inside jdtls: OXIDEA_JAVA_DEBUG_SERVER is the port the IDE's
     // `java_debug_server` returned for this folder (classes compiled to java/out).
     let java_case =
-        std::env::var("OPENIDEA_JAVA_DEBUG_SERVER").ok().and_then(|p| p.parse::<u16>().ok()).map(|port| Case {
+        std::env::var("OXIDEA_JAVA_DEBUG_SERVER").ok().and_then(|p| p.parse::<u16>().ok()).map(|port| Case {
             adapter: "java-debug",
             source: java.join("src/demo/Main.java"),
             loop_line: 14,
@@ -149,7 +149,7 @@ fn cases(dir: &Path) -> Vec<Case> {
             after_loop: 15,
             function: "parse",
             field: None,
-            config: launch("lldb-dap", &c.join("main"), &c, serde_json::json!({"env": ["OPENIDEA_FIXTURE=1"]})),
+            config: launch("lldb-dap", &c.join("main"), &c, serde_json::json!({"env": ["OXIDEA_FIXTURE=1"]})),
         },
     ]);
     out
@@ -207,13 +207,13 @@ fn add_managed_tools_to_path() {
     // `RUST_LOG=ide_dap::wire=trace` prints the DAP traffic.
     let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).try_init();
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
-    // Like the app: adapters installed by OpenIDEA are found without being on PATH.
-    adapter::set_tools_root(home.join("Library/Application Support/ai.l0ng.openidea/tools"));
+    // Like the app: adapters installed by OXidea are found without being on PATH.
+    adapter::set_tools_root(home.join("Library/Application Support/ai.l0ng.oxidea/tools"));
 }
 
-/// The debuggee interpreter (`OPENIDEA_PYTHON`, e.g. one without debugpy).
+/// The debuggee interpreter (`OXIDEA_PYTHON`, e.g. one without debugpy).
 fn python() -> String {
-    std::env::var("OPENIDEA_PYTHON").unwrap_or_else(|_| "python3".into())
+    std::env::var("OXIDEA_PYTHON").unwrap_or_else(|_| "python3".into())
 }
 
 fn installed(adapter: &str) -> bool {
@@ -430,14 +430,14 @@ fn line_bp_at(line: u32) -> Breakpoint {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs real debug adapters and OPENIDEA_DAP_FIXTURES"]
+#[ignore = "needs real debug adapters and OXIDEA_DAP_FIXTURES"]
 async fn real_adapters() {
-    let Some(dir) = std::env::var_os("OPENIDEA_DAP_FIXTURES").map(PathBuf::from) else {
-        eprintln!("OPENIDEA_DAP_FIXTURES not set");
+    let Some(dir) = std::env::var_os("OXIDEA_DAP_FIXTURES").map(PathBuf::from) else {
+        eprintln!("OXIDEA_DAP_FIXTURES not set");
         return;
     };
     add_managed_tools_to_path();
-    let only = std::env::var("OPENIDEA_DAP_ONLY").ok();
+    let only = std::env::var("OXIDEA_DAP_ONLY").ok();
     let mut failures = Vec::new();
     for case in cases(&dir) {
         if only.as_deref().is_some_and(|o| o != case.adapter) {
@@ -480,12 +480,12 @@ struct AttachCase {
 /// Attach to Process: each fixture server is listed with the right debugger, and attaching
 /// with the request `attach.ts` builds stops at a breakpoint in its loop.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs real debug adapters and OPENIDEA_DAP_FIXTURES"]
+#[ignore = "needs real debug adapters and OXIDEA_DAP_FIXTURES"]
 async fn attach_to_processes() {
-    let Some(dir) = std::env::var_os("OPENIDEA_DAP_FIXTURES").map(PathBuf::from) else { return };
+    let Some(dir) = std::env::var_os("OXIDEA_DAP_FIXTURES").map(PathBuf::from) else { return };
     add_managed_tools_to_path();
     let s = |p: &Path| p.display().to_string();
-    let java_server = std::env::var("OPENIDEA_JAVA_DEBUG_SERVER").ok().and_then(|p| p.parse::<u16>().ok());
+    let java_server = std::env::var("OXIDEA_JAVA_DEBUG_SERVER").ok().and_then(|p| p.parse::<u16>().ok());
     let mut cases = vec![
         // `debugpy --pid` injection ships only an x86_64 helper on macOS, so on Apple
         // Silicon the attach goes through a `debugpy --listen` process.
@@ -509,7 +509,7 @@ async fn attach_to_processes() {
         },
         AttachCase {
             kind: attach::AttachKind::Node,
-            command: match std::env::var("OPENIDEA_NODE_INSPECT") {
+            command: match std::env::var("OXIDEA_NODE_INSPECT") {
                 Ok(flag) => vec!["node".into(), flag, s(&dir.join("node/server.js"))],
                 Err(_) => vec!["node".into(), s(&dir.join("node/server.js"))],
             },
@@ -555,7 +555,7 @@ async fn attach_to_processes() {
             },
         );
     }
-    let only = std::env::var("OPENIDEA_DAP_ONLY").ok();
+    let only = std::env::var("OXIDEA_DAP_ONLY").ok();
     let mut failures = Vec::new();
     for case in cases {
         let label = format!("{:?}", case.kind);

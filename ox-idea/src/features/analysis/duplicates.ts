@@ -13,7 +13,7 @@ import {
 import { notifications, toolWindowService } from "@/workbench/contributions";
 import { describeScope, resolveScope, type ScopeChoice } from "./scope";
 
-const OPTIONS_KEY = "openidea.analysis.duplicates.v1";
+const OPTIONS_KEY = "oxidea.analysis.duplicates.v1";
 
 export const DEFAULT_DUPLICATE_OPTIONS: DuplicateOptions = {
   minTokens: 60,

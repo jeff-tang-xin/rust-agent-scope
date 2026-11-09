@@ -374,11 +374,11 @@ function ResetDialog({ commit, onClose }: { commit?: Commit; onClose: () => void
           </div>
         ) : (
           <>
-            <label className={styles.fieldLabel} htmlFor="openidea-reset-to">
+            <label className={styles.fieldLabel} htmlFor="oxidea-reset-to">
               <T>To commit:</T>
             </label>
             <Input
-              id="openidea-reset-to"
+              id="oxidea-reset-to"
               data-autofocus
               mono
               value={target}
@@ -469,11 +469,11 @@ function TagDialog({ onClose }: { onClose: () => void }) {
       ]}
     >
       <div className={styles.form}>
-        <label className={styles.fieldLabel} htmlFor="openidea-tag-name">
+        <label className={styles.fieldLabel} htmlFor="oxidea-tag-name">
           <T>Tag name:</T>
         </label>
         <Input
-          id="openidea-tag-name"
+          id="oxidea-tag-name"
           data-autofocus
           mono
           value={name}
@@ -482,15 +482,15 @@ function TagDialog({ onClose }: { onClose: () => void }) {
         />
         {name && error && <div className={styles.error}>{error}</div>}
         <Checkbox checked={force} onChange={setForce} label="Force" />
-        <label className={styles.fieldLabel} htmlFor="openidea-tag-commit">
+        <label className={styles.fieldLabel} htmlFor="oxidea-tag-commit">
           <T>Commit:</T>
         </label>
-        <Input id="openidea-tag-commit" mono value={commit} onChange={(e) => setCommit(e.target.value)} />
-        <label className={styles.fieldLabel} htmlFor="openidea-tag-message">
+        <Input id="oxidea-tag-commit" mono value={commit} onChange={(e) => setCommit(e.target.value)} />
+        <label className={styles.fieldLabel} htmlFor="oxidea-tag-message">
           <T>Message:</T>
         </label>
         <textarea
-          id="openidea-tag-message"
+          id="oxidea-tag-message"
           className={styles.textarea}
           rows={4}
           value={message}

@@ -34,7 +34,7 @@ describe("editor in distraction free mode", () => {
   it("shows line numbers and the right margin normally", () => {
     const { view, dispose } = mount(undefined);
     expect(view.dom.querySelector(".cm-lineNumbers")).not.toBeNull();
-    expect(view.dom.classList.contains("cm-openidea-distractionFree")).toBe(false);
+    expect(view.dom.classList.contains("cm-oxidea-distractionFree")).toBe(false);
     expect(view.contentDOM.getAttribute("style") ?? "").toContain("background-image");
     dispose();
   });
@@ -43,8 +43,8 @@ describe("editor in distraction free mode", () => {
     setDistractionFree(true);
     const { view, dispose } = mount(settings);
     expect(view.dom.querySelector(".cm-lineNumbers")).toBeNull();
-    expect(view.dom.classList.contains("cm-openidea-distractionFree")).toBe(true);
-    expect(view.dom.style.getPropertyValue("--openidea-df-columns").trim()).toBe("100");
+    expect(view.dom.classList.contains("cm-oxidea-distractionFree")).toBe(true);
+    expect(view.dom.style.getPropertyValue("--oxidea-df-columns").trim()).toBe("100");
     expect(view.contentDOM.getAttribute("style") ?? "").not.toContain("background-image");
     expect(stickyExtension({} as EditorSettings)).toEqual([]);
     dispose();

@@ -1,5 +1,5 @@
 //! Loads a Ruby file into a launched process without touching the project: the directory goes on
-//! `RUBYLIB` and `RUBYOPT` gets the bare feature name (`-ropenidea_hook`).
+//! `RUBYLIB` and `RUBYOPT` gets the bare feature name (`-roxidea_hook`).
 //!
 //! `RUBYOPT` is split at spaces with no quoting, so an absolute path in it (`-r/…/Application
 //! Support/…/hook.rb`, where the IDE keeps its data) makes Ruby fail with `invalid switch in RUBYOPT`.
@@ -42,9 +42,9 @@ mod tests {
     fn a_directory_with_spaces_goes_on_rubylib_not_into_rubyopt() {
         let dir = Path::new("/Users/me/Library/Application Support/ide/ruby");
         let mut env = BTreeMap::new();
-        add(&mut env, dir, "openidea_hook", false);
+        add(&mut env, dir, "oxidea_hook", false);
         assert_eq!(env["RUBYLIB"], dir.to_string_lossy());
-        assert_eq!(env["RUBYOPT"], "-ropenidea_hook");
+        assert_eq!(env["RUBYOPT"], "-roxidea_hook");
         assert!(!env["RUBYOPT"].contains(' '));
     }
 

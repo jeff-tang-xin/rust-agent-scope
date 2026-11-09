@@ -1,6 +1,6 @@
 name: CNB mirror
 
-# Copies a published release to cnb.cool/l0ng-ai/openidea, the updater's CNB source
+# Copies a published release to cnb.cool/l0ng-ai/oxidea, the updater's CNB source
 # (scripts/cnb-mirror.ts). Release runs it after publishing; run it by hand to mirror
 # an existing tag again. Skipped without the CNB_TOKEN secret.
 on:

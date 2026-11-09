@@ -1,4 +1,4 @@
-# OpenIDEA — contributor guide
+# OXidea — contributor guide
 
 Rust + Tauri 2 desktop IDE with full-featured, multi-language code intelligence.
 Visual style: dark, low-contrast greys, one cool accent
@@ -18,8 +18,8 @@ Visual style: dark, low-contrast greys, one cool accent
 - `src/ui/` — design-system primitives. `src/features/<name>/` — one feature each,
   exporting `activate()` registered in `src/features/index.ts`.
 - `languages/<id>.toml` — language definitions (detection, comments, LSP, DAP).
-- `crates/ide-host` — the `openidea-server` binary for remote development and the
-  `openidea-plugin` CLI (plugin starter templates live in its `templates.rs`).
+- `crates/ide-host` — the `oxidea-server` binary for remote development and the
+  `oxidea-plugin` CLI (plugin starter templates live in its `templates.rs`).
 - `wit/` — plugin interface definitions; `plugins/` — sample and bundled plugins.
   Plugin docs: `plugins/README.md`, `docs/plugins/themes.md`.
 - `java/` — JDT LS extension bundles (`java-usages`, `kotlin-bridge`) and the patched
@@ -71,7 +71,7 @@ Shared agent skills live in `.agents/skills/` (`.claude/skills/` links to them):
 - `cargo test -p ide-host --test language_smoke -- --ignored --exact <language>` — code intelligence
   on `fixtures/` with that language's real server installed (CI: `Language smoke`, pinned versions).
 - `pnpm smoke smoke/run.test.ts -t <language>` — run and test that language's fixture through the
-  run store and a real `openidea-server` (build it first: `cargo build -p ide-host --bin openidea-server`).
+  run store and a real `oxidea-server` (build it first: `cargo build -p ide-host --bin oxidea-server`).
 - `pnpm smoke smoke/debug.test.ts -t <language>` — debug that fixture's entry point the same way, with
   the debugger the IDE installs (on macOS, CodeLLDB and Delve may need Developer Mode:
   `sudo DevToolsSecurity -enable`).
@@ -127,6 +127,6 @@ Several worktrees can be developed and run side by side.
 - Each worktree's first build is cold (several minutes) and `cargo build` output takes
   around 9 GB; tests, clippy and incremental builds add more. Avoid running several heavy builds on one machine at the same time.
 - Stop only processes started for the current worktree/session. Never use broad
-  process-name kills such as `pkill openidea`.
+  process-name kills such as `pkill oxidea`.
 - When done: stop that worktree's app and dev session, delete its build output, then
   `git worktree remove ../<name>`.

@@ -23,7 +23,7 @@ test("Close Project shows the Welcome screen; a recent project opens from it onc
     });
     const h = window.__ipc.handlers;
     h.close_project = () => null;
-    h.app_info = () => ({ version: "1.0.0", platform: "macos", configDir: "/Users/dev/.openidea", wayland: false });
+    h.app_info = () => ({ version: "1.0.0", platform: "macos", configDir: "/Users/dev/.oxidea", wayland: false });
     h.recent_projects = () => [
       { path: root, name: "billing", openedAtMs: Date.now() - 3_600_000, branch: "main" },
       { path: "/dev/acme-api", name: "acme-api", openedAtMs: Date.now(), branch: "main" },

@@ -22,7 +22,7 @@ pub struct TrustStore {
 
 /// Set by the desktop when it starts the server in a dev container of a folder the user trusts
 /// there: the project folder in the container, trusted without asking again. Never persisted.
-pub const TRUSTED_ROOT_ENV: &str = "OPENIDEA_TRUSTED_ROOT";
+pub const TRUSTED_ROOT_ENV: &str = "OXIDEA_TRUSTED_ROOT";
 
 impl TrustStore {
     pub fn load(config: &Path, data: &Path) -> Self {

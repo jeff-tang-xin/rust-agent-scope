@@ -163,7 +163,7 @@ describe("sessions saved with Windows backslash paths", () => {
       activePane: 0,
       files: { [raw`C:\p\a.ts`]: { anchor: 1, head: 2 } },
     };
-    const key = raw`openidea.editorSession.v1:C:\p`;
+    const key = raw`oxidea.editorSession.v1:C:\p`;
     localStorage.setItem(key, JSON.stringify(old));
     try {
       const s = loadSession("C:/p")!;

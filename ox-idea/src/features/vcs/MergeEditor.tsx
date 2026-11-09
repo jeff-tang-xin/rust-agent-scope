@@ -75,7 +75,7 @@ const NOTHING_LEFT: MergeSummary = {
 };
 
 // IntelliJ's "Automatically apply non-conflicting changes" (Tools | Diff & Merge); off by default.
-const AUTO_APPLY_KEY = "openidea.merge.autoApplyNonConflicting";
+const AUTO_APPLY_KEY = "oxidea.merge.autoApplyNonConflicting";
 const readAutoApply = () => {
   try {
     return localStorage.getItem(AUTO_APPLY_KEY) === "true";

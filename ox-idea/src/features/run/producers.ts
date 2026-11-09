@@ -56,7 +56,7 @@ export interface ToolEnv {
 }
 
 /** Names only: every tool unknown. */
-export const OPTIMISTIC: ToolEnv = { tool: () => undefined, compileDir: "/tmp/openidea-run" };
+export const OPTIMISTIC: ToolEnv = { tool: () => undefined, compileDir: "/tmp/oxidea-run" };
 
 export interface ContextInput {
   /** Absolute path of the file or directory. */

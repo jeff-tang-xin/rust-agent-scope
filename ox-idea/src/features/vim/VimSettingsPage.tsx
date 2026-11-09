@@ -56,7 +56,7 @@ export function VimSettingsPage() {
               <code className={styles.mono}>{rc.path}</code> · {rc.mappings} <T>mappings</T>
             </>
           ) : (
-            <T>No ~/.openideavimrc or ~/.ideavimrc found.</T>
+            <T>No ~/.oxideavimrc or ~/.ideavimrc found.</T>
           )}
         </p>
         <p className={styles.hint}>

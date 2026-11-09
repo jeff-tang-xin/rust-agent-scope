@@ -172,7 +172,7 @@ export function httpEditorExtension(ctx: EditorDocContext): Extension {
     detector,
     showPanel.of(toolbarPanel(path)),
     gutter({
-      class: `${styles.runGutter} cm-openidea-gutter-http`,
+      class: `${styles.runGutter} cm-oxidea-gutter-http`,
       markers: (view) => markers(view.state),
       initialSpacer: () =>
         new RequestMarker({ index: 0, name: null, method: "", url: "", line: 0, startLine: 0, endLine: 0, pos: 0 }),

@@ -1,5 +1,5 @@
 //! Remote development protocol: JSON-RPC 2.0 (`Content-Length` framing) between
-//! the desktop app and `openidea-server`, over the server's stdio (an SSH exec
+//! the desktop app and `oxidea-server`, over the server's stdio (an SSH exec
 //! channel).
 //!
 //! * client → server request `initialize` `{ version }` → [`ServerInfo`];

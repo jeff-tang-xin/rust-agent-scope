@@ -1,5 +1,5 @@
 //! Remote development (client side): a window whose project lives on another
-//! machine. The backend there is `openidea-server`, started over SSH; the
+//! machine. The backend there is `oxidea-server`, started over SSH; the
 //! frontend's remote-capable commands go through [`remote_invoke`] instead of
 //! running locally.
 
@@ -47,13 +47,13 @@ fn install_dir(version: &str) -> String {
 }
 
 /// Under the remote home: where the server builds are kept, one folder per version.
-pub(crate) const SERVER_DIR: &str = ".openidea/server";
+pub(crate) const SERVER_DIR: &str = ".oxidea/server";
 
 /// File name of the server binary on every host.
-pub(crate) const SERVER_BIN: &str = "openidea-server";
+pub(crate) const SERVER_BIN: &str = "oxidea-server";
 
 /// Printed before a probe's answer: shell start-up files and `wsl.exe` may print first.
-pub(crate) const PROBE_MARK: &str = "__OPENIDEA_PROBE__";
+pub(crate) const PROBE_MARK: &str = "__OXIDEA_PROBE__";
 
 /// One remote window's connection.
 pub struct Connection {
@@ -265,20 +265,20 @@ impl Handler for ClientHandler {
     }
 }
 
-/// The server binary for a remote `os`/`arch`: `OPENIDEA_SERVER_BINARY`, then
-/// `<data dir>/server/<os>-<arch>/openidea-server`, then one next to this app
+/// The server binary for a remote `os`/`arch`: `OXIDEA_SERVER_BINARY`, then
+/// `<data dir>/server/<os>-<arch>/oxidea-server`, then one next to this app
 /// when the platforms match.
 fn local_server_binary(state: &AppState, os: &str, arch: &str) -> Option<std::path::PathBuf> {
-    if let Some(p) = std::env::var_os("OPENIDEA_SERVER_BINARY").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
+    if let Some(p) = std::env::var_os("OXIDEA_SERVER_BINARY").map(std::path::PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
-    let bundled = state.local_data_dir.join("server").join(format!("{os}-{arch}")).join("openidea-server");
+    let bundled = state.local_data_dir.join("server").join(format!("{os}-{arch}")).join("oxidea-server");
     if bundled.is_file() {
         return Some(bundled);
     }
     if os == std::env::consts::OS && arch == std::env::consts::ARCH {
         let exe = std::env::current_exe().ok()?;
-        let name = if cfg!(windows) { "openidea-server.exe" } else { "openidea-server" };
+        let name = if cfg!(windows) { "oxidea-server.exe" } else { "oxidea-server" };
         let sibling = exe.parent()?.join(name);
         if sibling.is_file() {
             return Some(sibling);
@@ -298,7 +298,7 @@ async fn download_server(
     let (data, version, os, arch) = (state.local_data_dir.clone(), version.to_owned(), os.to_owned(), arch.to_owned());
     tokio::task::spawn_blocking(move || {
         ide_tools::server::fetch(&data, &version, &os, &arch, &ide_core::CancellationToken::new(), &|e| match e {
-            ide_tools::InstallEvent::Line { text } => tracing::info!("openidea-server download: {text}"),
+            ide_tools::InstallEvent::Line { text } => tracing::info!("oxidea-server download: {text}"),
             ide_tools::InstallEvent::Progress { fraction, .. } => progress(RemoteStage::Downloading, fraction),
         })
     })
@@ -346,15 +346,15 @@ pub(crate) async fn local_server(
             Err(e) => {
                 return installed.first().cloned().map(LocalServer::Installed).ok_or_else(|| {
                     IdeError::unavailable(format!(
-                        "no openidea-server {version} for {os}-{arch} ({}). Build it with \
-                         `cargo build --release -p ide-host --bin openidea-server` for that platform and put it at {} \
-                         (or set OPENIDEA_SERVER_BINARY)",
+                        "no oxidea-server {version} for {os}-{arch} ({}). Build it with \
+                         `cargo build --release -p ide-host --bin oxidea-server` for that platform and put it at {} \
+                         (or set OXIDEA_SERVER_BINARY)",
                         e.message,
                         state
                             .local_data_dir
                             .join("server")
                             .join(format!("{os}-{arch}"))
-                            .join("openidea-server")
+                            .join("oxidea-server")
                             .display()
                     ))
                 });
@@ -378,7 +378,7 @@ async fn ensure_server(state: &AppState, session: &ide_ssh::Session, progress: A
     let dir = install_dir(version);
     let q = ide_ssh::shell::tilde_quote;
     let probe = session
-        .exec(&format!("echo {PROBE_MARK}; uname -sm; ls -d {}/*/openidea-server 2>/dev/null", q(&dir)), None)
+        .exec(&format!("echo {PROBE_MARK}; uname -sm; ls -d {}/*/oxidea-server 2>/dev/null", q(&dir)), None)
         .await?
         .stdout_str();
     let probe = probe.split_once(PROBE_MARK).map_or(probe.as_str(), |(_, rest)| rest);
@@ -389,14 +389,14 @@ async fn ensure_server(state: &AppState, session: &ide_ssh::Session, progress: A
         LocalServer::Installed(bin) => return Ok(bin),
         LocalServer::Binary(local, build) => (local, build),
     };
-    if let Some(bin) = installed.iter().find(|b| b.ends_with(&format!("/{build}/openidea-server"))) {
+    if let Some(bin) = installed.iter().find(|b| b.ends_with(&format!("/{build}/oxidea-server"))) {
         return Ok(bin.to_string());
     }
     let fs = ide_ssh::RemoteFs::new(session.sftp().await?);
     let remote_dir = fs.resolve(&dir).await;
     fs.close().await;
     let remote_dir = remote_dir?;
-    let remote_bin = ide_ssh::sftp::join(&ide_ssh::sftp::join(&remote_dir, &build), "openidea-server");
+    let remote_bin = ide_ssh::sftp::join(&ide_ssh::sftp::join(&remote_dir, &build), "oxidea-server");
     // Per install: another window may be installing the same build right now.
     let tmp = format!(
         "{remote_bin}.{}-{}.part",
@@ -408,7 +408,7 @@ async fn ensure_server(state: &AppState, session: &ide_ssh::Session, progress: A
     session
         .put_with_progress(&tmp, &tokio::fs::read(&local).await?, &|f| progress(RemoteStage::Uploading, Some(f)))
         .await?;
-    tracing::info!("installed openidea-server on {} in {:?}", session.label(), started.elapsed());
+    tracing::info!("installed oxidea-server on {} in {:?}", session.label(), started.elapsed());
     let q = ide_ssh::shell::quote;
     // Older builds of this version go (a running one keeps its open file).
     session
@@ -423,7 +423,7 @@ async fn ensure_server(state: &AppState, session: &ide_ssh::Session, progress: A
             None,
         )
         .await?
-        .into_stdout("installing openidea-server")?;
+        .into_stdout("installing oxidea-server")?;
     Ok(remote_bin)
 }
 
@@ -475,7 +475,7 @@ pub async fn remote_connect(
             let stream = session
                 .exec_stream(&format!("{} --stdio", ide_ssh::shell::tilde_quote(&bin)))
                 .await
-                .map_err(|e| IdeError::unavailable(format!("cannot start openidea-server: {e}")))?;
+                .map_err(|e| IdeError::unavailable(format!("cannot start oxidea-server: {e}")))?;
             let (reader, writer) = tokio::io::split(stream);
             (Peer::connect(reader, writer, handler), Some(session), config.label(), config.label())
         }
@@ -507,7 +507,7 @@ pub async fn remote_connect(
         .map_err(|e| with_output(ide_host::rpc::error_from_reply(e)))?;
     if info.protocol != ide_host::rpc::PROTOCOL_VERSION {
         return Err(IdeError::unavailable(format!(
-            "openidea-server {} speaks protocol {}, this app {}",
+            "oxidea-server {} speaks protocol {}, this app {}",
             info.version,
             info.protocol,
             ide_host::rpc::PROTOCOL_VERSION

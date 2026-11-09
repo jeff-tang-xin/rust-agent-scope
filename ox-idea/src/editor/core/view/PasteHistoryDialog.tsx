@@ -23,9 +23,9 @@ import {
   selectedRows,
 } from "@/ui";
 import { clipLabel, clipboardHistory, removeClipboardEntries } from "../clipboardHistory";
-import { openideaHighlightStyle } from "../cm/highlight";
+import { oxideaHighlightStyle } from "../cm/highlight";
 import { compartments } from "../cm/setup";
-import { openideaTheme } from "../cm/theme";
+import { oxideaTheme } from "../cm/theme";
 import styles from "./PasteHistoryDialog.module.css";
 
 interface Request {
@@ -224,8 +224,8 @@ function PastePreview({ source, text }: { source: EditorView; text: string }) {
       state: EditorState.create({
         doc: text,
         extensions: [
-          openideaTheme,
-          syntaxHighlighting(openideaHighlightStyle),
+          oxideaTheme,
+          syntaxHighlighting(oxideaHighlightStyle),
           source.state.facet(language)?.extension ?? [],
           compartments.font.get(source.state) ?? [],
           EditorState.tabSize.of(source.state.tabSize),

@@ -1,6 +1,6 @@
 //! The Commit view's side of the `commit` API, as the window commands
 //! `plugin_answer_commit` / `plugin_commit_checks` serve it — the desktop for
-//! local projects, `openidea-server` for remote ones.
+//! local projects, `oxidea-server` for remote ones.
 
 use super::{CommitSelection, PluginCommitCheckRef, PluginCommitCheckResult, PluginHost};
 use ide_core::{IdeError, IdeResult, RequestId};

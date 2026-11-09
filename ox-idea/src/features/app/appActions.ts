@@ -93,7 +93,7 @@ export function appActions(): Action[] {
       id: "help.showLog",
       title: t("app.action.showLog", { os }),
       category: t("app.category.help"),
-      keywords: ["log", "logs", "openidea.log"],
+      keywords: ["log", "logs", "oxidea.log"],
       run: showLog,
     },
     edit("edit.undo", "undo", "app.action.undo"),

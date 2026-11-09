@@ -592,7 +592,7 @@ impl LspManager {
             }
             // The extension only queues bounded, low-priority work; this request
             // never waits for the configuration index itself to be built.
-            const WARMUP: &str = "openidea.java.configuration.warmup";
+            const WARMUP: &str = "oxidea.java.configuration.warmup";
             if server.running_gen(generation).is_some()
                 && run.caps.read().commands().iter().any(|command| command == WARMUP)
             {

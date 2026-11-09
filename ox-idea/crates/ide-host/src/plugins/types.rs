@@ -25,7 +25,7 @@ pub enum PluginSource {
     Installed,
     /// Loaded from `<project>/.oxidea/plugins/<dir>/` while that project is open.
     Dev,
-    /// A development plugin linked from any folder (`openidea-plugin link`).
+    /// A development plugin linked from any folder (`oxidea-plugin link`).
     Linked,
 }
 

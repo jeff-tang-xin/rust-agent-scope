@@ -90,7 +90,7 @@ it("keeps the window and unsaved local edits when closing is cancelled or saving
   // The project window waiting to close stops.
   expect(mocks.emit).toHaveBeenCalledWith(
     "project-2",
-    "openidea://auxiliary/closed",
+    "oxidea://auxiliary/closed",
     expect.objectContaining({ label: "deployment-project-2", closed: false }),
   );
   mocks.ask.mockResolvedValue({ button: "save" });

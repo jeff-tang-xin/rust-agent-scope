@@ -1,9 +1,9 @@
-//! String Tools for OpenIDEA: text transformations on every selection of the
+//! String Tools for OXidea: text transformations on every selection of the
 //! focused editor, applied as one undoable change. An empty selection
 //! (a cursor) works on the word under it; line commands on whole lines.
 
-use openidea_plugin::text::{offset, position};
-use openidea_plugin::{Error, Invocation, Plugin, Range, TextEdit, TextEditor, register_plugin};
+use oxidea_plugin::text::{offset, position};
+use oxidea_plugin::{Error, Invocation, Plugin, Range, TextEdit, TextEditor, register_plugin};
 
 #[derive(Default)]
 pub struct StringTools;
@@ -111,10 +111,10 @@ fn word_range(text: &str, r: Range) -> Range {
 }
 
 fn line_range(text: &str, r: Range) -> Range {
-    let start = openidea_plugin::Position::new(r.start.line, 0);
+    let start = oxidea_plugin::Position::new(r.start.line, 0);
     let end_line = if r.end.character == 0 && r.end.line > r.start.line { r.end.line - 1 } else { r.end.line };
     let line_end = text.split('\n').nth(end_line as usize).map_or(0, |l| l.encode_utf16().count() as u32);
-    Range::new(start, openidea_plugin::Position::new(end_line, line_end))
+    Range::new(start, oxidea_plugin::Position::new(end_line, line_end))
 }
 
 #[derive(Clone, Copy)]
@@ -391,7 +391,7 @@ fn json_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     #[test]
     fn cases() {

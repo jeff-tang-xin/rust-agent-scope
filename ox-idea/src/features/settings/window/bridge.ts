@@ -15,9 +15,9 @@ import { allActions, executeAction, getAction, registerAction, useActions, type 
 import { isTauri } from "@/platform/ipc";
 
 const SETTINGS_PREFIX = "settings-";
-const REQUEST_ACTIONS = "openidea://settings/request-actions";
-const ACTIONS = "openidea://settings/actions";
-const EXEC = "openidea://settings/exec";
+const REQUEST_ACTIONS = "oxidea://settings/request-actions";
+const ACTIONS = "oxidea://settings/actions";
+const EXEC = "oxidea://settings/exec";
 
 export type ActionInfo = Pick<
   Action,

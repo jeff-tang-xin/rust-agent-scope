@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 
 const MAX_HISTORY_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_HISTORY_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-const SNAPSHOT_PREFIX: &str = "openidea-workspace-edit-";
+const SNAPSHOT_PREFIX: &str = "oxidea-workspace-edit-";
 
 struct ActiveEdit<'a>(&'a AtomicBool);
 impl<'a> ActiveEdit<'a> {
@@ -963,7 +963,7 @@ mod tests {
 
     #[test]
     fn snapshot_crash_child() {
-        let Some(root) = std::env::var_os("OPENIDEA_SNAPSHOT_CRASH_FIXTURE") else { return };
+        let Some(root) = std::env::var_os("OXIDEA_SNAPSHOT_CRASH_FIXTURE") else { return };
         let root = PathBuf::from(root);
         for (name, recovery) in [("undo", false), ("recovery", true)] {
             let directory = tempfile::Builder::new().prefix(SNAPSHOT_PREFIX).tempdir_in(&root).unwrap();
@@ -991,7 +991,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "documents::workspace_edit::tests::snapshot_crash_child"])
-            .env("OPENIDEA_SNAPSHOT_CRASH_FIXTURE", root.path())
+            .env("OXIDEA_SNAPSHOT_CRASH_FIXTURE", root.path())
             .status()
             .unwrap();
         assert!(status.success());

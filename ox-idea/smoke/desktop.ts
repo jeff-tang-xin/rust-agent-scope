@@ -1,7 +1,7 @@
 /**
  * The frontend's view of the desktop app, with a real backend: the window's Tauri runtime
  * (callbacks, `Channel`s, the event plugin) in-process, and every app command sent to an
- * `openidea-server` through the route remote development uses (`src/platform/tauriCore.ts`).
+ * `oxidea-server` through the route remote development uses (`src/platform/tauriCore.ts`).
  */
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";

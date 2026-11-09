@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { loadJson, saveJson } from "../storage";
 
-export const POSTFIX_KEY = "openidea.postfix.v1";
+export const POSTFIX_KEY = "oxidea.postfix.v1";
 const KEY = POSTFIX_KEY;
 
 export interface PostfixSettings {

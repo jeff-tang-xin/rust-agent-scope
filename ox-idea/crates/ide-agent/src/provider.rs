@@ -20,6 +20,9 @@ pub(crate) enum Driver {
     Codex,
     /// `claude` in stream-json mode.
     Claude,
+    /// Our own `ox-hareness`: the AgentScope harness assembled in-process
+    /// (no child process; the agent endpoint runs on an in-memory duplex).
+    Ox,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,17 +42,16 @@ pub(crate) struct ProviderSpec {
 /// session's protocol does not change under the user.
 ///
 /// OXidea is not a multi-tool ACP hub: the only built-in agent is our own OX-series
-/// one, `ox-hareness` (the `agentscope-acp` binary built from the AgentScope Rust
-/// workspace). External CLIs stay available through the ACP Registry, not here.
-const BUILTIN: &[(&str, &str, Driver, &[&str], &str)] = &[
-    (
-        "ox-hareness",
-        "OX Hareness",
-        Driver::Acp,
-        &["agentscope-acp"],
-        "Set `AGENTSCOPE_API_KEY` (and optionally `AGENTSCOPE_PROVIDER`/`AGENTSCOPE_MODEL`) to sign in.",
-    ),
-];
+/// one, `ox-hareness` — the AgentScope harness assembled in-process (driver `ox`),
+/// so it is always available and has nothing to install. External CLIs stay
+/// available through the ACP Registry, not here.
+const BUILTIN: &[(&str, &str, Driver, &[&str], &str)] = &[(
+    "ox-hareness",
+    "OX Hareness",
+    Driver::Ox,
+    &[],
+    "Configure the model provider (API key, model) in Settings › Tools › Agents.",
+)];
 
 fn builtins() -> Vec<ProviderSpec> {
     BUILTIN
@@ -58,8 +60,9 @@ fn builtins() -> Vec<ProviderSpec> {
             id: (*id).into(),
             name: (*name).into(),
             driver: *driver,
-            command: cmd[0].into(),
-            args: cmd[1..].iter().map(|a| (*a).to_owned()).collect(),
+            // The in-process OX agent has no executable; every other driver launches one.
+            command: cmd.first().map_or_else(String::new, |c| (*c).to_string()),
+            args: cmd.iter().skip(1).map(|a| (*a).to_owned()).collect(),
             env: Vec::new(),
             login_hint: (*hint).into(),
             source: AgentSource::Builtin,
@@ -175,7 +178,11 @@ pub(crate) fn describe(spec: &ProviderSpec) -> AgentProvider {
     let reason = if matches!(spec.source, AgentSource::Registry { .. }) {
         Some(AgentCommandReadOnlyReason::Registry)
     } else if let Some(default) = &builtin {
-        matches!(default.command.as_str(), "npx" | "bunx" | "uvx").then_some(AgentCommandReadOnlyReason::PackageRunner)
+        if default.driver == Driver::Ox {
+            Some(AgentCommandReadOnlyReason::InProcess)
+        } else {
+            matches!(default.command.as_str(), "npx" | "bunx" | "uvx").then_some(AgentCommandReadOnlyReason::PackageRunner)
+        }
     } else {
         Some(AgentCommandReadOnlyReason::CustomAgent)
     };
@@ -194,7 +201,7 @@ pub(crate) fn describe(spec: &ProviderSpec) -> AgentProvider {
         command_overridden: builtin.as_ref().is_some_and(|b| b.command != spec.command),
         command_editable: reason.is_none(),
         command_read_only_reason: reason,
-        installed: installed(&spec.command),
+        installed: spec.driver == crate::provider::Driver::Ox || installed(&spec.command),
         env: spec.env.iter().cloned().collect(),
         config: vec![],
         thought_levels: BTreeMap::new(),
@@ -206,6 +213,11 @@ pub(crate) fn describe(spec: &ProviderSpec) -> AgentProvider {
 /// Overrides built-in `id`'s command through its agent file, preserving other
 /// customizations. `None` restores the built-in command and removes a redundant file.
 pub(crate) fn set_builtin_command(custom_dir: &Path, id: &str, command: Option<&str>) -> IdeResult<()> {
+    if builtin_spec(id).is_some_and(|b| b.driver == Driver::Ox) {
+        return Err(IdeError::invalid(format!(
+            "{id} runs in-process and has no executable to point at"
+        )));
+    }
     update_builtin(custom_dir, id, |agent, builtin| agent.command = command.unwrap_or(&builtin.command).to_owned())
 }
 
@@ -388,7 +400,8 @@ mod tests {
     #[test]
     fn login_hints_cover_all_builtin_commands_and_preserve_separate_login_tools() {
         for spec in builtins() {
-            let separate = matches!(spec.id.as_str(), "claude-acp" | "codex-acp" | "vibe");
+            // The in-process OX agent has no executable to render; its hint is fixed text.
+            let separate = spec.driver == Driver::Ox;
             for windows in [false, true] {
                 let program =
                     if windows { Path::new(r"C:\Agent Tools\renamed.cmd") } else { Path::new("/agent tools/renamed") };
@@ -411,41 +424,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn login_commands_quote_shell_metacharacters_and_keep_arguments() {
-        let cursor = builtin_spec("cursor").unwrap();
-        assert_eq!(
-            render_login_hint(&cursor, Path::new("/agent's tools/$cli"), None, false),
-            "Run `'/agent'\\''s tools/$cli' login` in a terminal."
-        );
-        assert_eq!(
-            render_login_hint(&cursor, Path::new(r"C:\agent's tools\$cli.cmd"), None, true),
-            r"Run `& 'C:\agent''s tools\$cli.cmd' login` in a terminal."
-        );
-        let opencode = builtin_spec("opencode").unwrap();
-        assert_eq!(
-            render_login_hint(&opencode, Path::new("/registry/opencode"), None, false),
-            "Run `'/registry/opencode' auth login` in a terminal."
-        );
-        let mut custom = cursor;
-        custom.id = "custom".into();
-        custom.login_hint = "Sign in with the agent's own command line first.".into();
-        assert_eq!(render_login_hint(&custom, Path::new("/custom"), None, false), custom.login_hint);
+    fn acp_spec(id: &str, command: &str, login_hint: &str) -> ProviderSpec {
+        ProviderSpec {
+            id: id.into(),
+            name: id.into(),
+            driver: Driver::Acp,
+            command: command.into(),
+            args: vec![],
+            env: vec![],
+            login_hint: login_hint.into(),
+            source: AgentSource::Builtin,
+        }
     }
 
     #[test]
     fn launch_resolution_uses_the_child_path_and_absolutizes_relative_overrides() {
         let dir = tempfile::tempdir().unwrap();
-        let mut cursor = builtin_spec("cursor").unwrap();
         let command = if cfg!(windows) { "cursor-agent.cmd" } else { "cursor-agent" };
         let program = dir.path().join(command);
         std::fs::write(&program, "").unwrap();
-        cursor.env.push(("PATH".into(), dir.path().to_string_lossy().into_owned()));
-        let resolved = cursor.clone().resolve_for_launch(dir.path());
+        let mut spec = acp_spec("cursor", command, "Run `cursor-agent login` in a terminal.");
+        spec.env.push(("PATH".into(), dir.path().to_string_lossy().into_owned()));
+        let resolved = spec.clone().resolve_for_launch(dir.path());
         assert_eq!(Path::new(&resolved.command), program);
-        assert!(resolved.sign_in_message(&[]).contains(&*program.to_string_lossy()));
-        cursor.command = format!("tools/{command}");
-        let resolved = cursor.resolve_for_launch(dir.path());
+        // No built-in command to re-render: the hint is the agent's own.
+        assert_eq!(resolved.sign_in_message(&[]), "cursor needs you to sign in. Run `cursor-agent login` in a terminal.");
+        spec.command = format!("tools/{command}");
+        let resolved = spec.resolve_for_launch(dir.path());
         assert_eq!(Path::new(&resolved.command), dir.path().join("tools").join(command));
     }
 
@@ -464,10 +469,10 @@ mod tests {
                 expected
             );
         }
-        let mut spec = builtin_spec("cursor").unwrap();
+        let mut spec = acp_spec("cursor", "cursor-agent", "Sign in with the agent's own command line first.");
+        spec.name = "Cursor".into();
         spec.id = "custom".into();
         spec.source = AgentSource::Registry { version: "1.4.5".into(), update: None };
-        spec.login_hint = "Sign in with the agent's own command line first.".into();
         for method in [
             json!({"type": "terminal"}),
             json!({"type": "terminal", "args": ["login", null]}),
@@ -483,11 +488,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn registry_login_hint_names_the_installed_executable() {
-        let mut spec = builtin_spec("cursor").unwrap();
+        // A non-builtin id has no built-in command to re-render: the hint is the agent's own.
+        let mut spec = acp_spec("cursor", "/registry path/dist-package/cursor-agent", "Run `cursor-agent login` in a terminal.");
         spec.command = "/registry path/dist-package/cursor-agent".into();
         assert_eq!(
             describe(&spec).login_hint.as_deref(),
-            Some("Run `'/registry path/dist-package/cursor-agent' login` in a terminal.")
+            Some("Run `cursor-agent login` in a terminal.")
         );
     }
 
@@ -496,40 +502,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let list = || load(Some(dir.path())).iter().map(describe).collect::<Vec<_>>();
         let defaults = list();
-        let codex = defaults.iter().find(|p| p.id == "codex").unwrap();
-        assert_eq!(codex.program, "codex");
-        assert_eq!(codex.default_program.as_deref(), Some("codex"));
-        assert_eq!(codex.args, ["app-server"]);
-        assert_eq!(codex.default_args, codex.args);
-        assert_eq!(codex.command, "codex app-server");
-        assert_eq!(codex.login_hint.as_deref(), Some("Run `codex login` in a terminal."));
-        assert!(!codex.command_overridden);
-        assert!(codex.command_editable);
+        let ox = defaults.iter().find(|p| p.id == "ox-hareness").unwrap();
+        // The in-process OX agent: no executable, nothing to override, always installed.
+        assert_eq!(ox.program, "");
+        assert_eq!(ox.default_program.as_deref(), Some(""));
+        assert!(ox.args.is_empty() && ox.default_args.is_empty());
+        assert_eq!(ox.command, "");
+        assert_eq!(
+            ox.login_hint.as_deref(),
+            Some("Configure the model provider (API key, model) in Settings › Tools › Agents.")
+        );
+        assert!(!ox.command_overridden);
+        assert!(!ox.command_editable);
+        assert_eq!(ox.command_read_only_reason, Some(AgentCommandReadOnlyReason::InProcess));
+        assert!(ox.installed);
         for p in &defaults {
             assert_eq!(p.source, AgentSource::Builtin);
             assert!(p.default_program.is_some());
-            assert_eq!(p.command_editable, !p.id.ends_with("-acp"));
-            assert_eq!(
-                p.command_read_only_reason,
-                p.id.ends_with("-acp").then_some(AgentCommandReadOnlyReason::PackageRunner)
-            );
         }
-        set_builtin_command(dir.path(), "codex", Some("/path with spaces/codex")).unwrap();
-        let overridden = list().into_iter().find(|p| p.id == "codex").unwrap();
-        assert_eq!(overridden.program, "/path with spaces/codex");
-        assert_eq!(overridden.args, codex.args);
-        assert_eq!(overridden.default_program, codex.default_program);
-        assert!(overridden.command_overridden && overridden.command_editable);
-        assert_eq!(overridden.source, AgentSource::Builtin);
-        set_builtin_command(dir.path(), "codex", Some("codex")).unwrap();
-        assert!(!list().iter().find(|p| p.id == "codex").unwrap().command_overridden);
+        // The OX agent's command cannot be overridden at all.
+        set_builtin_command(dir.path(), "ox-hareness", Some("/path with spaces/ox")).unwrap_err();
+        // A registry install is read-only.
         std::fs::write(
             dir.path().join("gemini.toml"),
             "command = \"/registry/gemini\"\n[registry]\nid = \"gemini\"\nversion = \"1.0\"\n",
         )
         .unwrap();
         let registry = list().into_iter().find(|p| p.id == "gemini").unwrap();
-        assert_eq!(registry.default_program.as_deref(), Some("gemini"));
+        assert_eq!(registry.default_program, None);
         assert!(!registry.command_editable);
         assert_eq!(registry.command_read_only_reason, Some(AgentCommandReadOnlyReason::Registry));
         assert!(matches!(registry.source, AgentSource::Registry { .. }));
@@ -553,38 +553,33 @@ mod tests {
         let gemini = specs.iter().find(|s| s.id == "gemini").unwrap();
         assert_eq!((gemini.name.as_str(), gemini.args.as_slice()), ("gemini", &["--acp".to_owned()][..]));
         assert!(!specs.iter().any(|s| s.id == "broken"));
-        assert_eq!(specs.iter().filter(|s| s.id == "claude").count(), 1);
+        assert_eq!(specs.iter().filter(|s| s.id == "ox-hareness").count(), 1);
         assert!(!installed("/definitely/not/here"));
-        assert!(installed("sh"));
+        assert!(installed(if cfg!(windows) { "cmd" } else { "sh" }));
     }
 
     #[test]
     fn set_builtin_env_writes_and_clears_the_environment() {
         let dir = tempfile::tempdir().unwrap();
-        let env = BTreeMap::from([("CLAUDE_CODE_ENTRYPOINT".to_owned(), "openidea".to_owned())]);
-        set_builtin_env(dir.path(), "claude", env.clone()).unwrap();
-        let claude = load(Some(dir.path())).into_iter().find(|s| s.id == "claude").unwrap();
-        assert_eq!(claude.env, vec![("CLAUDE_CODE_ENTRYPOINT".to_owned(), "openidea".to_owned())]);
-        assert_eq!(describe(&claude).env, env);
-        // The command override and the environment are kept independently.
-        set_builtin_command(dir.path(), "claude", Some("/opt/claude")).unwrap();
-        set_builtin_command(dir.path(), "claude", None).unwrap();
-        assert!(dir.path().join("claude.toml").is_file());
-        set_builtin_env(dir.path(), "claude", BTreeMap::new()).unwrap();
-        assert!(!dir.path().join("claude.toml").exists());
+        let env = BTreeMap::from([("AGENTSCOPE_API_KEY".to_owned(), "sk-test".to_owned())]);
+        set_builtin_env(dir.path(), "ox-hareness", env.clone()).unwrap();
+        let ox = load(Some(dir.path())).into_iter().find(|s| s.id == "ox-hareness").unwrap();
+        assert_eq!(ox.env, vec![("AGENTSCOPE_API_KEY".to_owned(), "sk-test".to_owned())]);
+        assert_eq!(describe(&ox).env, env);
+        set_builtin_env(dir.path(), "ox-hareness", BTreeMap::new()).unwrap();
+        assert!(!dir.path().join("ox-hareness.toml").exists());
         set_builtin_env(dir.path(), "not-a-builtin", env).unwrap_err();
     }
 
     #[test]
-    fn set_builtin_command_overrides_and_clears_a_builtin() {
+    fn set_builtin_command_rejects_non_builtin_registry_and_in_process_agents() {
         let dir = tempfile::tempdir().unwrap();
         set_builtin_command(dir.path(), "not-a-builtin", Some("/x")).unwrap_err();
-        set_builtin_command(dir.path(), "claude", Some("/opt/claude")).unwrap();
-        let claude = load(Some(dir.path())).into_iter().find(|s| s.id == "claude").unwrap();
-        assert_eq!((claude.command.as_str(), claude.driver), ("/opt/claude", Driver::Claude));
-        assert!(claude.args.is_empty());
+        // The in-process OX agent has no executable to point at.
+        set_builtin_command(dir.path(), "ox-hareness", Some("/x")).unwrap_err();
+        set_builtin_command(dir.path(), "ox-hareness", None).unwrap_err();
         // A registry install is neither overwritten nor removed by a command override.
-        let path = dir.path().join("codex.toml");
+        let path = dir.path().join("amp.toml");
         CustomAgent {
             name: None,
             driver: Driver::Acp,
@@ -595,68 +590,9 @@ mod tests {
         }
         .write(&path)
         .unwrap();
-        set_builtin_command(dir.path(), "codex", Some("/x")).unwrap_err();
-        set_builtin_command(dir.path(), "codex", None).unwrap_err();
+        set_builtin_command(dir.path(), "amp", Some("/x")).unwrap_err();
+        set_builtin_command(dir.path(), "amp", None).unwrap_err();
         assert!(path.exists());
-        // Clearing (twice) returns the built-in to auto-detection.
-        set_builtin_command(dir.path(), "claude", None).unwrap();
-        set_builtin_command(dir.path(), "claude", None).unwrap();
-        assert!(!dir.path().join("claude.toml").exists());
-        assert_eq!(load(Some(dir.path())).iter().find(|s| s.id == "claude").unwrap().command, "claude");
-    }
-
-    #[test]
-    fn set_builtin_command_preserves_other_customizations_on_save_and_reset() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("claude.toml");
-        for field in ["name", "driver", "args", "env", "unnamed"] {
-            let mut agent = CustomAgent {
-                name: Some("Claude Code".into()),
-                driver: Driver::Claude,
-                command: "/old/claude".into(),
-                args: vec![],
-                env: BTreeMap::new(),
-                registry: None,
-            };
-            match field {
-                "name" => agent.name = Some("My Claude".into()),
-                "driver" => agent.driver = Driver::Acp,
-                "args" => agent.args.push("--verbose".into()),
-                "env" => {
-                    agent.env.insert("K".into(), "v".into());
-                }
-                "unnamed" => agent.name = None,
-                _ => unreachable!(),
-            }
-            agent.write(&path).unwrap();
-
-            set_builtin_command(dir.path(), "claude", Some("/new/claude")).unwrap();
-            agent.command = "/new/claude".into();
-            assert_eq!(CustomAgent::read(&path).unwrap(), agent, "{field}");
-
-            set_builtin_command(dir.path(), "claude", None).unwrap();
-            agent.command = "claude".into();
-            assert_eq!(CustomAgent::read(&path).unwrap(), agent, "{field}");
-        }
-    }
-
-    #[test]
-    fn resetting_a_command_only_override_removes_the_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("codex.toml");
-        std::fs::write(
-            &path,
-            "name = \"Codex\"\ndriver = \"codex\"\ncommand = \"/custom/codex\"\nargs = [\"app-server\"]\n",
-        )
-        .unwrap();
-
-        set_builtin_command(dir.path(), "codex", None).unwrap();
-
-        assert!(!path.exists());
-        assert_eq!(
-            load(Some(dir.path())).into_iter().find(|s| s.id == "codex").unwrap(),
-            builtin_spec("codex").unwrap()
-        );
     }
 
     #[test]

@@ -52,7 +52,7 @@ export function isThemeChoiceId(value: unknown): value is ThemeChoiceId {
 /** Themes of live plugins, offered next to the built-in ones. */
 export const useContributedThemes = create<{ themes: readonly ThemeChoice[] }>(() => ({ themes: [] }));
 
-const KINDS_KEY = "openidea.themeKinds";
+const KINDS_KEY = "oxidea.themeKinds";
 
 function rememberedKinds(): Record<string, "light" | "dark"> {
   try {

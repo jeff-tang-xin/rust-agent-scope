@@ -59,7 +59,7 @@ describe("PreviewEditor", () => {
     stubAttacher(docs);
     render(<PreviewEditor path="/p/c.js" line={0} col={3} fallbackLoad={previewText} />);
     const todo = await waitFor(() => {
-      const el = document.querySelector(".cm-openidea-todo");
+      const el = document.querySelector(".cm-oxidea-todo");
       expect(el).toBeTruthy();
       return el!;
     });

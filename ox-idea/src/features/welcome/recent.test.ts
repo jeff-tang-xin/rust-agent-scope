@@ -23,7 +23,7 @@ const p = (name: string, path: string, branch: string | null = null): RecentProj
 
 const projects = [
   p("acme-api", "/Users/me/dev/acme", "main"),
-  p("openidea-ide", "/Users/me/dev/openidea"),
+  p("oxidea-ide", "/Users/me/dev/oxidea"),
   p("tokio", "/Users/me/oss/tokio"),
   p("notes", "/Volumes/data/acme-notes"),
 ];
@@ -31,7 +31,7 @@ const projects = [
 describe("filterRecent", () => {
   it("returns everything in recency order for an empty query", () => {
     const all = filterRecent(projects, "  ", "/Users/me");
-    expect(all.map((m) => m.project.name)).toEqual(["acme-api", "openidea-ide", "tokio", "notes"]);
+    expect(all.map((m) => m.project.name)).toEqual(["acme-api", "oxidea-ide", "tokio", "notes"]);
     expect(all[0]!.displayPath).toBe("~/dev/acme");
     expect(all[3]!.displayPath).toBe("/Volumes/data/acme-notes");
   });
@@ -45,7 +45,7 @@ describe("filterRecent", () => {
   });
 
   it("matches camel-hump / word starts and is case-insensitive", () => {
-    expect(filterRecent(projects, "EIde").map((m) => m.project.name)).toEqual(["openidea-ide"]);
+    expect(filterRecent(projects, "EIde").map((m) => m.project.name)).toEqual(["oxidea-ide"]);
     expect(filterRecent(projects, "TOK").map((m) => m.project.name)).toEqual(["tokio"]);
     expect(filterRecent(projects, "zzz")).toEqual([]);
   });
@@ -96,11 +96,11 @@ describe("project groups", () => {
   afterEach(() => useRecent.setState({ groups: [] }));
 
   it("lists groups first with their projects, then the rest; a search lists matches only", async () => {
-    expect(rows()).toEqual(["acme-api", "openidea-ide", "tokio", "notes"]);
+    expect(rows()).toEqual(["acme-api", "oxidea-ide", "tokio", "notes"]);
     await createGroup(" Work ", "/Users/me/dev/acme");
-    await moveToGroup("/Users/me/dev/openidea", "Work");
+    await moveToGroup("/Users/me/dev/oxidea", "Work");
     await createGroup("Oss", "/Users/me/oss/tokio");
-    expect(rows()).toEqual(["[Work 2]", "  acme-api", "  openidea-ide", "[Oss 1]", "  tokio", "notes"]);
+    expect(rows()).toEqual(["[Work 2]", "  acme-api", "  oxidea-ide", "[Oss 1]", "  tokio", "notes"]);
     expect(rows("tok")).toEqual(["tokio"]);
 
     useRecent.setState((s) => ({ groups: s.groups.map((g) => ({ ...g, expanded: g.name !== "Work" })) }));
@@ -119,13 +119,13 @@ describe("project groups", () => {
     expect(useRecent.getState().groups.map((g) => g.name)).toEqual(["Work", "Oss"]);
 
     await moveToGroup("/Users/me/dev/acme", "Oss");
-    expect(rows()).toEqual(["[Work 0]", "[Oss 1]", "  acme-api", "openidea-ide", "tokio", "notes"]);
+    expect(rows()).toEqual(["[Work 0]", "[Oss 1]", "  acme-api", "oxidea-ide", "tokio", "notes"]);
     await renameGroup("Oss", "Open source");
     await moveToGroup("/Users/me/oss/tokio", "Open source");
     await removeGroup("Work");
-    expect(rows()).toEqual(["[Open source 2]", "  acme-api", "  tokio", "openidea-ide", "notes"]);
+    expect(rows()).toEqual(["[Open source 2]", "  acme-api", "  tokio", "oxidea-ide", "notes"]);
     await moveToGroup("/Users/me/dev/acme", null);
     await removeGroup("Open source");
-    expect(rows()).toEqual(["acme-api", "openidea-ide", "tokio", "notes"]);
+    expect(rows()).toEqual(["acme-api", "oxidea-ide", "tokio", "notes"]);
   });
 });

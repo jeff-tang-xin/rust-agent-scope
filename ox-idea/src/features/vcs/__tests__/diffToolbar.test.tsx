@@ -75,12 +75,12 @@ beforeEach(() => {
 
 describe("Diff toolbar", () => {
   it("can start an embedded comparison side by side without overwriting saved viewer preferences", async () => {
-    localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ mode: "unified" }));
+    localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ mode: "unified" }));
     const mounted = render(<DiffEditor input={{ ...input, data: { ...(input.data as object), mode: "split" } }} />);
     await waitFor(() => expect(mounted.container.querySelectorAll(".cm-editor")).toHaveLength(2));
-    expect(JSON.parse(localStorage.getItem("openidea.vcs.diffOptions")!).mode).toBe("unified");
+    expect(JSON.parse(localStorage.getItem("oxidea.vcs.diffOptions")!).mode).toBe("unified");
     mounted.unmount();
-    localStorage.removeItem("openidea.vcs.diffOptions");
+    localStorage.removeItem("oxidea.vcs.diffOptions");
   });
   it("shows a binary notice for disk comparisons instead of identical empty text", async () => {
     probe.mockResolvedValue({ status: "ok", data: { size: 3, binary: true, tooLarge: false } });
@@ -119,14 +119,14 @@ describe("Diff toolbar", () => {
   });
 
   it("does not describe ignored whitespace as only line separators", async () => {
-    localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ ignore: "whitespace" }));
+    localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ ignore: "whitespace" }));
     texts.HEAD = "a \r\n";
     texts.abc123 = "a\n";
     const mounted = render(<DiffEditor input={input} />);
     await waitFor(() => expect(mounted.container.querySelectorAll(".cm-editor")).toHaveLength(2));
     expect(screen.queryByText("Contents differ only in line separators")).toBeNull();
     mounted.unmount();
-    localStorage.removeItem("openidea.vcs.diffOptions");
+    localStorage.removeItem("oxidea.vcs.diffOptions");
   });
 
   it("compares a normalized live CRLF document with a raw CRLF revision", async () => {
@@ -186,7 +186,7 @@ describe("Diff toolbar", () => {
     // The lock turns scrolling together off without rebuilding the panes.
     const divider = document.querySelector(".cm-diffDivider");
     (await screen.findByRole("button", { name: "Synchronize Scrolling" })).click();
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("openidea.vcs.diffOptions")!).syncScroll).toBe(false));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("oxidea.vcs.diffOptions")!).syncScroll).toBe(false));
     expect(document.querySelector(".cm-diffDivider")).toBe(divider);
     (await screen.findByRole("button", { name: "Settings" })).click();
     const item = await screen.findByRole("menuitemcheckbox", { name: "Align Changes" });
@@ -195,7 +195,7 @@ describe("Diff toolbar", () => {
     // Padded panes, the changed lines' gutters still tinted as in IDEA.
     await waitFor(() => expect(document.querySelector(".cm-diffDivider")).toBeNull());
     expect(document.querySelector(".cm-merge-b .cm-lineNumbers .cm-diffGutter-inserted")?.textContent).toBe("2");
-    expect(JSON.parse(localStorage.getItem("openidea.vcs.diffOptions")!)).toMatchObject({
+    expect(JSON.parse(localStorage.getItem("oxidea.vcs.diffOptions")!)).toMatchObject({
       alignChanges: true,
       syncScroll: false,
     });
@@ -367,7 +367,7 @@ describe("Unified Revert", () => {
       ["", "added"],
       ["deleted", ""],
     ])(`${control} restores %j from %j`, async (original, changed) => {
-      localStorage.setItem("openidea.vcs.diffOptions", JSON.stringify({ mode: "unified", collapse: false }));
+      localStorage.setItem("oxidea.vcs.diffOptions", JSON.stringify({ mode: "unified", collapse: false }));
       texts.HEAD = original;
       working = changed;
       const mounted = render(

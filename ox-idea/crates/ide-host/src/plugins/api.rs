@@ -3061,7 +3061,7 @@ mod tests {
 
     fn api(dir: &Path, pins: Arc<RwLock<HashMap<(String, String), ProgramPin>>>) -> PluginApi {
         let manifest = ide_extension::Manifest::parse(
-            "id = \"acme.lint\"\nname = \"Lint\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n",
+            "id = \"acme.lint\"\nname = \"Lint\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n",
         )
         .unwrap();
         let sink: Arc<dyn PluginEventSink> = Arc::new(|_: Option<&str>, _: PluginEvent| {});
@@ -3268,19 +3268,19 @@ mod tests {
     fn process_environment_uses_prepared_values_and_windows_key_rules() {
         let mut cmd = StdCommand::new("unused");
         ide_core::process::prepare(&mut cmd);
-        cmd.env("OPENIDEA_PREPARED_ENV", "login-shell");
-        let err = append_process_env(&mut cmd, &[("OPENIDEA_PREPARED_ENV".into(), "override".into())]).unwrap_err();
-        assert!(err.to_string().contains("OPENIDEA_PREPARED_ENV"));
+        cmd.env("OXIDEA_PREPARED_ENV", "login-shell");
+        let err = append_process_env(&mut cmd, &[("OXIDEA_PREPARED_ENV".into(), "override".into())]).unwrap_err();
+        assert!(err.to_string().contains("OXIDEA_PREPARED_ENV"));
         for name in ["", "BAD=KEY", "BAD\0KEY"] {
             assert!(append_process_env(&mut cmd, &[(name.into(), "value".into())]).is_err());
         }
         for value in ["bad\0value".to_owned(), "x".repeat(4097)] {
-            assert!(append_process_env(&mut cmd, &[("OPENIDEA_NEW_ENV".into(), value)]).is_err());
+            assert!(append_process_env(&mut cmd, &[("OXIDEA_NEW_ENV".into(), value)]).is_err());
         }
         assert!(
             append_process_env(
                 &mut cmd,
-                &[("OPENIDEA_NEW_ENV".into(), "a".into()), ("OPENIDEA_NEW_ENV".into(), "b".into())]
+                &[("OXIDEA_NEW_ENV".into(), "a".into()), ("OXIDEA_NEW_ENV".into(), "b".into())]
             )
             .is_err()
         );
@@ -3290,9 +3290,9 @@ mod tests {
             assert!(append_process_env(&mut cmd, &[("pAtH".into(), "override".into())]).is_err());
             assert!(env_name_eq("Ä_KEY".as_ref(), "ä_key".as_ref()));
         }
-        cmd.env_remove("OPENIDEA_REMOVED_ENV");
-        append_process_env(&mut cmd, &[("OPENIDEA_REMOVED_ENV".into(), "added".into())]).unwrap();
-        assert_eq!(cmd.get_envs().find(|(k, _)| *k == "OPENIDEA_REMOVED_ENV").unwrap().1, Some("added".as_ref()));
+        cmd.env_remove("OXIDEA_REMOVED_ENV");
+        append_process_env(&mut cmd, &[("OXIDEA_REMOVED_ENV".into(), "added".into())]).unwrap();
+        assert_eq!(cmd.get_envs().find(|(k, _)| *k == "OXIDEA_REMOVED_ENV").unwrap().1, Some("added".as_ref()));
     }
 
     #[test]
@@ -3674,7 +3674,7 @@ mod workbench_tests {
     }
     fn api(root: &Path, trusted: bool, text: Option<&str>) -> PluginApi {
         let manifest = ide_extension::Manifest::parse(
-            "id = \"test\"\nname = \"Test\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.4\"\n",
+            "id = \"test\"\nname = \"Test\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.4\"\n",
         )
         .unwrap();
         let shared = Shared::new(

@@ -187,7 +187,7 @@ describe("Cargo dependency versions", () => {
   it("completes only at a parsed dependency version, preserving descending source order", async () => {
     const view = editor();
     const source = view.state.languageDataAt<(ctx: CompletionContext) => Promise<unknown>>(
-      "openideaCompletion",
+      "oxideaCompletion",
       from,
     )[0]!;
     const result = await source(new CompletionContext(view.state, from + 3, true, view));
@@ -228,7 +228,7 @@ describe("Go module dependency versions", () => {
       ],
     });
     const complete = view.state.languageDataAt<(ctx: CompletionContext) => Promise<unknown>>(
-      "openideaCompletion",
+      "oxideaCompletion",
       from,
     )[0]!;
     expect(await complete(new CompletionContext(view.state, from + 3, false, view))).toMatchObject({

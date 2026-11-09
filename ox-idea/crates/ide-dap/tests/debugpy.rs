@@ -32,7 +32,7 @@ async fn debugpy_end_to_end() {
         eprintln!("debugpy not installed; skipping");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("openidea-dap-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("oxidea-dap-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let script = dir.join("prog.py");
     std::fs::write(

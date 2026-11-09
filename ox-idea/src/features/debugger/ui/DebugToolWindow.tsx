@@ -135,7 +135,7 @@ export function DebugTabs() {
       activeId={active != null ? String(active) : null}
       onSelect={(id) => selectSession(+id)}
       onClose={(id) => void closeSessionTab(+id)}
-      panelIdPrefix="openidea-debug"
+      panelIdPrefix="oxidea-debug"
     />
   );
 }

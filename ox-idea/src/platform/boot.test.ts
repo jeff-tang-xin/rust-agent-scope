@@ -10,7 +10,7 @@ beforeEach(() => {
   new Function(boot)();
 });
 afterEach(() => {
-  window.dispatchEvent(new Event("openidea:boot-ready"));
+  window.dispatchEvent(new Event("oxidea:boot-ready"));
   vi.useRealTimers();
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -47,7 +47,7 @@ it("handles script load failures but ignores image failures", () => {
 });
 
 it("surfaces initial React render failures through the boot error event", () => {
-  window.dispatchEvent(new CustomEvent("openidea:boot-error", { detail: new Error("render failed") }));
+  window.dispatchEvent(new CustomEvent("oxidea:boot-error", { detail: new Error("render failed") }));
   expect(document.querySelector("textarea")?.value).toContain("render failed");
 });
 
@@ -57,7 +57,7 @@ it("reports an unresolved startup instead of waiting forever", () => {
 });
 
 it("stops intercepting failures after a successful startup", () => {
-  window.dispatchEvent(new Event("openidea:boot-ready"));
+  window.dispatchEvent(new Event("oxidea:boot-ready"));
   window.dispatchEvent(new ErrorEvent("error", { message: "runtime failure" }));
   vi.advanceTimersByTime(30_000);
   expect(document.getElementById("boot-error")).toBeNull();
@@ -75,11 +75,11 @@ it("copies diagnostics and offers manual copying when clipboard access fails", a
 });
 
 it("uses Chinese boot text without loading the application catalog", () => {
-  window.dispatchEvent(new Event("openidea:boot-ready"));
+  window.dispatchEvent(new Event("oxidea:boot-ready"));
   vi.spyOn(navigator, "language", "get").mockReturnValue("zh-CN");
   new Function(boot)();
   window.dispatchEvent(new ErrorEvent("error", { message: "failure" }));
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain("OpenIDEA 无法启动");
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("OXidea 无法启动");
 });
 
 it("confirms a successful copy", async () => {

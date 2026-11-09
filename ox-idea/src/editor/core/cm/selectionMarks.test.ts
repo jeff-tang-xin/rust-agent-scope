@@ -32,26 +32,26 @@ describe("selectionMarks", () => {
       backgroundMark("cm-lintRange-warning", 7, DOC.length, prec),
       selectionMarks,
     ]);
-    const selected = [...v.contentDOM.querySelectorAll(".cm-openidea-selected")];
+    const selected = [...v.contentDOM.querySelectorAll(".cm-oxidea-selected")];
     expect(selected.map((e) => e.textContent).join("")).toBe(DOC.slice(7));
     for (const el of selected) expect(el.closest(".cm-lintRange-warning")).not.toBeNull();
   });
 
   it("covers every range of a multi-selection, partially overlapping marks too", () => {
     const v = view(DOC, EditorSelection.create([EditorSelection.range(0, 3), EditorSelection.range(10, 20)], 1), [
-      backgroundMark("cm-openidea-findMatch", 15, 24),
+      backgroundMark("cm-oxidea-findMatch", 15, 24),
       selectionMarks,
     ]);
-    const text = [...v.contentDOM.querySelectorAll(".cm-openidea-selected")].map((e) => e.textContent).join("|");
+    const text = [...v.contentDOM.querySelectorAll(".cm-oxidea-selected")].map((e) => e.textContent).join("|");
     expect(text.replace(/\|/g, "")).toBe(DOC.slice(0, 3) + DOC.slice(10, 20));
-    const inMatch = [...v.contentDOM.querySelectorAll(".cm-openidea-findMatch .cm-openidea-selected")];
+    const inMatch = [...v.contentDOM.querySelectorAll(".cm-oxidea-findMatch .cm-oxidea-selected")];
     expect(inMatch.map((e) => e.textContent).join("")).toBe(DOC.slice(15, 20));
   });
 
   it("adds nothing for an empty selection and clears when the selection collapses", () => {
     const v = view(DOC, EditorSelection.single(0, 6), [selectionMarks]);
-    expect(v.contentDOM.querySelector(".cm-openidea-selected")).not.toBeNull();
+    expect(v.contentDOM.querySelector(".cm-oxidea-selected")).not.toBeNull();
     v.dispatch({ selection: EditorSelection.cursor(3) });
-    expect(v.contentDOM.querySelector(".cm-openidea-selected")).toBeNull();
+    expect(v.contentDOM.querySelector(".cm-oxidea-selected")).toBeNull();
   });
 });

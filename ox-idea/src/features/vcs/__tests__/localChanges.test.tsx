@@ -115,7 +115,7 @@ describe("Local Changes diff preview (#710)", () => {
     expect(useCommit.getState().diffPreview).toBe(false);
     expect(screen.queryByTestId("diff-preview")).toBeNull();
     expect(screen.getByText("No local changes")).toBeTruthy();
-    expect(localStorage.getItem("openidea.vcs.diffPreview")).toBe("false");
+    expect(localStorage.getItem("oxidea.vcs.diffPreview")).toBe("false");
   });
 
   it("keeps the tree selection when the preview is toggled off and on", () => {

@@ -24,7 +24,7 @@ type Changes = Vec<(OsString, Option<OsString>)>;
 
 /// Set by the desktop when the Dev Containers CLI already ran the lifecycle commands
 /// (`devcontainer up`): the server then doesn't run `postStartCommand` again.
-pub const LIFECYCLE_DONE_ENV: &str = "OPENIDEA_LIFECYCLE_DONE";
+pub const LIFECYCLE_DONE_ENV: &str = "OXIDEA_LIFECYCLE_DONE";
 
 /// What Reload Environment changed.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -155,7 +155,7 @@ impl Environment {
     pub(crate) fn spawn_post_start(&self, cmd: LifecycleCommand, root: PathBuf, sink: SharedSink) {
         let cancel = self.cancel.child_token();
         self.state.lock().post_commands.insert(root.clone(), cancel.clone());
-        let spawned = std::thread::Builder::new().name("openidea-post-start".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("oxidea-post-start".into()).spawn(move || {
             run_post_start(&cmd, &root, &sink, &cancel);
         });
         if let Err(e) = spawned {
@@ -385,9 +385,9 @@ mod tests {
 
     #[test]
     fn project_variables_win_and_see_the_reloaded_login_values() {
-        let login = vec![change("OPENIDEA_TEST_TOOLS", Some("/reloaded")), change("A", Some("login"))];
+        let login = vec![change("OXIDEA_TEST_TOOLS", Some("/reloaded")), change("A", Some("login"))];
         let config = devcontainer::parse(
-            r#"{ "remoteEnv": { "A": "project", "B": "${containerEnv:OPENIDEA_TEST_TOOLS}/bin" } }"#,
+            r#"{ "remoteEnv": { "A": "project", "B": "${containerEnv:OXIDEA_TEST_TOOLS}/bin" } }"#,
         )
         .unwrap();
         let project = project_changes(&config, Path::new("/p"), &login);
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(
             merged,
             [
-                change("OPENIDEA_TEST_TOOLS", Some("/reloaded")),
+                change("OXIDEA_TEST_TOOLS", Some("/reloaded")),
                 change("A", Some("project")),
                 change("B", Some("/reloaded/bin"))
             ]
@@ -479,10 +479,10 @@ mod tests {
 
         let parallel = LifecycleCommand::Parallel(vec![
             ("ok".into(), LifecycleCommand::Shell("true".into())),
-            ("missing".into(), LifecycleCommand::Exec(vec!["openidea-no-such-program".into()])),
+            ("missing".into(), LifecycleCommand::Exec(vec!["oxidea-no-such-program".into()])),
         ]);
         let body = failure(&run(parallel, tmp.path())).unwrap();
-        assert!(body.starts_with("missing: cannot start openidea-no-such-program"), "{body}");
+        assert!(body.starts_with("missing: cannot start oxidea-no-such-program"), "{body}");
     }
 
     #[cfg(unix)]

@@ -915,7 +915,7 @@ pub enum GradleRunUsing {
     /// A `JavaExec` task on the source set's runtime classpath (`gradleRun.gradle`).
     #[default]
     Gradle,
-    /// The Java language server's classpath, launched by OpenIDEA.
+    /// The Java language server's classpath, launched by OXidea.
     Ide,
 }
 

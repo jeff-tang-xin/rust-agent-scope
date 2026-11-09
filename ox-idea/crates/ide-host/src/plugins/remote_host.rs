@@ -1,5 +1,5 @@
 //! Code plugins of remote projects:
-//! Wasm runs where the project is, so `openidea-server` hosts the desktop's
+//! Wasm runs where the project is, so `oxidea-server` hosts the desktop's
 //! code plugins and they read, search, run processes and publish diagnostics
 //! on the remote machine.
 //!
@@ -226,7 +226,7 @@ impl PluginHost {
 
 // ---- server side ------------------------------------------------------------
 
-/// The plugin host of `openidea-server`.
+/// The plugin host of `oxidea-server`.
 pub struct RemotePlugins {
     host: Arc<PluginHost>,
     incoming: PathBuf,

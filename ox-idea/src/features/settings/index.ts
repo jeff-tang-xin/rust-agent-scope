@@ -54,7 +54,7 @@ export const activateRuntimeSettings = trackRuntimeSettings;
 export const SettingsWindow = lazyComponent(() => import("./window/SettingsWindow").then((m) => m.SettingsWindow));
 
 /** Same event as `windows::LAUNCH_EVENT`: a pending launch (page) is waiting. */
-const LAUNCH_EVENT = "openidea://launch";
+const LAUNCH_EVENT = "oxidea://launch";
 
 /** Java's page first: JDK, Maven and the language server are what new projects most often need. */
 const NEW_PROJECTS_PAGE = "languages.java";

@@ -89,7 +89,7 @@ const GRADLE: &[&str] = &["gradle", "gradlew"];
 /// default charset before the build configures them, so the build can override it.
 /// Gradle's own JVM and the compiler's source encoding are untouched.
 pub const GRADLE_FILE_ENCODING_SCRIPT: &str = "\
-// Written by OpenIDEA: a UTF-8 default charset for applications run by Gradle, as the Run console decodes UTF-8.
+// Written by OXidea: a UTF-8 default charset for applications run by Gradle, as the Run console decodes UTF-8.
 allprojects {
     tasks.withType(JavaExec).configureEach {
         defaultCharacterEncoding = 'UTF-8'

@@ -4,7 +4,7 @@
 //! - **Package** (`<id>-<version>.oiplugin`): a zip of the manifest, the files
 //!   its declarations reference, the component and licence files, plus
 //!   [`SIGNATURE_FILE`] when signed.
-//! - **Signature**: Ed25519 over `openidea-plugin/1\n<id>\n<version>\n<digest>`,
+//! - **Signature**: Ed25519 over `oxidea-plugin/1\n<id>\n<version>\n<digest>`,
 //!   `digest` being [`package_digest`] of the unpacked files. A signature
 //!   proves who published the bytes; whether to trust that publisher is the
 //!   index's call.
@@ -47,11 +47,11 @@ pub fn package_digest(dir: &Path, files: &[PathBuf]) -> std::io::Result<String> 
 }
 
 fn signed_message(id: &str, version: &str, digest: &str) -> Vec<u8> {
-    format!("openidea-plugin/1\n{id}\n{version}\n{digest}").into_bytes()
+    format!("oxidea-plugin/1\n{id}\n{version}\n{digest}").into_bytes()
 }
 
 fn endorsement_message(publisher: &str, key: &str) -> Vec<u8> {
-    format!("openidea-key/1\n{publisher}\n{key}").into_bytes()
+    format!("oxidea-key/1\n{publisher}\n{key}").into_bytes()
 }
 
 /// Whether `signature` (base64) is `key`'s (base64) Ed25519 signature of
@@ -87,7 +87,7 @@ impl PublisherKey {
         Self(SigningKey::from_bytes(&seed))
     }
 
-    /// The seed as written by `openidea-plugin keygen`.
+    /// The seed as written by `oxidea-plugin keygen`.
     pub fn from_base64(text: &str) -> Result<Self, String> {
         let bytes = B64.decode(text.trim()).map_err(|e| format!("key file: {e}"))?;
         let seed: [u8; 32] = bytes.try_into().map_err(|_| "key file: expected a 32-byte key".to_owned())?;
@@ -209,7 +209,7 @@ pub fn unpack(archive: &Path, dest: &Path) -> Result<Unpacked, String> {
     }
     // An IntelliJ plugin or any other zip: say what is missing rather than fail later.
     let prefix = package_prefix(&names).ok_or_else(|| {
-        format!("{} is not an OpenIDEA plugin: no {MANIFEST_FILE} at its root or in its only folder", archive.display())
+        format!("{} is not an OXidea plugin: no {MANIFEST_FILE} at its root or in its only folder", archive.display())
     })?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let (mut files, mut signature, mut total, mut manifest) = (Vec::new(), None, 0u64, false);
@@ -310,7 +310,7 @@ impl KeyEntry {
 pub struct Endorsement {
     /// The endorsing key, base64.
     pub key: String,
-    /// Its Ed25519 signature of `openidea-key/1\n<publisher>\n<endorsed key>`, base64.
+    /// Its Ed25519 signature of `oxidea-key/1\n<publisher>\n<endorsed key>`, base64.
     pub signature: String,
 }
 
@@ -341,7 +341,7 @@ pub struct IndexEntry {
     #[serde(default)]
     pub capabilities: Vec<String>,
     /// The plugin API versions it loads in (a semver requirement): its
-    /// manifest's `engines.openidea` and the API its component was built for.
+    /// manifest's `engines.oxidea` and the API its component was built for.
     /// Required: an entry without one is offered to no IDE.
     #[serde(default)]
     pub engine: String,
@@ -365,7 +365,7 @@ impl IndexEntry {
     }
 }
 
-/// `engines.openidea` of a manifest narrowed to the API its component was built
+/// `engines.oxidea` of a manifest narrowed to the API its component was built
 /// for (`major.minor`, if it has code): the requirement an index lists.
 pub fn engine_requirement(manifest_engine: &str, built_for: Option<&semver::Version>) -> String {
     match built_for {
@@ -745,9 +745,9 @@ mod tests {
     fn including_an_index_replaces_everything_but_the_kept_publishers() {
         let mut official = Index {
             format: INDEX_FORMAT,
-            publishers: vec![publisher("openidea"), publisher("gone")],
-            plugins: vec![entry("openidea.a", "openidea"), entry("gone.x", "gone")],
-            revoked: vec![revocation("openidea.old"), revocation("gone.x")],
+            publishers: vec![publisher("oxidea"), publisher("gone")],
+            plugins: vec![entry("oxidea.a", "oxidea"), entry("gone.x", "gone")],
+            revoked: vec![revocation("oxidea.old"), revocation("gone.x")],
             moved: None,
         };
         let community = Index {
@@ -757,21 +757,21 @@ mod tests {
             revoked: vec![revocation("alice.bad")],
             moved: None,
         };
-        official.include(community.clone(), &["openidea"]).unwrap();
+        official.include(community.clone(), &["oxidea"]).unwrap();
         let ids = |v: &[IndexEntry]| v.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
-        assert_eq!(official.publishers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["openidea", "alice"]);
-        assert_eq!(ids(&official.plugins), ["openidea.a", "alice.arthas"]);
-        assert_eq!(official.revoked.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["openidea.old", "alice.bad"]);
+        assert_eq!(official.publishers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["oxidea", "alice"]);
+        assert_eq!(ids(&official.plugins), ["oxidea.a", "alice.arthas"]);
+        assert_eq!(official.revoked.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["oxidea.old", "alice.bad"]);
 
         // Including again is idempotent.
         let once = official.clone();
-        official.include(community.clone(), &["openidea"]).unwrap();
+        official.include(community.clone(), &["oxidea"]).unwrap();
         assert_eq!(official, once);
     }
 
     #[test]
     fn an_included_index_speaks_only_for_its_own_publishers() {
-        let base = Index { format: INDEX_FORMAT, publishers: vec![publisher("openidea")], ..Index::default() };
+        let base = Index { format: INDEX_FORMAT, publishers: vec![publisher("oxidea")], ..Index::default() };
         let with = |publishers: Vec<Publisher>, plugins: Vec<IndexEntry>, revoked: Vec<Revocation>| Index {
             format: INDEX_FORMAT,
             publishers,
@@ -780,13 +780,13 @@ mod tests {
             moved: None,
         };
         let cases = [
-            (with(vec![publisher("openidea")], vec![], vec![]), "may not list"),
+            (with(vec![publisher("oxidea")], vec![], vec![]), "may not list"),
             (with(vec![publisher("alice"), publisher("alice")], vec![], vec![]), "listed twice"),
-            (with(vec![publisher("openidea.x")], vec![], vec![]), "invalid publisher"),
-            (with(vec![publisher("alice")], vec![entry("openidea.a", "alice")], vec![]), "not a plugin of"),
+            (with(vec![publisher("oxidea.x")], vec![], vec![]), "invalid publisher"),
+            (with(vec![publisher("alice")], vec![entry("oxidea.a", "alice")], vec![]), "not a plugin of"),
             (with(vec![publisher("alice")], vec![entry("alice.a", "bob")], vec![]), "not a plugin of"),
             (with(vec![publisher("alice")], vec![entry("alicex.a", "alice")], vec![]), "not a plugin of"),
-            (with(vec![publisher("alice")], vec![], vec![revocation("openidea.a")]), "doesn't publish"),
+            (with(vec![publisher("alice")], vec![], vec![revocation("oxidea.a")]), "doesn't publish"),
             (
                 with(
                     vec![publisher("alice")],
@@ -798,7 +798,7 @@ mod tests {
         ];
         for (other, error) in cases {
             let mut index = base.clone();
-            let err = index.include(other, &["openidea"]).unwrap_err();
+            let err = index.include(other, &["oxidea"]).unwrap_err();
             assert!(err.contains(error), "{err}");
             assert_eq!(index, base);
         }
@@ -864,7 +864,7 @@ mod tests {
             let path = tmp.path().join(name);
             zip_of(&path, entries);
             let err = unpack(&path, &tmp.path().join(name).with_extension("out")).unwrap_err();
-            assert!(err.contains("is not an OpenIDEA plugin"), "{name}: {err}");
+            assert!(err.contains("is not an OXidea plugin"), "{name}: {err}");
         }
     }
 
@@ -933,36 +933,36 @@ mod tests {
         let (root, next, intruder) =
             (PublisherKey::from_seed([1; 32]), PublisherKey::from_seed([2; 32]), PublisherKey::from_seed([5; 32]));
         let mut index = index(&intruder);
-        index.publishers[0].id = "openidea".into();
-        keys(&mut index, "openidea").push(KeyEntry {
-            endorsement: Some(root.endorse("openidea", &next.public_base64())),
+        index.publishers[0].id = "oxidea".into();
+        keys(&mut index, "oxidea").push(KeyEntry {
+            endorsement: Some(root.endorse("oxidea", &next.public_base64())),
             ..KeyEntry::new(next.public_base64())
         });
         let roots = [root.public_base64()];
         let listed = |index: &Index| -> Vec<(String, bool)> {
             let mut index = index.clone();
-            index.pin_publisher("openidea", "OpenIDEA", &roots);
-            keys(&mut index, "openidea").iter().map(|k| (k.key.clone(), k.revoked)).collect()
+            index.pin_publisher("oxidea", "OXidea", &roots);
+            keys(&mut index, "oxidea").iter().map(|k| (k.key.clone(), k.revoked)).collect()
         };
         // The intruder's key goes, the successor the root endorsed stays, the root is added.
         assert_eq!(listed(&index), [(next.public_base64(), false), (root.public_base64(), false)]);
         let mut pinned = index.clone();
-        pinned.pin_publisher("openidea", "OpenIDEA", &roots);
+        pinned.pin_publisher("oxidea", "OXidea", &roots);
         let digest = "d";
-        let signed = |k: &PublisherKey| k.sign("openidea", "openidea.tools", "1.0.0", digest);
-        assert!(pinned.verify(&signed(&intruder), "openidea.tools", "1.0.0", digest).is_err());
-        assert!(pinned.verify(&signed(&next), "openidea.tools", "1.0.0", digest).is_ok());
+        let signed = |k: &PublisherKey| k.sign("oxidea", "oxidea.tools", "1.0.0", digest);
+        assert!(pinned.verify(&signed(&intruder), "oxidea.tools", "1.0.0", digest).is_err());
+        assert!(pinned.verify(&signed(&next), "oxidea.tools", "1.0.0", digest).is_ok());
         // A revoked root stays revoked, and what it endorsed is no longer trusted.
-        keys(&mut index, "openidea").push(KeyEntry { revoked: true, ..KeyEntry::new(root.public_base64()) });
+        keys(&mut index, "oxidea").push(KeyEntry { revoked: true, ..KeyEntry::new(root.public_base64()) });
         assert_eq!(listed(&index), [(root.public_base64(), true)]);
 
         // A publisher missing from the index is added with its roots.
         let mut empty = Index { format: INDEX_FORMAT, ..Index::default() };
-        empty.pin_publisher("openidea", "OpenIDEA", &[root.public_base64()]);
-        assert_eq!(empty.verify(&signed(&root), "openidea.tools", "1.0.0", digest).unwrap(), "openidea");
+        empty.pin_publisher("oxidea", "OXidea", &[root.public_base64()]);
+        assert_eq!(empty.verify(&signed(&root), "oxidea.tools", "1.0.0", digest).unwrap(), "oxidea");
         // No roots: the index decides.
         let mut open = index.clone();
-        open.pin_publisher("openidea", "OpenIDEA", &[]);
+        open.pin_publisher("oxidea", "OXidea", &[]);
         assert_eq!(open, index);
     }
 }

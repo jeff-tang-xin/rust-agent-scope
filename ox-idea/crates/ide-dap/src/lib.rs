@@ -930,8 +930,8 @@ impl DebugManager {
             .request_timeout(
                 "initialize",
                 json!({
-                    "clientID": "openidea",
-                    "clientName": "OpenIDEA",
+                    "clientID": "oxidea",
+                    "clientName": "OXidea",
                     "adapterID": s.adapter,
                     "locale": "en",
                     "linesStartAt1": true,

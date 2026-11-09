@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory() as out:
                     'org.eclipse.jdt.internal.compiler.batch.Main', '-21', '-proc:none',
                     '-classpath', os.pathsep.join(str(p) for p in sorted(plugins.glob('*.jar'))),
                     '-d', out, *[str(p) for p in sorted((root / 'src').rglob('*.java'))]], check=True)
-    with zipfile.ZipFile(root / 'openidea-java-usages.jar', 'w', zipfile.ZIP_DEFLATED) as jar:
+    with zipfile.ZipFile(root / 'oxidea-java-usages.jar', 'w', zipfile.ZIP_DEFLATED) as jar:
         files = {'META-INF/MANIFEST.MF': root / 'MANIFEST.MF', 'plugin.xml': root / 'plugin.xml'}
         files.update({str(p.relative_to(out)): p for p in pathlib.Path(out).rglob('*.class')})
         for name, path in sorted(files.items()):

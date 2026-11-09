@@ -281,7 +281,7 @@ fn interactive_rebase_reorder_squash_fixup_reword_drop() {
     assert_eq!(fx.git(&["log", "-1", "--format=%B", "HEAD~1"]), "c4 reworded\n\nnew body");
     assert_eq!(fx.git(&["show", "--format=", "--name-only", "HEAD"]), "f2.txt\nf3.txt");
     assert_eq!(repo.branch_info().unwrap().operation, None);
-    assert!(!fx.path(".git/openidea-rebase").exists(), "plan files are removed once the rebase finished");
+    assert!(!fx.path(".git/oxidea-rebase").exists(), "plan files are removed once the rebase finished");
 
     // Fixup keeps the first message; drop removes the commit and its file.
     let ids: Vec<String> = fx.git(&["rev-list", "--reverse", "HEAD"]).lines().map(str::to_string).collect();
@@ -1158,7 +1158,7 @@ fn interactive_rebase_restores_local_changes_staged_as_they_were() {
     assert_eq!(fx.git(&["diff", "--cached", "--name-only"]), "f1.txt");
     assert_eq!(fx.git(&["diff", "--name-only"]), "f2.txt");
     assert!(fx.git(&["stash", "list"]).is_empty());
-    assert!(!fx.path(".git/openidea-rebase").exists());
+    assert!(!fx.path(".git/oxidea-rebase").exists());
 }
 
 #[test]

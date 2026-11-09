@@ -1,5 +1,5 @@
-use openidea_plugin::commit::{CommitChecks, CommitProblem};
-use openidea_plugin::{CommitDraft, Error, Invocation, Location, Plugin, Position, Range, host, register_plugin};
+use oxidea_plugin::commit::{CommitChecks, CommitProblem};
+use oxidea_plugin::{CommitDraft, Error, Invocation, Location, Plugin, Position, Range, host, register_plugin};
 
 #[derive(Default)]
 struct Fixture;

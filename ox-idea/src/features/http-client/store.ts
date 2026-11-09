@@ -13,7 +13,7 @@ import {
 import { notifications, showServiceView } from "@/workbench/contributions";
 
 export const SERVICE_VIEW = "httpClient";
-const ENV_KEY = "openidea.httpClient.environments";
+const ENV_KEY = "oxidea.httpClient.environments";
 
 function readEnvChoices(): Record<string, string> {
   try {

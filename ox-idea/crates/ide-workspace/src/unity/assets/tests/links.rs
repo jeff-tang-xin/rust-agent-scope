@@ -69,7 +69,7 @@ fn linked_parent_and_project_root_support_asset_operations_and_undo() {
 
 #[test]
 fn internal_directory_links_reject_asset_operations_before_mutation() {
-    for relative in ["Assets/Linked", "Library", "Library/OpenIDEA", "Library/OpenIDEA/AssetOperations"] {
+    for relative in ["Assets/Linked", "Library", "Library/OXidea", "Library/OXidea/AssetOperations"] {
         let tmp = project();
         let outside = tempfile::tempdir().unwrap();
         fs::write(outside.path().join("sentinel"), "keep").unwrap();

@@ -3,9 +3,9 @@
 //! body, kind `table`), the clicks arrive as `other` view-events (kind
 //! `sort`), and the rows render in the order the plugin was asked for.
 
-use openidea_plugin::host;
-use openidea_plugin::views::{Body, Field, FieldValue, Table, TableSort, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Error, Invocation, Plugin, register_plugin};
+use oxidea_plugin::host;
+use oxidea_plugin::views::{Body, Field, FieldValue, Table, TableSort, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Error, Invocation, Plugin, register_plugin};
 
 pub const VIEW: &str = "tables";
 

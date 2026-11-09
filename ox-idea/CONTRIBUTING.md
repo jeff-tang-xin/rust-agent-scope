@@ -1,4 +1,4 @@
-# Contributing to OpenIDEA
+# Contributing to OXidea
 
 These rules apply to everyone, and to any coding agent working on their behalf.
 Project layout, coding rules, commands and checks are in [AGENTS.md](AGENTS.md).
@@ -33,7 +33,7 @@ Project layout, coding rules, commands and checks are in [AGENTS.md](AGENTS.md).
 
 Plugins: pull requests here add or change official plugins (`plugins/official/`)
 and the plugin API. Community plugins live in their authors' repositories and
-are listed through [l0ng-ai/openidea-plugins](https://github.com/l0ng-ai/openidea-plugins);
+are listed through [l0ng-ai/oxidea-plugins](https://github.com/l0ng-ai/oxidea-plugins);
 see [`plugins/README.md`](plugins/README.md) § 8.1.
 
 A check on each PR adds `needs-info` when the verification section is missing, and removes it once it's filled in.

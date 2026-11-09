@@ -145,7 +145,7 @@ export function disposeFindWindow() {
 // ---------------------------------------------------------------------------
 // View options (persisted), in the tool window's ⋮ menu.
 
-const OPTIONS_KEY = "openidea.find.view.v1";
+const OPTIONS_KEY = "oxidea.find.view.v1";
 
 export interface FindViewOptions {
   /** Code preview beside the results (IDEA: on). */

@@ -1,7 +1,7 @@
 /// Runtime probe: optional exports, async calls and
 /// cancellation, and a WASI p2 task model built on `wasi:io/poll`.
 /// Test fixture only; not part of the plugin API.
-package openidea:probe@0.1.0;
+package oxidea:probe@0.1.0;
 
 interface host-api {
     use wasi:io/poll@0.2.0.{pollable};

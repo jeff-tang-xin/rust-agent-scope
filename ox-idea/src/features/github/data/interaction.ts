@@ -9,7 +9,7 @@ import { useProject } from "@/platform/project";
 import type { GHPullRequestShort, GHUser } from "../api/types";
 import { CLEAR_LAST_SEEN_AFTER_DAYS, isSeen } from "./model";
 
-const key = (root: string) => `openidea.github.lastSeen.v1:${root}`;
+const key = (root: string) => `oxidea.github.lastSeen.v1:${root}`;
 const projectRoot = () => useProject.getState().project?.root ?? null;
 
 function load(root: string | null): Record<string, number> {

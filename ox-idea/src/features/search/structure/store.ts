@@ -163,7 +163,7 @@ export function useLiveOutline() {
 // ---------------------------------------------------------------------------
 // View options (persisted)
 
-const OPTIONS_KEY = "openidea.structure.options.v1";
+const OPTIONS_KEY = "oxidea.structure.options.v1";
 
 interface StructureOptions {
   alphabetical: boolean;

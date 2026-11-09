@@ -158,7 +158,7 @@ it("Cancel discards a pending detected removal", () => {
 });
 
 const temporaryOf = () =>
-  JSON.parse(localStorage.getItem("openidea.run.temporary.v2:/test-removal") ?? "[]") as RunConfig[];
+  JSON.parse(localStorage.getItem("oxidea.run.temporary.v2:/test-removal") ?? "[]") as RunConfig[];
 const mainGo: RunConfig = { ...config("go"), id: "go:file:/test-removal/app/main.go", name: "main.go" };
 
 it("removes a temporary configuration from Edit Configurations for good", async () => {

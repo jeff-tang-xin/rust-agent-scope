@@ -2,7 +2,7 @@
 const { spawn } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
 const { join } = require("node:path");
-const home = process.env.OPENIDEA_SERVER_HOME;
+const home = process.env.OXIDEA_SERVER_HOME;
 const mode = process.env.SMOKE_SERVER_MODE;
 const tool = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
   detached: mode !== "hang-inherited",

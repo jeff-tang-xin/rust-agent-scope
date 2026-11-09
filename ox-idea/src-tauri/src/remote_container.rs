@@ -1,12 +1,12 @@
 //! Dev container transport of remote development: the Dev Containers CLI (`devcontainer up`)
-//! builds or starts the container of a local folder, then `openidea-server --stdio` runs in it
+//! builds or starts the container of a local folder, then `oxidea-server --stdio` runs in it
 //! through `docker exec`, installed there the way it is in a WSL distribution.
 //!
 //! The container id, user and folder come from the CLI's output, are checked, and only ever
 //! reach `docker exec` as separate arguments; only fixed scripts reach `sh -c`.
 //!
 //! A forwarded port is a local listener whose every connection runs
-//! `openidea-server --connect localhost <port>` in the container and pipes through it: the
+//! `oxidea-server --connect localhost <port>` in the container and pipes through it: the
 //! container's own network is reached the same way on every Docker setup.
 
 use crate::remote_dev::{Progress, RemoteStage, SERVER_BIN};
@@ -142,7 +142,7 @@ async fn ensure_server(
     install(docker, up, &version_dir(&probe.home, version), &build, &local, progress).await
 }
 
-/// Copies the server at `local` into `<version_dir>/<build>/openidea-server` in the container and
+/// Copies the server at `local` into `<version_dir>/<build>/oxidea-server` in the container and
 /// removes the other builds of the version. Returns the installed path.
 async fn install(
     docker: &Path,
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn the_server_starts_in_the_folder_trusted_and_without_the_lifecycle() {
         let up = Up { container: ID.into(), user: "vscode".into(), folder: "/workspaces/my app".into() };
-        let args = server_args(&up, "/home/vscode/.openidea/server/1/ab/openidea-server");
+        let args = server_args(&up, "/home/vscode/.oxidea/server/1/ab/oxidea-server");
         assert_eq!(
             args,
             [
@@ -248,11 +248,11 @@ mod tests {
                 "-w",
                 "/workspaces/my app",
                 "-e",
-                "OPENIDEA_TRUSTED_ROOT=/workspaces/my app",
+                "OXIDEA_TRUSTED_ROOT=/workspaces/my app",
                 "-e",
-                "OPENIDEA_LIFECYCLE_DONE=1",
+                "OXIDEA_LIFECYCLE_DONE=1",
                 ID,
-                "/home/vscode/.openidea/server/1/ab/openidea-server",
+                "/home/vscode/.oxidea/server/1/ab/oxidea-server",
                 "--stdio",
             ]
         );
@@ -327,13 +327,13 @@ echo '{{"outcome":"success","containerId":"{ID}","remoteUser":"vscode","remoteWo
     }
 
     /// Against a real daemon and the real Dev Containers CLI (`devcontainer` on `PATH`).
-    /// `OPENIDEA_DOCKER_TEST_DIR` names a folder the daemon can bind-mount at the same path, and
-    /// `OPENIDEA_SERVER_BIN` an `openidea-server` built for the container's platform.
+    /// `OXIDEA_DOCKER_TEST_DIR` names a folder the daemon can bind-mount at the same path, and
+    /// `OXIDEA_SERVER_BIN` an `oxidea-server` built for the container's platform.
     #[tokio::test]
-    #[ignore = "requires Docker, the Dev Containers CLI, OPENIDEA_DOCKER_TEST_DIR and OPENIDEA_SERVER_BIN"]
+    #[ignore = "requires Docker, the Dev Containers CLI, OXIDEA_DOCKER_TEST_DIR and OXIDEA_SERVER_BIN"]
     async fn opens_a_real_dev_container() {
-        let base = PathBuf::from(std::env::var("OPENIDEA_DOCKER_TEST_DIR").expect("OPENIDEA_DOCKER_TEST_DIR"));
-        let server = PathBuf::from(std::env::var("OPENIDEA_SERVER_BIN").expect("OPENIDEA_SERVER_BIN"));
+        let base = PathBuf::from(std::env::var("OXIDEA_DOCKER_TEST_DIR").expect("OXIDEA_DOCKER_TEST_DIR"));
+        let server = PathBuf::from(std::env::var("OXIDEA_SERVER_BIN").expect("OXIDEA_SERVER_BIN"));
         let root = base.join("devcontainer");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(".devcontainer")).unwrap();

@@ -1,6 +1,6 @@
-# Writing OpenIDEA plugins
+# Writing OXidea plugins
 
-OpenIDEA plugins are sandboxed **WebAssembly components** (wasmtime, component
+OXidea plugins are sandboxed **WebAssembly components** (wasmtime, component
 model, WASI preview 2). A plugin can register commands (they become IDE actions
 you can search for and bind to keys), read project files, edit the focused
 editor, react to workbench events, run background tasks, show notifications
@@ -13,7 +13,7 @@ menus, settings) need no code at all.
 
 > **Preview.** The plugin system ships as a preview and the official plugins
 > are versioned `0.x`. Released API versions only grow: a plugin built for
-> `openidea:plugin@1.0` keeps loading in later 1.x IDEs. See _Evolving the
+> `oxidea:plugin@1.0` keeps loading in later 1.x IDEs. See _Evolving the
 > plugin API_ below.
 
 ```
@@ -33,38 +33,38 @@ plugins/
    ├─ graphviz/               # web view with code: live preview, problems from the page, a language
    ├─ regex-tester/           # html view talking to its code, settings, the editor's selection
    └─ license-header/         # file-opened events, quick fix, project scan in a task
-sdk/rust/openidea-plugin/     # the Rust SDK (host API, Plugin trait, mock host)
+sdk/rust/oxidea-plugin/     # the Rust SDK (host API, Plugin trait, mock host)
 crates/ide-plugin/tests/fixtures/  # test plugins: hello, jobs, language-toy, misbehave, semantic-tokens, hover, commit, inlay-hints
 ```
 
-The plugin API is defined in [`wit/`](../wit/) (`openidea:plugin@1.4.0`, world
+The plugin API is defined in [`wit/`](../wit/) (`oxidea:plugin@1.4.0`, world
 `plugin`).
 
 ## 1. Quick start
 
-The `openidea-plugin` tool scaffolds, builds, checks and links plugins:
+The `oxidea-plugin` tool scaffolds, builds, checks and links plugins:
 
 ```sh
-cargo install --locked --git https://github.com/l0ng-ai/openidea ide-host --bin openidea-plugin
-# in a checkout of this repository: cargo install --path crates/ide-host --bin openidea-plugin
+cargo install --locked --git https://github.com/l0ng-ai/oxidea ide-host --bin oxidea-plugin
+# in a checkout of this repository: cargo install --path crates/ide-host --bin oxidea-plugin
 
-openidea-plugin new my-plugin                          # Rust command plugin (SDK)
-openidea-plugin new my-theme --template theme          # also: icon-theme, language
+oxidea-plugin new my-plugin                          # Rust command plugin (SDK)
+oxidea-plugin new my-theme --template theme          # also: icon-theme, language
 cd my-plugin
 cargo test                                             # logic, against the SDK's mock host
-openidea-plugin build                                  # → dist/plugin.wasm, then `check`
-openidea-plugin link                                   # load this folder in the IDE
+oxidea-plugin build                                  # → dist/plugin.wasm, then `check`
+oxidea-plugin link                                   # load this folder in the IDE
 ```
 
 Each release also attaches the tool for Linux x64
-(`openidea-plugin-linux-x86_64.gz`). A plugin is a project of its own: keep it
+(`oxidea-plugin-linux-x86_64.gz`). A plugin is a project of its own: keep it
 in its own repository, and list it in the community marketplace when it is
 ready (§8.1).
 
 A Rust plugin made by `new` depends on the SDK of the tool's release, from
-this repository's tag (`openidea-plugin = { git = "…", tag = "vX.Y.Z" }`);
+this repository's tag (`oxidea-plugin = { git = "…", tag = "vX.Y.Z" }`);
 change the tag to build against a later API. Inside a checkout of this
-repository, or with `--sdk <path to sdk/rust/openidea-plugin>`, it depends on
+repository, or with `--sdk <path to sdk/rust/oxidea-plugin>`, it depends on
 that SDK by path instead.
 
 `build` runs `cargo build --release --target wasm32-wasip2` (installing the
@@ -76,7 +76,7 @@ plugin API and WASI and links against the IDE's: every function it imports
 exists with the same signature, and it exports the plugin world. It prints what the user will be asked to grant.
 
 `link` adds the folder to `links.json` in the IDE's plugins directory
-(`$OPENIDEA_PLUGINS_DIR`, default `<app-data>/ai.l0ng.openidea/plugins`). Linked
+(`$OXIDEA_PLUGINS_DIR`, default `<app-data>/ai.l0ng.oxidea/plugins`). Linked
 plugins are read from the folder itself, so the edit loop is `build` then
 Settings › Plugins › _Reload_. `unlink` and `links` undo and list.
 
@@ -96,7 +96,7 @@ change-notes = "1.2.0 — …"        # shown under What's New
 categories = ["tools"]            # marketplace categories, see below
 icon = "icon.svg"                 # optional, see below
 icon-dark = "icon_dark.svg"       # optional
-engines.openidea = "^1.0"         # the plugin API this package needs
+engines.oxidea = "^1.0"         # the plugin API this package needs
 wasm = "dist/plugin.wasm"         # omit for data-only plugins
 activation = ["on-language:markdown"]   # optional, see below
 
@@ -123,7 +123,7 @@ marketplace; `icon-dark`, if given, replaces it with dark themes. Each is at
 most 16 KiB and sanitised like file icons (no scripts, external references or
 `foreignObject`); an invalid one fails the package. Without `icon`, the
 plugin gets the generic plugin icon. `icon` is new in API 1.2: IDEs before it
-refuse the manifest, so a package with one declares `engines.openidea = "^1.2"`
+refuse the manifest, so a package with one declares `engines.oxidea = "^1.2"`
 (`check` and installing refuse it otherwise).
 
 All paths are relative to the package directory and may not leave it. A
@@ -131,7 +131,7 @@ manifest is validated as a whole: if one contribution is invalid, nothing is
 installed or loaded. Contribution types the IDE does not know (a newer API) are
 skipped with a warning.
 
-Manifests in the 0.1 format (`openidea-api = "0.1"`, `permissions = [...]`)
+Manifests in the 0.1 format (`oxidea-api = "0.1"`, `permissions = [...]`)
 still load (their permissions become required capabilities; contributions
 work), but 0.1 code no longer runs: rebuild it against the 1.0 SDK.
 
@@ -168,7 +168,7 @@ its first `:`, so `pod` for `pod:default/nginx`; the whole key when it has no
 whose `when` is false shows greyed out. Other menus refuse `view`, a web view
 has no item menu, and no menu opens when no declaration matches the item.
 The menu is new in API 1.2, so a plugin using it declares
-`engines.openidea = "^1.2"`. For example:
+`engines.oxidea = "^1.2"`. For example:
 
 ```toml
 [[contributes.menus]]
@@ -180,7 +180,7 @@ when = "viewItemKind == pod"
 
 A `commit.message` menu puts the command, with the plugin's icon, in the
 toolbar above the commit message of the Commit tool window and the Commit
-dialog (see _Commits_). It is new in API 1.3 (`engines.openidea = "^1.3"`).
+dialog (see _Commits_). It is new in API 1.3 (`engines.oxidea = "^1.3"`).
 
 In a context menu (`editor.context`, `projectView.context`, `editorTab.context`,
 `viewItem.context`), entries can name a `submenu`: the plugin's entries of that
@@ -188,7 +188,7 @@ menu with the same `submenu` are shown under it (`Arthas` ▸ _Watch_ / _Trace_)
 in declaration order; a submenu with one visible entry shows it as a plain
 entry, and entries without `submenu` stay where they are. The label goes
 through the plugin's translations. It is new in API 1.3
-(`engines.openidea = "^1.3"`):
+(`engines.oxidea = "^1.3"`):
 
 ```toml
 [[contributes.menus]]
@@ -217,7 +217,7 @@ kept across a window reload and idle reclaim, and dropped when the plugin stops.
 
 ### File template names and variables (API 1.3)
 
-With `engines.openidea = "^1.3"`, `fileName` creates an exact single filename
+With `engines.oxidea = "^1.3"`, `fileName` creates an exact single filename
 (including dotfiles) without a name prompt. `extension` may be omitted for these
 files; it is never appended to `fileName`. Without `fileName`, naming behaves as before.
 Declared variables are required text fields shown together in the new-file dialog;
@@ -227,7 +227,7 @@ through the plugin's text catalog. Values are inserted literally with `$ENTITY$`
 or `${ENTITY}` syntax.
 
 ```toml
-engines.openidea = "^1.3"
+engines.oxidea = "^1.3"
 
 [[contributes.fileTemplates]]
 id = "ignore"
@@ -259,7 +259,7 @@ and references, alongside language-server results. Name anchors must cover exact
 the name in UTF-16 columns; markers are excluded. Indexed renames always show a
 preview and apply as one undoable workspace edit. No new WIT export or capability
 is required: the existing `project.read` declaration and trusted-project checks
-still apply. Use `engines.openidea = "^1.3"` when relying on this behavior. The
+still apply. Use `engines.oxidea = "^1.3"` when relying on this behavior. The
 [indexer fixture](../crates/ide-plugin/tests/fixtures/indexer) exercises both flows.
 
 ### Activation
@@ -338,7 +338,7 @@ and are refused while the editor holds unsaved changes for the same file. The
 path is resolved as a read's is, so a link inside a granted directory cannot be
 used to write outside it. `project.write` does the same inside the open
 projects, creating missing directories. Both are new in API 1.3
-(`engines.openidea = "^1.3"`).
+(`engines.oxidea = "^1.3"`).
 
 `host::fs::plugin_dir()` (API 1.3) returns a private directory belonging only to
 this plugin, separate from its installed code and key-value storage. Reading and
@@ -367,8 +367,8 @@ are always available. Calling a gated function without its capability returns
 
 ### API 1.4
 
-API 1.4.0 is planned for the next OpenIDEA release. Use
-`engines.openidea = "^1.4"` and the matching SDK. Released 1.3 plugins keep
+API 1.4.0 is planned for the next OXidea release. Use
+`engines.oxidea = "^1.4"` and the matching SDK. Released 1.3 plugins keep
 working. New in 1.4:
 
 - [Permissions](#capabilities): `net.http:<host>` for unencrypted HTTP,
@@ -408,11 +408,11 @@ Small runnable API examples: [blame annotations](official/blame-annotations/),
 and [TODO finder](official/todo-finder/). These demonstrate extension points;
 see [official and community plugins](#81-official-and-community-plugins).
 
-`openidea-plugin new` writes this for you. `Cargo.toml`:
+`oxidea-plugin new` writes this for you. `Cargo.toml`:
 
 ```toml
 [package]
-name = "openidea-plugin-word-tools"
+name = "oxidea-plugin-word-tools"
 version = "0.1.0"
 edition = "2024"
 
@@ -422,7 +422,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", tag = "vX.Y.Z" }   # or { path = "…/sdk/rust/openidea-plugin" }
+oxidea-plugin = { git = "https://github.com/l0ng-ai/oxidea", tag = "vX.Y.Z" }   # or { path = "…/sdk/rust/oxidea-plugin" }
 
 [profile.release]
 opt-level = "s"
@@ -434,7 +434,7 @@ panic = "abort"
 `src/lib.rs`:
 
 ```rust
-use openidea_plugin::{Error, Invocation, NotificationLevel, Plugin, host, register_plugin};
+use oxidea_plugin::{Error, Invocation, NotificationLevel, Plugin, host, register_plugin};
 
 #[derive(Default)]
 struct WordTools;
@@ -467,7 +467,7 @@ mock host, so the logic is unit-tested with `cargo test`:
 ```rust
 #[test]
 fn counts_and_shouts() {
-    let host = openidea_plugin::mock::MockHost::install();
+    let host = oxidea_plugin::mock::MockHost::install();
     host.open_editor("/project/a.md", "markdown", "one two three", &[(0, 4, 0, 7)]);
     WordTools.run_command("count", &host.invocation(), None).unwrap();
     assert_eq!(host.notifications()[0].body, "3 words");
@@ -484,7 +484,7 @@ commands, languages, themes and log lines.
 Any language with component-model tooling works (`componentize-py`,
 `jco componentize`, TinyGo): the only contract is the `plugin` world in
 [`wit/`](../wit/) (`plugin-syntax` adds the syntax provider). Build it yourself,
-then run `openidea-plugin check`.
+then run `oxidea-plugin check`.
 
 ### The API
 
@@ -611,7 +611,7 @@ There is no credential read function, including for credentials just written.
 
 ```rust
 let project = ctx.project().ok_or("Open a project first")?;
-project.upsert_data_source(&openidea_plugin::PluginDataSource {
+project.upsert_data_source(&oxidea_plugin::PluginDataSource {
     id: "local".into(), name: "Local service".into(), driver: "postgres".into(),
     host: Some("127.0.0.1".into()), port: Some(5432),
     database: Some("app".into()), user: Some("app".into()),
@@ -628,7 +628,7 @@ at most 64 KiB. Unknown/unowned ids return `not-found` without revealing whether
 another owner's source exists. The host checks stored ownership even when a
 user source happens to use the generated id format.
 
-Owned sources persist in `.openidea/data-sources.toml` with `pluginOwner` and
+Owned sources persist in `.oxidea/data-sources.toml` with `pluginOwner` and
 `pluginSourceId`; updates preserve unrelated entries, comments and formatting.
 Plugin edits require the normal `[[data-source]]` table format; inline table arrays
 are rejected. No password is written there. The Database tree refreshes on source changes
@@ -665,7 +665,7 @@ Names match `[a-z0-9_]{1,40}`. The registered name is
 `<plugin-id with every non [a-z0-9_] character replaced by _>__<name>`; the
 complete name must fit 64 bytes or installation/check fails. Descriptions
 (1–4096 bytes) identify the originating plugin in the server listing. Schema
-files are at most 256 KiB, validated at install and `openidea-plugin check`,
+files are at most 256 KiB, validated at install and `oxidea-plugin check`,
 and must describe an object. Inputs are checked against that schema at call
 time (at most 1 MiB of JSON); text results are at most 4 MiB. If two live
 plugins normalize to the same tool name, both ambiguous tools are withheld.
@@ -677,7 +677,7 @@ The result is text, or JSON encoded as text if the tool wants structure.
 with it. In Rust:
 
 ```rust
-impl openidea_plugin::McpProvider for MyPlugin {
+impl oxidea_plugin::McpProvider for MyPlugin {
     fn call(&mut self, tool: &str, arguments: &str, ctx: &Invocation)
         -> Result<String, Error>
     {
@@ -701,7 +701,7 @@ retain its documented “not supported for remote projects yet” response.
 
 The new host interface `mcp` has `stdio-command() -> option<list<string>>`
 (`host::mcp_stdio_command()`). It returns only bridge argv for the invoking
-project, such as `["/path/openidea", "--mcp-stdio", "--project", "/project"]`;
+project, such as `["/path/oxidea", "--mcp-stdio", "--project", "/project"]`;
 never the HTTP URL or bearer token. It returns `none` while the server is off,
 without a project window, or on a remote host without its own running server.
 It needs no additional capability.
@@ -780,7 +780,7 @@ The Rust SDK exposes `Event::FilesChanged(FilesChanged)` and
 `EventKind::FilesChanged`. Paths have the same absolute form as `file-saved`.
 Subscribe with `host::subscribe(EventKind::FilesChanged)` or
 `activation = ["on-event:files-changed"]`. Plugins using this event must declare
-`engines.openidea = "^1.3"`.
+`engines.oxidea = "^1.3"`.
 
 Kinds are names (`subscribe` takes a string), so later IDEs add kinds without
 a new API: an IDE refuses a kind it doesn't know with `invalid`, and a kind
@@ -813,7 +813,7 @@ still require `project.read`.
 ### Commits
 
 A plugin can work on the commit the user is preparing, in the Commit tool
-window or the Commit dialog (API 1.3, `engines.openidea = "^1.3"`):
+window or the Commit dialog (API 1.3, `engines.oxidea = "^1.3"`):
 
 - **A button above the message.** `[[contributes.menus]]` with
   `menu = "commit.message"` shows one of the plugin's commands there, with the
@@ -863,7 +863,7 @@ languages = ["java", "xml"]                           # editor language ids; "*"
 Line marker `icon` accepts an icon name (including registered plugin icons),
 the aliases `navigate`, `implemented`, `implementing`, `overridden`, `overriding`
 and `run`, or a package SVG path. Declare package marker icons so installation
-includes and validates the SVGs (`engines.openidea = "^1.3"`):
+includes and validates the SVGs (`engines.oxidea = "^1.3"`):
 
 ```toml
 [[contributes.markerIcons]]
@@ -898,7 +898,7 @@ not recognize `markers` or `tooltip` reject the manifest at install; update the
 IDE to use them.
 
 Then `register_plugin!(MyPlugin, providers)` and implement
-`openidea_plugin::providers::Providers` for it: `completion`,
+`oxidea_plugin::providers::Providers` for it: `completion`,
 `inline_completion`, `code_actions`, `definition`, `line_markers`. Each gets
 the document (path, language, version, text). Results join the language
 servers' (completion lists, ⌥⏎ quick fixes, ⌘B, gutter icons; a code action
@@ -939,12 +939,12 @@ need the network) but is cancelled as soon as the user types on: check
 
 #### Semantic highlighting
 
-The `semantic-tokens` kind (API 1.3: `engines.openidea = "^1.3"`) colours
+The `semantic-tokens` kind (API 1.3: `engines.oxidea = "^1.3"`) colours
 tokens in documents of the declared languages, including languages the plugin
 doesn't contribute, such as `php`. Register with
 `register_plugin!(MyPlugin, semantic_tokens)` (any combination works:
 `(MyPlugin, providers, views, semantic_tokens)`) and implement
-`openidea_plugin::semantic_tokens::SemanticTokens`:
+`oxidea_plugin::semantic_tokens::SemanticTokens`:
 
 ```rust
 impl SemanticTokens for MyPlugin {
@@ -967,7 +967,7 @@ after each edit, under the edit-path budget; at most 65,536 per document.
 The `hover` kind (API 1.3) adds Markdown to the hover of documents of the
 declared languages, here too including languages the plugin doesn't
 contribute. Register with `register_plugin!(MyPlugin, hover)` and implement
-`openidea_plugin::hover::HoverProvider`:
+`oxidea_plugin::hover::HoverProvider`:
 
 ```rust
 impl HoverProvider for MyPlugin {
@@ -986,7 +986,7 @@ the server names none). At most 64 KiB of Markdown per plugin.
 
 The `diagnostics` kind (API 1.3) checks unsaved documents in its declared
 `languages` (`"*"` matches any language). Implement
-`openidea_plugin::diagnostics::DiagnosticsProvider` and register with
+`oxidea_plugin::diagnostics::DiagnosticsProvider` and register with
 `register_plugin!(MyPlugin, diagnostics)`:
 
 ```rust
@@ -1035,7 +1035,7 @@ is explicit; debounce and cancellation are exercised by the real Wasm host tests
 The `inlay-hints` kind (API 1.3) shows short labels inside the code of
 documents of the declared languages, such as a type after a call. Register
 with `register_plugin!(MyPlugin, inlay_hints)` and implement
-`openidea_plugin::inlay_hints::InlayHints`:
+`oxidea_plugin::inlay_hints::InlayHints`:
 
 ```rust
 impl InlayHints for MyPlugin {
@@ -1054,7 +1054,7 @@ scrolling. Labels are cut at 256 bytes and tooltips at 1 KiB.
 #### Additional language features (API 1.4)
 
 Declare the following kinds under `[[contributes.providers]]`, with
-`engines.openidea = "^1.4"`, implement `language_features::LanguageFeatures`,
+`engines.oxidea = "^1.4"`, implement `language_features::LanguageFeatures`,
 and register `register_plugin!(MyPlugin, language_features)`:
 
 | Kind                  | SDK method                                       | Host policy                                                                                                                                                                                                                                                                                        |
@@ -1149,7 +1149,7 @@ escapes a literal dollar. They appear in completion, Tab expansion and
 Settings › Editor › Live Templates, grouped by the plugin name and read-only.
 Disabling or removing the plugin removes them. Plugin locales translate
 `description`; prefixes and bodies remain code. Installation and
-`openidea-plugin check` validate every entry and package path. Limits: 1 MiB
+`oxidea-plugin check` validate every entry and package path. Limits: 1 MiB
 per file, 1,000 named entries, 32 prefixes per entry, 64 KiB per body, 4 KiB
 per description. No additional permission or runtime export is needed.
 
@@ -1176,7 +1176,7 @@ main-toolbar actions use the focused editor context.
 HTTPS grant. Both use the same wildcard rules. Each redirect is checked before
 connecting to the destination; HTTPS → HTTP also requires `net.http:<host>`,
 even on loopback. Responses are limited to 8 MiB. Requests run on the project
-machine. A manifest using `net.http:` or `ipc:` declares `engines.openidea = "^1.4"`.
+machine. A manifest using `net.http:` or `ipc:` declares `engines.oxidea = "^1.4"`.
 
 `ipc:<path>` grants a local byte stream: an absolute Unix socket path (the host
 expands `~/`, `$TMPDIR/` and `$XDG_RUNTIME_DIR/`) or `\\.\pipe\<name>` on Windows.
@@ -1203,7 +1203,7 @@ Window status overrides, command execution, loopback creation/waiting and
 output reveal are valid only in a command or event from a window. The Vim
 context key `vim.mode` is `normal`, `insert`, `visual` or `replace`, and empty
 when Vim is disabled. Subscribing to the three new event kinds, including
-`on-event:<kind>` activation, requires `engines.openidea = "^1.4"`.
+`on-event:<kind>` activation, requires `engines.oxidea = "^1.4"`.
 
 Settings › Plugins lets the user choose the executable of a `process:<name>`
 grant globally or for the current project. The native chooser's selection is
@@ -1217,7 +1217,7 @@ The plugin continues to call its declared program name.
 A view is data: a toolbar, a body — `Tree`, `List`, `Form`, `Table`,
 `Message` or `Html` — and a status line. Declare it, then
 `register_plugin!(MyPlugin, views)` (or `(MyPlugin, providers, views)`) and
-implement `openidea_plugin::views::Views`:
+implement `oxidea_plugin::views::Views`:
 
 ```rust
 impl Views for MyPlugin {
@@ -1265,7 +1265,7 @@ activate their row with Enter on the focused row or double-click its row number.
 `viewItem` context key are the decimal row index, e.g. `"0"`. Editable tables
 keep their insert/delete entries alongside contributed commands. After sorting
 or changing data, plugins resolve row indices against their current row order.
-Declare `engines.openidea = "^1.3"` when relying on these additions.
+Declare `engines.oxidea = "^1.3"` when relying on these additions.
 
 Bodies, field types and view events added by later APIs travel as `Other {
 kind, data }`: an IDE that doesn't know a body says it needs updating, and
@@ -1283,7 +1283,7 @@ command, so a view's buttons can act on what the user is editing (a click in
 the tool window doesn't change which editor that is).
 
 API 1.3 adds optional `group`, `when` and `secondary` fields to `[[contributes.views]]`;
-using any of them requires `engines.openidea = "^1.3"`. `secondary = true`
+using any of them requires `engines.oxidea = "^1.3"`. `secondary = true`
 places a `left`, `right` or `bottom` tool window in the secondary split of its
 dock (**Left Bottom**, **Right Bottom** or **Bottom Right**). It defaults to
 `false` for every view, including views with `header = "none"`. A saved user
@@ -1338,8 +1338,8 @@ Editor and … / … Only_ switch in the tab strip, as for Markdown. `"tab"`
 `Html` is the escape hatch for content the declarative bodies can't show. It
 runs in a sandboxed frame — an opaque origin under a CSP that allows only its
 inline scripts and styles and `data:` images, no network, no IDE API — and
-talks to the plugin only through `openidea.postMessage(text)` /
-`openidea.onMessage(fn)` (`ViewEvent::Message`, `host::post_view_message`).
+talks to the plugin only through `oxidea.postMessage(text)` /
+`oxidea.onMessage(fn)` (`ViewEvent::Message`, `host::post_view_message`).
 
 The frame follows the IDE theme without reloading: its root carries
 `data-theme="light|dark"` and these CSS variables, with concrete colour
@@ -1347,20 +1347,20 @@ values (the body already uses the text colour, UI font and size):
 
 | Variable                                                                                                          | Meaning                                                          |
 | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `--openidea-bg`, `--openidea-bg-elevated`, `--openidea-bg-hover`, `--openidea-bg-selected`, `--openidea-bg-input` | Surfaces (the frame itself is transparent)                       |
-| `--openidea-fg`, `--openidea-fg-strong`, `--openidea-fg-muted`                                                    | Text                                                             |
-| `--openidea-border`, `--openidea-focus-ring`, `--openidea-link`                                                   | Lines, focus, links                                              |
-| `--openidea-accent`, `--openidea-fg-on-accent`                                                                    | Accent and text on it                                            |
-| `--openidea-danger`, `--openidea-warning`, `--openidea-success`, `--openidea-info`                                | Status colours                                                   |
-| `--openidea-font-ui`, `--openidea-font-mono`, `--openidea-font-size`                                              | Fonts (web fonts the IDE bundles are not available in the frame) |
+| `--oxidea-bg`, `--oxidea-bg-elevated`, `--oxidea-bg-hover`, `--oxidea-bg-selected`, `--oxidea-bg-input` | Surfaces (the frame itself is transparent)                       |
+| `--oxidea-fg`, `--oxidea-fg-strong`, `--oxidea-fg-muted`                                                    | Text                                                             |
+| `--oxidea-border`, `--oxidea-focus-ring`, `--oxidea-link`                                                   | Lines, focus, links                                              |
+| `--oxidea-accent`, `--oxidea-fg-on-accent`                                                                    | Accent and text on it                                            |
+| `--oxidea-danger`, `--oxidea-warning`, `--oxidea-success`, `--oxidea-info`                                | Status colours                                                   |
+| `--oxidea-font-ui`, `--oxidea-font-mono`, `--oxidea-font-size`                                              | Fonts (web fonts the IDE bundles are not available in the frame) |
 
-Scripts get the same as `openidea.theme` (`{ dark, vars }`) and
-`openidea.onThemeChange(fn)`, for drawing on a canvas, say. Variables are only
+Scripts get the same as `oxidea.theme` (`{ dark, vars }`) and
+`oxidea.onThemeChange(fn)`, for drawing on a canvas, say. Variables are only
 ever added.
 
 #### List and detail views
 
-With API 1.3 (`engines.openidea = "^1.3"`), a rendered `tree` or `list` view
+With API 1.3 (`engines.oxidea = "^1.3"`), a rendered `tree` or `list` view
 in any location can declare `detail = true`:
 
 ```toml
@@ -1382,7 +1382,7 @@ list/detail split, so this declaration never adds a nested split.
 
 #### Services views
 
-`location = "services"` (API 1.3: `engines.openidea = "^1.3"`) puts a view's
+`location = "services"` (API 1.3: `engines.oxidea = "^1.3"`) puts a view's
 tree in the Services tool window, next to Docker and the run configurations,
 instead of a tool window of its own. Its code renders it (no `web`):
 
@@ -1402,7 +1402,7 @@ toolbar work as in a tool window, the toolbar's buttons acting on the one
 selected node, and `viewItem.context` menus give the nodes a right-click menu.
 The pane beside the tree comes from the `detail-provider` export: register
 `register_plugin!(MyPlugin, views, details)` and implement
-`openidea_plugin::details::Details`, which returns the selected node's tabs
+`oxidea_plugin::details::Details`, which returns the selected node's tabs
 (at most 8; asked again after `host::refresh_view("kube")`):
 
 ```rust
@@ -1442,13 +1442,13 @@ web = "web/index.html"   # the page; its directory is what it can load
 The page's directory (never the package root) is part of the declaration:
 every file under it is checked (at most 4096 files and 256 MiB, no links),
 installed and signed with the package. The IDE loads the page from its own
-`openidea-plugin` URL scheme into an `<iframe sandbox="allow-scripts">`: an
+`oxidea-plugin` URL scheme into an `<iframe sandbox="allow-scripts">`: an
 opaque origin, no network, no cookies or storage, no IDE API, and only the
 page's own files (relative URLs, ES modules, fonts, WebAssembly) — so build
-it with relative paths (Vite: `base: "./"`). The same `openidea` object as
+it with relative paths (Vite: `base: "./"`). The same `oxidea` object as
 in `html` bodies is there before the page's scripts run, plus:
 
-| `window.openidea`                    | What it does                                                                                                                                                       |
+| `window.oxidea`                    | What it does                                                                                                                                                       |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `document.get()`                     | `{ version, text, readOnly, name }` of the custom editor's document (`name`: the file's, without its directory; none in a tool window)                             |
 | `document.edit(version, edits)`      | Applies `[{ from, to, insert }]` (UTF-16 offsets) as one change of the document's undo history; rejects with `stale` when not at `version`; resolves `{ version }` |
@@ -1463,19 +1463,19 @@ IDE shortcuts the page doesn't handle itself (Save, Close, Find Action…) still
 work while it has focus; editing keys (⌘C, ⌘V, ⌘Z…) stay with the page. With
 the `clipboard` capability the page may use `navigator.clipboard`.
 An ungrouped tool-window web view that renders its own top bar can declare
-`header = "none"` (API 1.3: `engines.openidea = "^1.3"`): once the page is
+`header = "none"` (API 1.3: `engines.oxidea = "^1.3"`): once the page is
 ready, the IDE replaces the standard tool-window header with top-right corner
-actions (`Options` and `Hide`) and sets `--openidea-corner-inset-width` (`64px`)
-and `--openidea-corner-inset-height` (`34px`) on the frame's root element (and
-in `openidea.theme.vars`) so the page can pad its top bar around them. Loading
+actions (`Options` and `Hide`) and sets `--oxidea-corner-inset-width` (`64px`)
+and `--oxidea-corner-inset-height` (`34px`) on the frame's root element (and
+in `oxidea.theme.vars`) so the page can pad its top bar around them. Loading
 and error states keep the standard tool-window header.
 Omitting `header` (or setting `header = "default"`) keeps the standard header.
 For example, a page can reserve the corner in its own toolbar:
 
 ```css
 .toolbar {
-  min-height: var(--openidea-corner-inset-height, 0px);
-  padding-right: var(--openidea-corner-inset-width, 0px);
+  min-height: var(--oxidea-corner-inset-height, 0px);
+  padding-right: var(--oxidea-corner-inset-width, 0px);
 }
 ```
 
@@ -1488,8 +1488,8 @@ before installing the plugin from the repository.
 
 ### Web frame PTYs (API 1.3)
 
-Packages requiring `engines.openidea = "^1.3"` can exchange JSON strings through
-`openidea.postMessage` / `onMessage` to own an interactive PTY. Declare
+Packages requiring `engines.oxidea = "^1.3"` can exchange JSON strings through
+`oxidea.postMessage` / `onMessage` to own an interactive PTY. Declare
 `process:<program>` in the manifest; the install dialog shows its high-risk
 permission and the user must grant it. The host runs the exact approved file,
 never a fresh PATH lookup or an implicit fallback shell. A shell requires its
@@ -1530,7 +1530,7 @@ This API is a web bridge extension; existing WIT signatures are unchanged.
 A web view can open a read-only editor tab backed by an authorized process:
 
 ```js
-openidea.postMessage(JSON.stringify({
+oxidea.postMessage(JSON.stringify({
   op: "open-log-tab",
   key: "server-output",
   title: "Server logs",
@@ -1540,7 +1540,7 @@ openidea.postMessage(JSON.stringify({
 }));
 ```
 
-Declare `engines.openidea = "^1.3"` and `process:my-server` in the manifest.
+Declare `engines.oxidea = "^1.3"` and `process:my-server` in the manifest.
 The install permission prompt and exact pinned executable, trusted project cwd,
 session caps and lifecycle rules are the same as for web frame PTYs. The tab
 uses the backend PTY API, never a shell fallback. It supplies no environment
@@ -1554,7 +1554,7 @@ to the title and is scoped to the calling plugin and view; reopening the same
 key focuses its existing tab. Titles are at most 256 characters, keys 128,
 and at most 32 toggles have ids of 64 and labels of 128 characters. The combined
 arguments must fit the PTY limits above. `cwd` and `env` are refused. Invalid or
-ungranted requests send `log-error { error }` through `openidea.onMessage`;
+ungranted requests send `log-error { error }` through `oxidea.onMessage`;
 backend start errors appear in the tab.
 
 The viewer supports selection/copy, soft wrap, Find, font zoom and Clear. It
@@ -1571,7 +1571,7 @@ window, with `host::open_log_tab(key, title, &log)` (WIT `views.open-log-tab`)
 and the `ProcessLog` the Services pane uses:
 
 ```rust
-use openidea_plugin::details::ProcessLog;
+use oxidea_plugin::details::ProcessLog;
 
 let log = ProcessLog::new("kubectl", &["logs", "-f", "deploy/api"]).toggle("previous", "Previous", &["--previous"]);
 host::open_log_tab("api-logs", "api logs", &log)?;
@@ -1608,7 +1608,7 @@ these configurations on a run target is currently invalid. Starting from activat
 An optional configuration provider declares marker files:
 
 ```toml
-engines.openidea = "^1.4"
+engines.oxidea = "^1.4"
 [[contributes.runConfigurations]]
 files = ["package.json"]
 ```
@@ -1674,10 +1674,10 @@ are limited to 1 Mi UTF-16 units, with at most 16 actions and one Save action.
 
 A web view can open an editor tab on content the plugin supplies, with
 plugin-defined toolbar actions that call back into the plugin. Declare
-`engines.openidea = "^1.3"` when using this protocol:
+`engines.oxidea = "^1.3"` when using this protocol:
 
 ```js
-openidea.postMessage(JSON.stringify({
+oxidea.postMessage(JSON.stringify({
   op: "open-content-tab",
   key: "service-config",
   title: "service.toml",
@@ -1700,7 +1700,7 @@ calling plugin and view; `fileName` (1–256 characters, no path separators) and
 `readOnly` defaults to `false`. `actions` lists up to 16 toolbar buttons with
 unique `id`s (1–64 characters), `label`s (1–128 characters), an optional built-in
 `icon` name, `primary`, and `save` (at most one action may set `save: true`).
-Invalid requests send `content-tab-error { error }` through `openidea.onMessage`.
+Invalid requests send `content-tab-error { error }` through `oxidea.onMessage`.
 
 Clicking an action (or saving via ⌘S / the close-with-changes prompt) sends
 `content-tab-action { requestId, key, action, content }` to the web view and, when
@@ -1734,7 +1734,7 @@ properties), file templates, themes and secrets, and to what views show: toolbar
 buttons, tree and list items, form field labels, table column names, messages and the
 status line, and status bar items set by code. Text without an entry, and every text
 when the language has no catalog, shows as written. A catalog applies to its own plugin
-only and never changes the IDE's text. `openidea-plugin check` refuses a catalog that is
+only and never changes the IDE's text. `oxidea-plugin check` refuses a catalog that is
 not a JSON object of strings.
 
 Text the plugin builds itself (notifications, error messages, `html` bodies, cell data)
@@ -1766,7 +1766,7 @@ back to the default.
 
 #### Multiple pages, groups, lists and tables (API 1.3)
 
-Require `engines.openidea = "^1.3"` when using pages, groups, arrays or actions.
+Require `engines.oxidea = "^1.3"` when using pages, groups, arrays or actions.
 The single `schema` form above remains supported; do not combine it with `pages`.
 
 ```toml
@@ -1837,13 +1837,13 @@ other custom UI.
 
 See the [complete two-page fixture](../crates/ide-plugin/tests/fixtures/settings-pages)
 for a model-profile table and working Test action, and the
-[Rust SDK settings example](../sdk/rust/openidea-plugin/README.md#multi-page-settings-api-13).
+[Rust SDK settings example](../sdk/rust/oxidea-plugin/README.md#multi-page-settings-api-13).
 
 ### Remote projects
 
 Plugin code runs where the project is. When a window opens a remote project,
 the desktop sends its enabled code plugins and their grants to
-`openidea-server`, which runs them next to the files: `read_file`,
+`oxidea-server`, which runs them next to the files: `read_file`,
 `find_files`, `run_process`, `fetch` and diagnostics all act on the remote
 machine, and `process:` programs are resolved on its `PATH`. Changes on the
 desktop (install, disable, grants) follow within a second. Secrets stay in the
@@ -1851,7 +1851,7 @@ desktop's keychain; the server asks for one when a request header needs it.
 Status items, notifications, tasks, views, custom editors and terminals of
 remote plugins show in that window; a custom editor edits the remote
 document.
-Project plugins (`.openidea/plugins`) don't run in remote projects yet, and a
+Project plugins (`.oxidea/plugins`) don't run in remote projects yet, and a
 plugin's storage on the server starts empty.
 
 ### Sandbox and limits
@@ -1895,7 +1895,7 @@ values (no `url()`, `;`, braces); `//` and `/* */` comments are allowed. A
 manifest theme entry may add `editor-scheme = "themes/x.scheme.json"` (editor
 colours, merged over the theme). Pick a theme in Settings › Plugins › _Apply_.
 
-Start with `openidea-plugin new <dir> --template theme` (or a copy of
+Start with `oxidea-plugin new <dir> --template theme` (or a copy of
 [`official/harbor-night`](official/harbor-night)); the full guide, token
 reference and IntelliJ / VS Code porting tables are in
 [`docs/plugins/themes.md`](../docs/plugins/themes.md).
@@ -2037,7 +2037,7 @@ it has no grammar for, the plugin's component can export `syntax-provider`
 folds for a whole document, in UTF-8 byte offsets. With the SDK:
 
 ```rust
-use openidea_plugin::syntax::{Fold, Highlight, Symbol, SyntaxProvider, Token};
+use oxidea_plugin::syntax::{Fold, Highlight, Symbol, SyntaxProvider, Token};
 
 impl SyntaxProvider for MyPlugin {
     fn highlights(&mut self, language: &str, text: &str) -> Vec<Token> { … }
@@ -2090,10 +2090,10 @@ granted, and starts the approved program.
   nothing new installs with the grants the installed version has; the install
   page is shown only for new capabilities, an unsigned package or another
   signer (see _Distribution_).
-- **Linked plugins:** `openidea-plugin link <dir>` (§1). Listed with a _linked_
+- **Linked plugins:** `oxidea-plugin link <dir>` (§1). Listed with a _linked_
   tag; capabilities are granted per folder.
 - **Project plugins:** put (or symlink) the package in
-  `<project>/.openidea/plugins/<name>/`. They load only in trusted projects and
+  `<project>/.oxidea/plugins/<name>/`. They load only in trusted projects and
   only after you approve their capabilities.
 - **Where:** installing, removing, enabling, granting and reloading plugins
   work on the welcome screen and in trusted projects. A project opened in
@@ -2101,7 +2101,7 @@ granted, and starts the approved program.
   page, but not change which plugin code runs.
 - Commands appear in Search Everywhere › Actions under their category, and can
   be bound in Settings › Keymap like any other action.
-- **Troubleshooting:** `openidea-plugin check` says why a package would be
+- **Troubleshooting:** `oxidea-plugin check` says why a package would be
   refused. Settings › Plugins shows each plugin's state, why it failed if it
   did, and its call stats (§3, _Sandbox and limits_). `host::log` lines go to
   the IDE log (Help › _Show Log in Finder_ / _Explorer_ / _Files_) tagged with
@@ -2117,12 +2117,12 @@ files it references, the component, licence files and, when signed,
 files).
 
 ```sh
-openidea-plugin keygen acme.key                     # once; keep the file secret
-openidea-plugin pack plugins/acme-tools --key acme.key --publisher acme
-openidea-plugin index market/ --publisher acme --name "ACME" --key acme.key
-openidea-plugin check acme.tools-1.0.0.oiplugin      # a package as installing would check it
-openidea-plugin merge market/index.json https://example.com/index.json --keep acme
-openidea-plugin endorse <new public key> --key acme.key --publisher acme   # when rotating keys
+oxidea-plugin keygen acme.key                     # once; keep the file secret
+oxidea-plugin pack plugins/acme-tools --key acme.key --publisher acme
+oxidea-plugin index market/ --publisher acme --name "ACME" --key acme.key
+oxidea-plugin check acme.tools-1.0.0.oiplugin      # a package as installing would check it
+oxidea-plugin merge market/index.json https://example.com/index.json --keep acme
+oxidea-plugin endorse <new public key> --key acme.key --publisher acme   # when rotating keys
 ```
 
 A **marketplace** is static: an `index.json` and the packages next to it, on
@@ -2149,9 +2149,9 @@ and the publisher's key, then shows the install page.
   unsigned package replacing a signed one — is shown on the install page and
   needs the user's confirmation.
 - **Official key:** release builds carry the official publisher's public key
-  (`OPENIDEA_OFFICIAL_PLUGIN_KEYS`, derived from the release's signing key).
-  `openidea.*` plugins must be signed with it, or with a key it endorsed,
-  whatever keys an index lists for `openidea`.
+  (`OXIDEA_OFFICIAL_PLUGIN_KEYS`, derived from the release's signing key).
+  `oxidea.*` plugins must be signed with it, or with a key it endorsed,
+  whatever keys an index lists for `oxidea`.
 - **Format:** fields are only ever added to the index (an IDE ignores those it
   doesn't know), and `format` stays `1` unless older IDEs can't read the
   change. An IDE reading a newer format still applies its revocations and
@@ -2161,7 +2161,7 @@ and the publisher's key, then shows the install page.
   change hosts while released IDEs keep the address they were built with.
 
 **Versions.** Each index entry records the plugin API it needs (`engine`: the
-manifest's `engines.openidea`, narrowed to the API its component was built
+manifest's `engines.oxidea`, narrowed to the API its component was built
 for; an entry without one is offered to no IDE), and a plugin may be listed in
 several versions. Settings › Plugins
 offers the newest version this IDE can load; when there is none, it shows the
@@ -2184,16 +2184,16 @@ in place of every publisher but `--keep`; `check` also takes a `.oiplugin`.
 The IDE's default marketplace is `plugins-index.json` of the latest release.
 It lists two kinds of plugins:
 
-- **Official** (`plugins/official/`, ids `openidea.*`): maintained in this
+- **Official** (`plugins/official/`, ids `oxidea.*`): maintained in this
   repository, built and signed by its release workflow, and kept working as
   the API changes. New official plugins are proposed in an issue first; they
   cover general needs or show how to use part of the API.
 - **Community** (their authors' ids and keys): developed in their authors'
   repositories and listed through the registry,
-  [l0ng-ai/openidea-plugins](https://github.com/l0ng-ai/openidea-plugins).
+  [l0ng-ai/oxidea-plugins](https://github.com/l0ng-ai/oxidea-plugins).
   An author registers a publisher (an id prefix, its public key and the GitHub
   accounts that may change it) and adds each plugin version by pull request;
-  the registry checks the package (digest, signature, `openidea-plugin check`)
+  the registry checks the package (digest, signature, `oxidea-plugin check`)
   and publishes its index, which `plugins-index.yml` merges into the release's
   within the hour. Its README has the rules.
 
@@ -2224,16 +2224,16 @@ Next to each `dist/plugin.wasm`, `dist/plugin.wasm.sources` fingerprints the
 sources it was built from (the plugin, the SDK and `wit/`); builds are not
 byte-reproducible across machines, so `--check` compares fingerprints.
 
-The SDK carries a copy of `wit/` in `sdk/rust/openidea-plugin/wit`; keep them
+The SDK carries a copy of `wit/` in `sdk/rust/oxidea-plugin/wit`; keep them
 identical (a test in `crates/ide-plugin/tests/api_compat.rs` checks). Changing
 the API itself follows _Evolving the plugin API_ below.
 
 ## 10. Evolving the plugin API
 
-Released versions are frozen: 1.0.0 shipped with OpenIDEA 0.1.36, 1.1.0
+Released versions are frozen: 1.0.0 shipped with OXidea 0.1.36, 1.1.0
 with 0.1.37, 1.2.0 with 0.1.38 and 1.3.0 with 0.1.39. API 1.4.0 is planned
 with the next release. wasmtime decides what stays compatible: it resolves interface names
-by semver (a component importing `openidea:plugin/x@1.0.0` links against a
+by semver (a component importing `oxidea:plugin/x@1.0.0` links against a
 host defining `@1.1.0`, and the host finds its exports the same way), but
 function types must match exactly — a record with another field count, or a
 variant or enum with another case count, doesn't link. So a released 1.x
@@ -2254,8 +2254,8 @@ only grows:
    host would not find them in older components. New capabilities get new
    interfaces (e.g. a `hover-provider`) in new optional worlds.
 4. **The host knows each component's API version** (the highest version of
-   its `openidea:plugin/*` imports and exports, `PluginEngine::check_component`).
-   Installing and `openidea-plugin check` refuse another major or a newer
+   its `oxidea:plugin/*` imports and exports, `PluginEngine::check_component`).
+   Installing and `oxidea-plugin check` refuse another major or a newer
    minor with a message that says to update the IDE or rebuild with the SDK.
    They also link the component, so one that imports a function this host
    lacks under the same version (built from unreleased WIT) is refused too.
@@ -2289,10 +2289,10 @@ A new host function touches:
 
 | Where                                                     | Checked by                                     |
 | --------------------------------------------------------- | ---------------------------------------------- |
-| `wit/*.wit`, copied to `sdk/rust/openidea-plugin/wit`     | `api_compat.rs::the_sdk_carries_the_hosts_wit` |
+| `wit/*.wit`, copied to `sdk/rust/oxidea-plugin/wit`     | `api_compat.rs::the_sdk_carries_the_hosts_wit` |
 | `crates/ide-plugin/src/wit_host.rs`: binding, capability  | the compiler (bindgen's traits)                |
 | `crates/ide-plugin/src/runtime.rs`: `HostApi` method      | the compiler                                   |
-| `crates/ide-host/src/plugins/api.rs`: implementation      | the compiler (desktop and `openidea-server`)   |
+| `crates/ide-host/src/plugins/api.rs`: implementation      | the compiler (desktop and `oxidea-server`)   |
 | SDK `src/host.rs`: the wasm and the mock `imp`            | the compiler (CI builds both targets)          |
 | SDK public wrapper                                        | SDK `tests/wit_coverage.rs`                    |
 | Capability: `ide-extension/src/capability.rs`, consent UI | review; a test that a missing grant is denied  |
@@ -2325,7 +2325,7 @@ opens the generated-requests scratch; requests start at `http://localhost:8080`
 and path parameters become HTTP client variables. Adjust the host for the app.
 
 ```toml
-engines.openidea = "^1.3"
+engines.oxidea = "^1.3"
 [capabilities]
 required = ["project.read"]
 [[contributes.endpoints]]

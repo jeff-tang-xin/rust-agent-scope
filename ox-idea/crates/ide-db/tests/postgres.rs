@@ -1,11 +1,11 @@
 //! The active schema context against a real PostgreSQL server, skipped unless
-//! `OPENIDEA_TEST_POSTGRES=host:port:user:password` names a throwaway server.
+//! `OXIDEA_TEST_POSTGRES=host:port:user:password` names a throwaway server.
 
 use ide_core::{CancellationToken, IdeResult};
 use ide_db::{DataSource, DbDriver, DbManager};
 
 fn server() -> Option<(String, u16, String, String)> {
-    let v = std::env::var("OPENIDEA_TEST_POSTGRES").ok()?;
+    let v = std::env::var("OXIDEA_TEST_POSTGRES").ok()?;
     let mut it = v.splitn(4, ':');
     Some((it.next()?.into(), it.next()?.parse().ok()?, it.next()?.into(), it.next().unwrap_or("").into()))
 }

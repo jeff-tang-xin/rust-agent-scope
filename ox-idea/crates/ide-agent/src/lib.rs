@@ -51,12 +51,12 @@ const IDLE_RELEASE: Duration = Duration::from_secs(5 * 60);
 const SESSION_STATE: [&str; 5] =
     ["session_info_update", "config_option_update", "current_mode_update", "available_commands_update", "usage_update"];
 /// A native agent's own update: it is about to retry a failed API request (see [`AgentRetry`]).
-pub(crate) const RETRY_UPDATE: &str = "openidea_retry";
+pub(crate) const RETRY_UPDATE: &str = "oxidea_retry";
 /// A native agent's own update: the usage limits of its account (see [`AgentLimit`]).
-pub(crate) const LIMITS_UPDATE: &str = "openidea_limits";
+pub(crate) const LIMITS_UPDATE: &str = "oxidea_limits";
 /// A native agent's own update: the background tasks its session runs
 /// (see [`TaskState::background_tasks`]).
-pub(crate) const BACKGROUND_TASKS_UPDATE: &str = "openidea_background_tasks";
+pub(crate) const BACKGROUND_TASKS_UPDATE: &str = "oxidea_background_tasks";
 /// Referenced files up to this size are embedded in the prompt (when the agent takes it).
 const MAX_EMBED: u64 = 256 * 1024;
 /// How long a probe waits for the agent to answer `initialize`.
@@ -356,6 +356,7 @@ impl AgentManager {
             }
             provider::Driver::Codex => native::codex::connect(spec, cwd, client, on_stderr),
             provider::Driver::Claude => native::claude::connect(spec, cwd, client, on_stderr),
+            provider::Driver::Ox => native::ox::connect(spec, cwd, client, on_stderr),
         });
         Self::with_connector(paths, runtime, connector)
     }
@@ -493,7 +494,7 @@ impl AgentManager {
                 });
             }
         }
-        if provider != "claude" && provider != "claude-acp" {
+        if provider != "claude" && provider != "ox-hareness" {
             return Ok(offered);
         }
         let home = self.shared.paths.home_dir.clone();
@@ -855,7 +856,7 @@ impl AgentManager {
         let drop = (starts.len() - turns as usize) as u32;
         let _: Value = live
             .peer
-            .request("_openidea/rollback", json!({ "sessionId": live.session, "turns": drop }), None)
+            .request("_oxidea/rollback", json!({ "sessionId": live.session, "turns": drop }), None)
             .await
             .map_err(|e| IdeError::internal(task.describe(e)))?;
         let first = {
@@ -965,7 +966,7 @@ impl AgentManager {
         }
         let _: Value = live
             .peer
-            .request("_openidea/stop_task", json!({ "sessionId": live.session, "taskId": background }), None)
+            .request("_oxidea/stop_task", json!({ "sessionId": live.session, "taskId": background }), None)
             .await
             .map_err(|error| IdeError::internal(task.describe(error)))?;
         Ok(())
@@ -1380,7 +1381,7 @@ impl Task {
         };
         let content = self.content(&live, &prompt).await;
         let sent: Result<Value, RpcError> =
-            live.peer.request("_openidea/steer", json!({ "sessionId": live.session, "prompt": content }), None).await;
+            live.peer.request("_oxidea/steer", json!({ "sessionId": live.session, "prompt": content }), None).await;
         if let Err(e) = sent {
             // The turn ended meanwhile: the message waits for the next one instead.
             tracing::debug!("agent task {}: steering failed: {e}", self.id);
@@ -1557,7 +1558,7 @@ impl Task {
         if pending > 0 {
             if resumed && capabilities.rollback {
                 let params = json!({ "sessionId": session_id, "turns": pending });
-                if let Err(e) = peer.request::<_, Value>("_openidea/rollback", params, None).await {
+                if let Err(e) = peer.request::<_, Value>("_oxidea/rollback", params, None).await {
                     tracing::warn!("agent task {}: dropping {pending} forked turns failed: {e}", self.id);
                 }
             } else {
@@ -2152,10 +2153,10 @@ impl From<String> for Failure {
 }
 
 /// Whether `e` reports a usage or rate limit, and when it resets: as native agents report
-/// it (`data.openidea.usageLimit.resetsAtMs`), or as ACP agents word it.
+/// it (`data.oxidea.usageLimit.resetsAtMs`), or as ACP agents word it.
 fn usage_limit(e: &RpcError) -> Option<Option<f64>> {
     let RpcError::Server { message, data, .. } = e else { return None };
-    if let Some(limit) = data.as_ref().and_then(|d| d.pointer("/openidea/usageLimit")) {
+    if let Some(limit) = data.as_ref().and_then(|d| d.pointer("/oxidea/usageLimit")) {
         return Some(limit.get("resetsAtMs").and_then(Value::as_f64));
     }
     let m = message.to_lowercase();
@@ -2166,7 +2167,7 @@ fn usage_limit(e: &RpcError) -> Option<Option<f64>> {
 }
 
 fn client_info() -> Value {
-    json!({ "name": "OpenIDEA", "version": env!("CARGO_PKG_VERSION") })
+    json!({ "name": "OXidea", "version": env!("CARGO_PKG_VERSION") })
 }
 
 /// What the agent said it can do, and whether it takes embedded files.
@@ -2188,9 +2189,9 @@ fn capabilities_of(init: &acp::Negotiated) -> (AgentCapabilities, bool) {
     let capabilities = AgentCapabilities {
         images: init.prompt("image"),
         fork: init.session("fork"),
-        rollback: meta("/openidea/rollback"),
-        steer: meta("/openidea/steer"),
-        background_tasks: meta("/openidea/backgroundTasks"),
+        rollback: meta("/oxidea/rollback"),
+        steer: meta("/oxidea/steer"),
+        background_tasks: meta("/oxidea/backgroundTasks"),
     };
     (capabilities, init.prompt("embeddedContext"))
 }
@@ -2305,5 +2306,5 @@ fn mcp_servers_for(supported: bool, root: &std::path::Path) -> Vec<Value> {
 fn stdio_mcp_servers(executable: Option<&std::path::Path>, supported: bool, root: &std::path::Path) -> Vec<Value> {
     let Some(executable) = executable.filter(|_| supported) else { return Vec::new() };
     let command = ide_mcp::stdio_command(executable, root);
-    vec![json!({ "name": "OpenIDEA", "command": command[0], "args": command[1..], "env": [] })]
+    vec![json!({ "name": "OXidea", "command": command[0], "args": command[1..], "env": [] })]
 }

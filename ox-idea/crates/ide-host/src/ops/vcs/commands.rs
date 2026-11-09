@@ -251,7 +251,7 @@ pub enum PatchSource {
     Commits { commits: Vec<String>, reverse: bool },
 }
 
-// ---- shelf (`.openidea/shelf`) and change lists (`.openidea/changelists.json`) ----
+// ---- shelf (`.oxidea/shelf`) and change lists (`.oxidea/changelists.json`) ----
 
 const PRIVATE_ENTRIES: [&str; 2] = ["/shelf/", "/changelists.json"];
 

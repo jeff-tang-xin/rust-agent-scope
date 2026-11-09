@@ -308,7 +308,7 @@ async fn upload_reports_a_command_that_stops_reading() {
             state as u8
         })
         .collect();
-    let put = session.put("/home/dev/.openidea/server/openidea-server", &data);
+    let put = session.put("/home/dev/.oxidea/server/oxidea-server", &data);
     let err = tokio::time::timeout(std::time::Duration::from_secs(20), put)
         .await
         .expect("the upload must end when the command exits")

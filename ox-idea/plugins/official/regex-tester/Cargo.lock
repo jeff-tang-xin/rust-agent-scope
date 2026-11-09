@@ -104,7 +104,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "openidea-plugin"
+name = "oxidea-plugin"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -113,10 +113,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "openidea-plugin-openidea-regex-tester"
+name = "oxidea-plugin-oxidea-regex-tester"
 version = "0.1.0"
 dependencies = [
- "openidea-plugin",
+ "oxidea-plugin",
  "regex",
  "serde_json",
 ]

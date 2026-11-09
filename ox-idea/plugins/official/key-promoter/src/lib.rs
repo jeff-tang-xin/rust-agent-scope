@@ -1,10 +1,10 @@
-//! Key Promoter for OpenIDEA: when you run an action with the mouse (menu,
+//! Key Promoter for OXidea: when you run an action with the mouse (menu,
 //! toolbar, context menu) that has a keyboard shortcut, it tells you the
 //! shortcut. Counts persist in storage, so the tips survive restarts and the
 //! instance being reclaimed while you work.
 
-use openidea_plugin::host::{self, storage};
-use openidea_plugin::{ActionSource, Error, Event, Invocation, NotificationLevel, Plugin, register_plugin};
+use oxidea_plugin::host::{self, storage};
+use oxidea_plugin::{ActionSource, Error, Event, Invocation, NotificationLevel, Plugin, register_plugin};
 
 /// Tips for one action are shown on these counts, then every `REPEAT_EVERY`.
 const FIRST_TIPS: [u32; 3] = [1, 3, 10];
@@ -99,8 +99,8 @@ register_plugin!(KeyPromoter);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::ActionPerformed;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::ActionPerformed;
+    use oxidea_plugin::mock::MockHost;
 
     fn action(id: &str, source: ActionSource, shortcut: Option<&str>) -> Event {
         Event::ActionPerformed(ActionPerformed {

@@ -1,6 +1,6 @@
-use openidea_plugin::host::{self, Project};
-use openidea_plugin::providers::{Document, Providers};
-use openidea_plugin::{Error, Invocation, Location, Plugin, Position, register_plugin};
+use oxidea_plugin::host::{self, Project};
+use oxidea_plugin::providers::{Document, Providers};
+use oxidea_plugin::{Error, Invocation, Location, Plugin, Position, register_plugin};
 
 #[derive(Default)]
 struct Fixture {

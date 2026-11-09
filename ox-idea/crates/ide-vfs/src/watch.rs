@@ -201,7 +201,7 @@ impl Watcher {
         let thread = {
             let state = state.clone();
             std::thread::Builder::new()
-                .name("openidea-fs-watch".into())
+                .name("oxidea-fs-watch".into())
                 .spawn(move || state.run(deferred, &*emit))
                 .map_err(|e| io_error(format!("cannot start file watcher: {e}")))?
         };
@@ -908,7 +908,7 @@ mod tests {
     fn atomic_save_temp_files_are_not_reported() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
-        let temp = root.join(".a.py.openidea-tmp-42-0");
+        let temp = root.join(".a.py.oxidea-tmp-42-0");
         std::fs::write(&temp, "x").unwrap();
         std::fs::write(root.join("a.py"), "x").unwrap();
         let filter = EventFilter::new(root.clone(), &[]);

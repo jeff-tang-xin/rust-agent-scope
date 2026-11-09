@@ -337,7 +337,7 @@ pub struct ReportedSourceSet {
     pub res: Vec<String>,
 }
 
-const MODEL_LINE: &str = "@openidea-model\t";
+const MODEL_LINE: &str = "@oxidea-model\t";
 
 /// The projects printed by `gradle-model.gradle`; malformed lines are skipped.
 pub fn parse_reported_projects(output: &str) -> Vec<ReportedProject> {

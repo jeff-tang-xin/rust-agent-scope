@@ -242,8 +242,9 @@ fn choose<'a>(entry: &'a Entry, platform: Platform, on_path: &dyn Fn(&str) -> bo
 }
 
 /// Registry ids that map to a shorter built-in provider id (`<config>/agents/<id>.toml`).
-const BUILTIN_ALIASES: &[(&str, &str)] =
-    &[("github-copilot-cli", "copilot"), ("qwen-code", "qwen"), ("mistral-vibe", "vibe")];
+const BUILTIN_ALIASES: &[(&str, &str)] = &[];
+// Empty since the built-in CLI agents were removed: the only built-in agent is the
+// in-process OX one, which the registry never lists. The mechanism stays for future use.
 
 fn canonical_id(id: &str) -> &str {
     BUILTIN_ALIASES.iter().find_map(|&(alias, canonical)| (alias == id).then_some(canonical)).unwrap_or(id)
@@ -738,8 +739,8 @@ mod tests {
          "distribution":{"npx":{"package":"cline@3.0.74","args":["--acp"]}}},
         {"id":"fast-agent","name":"fast-agent","version":"0.10.1",
          "distribution":{"uvx":{"package":"fast-agent-acp==0.10.1","args":["-x"],"env":{"K":"v"}}}},
-        {"id":"claude-acp","name":"Claude Agent","version":"0.98.0",
-         "distribution":{"npx":{"package":"@agentclientprotocol/claude-agent-acp@0.98.0"}}},
+        {"id":"zed-acp","name":"Zed Agent","version":"0.98.0",
+         "distribution":{"npx":{"package":"@agentclientprotocol/zed-agent-acp@0.98.0"}}},
         {"id":"../evil","name":"Evil","version":"1","distribution":{}},
         {"id":"broken","name":"Broken"}
     ],"extensions":[]}"#;
@@ -752,7 +753,7 @@ mod tests {
     fn parses_the_index_and_skips_bad_entries() {
         let entries = parse(INDEX).unwrap();
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(ids, ["amp-acp", "cline", "fast-agent", "claude-acp"]);
+        assert_eq!(ids, ["amp-acp", "cline", "fast-agent", "zed-acp"]);
         let amp = &entries[0];
         assert_eq!(amp.distribution.binary["darwin-aarch64"].sha256.as_deref(), Some("ab"));
         assert_eq!(entries[2].distribution.uvx.as_ref().unwrap().env["K"], "v");
@@ -775,12 +776,19 @@ mod tests {
         assert_eq!(ids(MAC_ARM, &none), [("amp-acp".to_owned(), Some(RegistryDistribution::Binary))]);
         assert!(ids(LINUX, &none).is_empty());
         let node_only = |c: &str| c == "npm" || c == "node";
-        assert_eq!(ids(LINUX, &node_only), [("cline".to_owned(), Some(RegistryDistribution::Npx))]);
+        assert_eq!(
+            ids(LINUX, &node_only),
+            [
+                ("cline".to_owned(), Some(RegistryDistribution::Npx)),
+                ("zed-acp".to_owned(), Some(RegistryDistribution::Npx))
+            ]
+        );
         assert_eq!(
             ids(LINUX, &all),
             [
                 ("cline".to_owned(), Some(RegistryDistribution::Npx)),
-                ("fast-agent".to_owned(), Some(RegistryDistribution::Uvx))
+                ("fast-agent".to_owned(), Some(RegistryDistribution::Uvx)),
+                ("zed-acp".to_owned(), Some(RegistryDistribution::Npx))
             ]
         );
         assert_eq!(platform_key(WINDOWS), "windows-x86_64");
@@ -957,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_github_copilot_cli_to_builtin_copilot_and_tracks_updates() {
+    fn registry_entries_keep_their_own_id_and_track_updates() {
         let dir = tempfile::tempdir().unwrap();
         let p = paths(dir.path());
         let index = r#"{"agents":[
@@ -967,13 +975,14 @@ mod tests {
         ]}"#;
         let entries = parse(index).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!((entries[0].id.as_str(), entries[0].name.as_str()), ("copilot", "GitHub Copilot"));
+        // No built-in aliasing any more: the registry id is used as is.
+        assert_eq!((entries[0].id.as_str(), entries[0].name.as_str()), ("github-copilot-cli", "Copilot"));
 
         let shown = visible(&p, &entries, MAC_ARM, &|c| c == "npm" || c == "node");
         assert_eq!(shown.len(), 1);
         assert_eq!(
             (shown[0].id.as_str(), shown[0].name.as_str(), shown[0].installed.as_deref()),
-            ("copilot", "GitHub Copilot", None)
+            ("github-copilot-cli", "Copilot", None)
         );
 
         CustomAgent {
@@ -982,18 +991,18 @@ mod tests {
             command: "/data/tools/copilot/1.0.104/node_modules/.bin/copilot".into(),
             args: vec!["--acp".into()],
             env: BTreeMap::new(),
-            registry: Some(RegistryRef { id: "copilot".into(), version: "1.0.104".into() }),
+            registry: Some(RegistryRef { id: "github-copilot-cli".into(), version: "1.0.104".into() }),
         }
-        .write(&p.agent_file("copilot"))
+        .write(&p.agent_file("github-copilot-cli"))
         .unwrap();
 
         let shown = visible(&p, &entries, MAC_ARM, &|c| c == "npm" || c == "node");
         assert_eq!((shown[0].installed.as_deref(), shown[0].update), (Some("1.0.104"), true));
 
         write_atomic(&p.cache_file, index.as_bytes()).unwrap();
-        let spec = provider::load(Some(&p.agents_dir)).into_iter().find(|s| s.id == "copilot").unwrap();
+        let spec =
+            provider::load(Some(&p.agents_dir)).into_iter().find(|s| s.id == "github-copilot-cli").unwrap();
         assert_eq!(spec.name, "GitHub Copilot");
-        assert_eq!(spec.login_hint, "Run `copilot` in a terminal and sign in.");
         assert_eq!(spec.source, AgentSource::Registry { version: "1.0.104".into(), update: None });
 
         let mut providers = vec![provider::describe(&spec)];
@@ -1003,8 +1012,8 @@ mod tests {
             AgentSource::Registry { version: "1.0.104".into(), update: Some("1.0.105".into()) }
         );
 
+        // Removing the install leaves nothing behind: there is no built-in fallback.
         remove(&p, "github-copilot-cli").unwrap();
-        let fallback = provider::load(Some(&p.agents_dir)).into_iter().find(|s| s.id == "copilot").unwrap();
-        assert_eq!(fallback.source, AgentSource::Builtin);
+        assert!(!provider::load(Some(&p.agents_dir)).iter().any(|s| s.id == "github-copilot-cli"));
     }
 }

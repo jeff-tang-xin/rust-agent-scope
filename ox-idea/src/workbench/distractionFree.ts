@@ -21,7 +21,7 @@ import { enterDistractionFreeLayout, exitDistractionFreeLayout, useToolWindowLay
 export const DISTRACTION_FREE_ACTION = "editor.toggleZen";
 export const DISTRACTION_FREE_CONTEXT = "distractionFree";
 export const DEFAULT_DISTRACTION_FREE_WIDTH = 80;
-const STORAGE_KEY = "openidea.distractionFree";
+const STORAGE_KEY = "oxidea.distractionFree";
 export const DISTRACTION_FREE_HINT_KEY = "distractionFree.hint";
 
 export const useDistractionFree = create<{ active: boolean }>(() => ({ active: false }));

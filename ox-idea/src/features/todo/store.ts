@@ -10,7 +10,7 @@ import { useProject } from "@/platform/project";
 import { onEditorEvent } from "@/editor/api";
 import { buildTodoQuery, DEFAULT_TODO_SETTINGS, itemsFromMatches, type TodoItem, type TodoSettings } from "./model";
 
-const SETTINGS_KEY = "openidea.todo.v1";
+const SETTINGS_KEY = "oxidea.todo.v1";
 
 function loadSettings(): TodoSettings {
   try {

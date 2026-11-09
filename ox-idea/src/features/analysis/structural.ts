@@ -23,7 +23,7 @@ import { notifications } from "@/workbench/contributions";
 import { resolveScope, type ScopeChoice } from "./scope";
 import { tx } from "@/platform/i18n";
 
-const STATE_KEY = "openidea.analysis.structural.v1";
+const STATE_KEY = "oxidea.analysis.structural.v1";
 
 export interface StructuralForm {
   pattern: string;

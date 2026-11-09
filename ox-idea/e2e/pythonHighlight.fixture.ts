@@ -1,7 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
-import { openideaHighlightStyle } from "../src/editor/core/cm/highlight";
+import { oxideaHighlightStyle } from "../src/editor/core/cm/highlight";
 import { findLanguageDescription, loadSupport } from "../src/editor/core/cm/languages";
 import { semanticExtension } from "../src/editor/lsp/semantic";
 import { lspDoc } from "../src/editor/lsp/lsp";
@@ -29,13 +29,13 @@ const attributes = {
   "PY.STRING.F": { FOREGROUND: "aa8811" },
   "PY.PREDEFINED_DEFINITION": { FOREGROUND: "bb9922" },
   "PY.PREDEFINED_USAGE": { FOREGROUND: "ccaa33" },
-  OPENIDEA_pyLocalVariable: { FOREGROUND: "aa1101" },
-  OPENIDEA_pyGlobalVariable: { FOREGROUND: "aa2202" },
-  OPENIDEA_pyInstanceAttribute: { FOREGROUND: "aa3303" },
-  OPENIDEA_pyClassAttribute: { FOREGROUND: "aa4404" },
-  OPENIDEA_pyConstant: { FOREGROUND: "aa5505" },
-  OPENIDEA_pyProperty: { FOREGROUND: "aa6606" },
-  OPENIDEA_pyTypeParameter: { FOREGROUND: "aa7707" },
+  OXIDEA_pyLocalVariable: { FOREGROUND: "aa1101" },
+  OXIDEA_pyGlobalVariable: { FOREGROUND: "aa2202" },
+  OXIDEA_pyInstanceAttribute: { FOREGROUND: "aa3303" },
+  OXIDEA_pyClassAttribute: { FOREGROUND: "aa4404" },
+  OXIDEA_pyConstant: { FOREGROUND: "aa5505" },
+  OXIDEA_pyProperty: { FOREGROUND: "aa6606" },
+  OXIDEA_pyTypeParameter: { FOREGROUND: "aa7707" },
 };
 const xml = `<scheme name="Python" parent_scheme="Darcula"><attributes>${Object.entries(attributes)
   .map(
@@ -84,7 +84,7 @@ def unused(param):
 `,
     extensions: [
       support!,
-      syntaxHighlighting(openideaHighlightStyle),
+      syntaxHighlighting(oxideaHighlightStyle),
       lspTheme,
       lspDoc.of({ language: "python" } as EditorDocContext),
       ...(new URLSearchParams(location.search).has("baseline") ? [] : [semanticExtension()]),

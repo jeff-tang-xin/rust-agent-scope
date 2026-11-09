@@ -13,9 +13,9 @@ import time
 import xml.etree.ElementTree as ET
 
 home = pathlib.Path(sys.argv[1]).resolve()
-bundle = pathlib.Path(__file__).resolve().parents[1] / 'openidea-kotlin-bridge.jar'
-work = pathlib.Path(tempfile.mkdtemp(prefix='openidea-kotlin-bridge-', dir=os.environ.get('TMPDIR'))).resolve()
-copied_bundle = work/'openidea-kotlin-bridge.jar'
+bundle = pathlib.Path(__file__).resolve().parents[1] / 'oxidea-kotlin-bridge.jar'
+work = pathlib.Path(tempfile.mkdtemp(prefix='oxidea-kotlin-bridge-', dir=os.environ.get('TMPDIR'))).resolve()
+copied_bundle = work/'oxidea-kotlin-bridge.jar'
 shutil.copyfile(bundle, copied_bundle)
 bundle = copied_bundle
 projects = work / 'projects'
@@ -89,12 +89,12 @@ def request(method, params):
             return message.get('result')
     raise TimeoutError(method)
 def command(snapshot):
-    response = request('workspace/executeCommand', {'command':'openidea.kotlin.replace', 'arguments':[snapshot]})
+    response = request('workspace/executeCommand', {'command':'oxidea.kotlin.replace', 'arguments':[snapshot]})
     assert isinstance(response, (int, float)), response
     return response
 def build(directory, revision, expected=True):
     staging = work / revision
-    result = subprocess.run(['mvn', '-B', '-fae', '-Dstyle.color=never', f'-Dmaven.ext.class.path={bundle}', f'-Dopenidea.kotlin.staging={staging}/staging', 'test-compile'], cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run(['mvn', '-B', '-fae', '-Dstyle.color=never', f'-Dmaven.ext.class.path={bundle}', f'-Doxidea.kotlin.staging={staging}/staging', 'test-compile'], cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (work/f'{revision}.log').write_bytes(result.stdout)
     modules = json.loads((staging/'modules.json').read_text())
     eligible = all(m['kotlinGoals'] and all(g['status'] == 'success' for g in m['kotlinGoals']) for m in modules if m['hasKotlin'])
@@ -151,7 +151,7 @@ try:
     state(single, 'test-before', False, True)
     def raw(directory):
         entries = ET.parse(directory/'.classpath').getroot()
-        return [ET.tostring(e).decode().strip() for e in entries if not any(a.get('name')=='ai.openidea.kotlin' for a in e.findall('./attributes/attribute'))]
+        return [ET.tostring(e).decode().strip() for e in entries if not any(a.get('name')=='ai.oxidea.kotlin' for a in e.findall('./attributes/attribute'))]
     before = {str(d):raw(d) for d in [single, lib, app]}
     sm = build(single, 'single-build')[0]
     assert not (pathlib.Path(sm['output'])/'probe/TestCaller.class').exists()

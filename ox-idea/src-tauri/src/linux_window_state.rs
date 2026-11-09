@@ -362,7 +362,7 @@ mod runtime {
         // first paint, allowing GTK to learn the scale of the assigned output.
         let script = r#"
 (() => {
-  const state = window.__OPENIDEA_WINDOW_GEOMETRY__ ??= { request: 0, scheduled: false };
+  const state = window.__OXIDEA_WINDOW_GEOMETRY__ ??= { request: 0, scheduled: false };
   state.request = __REQUEST_ID__;
   state.ready ??= () => {
     if (document.hidden || state.scheduled) return;
@@ -374,7 +374,7 @@ mod runtime {
       const api = window.__TAURI_INTERNALS__;
       const label = api?.metadata?.currentWindow?.label;
       if (label) api.invoke('plugin:event|emit', {
-        event: 'openidea://window-state-presented', payload: { label, request }
+        event: 'oxidea://window-state-presented', payload: { label, request }
       });
       if (request !== state.request) state.ready();
     }));
@@ -428,7 +428,7 @@ mod runtime {
                     .unwrap_or_default();
                 app.manage(Mutex::new(Cache { saved, ..Default::default() }));
                 let handle = app.clone();
-                app.listen("openidea://window-state-presented", move |event| {
+                app.listen("oxidea://window-state-presented", move |event| {
                     #[derive(serde::Deserialize)]
                     struct Presented {
                         label: String,

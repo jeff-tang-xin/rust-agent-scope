@@ -192,8 +192,8 @@ describe("naming the Java project jdtls imported", () => {
 
   it("uses the Maven artifactId, not the folder name, and skips the parent's", async () => {
     files["/p/pom.xml"] =
-      "<project><parent><artifactId>orders-parent</artifactId></parent><artifactId>openidea-fixture-orders</artifactId></project>";
-    expect(await javaProjectName("/p")).toBe("openidea-fixture-orders");
+      "<project><parent><artifactId>orders-parent</artifactId></parent><artifactId>oxidea-fixture-orders</artifactId></project>";
+    expect(await javaProjectName("/p")).toBe("oxidea-fixture-orders");
   });
 
   it("prefers the Eclipse project descriptor", async () => {

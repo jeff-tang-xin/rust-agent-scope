@@ -5,9 +5,9 @@ use ide_language::LanguageServerConfig;
 use serde_json::json;
 use std::path::Path;
 
-const PROFILE: &str = "OpenIDEA IntelliJ IDEA";
+const PROFILE: &str = "OXidea IntelliJ IDEA";
 const XML: &str = include_str!("intellij.xml");
-const GENERATED_PROFILE: &str = "OpenIDEA Code Style";
+const GENERATED_PROFILE: &str = "OXidea Code Style";
 const TAB_CHAR: &str = "org.eclipse.jdt.core.formatter.tabulation.char";
 const TAB_SIZE: &str = "org.eclipse.jdt.core.formatter.tabulation.size";
 const INDENT_SIZE: &str = "org.eclipse.jdt.core.formatter.indentation.size";

@@ -125,7 +125,7 @@ export function revalidateFile(path: string, text: string) {
 
 // --- environment variables ---------------------------------------------------------------------
 
-const ENV_KEY = "openidea.graphql.environment";
+const ENV_KEY = "oxidea.graphql.environment";
 
 function readEnvironment(): Record<string, Record<string, string>> {
   try {

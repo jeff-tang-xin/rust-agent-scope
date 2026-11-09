@@ -85,7 +85,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let index = ContributionIndex::new(tmp.path().join("idx"), "1.0");
         let manifest =
-            Manifest::parse("id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"\n").unwrap();
+            Manifest::parse("id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"\n").unwrap();
         let pkg = Package::new(manifest, tmp.path().to_path_buf()).with_digest("blake3:00aa11bb22cc33dd44ee");
         let decl: toml::Value = toml::from_str("id = \"x\"").unwrap();
         let ui = UiDecl::new("x", "X", serde_json::json!({ "id": "x" }));

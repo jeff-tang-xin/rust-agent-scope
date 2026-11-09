@@ -150,7 +150,7 @@ class MarkersPlugin {
 }
 
 const markerColumn: Extension = gutter({
-  class: `${styles.gutter} cm-openidea-gutter-pluginMarkers`,
+  class: `${styles.gutter} cm-oxidea-gutter-pluginMarkers`,
   markers: (view) =>
     RangeSet.of(
       view.state.field(markersField).map((m) => new PluginMarker(m.marker).range(m.pos)),

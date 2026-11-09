@@ -530,7 +530,7 @@ describe("Show Members", () => {
       ipc.docOpen.mockResolvedValue(ok({ id: 7 }));
       ipc.docClose.mockResolvedValue(ok(null));
       ipc.docOutline.mockResolvedValue(ok([item("restored", "function", 3)]));
-      localStorage.setItem(`openidea.projectTree.expanded:${ROOT}`, JSON.stringify([ROOT, "/w/acme/src", APP]));
+      localStorage.setItem(`oxidea.projectTree.expanded:${ROOT}`, JSON.stringify([ROOT, "/w/acme/src", APP]));
       initProjectTree(ROOT, "acme");
       setViewOption("showMembers", enabled);
       ipc.docOutline.mockClear();
@@ -702,7 +702,7 @@ it("sorts workspace member roots by the folder names shown in the tree", async (
     "/a/service10/ten.txt": "",
     "/z/Service2/two.txt": "",
     "/m/alpha/first.txt": "",
-    "/workspace/.openidea/workspace.json": "{}",
+    "/workspace/.oxidea/workspace.json": "{}",
   });
   setProjectFsForTests(fs, "/workspace");
   initProjectTree("/workspace", "Workspace", ["/a/service10", "/z/Service2", "/m/alpha"]);

@@ -1,5 +1,5 @@
 /**
- * `openidea-server --stdio`, spoken to as the desktop app does in remote development:
+ * `oxidea-server --stdio`, spoken to as the desktop app does in remote development:
  * JSON-RPC with `Content-Length` framing over the server's stdin / stdout.
  */
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from "node:child_process";
@@ -14,10 +14,10 @@ const SHUTDOWN_TIMEOUT_MS = 15_000;
 // Not `new URL(…, import.meta.url)`: the jsdom environment's `URL` isn't Node's.
 export const repoRoot = join(dirname(import.meta.filename), "..");
 
-/** The server binary: `OPENIDEA_SERVER`, else the workspace's debug build. */
+/** The server binary: `OXIDEA_SERVER`, else the workspace's debug build. */
 function serverBinary(): string {
   const exe = process.platform === "win32" ? ".exe" : "";
-  return process.env.OPENIDEA_SERVER ?? join(repoRoot, "target", "debug", `openidea-server${exe}`);
+  return process.env.OXIDEA_SERVER ?? join(repoRoot, "target", "debug", `oxidea-server${exe}`);
 }
 
 interface Pending {
@@ -127,8 +127,8 @@ export class Server {
     this.child = child;
     child.stdout.on("data", (chunk: Buffer) => this.receive(chunk));
     child.stderr.on("data", (chunk: Buffer) => {
-      // The whole log, when asked for (OPENIDEA_SMOKE_LOG=<file>; OPENIDEA_LOG sets its level).
-      if (process.env.OPENIDEA_SMOKE_LOG) appendFileSync(process.env.OPENIDEA_SMOKE_LOG, chunk);
+      // The whole log, when asked for (OXIDEA_SMOKE_LOG=<file>; OXIDEA_LOG sets its level).
+      if (process.env.OXIDEA_SMOKE_LOG) appendFileSync(process.env.OXIDEA_SMOKE_LOG, chunk);
       this.stderr.push(chunk.toString());
       if (this.stderr.length > 200) this.stderr.shift();
     });
@@ -142,7 +142,7 @@ export class Server {
       this.pending.clear();
     });
     child.on("exit", (code) => {
-      for (const p of this.pending.values()) p.reject(new Error(`openidea-server exited (${code}): ${this.log()}`));
+      for (const p of this.pending.values()) p.reject(new Error(`oxidea-server exited (${code}): ${this.log()}`));
       this.pending.clear();
     });
   }
@@ -150,7 +150,7 @@ export class Server {
   /** Starts a server whose settings, caches and tools live under `home`. */
   static async start(home: string, env: Record<string, string> = {}): Promise<Server> {
     const child = spawn(serverBinary(), ["--stdio"], {
-      env: { ...process.env, OPENIDEA_SERVER_HOME: home, ...env },
+      env: { ...process.env, OXIDEA_SERVER_HOME: home, ...env },
       stdio: ["pipe", "pipe", "pipe"],
       // A dedicated group for forced cleanup; LSPs may create groups of their own.
       detached: true,
@@ -242,7 +242,7 @@ export class Server {
               timer = setTimeout(resolve, 5000);
             }),
           ]);
-          if (running()) errors.add(new Error(`openidea-server (${pid}) did not exit after forced cleanup`));
+          if (running()) errors.add(new Error(`oxidea-server (${pid}) did not exit after forced cleanup`));
         } finally {
           clearTimeout(timer);
         }

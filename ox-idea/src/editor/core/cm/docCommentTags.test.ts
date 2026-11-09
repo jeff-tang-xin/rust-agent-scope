@@ -3,7 +3,7 @@ import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { codeFolding, foldEffect, HighlightStyle, highlightingFor, syntaxHighlighting } from "@codemirror/language";
 import { completedSyntaxState } from "@/test/syntax";
-import { docCommentMarkup, docCommentTag, docCommentTagValue, openideaHighlightStyle } from "./highlight";
+import { docCommentMarkup, docCommentTag, docCommentTagValue, oxideaHighlightStyle } from "./highlight";
 import { findLanguageDescription, loadSupport } from "./languages";
 import { docCommentTagRanges, docCommentTags } from "./docCommentTags";
 
@@ -182,7 +182,7 @@ describe("doc comment tags", () => {
       state: completedSyntaxState(
         EditorState.create({
           doc: "/** @return result */",
-          extensions: [support!, theme.of(syntaxHighlighting(openideaHighlightStyle))],
+          extensions: [support!, theme.of(syntaxHighlighting(oxideaHighlightStyle))],
         }),
       ),
     });
@@ -203,7 +203,7 @@ describe("doc comment tags", () => {
       state: completedSyntaxState(
         EditorState.create({
           doc: "/** @return result */",
-          extensions: [language.of(support!), syntaxHighlighting(openideaHighlightStyle)],
+          extensions: [language.of(support!), syntaxHighlighting(oxideaHighlightStyle)],
         }),
       ),
     });
@@ -224,7 +224,7 @@ describe("doc comment tags", () => {
           doc,
           extensions: [
             support!,
-            syntaxHighlighting(openideaHighlightStyle),
+            syntaxHighlighting(oxideaHighlightStyle),
             Prec.high(
               EditorView.decorations.of(
                 Decoration.set(Decoration.mark({ class: "backend-comment" }).range(0, doc.length)),
@@ -260,7 +260,7 @@ describe("doc comment tags", () => {
   it("styles the tags with the highlight style's classes, inside the comment's own", async () => {
     const support = await loadSupport(findLanguageDescription("Java", "/p/A.java")!);
     const doc = "/**\n * See <b>this</b>.\n * @param id the id\n */\nclass A {}";
-    const highlight = syntaxHighlighting(openideaHighlightStyle);
+    const highlight = syntaxHighlighting(oxideaHighlightStyle);
     // The language support brings the tags; whichever comes first, they nest inside the comment's marks.
     for (const extensions of [
       [support!, highlight],
@@ -290,7 +290,7 @@ describe("doc comment tags", () => {
     const view = new EditorView({
       parent: document.body,
       state: completedSyntaxState(
-        EditorState.create({ doc, extensions: [support!, syntaxHighlighting(openideaHighlightStyle), codeFolding()] }),
+        EditorState.create({ doc, extensions: [support!, syntaxHighlighting(oxideaHighlightStyle), codeFolding()] }),
       ),
     });
     views.push(view);

@@ -7,7 +7,7 @@ export interface UsageAccessOptions {
   read: boolean;
   write: boolean;
 }
-const STORAGE_KEY = "openidea.usages.accessFilter.v1";
+const STORAGE_KEY = "oxidea.usages.accessFilter.v1";
 
 export function loadAccessOptions(): UsageAccessOptions {
   try {

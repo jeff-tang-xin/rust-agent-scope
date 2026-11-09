@@ -134,7 +134,7 @@ it("lists workspace members as scopes and admits their files without admitting w
     { name: "a", path: "/a" },
   ]);
   expect(inFileSet("all", "/z/src/main.ts")).toBe(true);
-  expect(inFileSet("all", "/workspace/.openidea/workspace.json")).toBe(false);
+  expect(inFileSet("all", "/workspace/.oxidea/workspace.json")).toBe(false);
   hook.unmount();
   useProject.setState({ project: null });
 });

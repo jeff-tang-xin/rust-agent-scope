@@ -94,7 +94,7 @@ function App() {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
   onUncaughtError: (error) => {
     logError("Uncaught render error", error);
-    window.dispatchEvent(new CustomEvent("openidea:boot-error", { detail: error }));
+    window.dispatchEvent(new CustomEvent("oxidea:boot-error", { detail: error }));
   },
 }).render(
   <React.StrictMode>

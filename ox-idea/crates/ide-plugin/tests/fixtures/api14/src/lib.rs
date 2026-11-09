@@ -1,4 +1,4 @@
-use openidea_plugin::{Error, Event, Invocation, Plugin, StatusItem, host, register_plugin};
+use oxidea_plugin::{Error, Event, Invocation, Plugin, StatusItem, host, register_plugin};
 #[derive(Default)]
 struct Api14;
 impl Plugin for Api14 {
@@ -7,22 +7,22 @@ impl Plugin for Api14 {
         match id {
             "open-editors" => Ok(Some(format!("{:?}", host::open_editors()?))),
             "open-editor" => {
-                host::open_editor(arg, Some(openidea_plugin::Range::default()))?;
+                host::open_editor(arg, Some(oxidea_plugin::Range::default()))?;
                 Ok(None)
             }
             "set-selections" => {
-                ctx.editor().unwrap().set_selections(&[openidea_plugin::Range::default()])?;
+                ctx.editor().unwrap().set_selections(&[oxidea_plugin::Range::default()])?;
                 Ok(None)
             }
             "reveal" => {
-                ctx.editor().unwrap().reveal(openidea_plugin::Range::default())?;
+                ctx.editor().unwrap().reveal(oxidea_plugin::Range::default())?;
                 Ok(None)
             }
             "search-text" => {
                 let result = ctx
                     .project()
                     .unwrap()
-                    .search_text(&openidea_plugin::TextQuery { pattern: arg.into(), ..Default::default() }, 10)?;
+                    .search_text(&oxidea_plugin::TextQuery { pattern: arg.into(), ..Default::default() }, 10)?;
                 Ok(Some(format!("{result:?}")))
             }
             "problems" => Ok(Some(format!("{:?}", host::problems(if arg.is_empty() { None } else { Some(arg) })?))),
@@ -30,8 +30,8 @@ impl Plugin for Api14 {
                 host::set_decorations(
                     arg,
                     "test",
-                    &[openidea_plugin::Decoration {
-                        range: openidea_plugin::Range::default(),
+                    &[oxidea_plugin::Decoration {
+                        range: oxidea_plugin::Range::default(),
                         style: "highlight".into(),
                         hover: Some("hover".into()),
                         after: Some("after".into()),
@@ -47,7 +47,7 @@ impl Plugin for Api14 {
                 host::set_file_decoration(
                     arg,
                     "test",
-                    &openidea_plugin::FileDecoration { badge: Some("OK".into()), style: "added".into(), tooltip: None },
+                    &oxidea_plugin::FileDecoration { badge: Some("OK".into()), style: "added".into(), tooltip: None },
                 )?;
                 Ok(None)
             }
@@ -69,7 +69,7 @@ impl Plugin for Api14 {
                 Ok(Some(String::from_utf8_lossy(&bytes).into()))
             }
             "fetch" => {
-                let response = host::fetch(&openidea_plugin::HttpRequest::get(arg))?;
+                let response = host::fetch(&oxidea_plugin::HttpRequest::get(arg))?;
                 Ok(Some(String::from_utf8_lossy(&response.body).into()))
             }
             "global-status" | "window-status" => {
@@ -122,7 +122,7 @@ impl Plugin for Api14 {
                 host::open_log_tab(
                     "api-test",
                     "API test",
-                    &openidea_plugin::details::ProcessLog {
+                    &oxidea_plugin::details::ProcessLog {
                         program: "api14-tool".into(),
                         args: Vec::new(),
                         toggles: Vec::new(),
@@ -155,8 +155,8 @@ impl Plugin for Api14 {
         host::storage::set("events", &serde_json::to_string(&received).unwrap()).unwrap();
     }
 }
-impl openidea_plugin::TestResults for Api14 {
-    fn parse(&mut self, _config: &str, _chunk: &str) -> Vec<openidea_plugin::PluginTestEvent> {
+impl oxidea_plugin::TestResults for Api14 {
+    fn parse(&mut self, _config: &str, _chunk: &str) -> Vec<oxidea_plugin::PluginTestEvent> {
         vec![]
     }
     fn select_tests(&mut self, config: &str, tests: &[Vec<String>]) -> Option<Vec<String>> {

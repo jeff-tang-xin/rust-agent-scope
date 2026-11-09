@@ -1,7 +1,7 @@
 //! The plugin host: assembles the extension
 //! registry (`ide-extension`), the grant ledger and the Wasm runtime
 //! (`ide-plugin`). It runs where the project is — in the desktop app for local
-//! projects, in `openidea-server` for remote ones; the desktop shell only adapts
+//! projects, in `oxidea-server` for remote ones; the desktop shell only adapts
 //! it to Tauri commands.
 //!
 //! Lifecycle of a package: its manifest is parsed and every declaration
@@ -13,7 +13,7 @@
 //!
 //! Sources: `<plugins_dir>/<id>/` (installed), `<project>/.oxidea/plugins/*/`
 //! (project plugins, loaded by [`PluginHost::sync_project`] for trusted
-//! projects) and folders linked with `openidea-plugin link` (`links.json`).
+//! projects) and folders linked with `oxidea-plugin link` (`links.json`).
 
 mod api;
 mod auth;
@@ -714,7 +714,7 @@ impl PluginHost {
         }
     }
 
-    /// Re-reads `links.json` (written by `openidea-plugin link`): loads new
+    /// Re-reads `links.json` (written by `oxidea-plugin link`): loads new
     /// linked plugins and unloads unlinked ones.
     pub fn sync_links(&self) {
         let links = self.links().paths;

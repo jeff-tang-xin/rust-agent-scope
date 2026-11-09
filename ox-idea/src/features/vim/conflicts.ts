@@ -70,7 +70,7 @@ export function conflictRows(
 }
 
 /** Marks the `.cm-editor` of an editor with Vim on. */
-export const VIM_EDITOR_ATTR = "data-openidea-vim";
+export const VIM_EDITOR_ATTR = "data-oxidea-vim";
 
 function inVimEditor(target: EventTarget | null): boolean {
   const el = target as Element | null;

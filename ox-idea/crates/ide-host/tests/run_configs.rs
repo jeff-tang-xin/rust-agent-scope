@@ -148,10 +148,10 @@ async fn gradle_init_scripts_are_written_by_the_host_that_runs_the_build() {
     let host = host(tmp.path());
     let text = "allprojects { }\n".to_string();
     let path =
-        ops::run::run_gradle_init_script(&host, "main", "openidea-gradle-tests".into(), text.clone()).await.unwrap();
-    assert!(path.contains("openidea-gradle-tests-"), "{path}");
+        ops::run::run_gradle_init_script(&host, "main", "oxidea-gradle-tests".into(), text.clone()).await.unwrap();
+    assert!(path.contains("oxidea-gradle-tests-"), "{path}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
-    let again = ops::run::run_gradle_init_script(&host, "main", "openidea-gradle-tests".into(), text).await.unwrap();
+    let again = ops::run::run_gradle_init_script(&host, "main", "oxidea-gradle-tests".into(), text).await.unwrap();
     assert_eq!(again, path);
     // A name is not a path.
     let escaped = ops::run::run_gradle_init_script(&host, "main", "../escape".into(), String::new()).await;

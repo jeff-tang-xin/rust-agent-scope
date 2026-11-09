@@ -205,7 +205,7 @@ export function ServicesTreeView() {
           </button>
         </div>
       ) : (
-        <SplitGroup orientation="horizontal" className={styles.split} storageKey="openidea.services.detailSplit">
+        <SplitGroup orientation="horizontal" className={styles.split} storageKey="oxidea.services.detailSplit">
           <SplitPanel id="services-items" defaultSize="40%" minSize="160px">
             <div className={styles.tree}>
               <Tree<ServiceTreeItem>

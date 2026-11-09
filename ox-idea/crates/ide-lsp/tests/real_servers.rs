@@ -64,7 +64,7 @@ fn lang(id: &str, ext: &str, server: LanguageServerConfig) -> LanguageConfig {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires kmp-lsp on PATH (or OPENIDEA_TEST_KMP_LSP)"]
+#[ignore = "requires kmp-lsp on PATH (or OXIDEA_TEST_KMP_LSP)"]
 async fn kmp_lsp_java_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
@@ -74,7 +74,7 @@ async fn kmp_lsp_java_end_to_end() {
     let mut java = LanguageRegistry::load(None).unwrap().get(&LanguageId::new("java")).unwrap();
     java.language_servers.retain(|s| s.name == "kmp-lsp");
     assert_eq!(java.language_servers.len(), 1);
-    if let Ok(bin) = std::env::var("OPENIDEA_TEST_KMP_LSP") {
+    if let Ok(bin) = std::env::var("OXIDEA_TEST_KMP_LSP") {
         java.language_servers[0].command = bin;
     }
     let (mgr, events) = manager(&root, LanguageRegistry::from_configs(vec![java]));
@@ -141,11 +141,11 @@ async fn java_searches_skip_indexed_sources_but_keep_exclusions_outside_scope() 
     let mut java = LanguageRegistry::load(None).unwrap().get(&LanguageId::new("java")).unwrap();
     java.language_servers.retain(|s| s.name == "jdtls");
     let server = &mut java.language_servers[0];
-    if let Ok(bin) = std::env::var("OPENIDEA_TEST_JDTLS") {
+    if let Ok(bin) = std::env::var("OXIDEA_TEST_JDTLS") {
         server.command = bin;
     }
     server.args.extend(["-data".into(), dir.path().join("metadata").to_string_lossy().into_owned()]);
-    let bundle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/java-usages/openidea-java-usages.jar");
+    let bundle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/java-usages/oxidea-java-usages.jar");
     server
         .initialization_options
         .as_mut()
@@ -161,7 +161,7 @@ async fn java_searches_skip_indexed_sources_but_keep_exclusions_outside_scope() 
     let covered = retry("imported source scope", Duration::from_secs(120), || async {
         mgr.jdtls_command(
             &path,
-            "openidea.workspace.coveredFiles",
+            "oxidea.workspace.coveredFiles",
             vec![json!([uri(&caller), uri(&decoy), uri(&excluded), uri(&outside),])],
         )
         .await
@@ -196,7 +196,7 @@ async fn lombok_generated_members_appear_in_document_symbols() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, source).unwrap();
     let agent = dunce::canonicalize(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/lombok/lombok-1.18.48-openidea.3.jar"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/lombok/lombok-1.18.48-oxidea.3.jar"),
     )
     .unwrap();
     std::fs::write(
@@ -220,7 +220,7 @@ async fn lombok_generated_members_appear_in_document_symbols() {
     let mut java = LanguageRegistry::load(None).unwrap().get(&LanguageId::new("java")).unwrap();
     java.language_servers.retain(|s| s.name == "jdtls");
     let server = &mut java.language_servers[0];
-    if let Ok(bin) = std::env::var("OPENIDEA_TEST_JDTLS") {
+    if let Ok(bin) = std::env::var("OXIDEA_TEST_JDTLS") {
         server.command = bin;
     }
     server.args.extend([
@@ -264,7 +264,7 @@ async fn intellij_java_formatter_preserves_manual_breaks_and_wraps_long_lines() 
     std::fs::write(&path, source).unwrap();
     let mut java = LanguageRegistry::load(None).unwrap().get(&LanguageId::new("java")).unwrap();
     let server = &mut java.language_servers[0];
-    if let Ok(bin) = std::env::var("OPENIDEA_TEST_JDTLS") {
+    if let Ok(bin) = std::env::var("OXIDEA_TEST_JDTLS") {
         server.command = bin;
     }
     server.args.extend(["-data".into(), root.join("jdtls-workspace").to_string_lossy().into_owned()]);
@@ -309,7 +309,7 @@ async fn missing_binary_is_reported_with_install_hint() {
     let dir = tempfile::tempdir().unwrap();
     let server = LanguageServerConfig {
         name: "nope-ls".into(),
-        command: "openidea-definitely-not-installed-ls".into(),
+        command: "oxidea-definitely-not-installed-ls".into(),
         args: vec![],
         env: Default::default(),
         root_markers: vec![],
@@ -501,10 +501,10 @@ async fn rust_analyzer_end_to_end() {
     let main = root.join("src/main.rs");
     std::fs::write(&main, MAIN_RS).unwrap();
 
-    // `OPENIDEA_TEST_RUST_ANALYZER` overrides the binary (e.g. when the rustup proxy
+    // `OXIDEA_TEST_RUST_ANALYZER` overrides the binary (e.g. when the rustup proxy
     // has no rust-analyzer component for the default toolchain).
     let mut rust = LanguageRegistry::load(None).unwrap().get(&LanguageId::new("rust")).unwrap();
-    if let Ok(bin) = std::env::var("OPENIDEA_TEST_RUST_ANALYZER") {
+    if let Ok(bin) = std::env::var("OXIDEA_TEST_RUST_ANALYZER") {
         rust.language_servers[0].command = bin;
     }
     let (mgr, events) = manager(&root, LanguageRegistry::from_configs(vec![rust]));
@@ -654,11 +654,11 @@ fn npm_server(tools: &Path, name: &str, bin: &str, init: Option<serde_json::Valu
 
 /// Vue Language Server 3 in hybrid mode: its `tsserver/request`s go through the
 /// client to vtsls with `@vue/typescript-plugin` (issue #25). Set
-/// `OPENIDEA_TEST_NPM_TOOLS` to a dir with `npm i @vue/language-server typescript@6 @vtsls/language-server`.
+/// `OXIDEA_TEST_NPM_TOOLS` to a dir with `npm i @vue/language-server typescript@6 @vtsls/language-server`.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires @vue/language-server and @vtsls/language-server (OPENIDEA_TEST_NPM_TOOLS)"]
+#[ignore = "requires @vue/language-server and @vtsls/language-server (OXIDEA_TEST_NPM_TOOLS)"]
 async fn vue_hybrid_mode_end_to_end() {
-    let tools = std::path::PathBuf::from(std::env::var("OPENIDEA_TEST_NPM_TOOLS").expect("OPENIDEA_TEST_NPM_TOOLS"));
+    let tools = std::path::PathBuf::from(std::env::var("OXIDEA_TEST_NPM_TOOLS").expect("OXIDEA_TEST_NPM_TOOLS"));
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     std::fs::write(root.join("package.json"), "{\"name\":\"app\",\"private\":true}").unwrap();
@@ -730,14 +730,14 @@ fn edited_lines(edit: &ide_core::WorkspaceEdit, path: &Path) -> Vec<u32> {
 }
 
 /// The Angular Language Server next to vtsls, in an external and an inline
-/// template. Set `OPENIDEA_TEST_NPM_TOOLS` to a dir with `npm i
+/// template. Set `OXIDEA_TEST_NPM_TOOLS` to a dir with `npm i
 /// @angular/language-server @vtsls/language-server @angular/core @angular/common
 /// @angular/compiler rxjs`; the project is created inside it, so that it
 /// resolves `@angular/core`.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires @angular/language-server, @vtsls/language-server and @angular/core (OPENIDEA_TEST_NPM_TOOLS)"]
+#[ignore = "requires @angular/language-server, @vtsls/language-server and @angular/core (OXIDEA_TEST_NPM_TOOLS)"]
 async fn angular_language_server_end_to_end() {
-    let tools = std::path::PathBuf::from(std::env::var("OPENIDEA_TEST_NPM_TOOLS").expect("OPENIDEA_TEST_NPM_TOOLS"));
+    let tools = std::path::PathBuf::from(std::env::var("OXIDEA_TEST_NPM_TOOLS").expect("OXIDEA_TEST_NPM_TOOLS"));
     let dir = tempfile::tempdir_in(&tools).unwrap();
     let root = dir.path().canonicalize().unwrap();
     std::fs::write(root.join("angular.json"), "{\"version\":1,\"projects\":{}}").unwrap();

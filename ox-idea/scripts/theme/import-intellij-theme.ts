@@ -1,5 +1,5 @@
 /**
- * Converts an IntelliJ theme into an OpenIDEA theme plugin package.
+ * Converts an IntelliJ theme into an OXidea theme plugin package.
  *
  *   pnpm theme:import-intellij <file.theme.json> [file.icls] --out <dir> [--id <id>] [--author <name>]
  *

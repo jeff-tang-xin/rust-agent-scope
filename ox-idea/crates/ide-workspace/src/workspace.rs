@@ -5,7 +5,7 @@ use specta::Type;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub const FILE: &str = ".openidea/workspace.json";
+pub const FILE: &str = ".oxidea/workspace.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -171,7 +171,7 @@ mod tests {
         let saved = Workspace::save(&root, " Full stack ", vec![project.clone(), project.clone()], true).unwrap();
         assert_eq!(saved.projects.len(), 1);
         assert_eq!(Workspace::load(&root).unwrap(), Some(saved));
-        assert!(!project.join(".openidea").exists());
+        assert!(!project.join(".oxidea").exists());
         assert!(Workspace::save(&root, "Other", vec![], true).is_err());
         assert_eq!(Workspace::load(&root).unwrap().unwrap().name, "Full stack");
     }

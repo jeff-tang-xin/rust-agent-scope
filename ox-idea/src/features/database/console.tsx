@@ -64,7 +64,7 @@ import styles from "./Database.module.css";
 import { tx } from "@/platform/i18n";
 
 /** `templates` feature's language-data key for finer template contexts. */
-const TEMPLATE_CONTEXT_KEY = "openideaTemplateContexts";
+const TEMPLATE_CONTEXT_KEY = "oxideaTemplateContexts";
 
 import { SQL_LANGUAGE } from "./sqlLanguage";
 export { SQL_LANGUAGE };
@@ -116,7 +116,7 @@ const runField = StateField.define<RunState>({
       for (const m of st.marks) {
         if (m.error)
           ranges.push(
-            Decoration.mark({ class: "cm-openidea-db-error", attributes: { title: m.error } }).range(m.from, m.to),
+            Decoration.mark({ class: "cm-oxidea-db-error", attributes: { title: m.error } }).range(m.from, m.to),
           );
         if (m.ms !== null)
           ranges.push(Decoration.widget({ widget: new TimingWidget(m.ms), side: 1 }).range(m.timingAt));
@@ -136,7 +136,7 @@ class TimingWidget extends WidgetType {
   }
   toDOM() {
     const span = document.createElement("span");
-    span.className = "cm-openidea-db-timing";
+    span.className = "cm-oxidea-db-timing";
     span.textContent = this.ms < 1000 ? `${Math.round(this.ms)} ms` : `${(this.ms / 1000).toFixed(1)} s`;
     return span;
   }
@@ -153,7 +153,7 @@ class RunMarker extends GutterMarker {
     const el = iconNode(
       this.error ? "error" : "check",
       14,
-      this.error ? "cm-openidea-db-run-error" : "cm-openidea-db-run-ok",
+      this.error ? "cm-oxidea-db-run-error" : "cm-oxidea-db-run-ok",
     );
     el.title = this.error ?? "Executed";
     return el;
@@ -161,7 +161,7 @@ class RunMarker extends GutterMarker {
 }
 
 const runGutter = gutter({
-  class: "cm-openidea-db-gutter",
+  class: "cm-oxidea-db-gutter",
   markers: (view) => {
     const st = view.state.field(runField);
     const doc = view.state.doc;
@@ -175,15 +175,15 @@ const runGutter = gutter({
 function errorBanner(message: string) {
   return (view: EditorView): Panel => {
     const dom = document.createElement("div");
-    dom.className = "cm-openidea-db-banner";
+    dom.className = "cm-oxidea-db-banner";
     dom.setAttribute("role", "alert");
     const text = document.createElement("span");
-    text.className = "cm-openidea-db-banner-text";
+    text.className = "cm-oxidea-db-banner-text";
     text.textContent = message;
     text.title = message;
     const close = document.createElement("button");
     close.type = "button";
-    close.className = "cm-openidea-db-banner-close";
+    close.className = "cm-oxidea-db-banner-close";
     close.setAttribute("aria-label", "Close");
     close.appendChild(iconNode("close", 14));
     close.onclick = () => view.dispatch({ effects: setRun.of({ ...view.state.field(runField), banner: null }) });
@@ -405,7 +405,7 @@ function iconOf(c: SqlCandidate): string | null {
 
 function docNode(text: string): Node {
   const pre = document.createElement("pre");
-  pre.className = "cm-openidea-db-doc";
+  pre.className = "cm-oxidea-db-doc";
   pre.textContent = text;
   return pre;
 }
@@ -543,11 +543,11 @@ function valuesInfo(path: string) {
       above: true,
       create: () => {
         const dom = document.createElement("div");
-        dom.className = "cm-openidea-db-params";
+        dom.className = "cm-oxidea-db-params";
         names.forEach((n, i) => {
           if (i) dom.append(", ");
           const span = document.createElement("span");
-          if (i === slot.index) span.className = "cm-openidea-db-param-current";
+          if (i === slot.index) span.className = "cm-oxidea-db-param-current";
           const type = typeOf(n);
           span.textContent = type ? `${n}:${type}` : n;
           dom.append(span);
@@ -571,7 +571,7 @@ export function consoleExtension(ctx: EditorDocContext): Extension {
     runGutter,
     showPanel.of(consolePanel(ctx.path)),
     EditorState.languageData.of(() => [
-      { openideaCompletion: completionSource(ctx.path), [TEMPLATE_CONTEXT_KEY]: templateContextsAt(ctx.path) },
+      { oxideaCompletion: completionSource(ctx.path), [TEMPLATE_CONTEXT_KEY]: templateContextsAt(ctx.path) },
     ]),
     completeAfterTemplate,
     valuesInfo(ctx.path),

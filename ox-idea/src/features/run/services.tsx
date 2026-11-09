@@ -67,8 +67,8 @@ import styles from "./RunServices.module.css";
 export const RUN_PROVIDER = "runConfigurations";
 const TYPE_PREFIX = "run:type:";
 const CONFIG_PREFIX = "run:config:";
-const STORAGE_KEY = "openidea.services.runTypes:";
-const RAN_KEY = "openidea.services.ran:";
+const STORAGE_KEY = "oxidea.services.runTypes:";
+const RAN_KEY = "oxidea.services.ran:";
 /** Types shown in Services until the user changes the list. */
 export const DEFAULT_TYPES: readonly string[] = ["spring-boot"];
 
@@ -212,7 +212,7 @@ export async function cleanupRemovedProject(removedRoot: string): Promise<void> 
 
 // Configurations hidden from Services, per project (removed one by one; "Add Service" restores)
 
-const HIDDEN_KEY = "openidea.services.runHidden:";
+const HIDDEN_KEY = "oxidea.services.runHidden:";
 
 const useHiddenConfigs = create<{ location: string | null; hidden: Record<string, string[]> }>(() => ({
   location: null,

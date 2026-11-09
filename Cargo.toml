@@ -9,10 +9,10 @@ members = [
     "crates/agentscope-model-dashscope",
     "crates/agentscope-model-openai-official",
     "crates/agentscope-harness",
-    "crates/agentscope-acp",
     "examples/quickstart",
 ]
 # ox-idea 是独立的 Cargo workspace（OpenIDEA fork 验证目录），不纳入本 workspace。
+# agentscope-acp 已移入 ox-idea/crates/（仅 IDE 使用）。
 exclude = ["ox-idea"]
 
 [workspace.package]

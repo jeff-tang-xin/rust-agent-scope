@@ -118,7 +118,7 @@ describe("Find in the diff viewer", () => {
     v.focus();
     fireEvent.keyDown(v.contentDOM, { key: "Escape", code: "Escape", keyCode: 27 });
     await waitFor(() => expect(screen.queryByRole("search")).toBeNull());
-    expect(document.querySelectorAll(".cm-openidea-findMatch")).toHaveLength(0);
+    expect(document.querySelectorAll(".cm-oxidea-findMatch")).toHaveLength(0);
   });
 
   it("follows a rebound shortcut", async () => {

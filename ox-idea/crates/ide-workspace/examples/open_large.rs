@@ -9,7 +9,7 @@ use std::time::Instant;
 
 fn main() {
     let mib: usize = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(100);
-    let dir = std::env::temp_dir().join(format!("openidea-open-large-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("oxidea-open-large-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join("big.log");
     let line = "2026-10-20T12:00:00Z INFO request served path=/api/v1/items id=12345 é\n";

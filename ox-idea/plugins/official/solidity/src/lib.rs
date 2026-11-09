@@ -1,10 +1,10 @@
-//! Solidity for OpenIDEA: highlighting, structure view and folding from a
+//! Solidity for OXidea: highlighting, structure view and folding from a
 //! small hand-written lexer (the IDE has no Solidity grammar), exported as the
 //! plugin's `syntax-provider`. Detection and the language server come from
 //! `languages/solidity.toml`.
 
-use openidea_plugin::syntax::{Fold, FoldKind, Highlight, Symbol, SymbolKind, SyntaxProvider, Token, bracket_folds};
-use openidea_plugin::{Error, Invocation, Plugin, register_plugin};
+use oxidea_plugin::syntax::{Fold, FoldKind, Highlight, Symbol, SymbolKind, SyntaxProvider, Token, bracket_folds};
+use oxidea_plugin::{Error, Invocation, Plugin, register_plugin};
 use std::ops::Range;
 
 #[derive(Default)]

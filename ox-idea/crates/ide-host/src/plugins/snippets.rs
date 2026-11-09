@@ -80,7 +80,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let manifest = |api| {
             ide_extension::Manifest::parse(&format!(
-                "id='test'\nname='Test'\nversion='1.0.0'\nengines.openidea='{api}'"
+                "id='test'\nname='Test'\nversion='1.0.0'\nengines.oxidea='{api}'"
             ))
             .unwrap()
         };

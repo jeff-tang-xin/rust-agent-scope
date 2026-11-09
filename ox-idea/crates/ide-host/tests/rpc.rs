@@ -214,7 +214,7 @@ async fn serves_projects_files_documents_search_and_runs() {
     .await
     .unwrap();
     assert_eq!(settings["deployment"]["autoUpload"], "always");
-    assert!(std::fs::read_to_string(project.join(".openidea/settings.toml")).unwrap().contains("autoUpload"));
+    assert!(std::fs::read_to_string(project.join(".oxidea/settings.toml")).unwrap().contains("autoUpload"));
     invoke(&peer, "vcs_init", json!({ "dir": project })).await.unwrap();
     until("git repository", || project.join(".git").is_dir()).await;
 

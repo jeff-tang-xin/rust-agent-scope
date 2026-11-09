@@ -152,7 +152,7 @@ describe("merged title bar menu", () => {
         expect(!!screen.queryByRole("menubar")).toBe(os !== "macos");
         expect(screen.queryByRole("button", { name: "Main Menu" })).toBeNull();
         if (os !== "macos") fireEvent.click(screen.getByRole("menuitem", { name: "File" }));
-        expect(screen.getByRole("button", { name: "OpenIDEA" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "OXidea" })).toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "IDE and Project Settings" }));
         expect(await screen.findByRole("menu", { name: "IDE and Project Settings" })).toBeInTheDocument();
       } finally {

@@ -86,7 +86,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
         <img className={styles.logo} src={logo} alt="" width={64} height={64} />
         <div className={styles.aboutBody}>
           <div className={clsx(styles.productName, selectableText)}>OXidea {build?.version ?? ""}</div>
-          <div className={clsx(styles.aboutLine, selectableText)}>Powered by OpenIDEA</div>
+          <div className={clsx(styles.aboutLine, selectableText)}>Powered by OXidea</div>
           {build && (
             <div className={clsx(styles.aboutLine, selectableText)}>
               {t("app.about.build")} #{build.build} ({build.profile})
@@ -119,7 +119,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
               type="button"
               className={styles.link}
               onClick={() =>
-                void openExternalUrl("https://github.com/l0ng-ai/openidea/issues/new/choose").catch(() => {})
+                void openExternalUrl("https://github.com/l0ng-ai/oxidea/issues/new/choose").catch(() => {})
               }
             >
               {t("app.about.reportIssue")}

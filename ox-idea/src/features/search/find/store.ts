@@ -63,8 +63,8 @@ interface FindPopupState extends FindOptions {
   newTab: boolean;
 }
 
-const PINNED_KEY = "openidea.search.findPinned.v1";
-const NEW_TAB_KEY = "openidea.search.findNewTab.v1";
+const PINNED_KEY = "oxidea.search.findPinned.v1";
+const NEW_TAB_KEY = "oxidea.search.findNewTab.v1";
 
 export const useFindPopup = create<FindPopupState>(() => ({
   open: false,
@@ -97,8 +97,8 @@ export function setFindPopupNewTab(newTab: boolean) {
   saveJson(NEW_TAB_KEY, newTab);
 }
 
-const SIZE_KEY = "openidea.search.findPopupSize.v1";
-const SPLIT_KEY = "openidea.search.findPopupSplit.v1";
+const SIZE_KEY = "oxidea.search.findPopupSize.v1";
+const SPLIT_KEY = "oxidea.search.findPopupSplit.v1";
 
 /** The popup's size and its results / preview split, remembered like IDEA's. */
 export function loadFindPopupSize(): { w: number; h: number } | null {
@@ -177,7 +177,7 @@ export function hideFindPopup() {
   useFindPopup.setState({ open: false });
 }
 
-const MASKS_KEY = "openidea.search.fileMasks.v1";
+const MASKS_KEY = "oxidea.search.fileMasks.v1";
 const PROJECT_MASKS = 5;
 
 /**

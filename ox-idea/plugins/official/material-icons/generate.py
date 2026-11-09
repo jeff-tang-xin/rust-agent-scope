@@ -4,7 +4,7 @@
 Flat, original icons on the Material colour palette: language files are
 coloured badges with a short label, well-known files get glyphs, folders are
 tinted by role. Edit the tables below and run `python3 generate.py`, then
-`openidea-plugin check .`. Not part of the package (plugin.toml does not
+`oxidea-plugin check .`. Not part of the package (plugin.toml does not
 reference it), so it is not installed.
 """
 

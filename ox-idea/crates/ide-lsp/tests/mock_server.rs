@@ -717,7 +717,7 @@ async fn initialize_and_incremental_sync() {
     let s = h.launcher.state("mock");
 
     let init = &s.requested("initialize")[0];
-    assert_eq!(init["clientInfo"]["name"], "OpenIDEA");
+    assert_eq!(init["clientInfo"]["name"], "OXidea");
     assert_eq!(init["capabilities"]["general"]["positionEncodings"], json!(["utf-16"]));
     assert_eq!(init["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"], true);
     assert_eq!(init["initializationOptions"], json!({ "flag": true, "nested": { "deep": 1 } }));
@@ -1787,7 +1787,7 @@ async fn java_formatter_profiles_reach_initialization_and_live_configuration_wit
     let init = state.requested("initialize")[0].clone();
     assert_eq!(
         init["initializationOptions"]["settings"]["java"]["format"]["settings"]["profile"],
-        "OpenIDEA IntelliJ IDEA"
+        "OXidea IntelliJ IDEA"
     );
     for mode in ["custom", "default", "intellij", "default"] {
         style.lock().formatter = Some(mode.into());
@@ -1816,7 +1816,7 @@ async fn java_formatter_profiles_reach_initialization_and_live_configuration_wit
             .await
             .unwrap();
         assert_eq!(result[0]["url"], expected);
-        assert_eq!(result[0]["profile"], if mode == "intellij" { "OpenIDEA IntelliJ IDEA" } else { "" });
+        assert_eq!(result[0]["profile"], if mode == "intellij" { "OXidea IntelliJ IDEA" } else { "" });
         assert_eq!(result[1], false);
         assert_eq!(state.launches.load(Ordering::SeqCst), 1);
     }
@@ -2291,7 +2291,7 @@ async fn java_implementations_come_from_sources_first() {
     let caps = json!({
         "textDocumentSync": 1,
         "implementationProvider": true,
-        "executeCommandProvider": { "commands": ["openidea.java.implementations"] },
+        "executeCommandProvider": { "commands": ["oxidea.java.implementations"] },
     });
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let (doc, path) = h.open("Repo.java", "interface Repo {}\nclass A implements Repo {}\nclass B {}\nclass C {}\n");
@@ -2321,7 +2321,7 @@ async fn java_implementations_come_from_sources_first() {
     assert_eq!(lines(&markers[0]), vec![1]);
     assert!(s.requested("textDocument/implementation").is_empty(), "no search through the dependencies");
     let asked = s.requested("workspace/executeCommand");
-    assert_eq!(asked[0]["command"], "openidea.java.implementations");
+    assert_eq!(asked[0]["command"], "oxidea.java.implementations");
     assert_eq!((asked[0]["arguments"][1].clone(), asked[0]["arguments"][2].clone()), (json!(0), json!(10)));
 
     // A dependency's type: those in the sources first, then the dependencies' too.
@@ -3350,9 +3350,9 @@ async fn indexed_sources_are_not_widened_but_outside_callers_are() {
         for outside in [false, true] {
             let mut caps = incremental_caps();
             caps["executeCommandProvider"]["commands"] = if classified {
-                json!(["openidea.workspace.coveredFiles", "openidea.java.usages"])
+                json!(["oxidea.workspace.coveredFiles", "oxidea.java.usages"])
             } else {
-                json!(["openidea.workspace.coveredFiles"])
+                json!(["oxidea.workspace.coveredFiles"])
             };
             let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
             let s = h.launcher.state("jdtls");
@@ -3367,14 +3367,14 @@ async fn indexed_sources_are_not_widened_but_outside_callers_are() {
             let covered = vec![uri_of(&caller), uri_of(&decoy)];
             let indexed = uri_of(&caller);
             *s.responder.lock() = Some(Arc::new(move |s, method, params| {
-                if method == "workspace/executeCommand" && params["command"] == "openidea.workspace.coveredFiles" {
+                if method == "workspace/executeCommand" && params["command"] == "oxidea.workspace.coveredFiles" {
                     return Some(json!(covered));
                 }
                 let model = MockState::default();
                 *model.docs.lock() = s.docs.lock().clone();
                 model.docs.lock().insert(indexed.clone(), "target();".into());
                 let responder = open_files_only(vec![]);
-                if method == "workspace/executeCommand" && params["command"] == "openidea.java.usages" {
+                if method == "workspace/executeCommand" && params["command"] == "oxidea.java.usages" {
                     let refs = responder(&model, "textDocument/references", params).unwrap();
                     return Some(Value::Array(
                         refs.as_array()
@@ -3411,7 +3411,7 @@ async fn indexed_sources_are_not_widened_but_outside_callers_are() {
                 assert_eq!(
                     s.requested("workspace/executeCommand")
                         .iter()
-                        .filter(|p| p["command"] == "openidea.java.usages")
+                        .filter(|p| p["command"] == "oxidea.java.usages")
                         .count(),
                     rounds
                 );
@@ -3432,7 +3432,7 @@ async fn indexed_sources_are_not_widened_but_outside_callers_are() {
 async fn unavailable_scope_capability_keeps_widening_and_incomplete_signals() {
     for response in [json!(null), json!([false]), json!([])] {
         let mut caps = incremental_caps();
-        caps["executeCommandProvider"]["commands"] = json!(["openidea.workspace.coveredFiles"]);
+        caps["executeCommandProvider"]["commands"] = json!(["oxidea.workspace.coveredFiles"]);
         let h = harness(&[("mock", caps)]);
         let s = h.launcher.state("mock");
         *s.responder.lock() = Some(open_files_only(vec![]));
@@ -3696,7 +3696,7 @@ async fn references_report_a_capped_candidate_search() {
 #[tokio::test(flavor = "multi_thread")]
 async fn classified_java_references_widen_without_losing_metadata() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     *s.responder.lock() = Some(Arc::new(|s, method, _| {
@@ -3753,7 +3753,7 @@ async fn classified_java_references_widen_without_losing_metadata() {
 #[tokio::test(flavor = "multi_thread")]
 async fn java_usages_in_the_sources_arrive_before_the_dependencies() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let library = json!({"uri": "jdt://contents/lib.jar/lib/Lib.class", "range": {
@@ -3843,7 +3843,7 @@ async fn java_usages_in_the_sources_arrive_before_the_dependencies() {
 async fn failed_java_command_falls_back_to_unclassified_native_references() {
     for project_wide in [false, true] {
         let mut caps = incremental_caps();
-        caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages"]});
+        caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages"]});
         let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
         let s = h.launcher.state("jdtls");
         s.errors.lock().insert("workspace/executeCommand".into(), (-32603, "NoSuchMethodError".into()));
@@ -3863,7 +3863,7 @@ async fn failed_java_command_falls_back_to_unclassified_native_references() {
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_widened_java_command_retries_with_native_references() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let native = open_files_only(Vec::new());
@@ -3900,7 +3900,7 @@ async fn failed_widened_java_command_retries_with_native_references() {
 #[tokio::test(flavor = "multi_thread")]
 async fn superseded_java_command_does_not_fall_back() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let (doc, _) = h.open("a.java", "int target;");
@@ -3922,7 +3922,7 @@ async fn superseded_java_command_does_not_fall_back() {
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelled_java_command_does_not_fall_back() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     s.errors.lock().insert("workspace/executeCommand".into(), (-32800, "cancelled".into()));
@@ -4549,7 +4549,7 @@ async fn clang_tidy_warning_requires_apple_binary_and_a_config() {
     for (binary, config) in [
         ("/usr/bin/clangd", false),
         ("/opt/homebrew/opt/llvm/bin/clangd", true),
-        ("/Users/me/Library/Application Support/openidea/tools/clangd/bin/clangd", true),
+        ("/Users/me/Library/Application Support/oxidea/tools/clangd/bin/clangd", true),
     ] {
         let h = harness_for("cpp", "cpp", &[("clangd", incremental_caps())], &[]);
         *h.launcher.state("clangd").binary.lock() = Some(PathBuf::from(binary));
@@ -4582,7 +4582,7 @@ async fn clang_tidy_config_for_a_later_opened_file_warns_on_a_running_server() {
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_definition_uses_java_without_yaml_definition_capability() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(h.root.join("pom.xml"), "<project/>").unwrap();
     let s = h.launcher.state("jdtls");
@@ -4604,7 +4604,7 @@ async fn configuration_definition_uses_java_without_yaml_definition_capability()
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_usages_merge_native_and_unsaved_profiles_without_sibling_modules() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let (doc, path) = h.open("Settings.java", "int timeOut;");
@@ -4653,7 +4653,7 @@ async fn configuration_usages_merge_native_and_unsaved_profiles_without_sibling_
 #[tokio::test(flavor = "multi_thread")]
 async fn java_usages_arrive_before_configuration_usages() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.usages", "openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.usages", "oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let yaml = h.root.join("application.yml");
@@ -4664,7 +4664,7 @@ async fn java_usages_arrive_before_configuration_usages() {
     let held = gate.clone();
     *s.responder.lock() = Some(Arc::new(move |s, method, params| {
         (method == "workspace/executeCommand").then(|| {
-            if params["command"] == "openidea.java.configuration" {
+            if params["command"] == "oxidea.java.configuration" {
                 held.hold();
                 return json!({"locations": [property.clone()], "keys": [{"name": "app.target", "relaxed": true}], "roots": []});
             }
@@ -4697,7 +4697,7 @@ async fn java_usages_arrive_before_configuration_usages() {
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_extension_failure_preserves_native_java_navigation() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let (doc, path) = h.open("Settings.java", "@Value(\"${app.port}\") int port;");
@@ -4743,7 +4743,7 @@ async fn configuration_placeholder_definition_lands_in_spring_xml_and_properties
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_placeholders_use_java_module_roots_and_utf16_columns() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(
         h.root.join("pom.xml"),
@@ -4814,7 +4814,7 @@ async fn configuration_file_list_refreshes_on_watched_changes_and_renames() {
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_placeholder_definition_merges_java_members_with_xml_declarations() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(h.root.join("pom.xml"), "<project/>").unwrap();
     std::fs::write(h.root.join("context.xml"), r#"<beans><prop key="db.user">sa</prop></beans>"#).unwrap();
@@ -4840,7 +4840,7 @@ async fn configuration_placeholder_definition_merges_java_members_with_xml_decla
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_placeholder_definition_survives_a_failing_java_extension() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(h.root.join("pom.xml"), "<project/>").unwrap();
     std::fs::write(h.root.join("context.xml"), r#"<beans><prop key="db.user">sa</prop></beans>"#).unwrap();
@@ -4858,7 +4858,7 @@ async fn configuration_placeholder_definition_survives_a_failing_java_extension(
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_key_definition_stays_java_only() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(h.root.join("pom.xml"), "<project/>").unwrap();
     std::fs::write(h.root.join("context.xml"), r#"<beans><prop key="spring.datasource.username">sa</prop></beans>"#)
@@ -4885,7 +4885,7 @@ async fn configuration_key_definition_stays_java_only() {
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_definition_on_an_xml_property_asks_java() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(h.root.join("pom.xml"), "<project/>").unwrap();
     let s = h.launcher.state("jdtls");
@@ -4910,7 +4910,7 @@ async fn configuration_definition_on_an_xml_property_asks_java() {
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_prewarm_starts_java_without_an_open_editor_and_waits_for_import() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration.warmup"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration.warmup"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     std::fs::write(h.root.join("pom.xml"), "<project/>").unwrap();
     let s = h.launcher.state("jdtls");
@@ -4923,11 +4923,11 @@ async fn configuration_prewarm_starts_java_without_an_open_editor_and_waits_for_
     h.mgr.did_open(DocId::next(), &config, &LanguageId::new("yaml"), 1, "app: {}\n");
     s.peer().notify("language/status", json!({"type": "ServiceReady"})).unwrap();
     eventually(|| {
-        s.requested("workspace/executeCommand").iter().any(|p| p["command"] == "openidea.java.configuration.warmup")
+        s.requested("workspace/executeCommand").iter().any(|p| p["command"] == "oxidea.java.configuration.warmup")
     })
     .await;
     let requests = s.requested("workspace/executeCommand");
-    let warmup = requests.iter().find(|p| p["command"] == "openidea.java.configuration.warmup").unwrap();
+    let warmup = requests.iter().find(|p| p["command"] == "oxidea.java.configuration.warmup").unwrap();
     assert_eq!(warmup["arguments"], json!(["start", [uri_of(&config)]]));
     assert!(s.notified("textDocument/didOpen").is_empty());
 }
@@ -4961,7 +4961,7 @@ async fn configuration_prewarm_respects_trust_shutdown_and_non_java_roots() {
 #[tokio::test(flavor = "multi_thread")]
 async fn java_definition_consults_configuration_only_inside_key_arguments() {
     let mut caps = incremental_caps();
-    caps["executeCommandProvider"] = json!({"commands": ["openidea.java.configuration"]});
+    caps["executeCommandProvider"] = json!({"commands": ["oxidea.java.configuration"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     let text = "class A {\n  @Value(\"${app.port}\") int port;\n  String a() { return env.getProperty(Keys.HOST) + x.getValue(); }\n}\n";
@@ -5036,7 +5036,7 @@ async fn jdtls_import_failure_names_reserved_device_files_on_windows() {
 async fn java_hierarchy_refactorings_use_the_extension_commands() {
     let mut caps = incremental_caps();
     caps["executeCommandProvider"] =
-        json!({"commands": ["openidea.java.hierarchy.members", "openidea.java.hierarchy.refactor"]});
+        json!({"commands": ["oxidea.java.hierarchy.members", "oxidea.java.hierarchy.refactor"]});
     let h = harness_for("java", "java", &[("jdtls", caps)], &[]);
     let s = h.launcher.state("jdtls");
     *s.responder.lock() = Some(Arc::new(|_, method, params| {
@@ -5047,7 +5047,7 @@ async fn java_hierarchy_refactorings_use_the_extension_commands() {
         let uri = args[0].clone();
         Some(match (params["command"].as_str().unwrap(), args[1].as_u64().unwrap()) {
             (_, 9) => json!({"refused": "Type has no super types."}),
-            ("openidea.java.hierarchy.members", _) => json!({
+            ("oxidea.java.hierarchy.members", _) => json!({
                 "className": "Dog",
                 "targets": [{"id": "=p/src<{Animal.java[Animal", "name": "Animal", "qualifiedName": "Animal", "interface": false}],
                 "members": [{"id": "=p/src<{Dog.java[Dog~bark", "label": "bark() : String", "kind": "method", "selected": true, "abstractable": true}],

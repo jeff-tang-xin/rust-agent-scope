@@ -92,7 +92,7 @@ describe("build tools feature", () => {
     await executeAction("maven.toggleSkipTests");
     await executeAction("maven.toggleOffline");
     expect(useBuild.getState().settings.maven).toMatchObject({ offline: true, skipTests: true });
-    expect(JSON.parse(localStorage.getItem("openidea.buildTools:/p")!).maven.skipTests).toBe(true);
+    expect(JSON.parse(localStorage.getItem("oxidea.buildTools:/p")!).maven.skipTests).toBe(true);
     expect(
       allActions()
         .find((a) => a.id === "maven.toggleOffline")!

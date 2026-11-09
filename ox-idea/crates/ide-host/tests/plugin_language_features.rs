@@ -49,7 +49,7 @@ fn every_new_kind_requires_api4_at_install() {
     let package = tmp.path().join("old");
     std::fs::create_dir_all(package.join("dist")).unwrap();
     std::fs::copy(fixture().join("dist/plugin.wasm"), package.join("dist/plugin.wasm")).unwrap();
-    let header = "id='old'\nname='Old'\nversion='1.0.0'\nengines.openidea='^1.3'\nwasm='dist/plugin.wasm'\n";
+    let header = "id='old'\nname='Old'\nversion='1.0.0'\nengines.oxidea='^1.3'\nwasm='dist/plugin.wasm'\n";
     for kind in [
         "formatting",
         "signature-help",

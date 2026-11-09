@@ -2,9 +2,9 @@
 //! the pinned `process:jobs`), and a terminal running `jobs follow <job>` for
 //! the activated one, titled and sized by the plugin's settings.
 
-use openidea_plugin::host;
-use openidea_plugin::views::{Body, Button, TreeItem, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Error, Invocation, NotificationLevel, PickItem, Plugin, register_plugin};
+use oxidea_plugin::host;
+use oxidea_plugin::views::{Body, Button, TreeItem, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Error, Invocation, NotificationLevel, PickItem, Plugin, register_plugin};
 
 pub const VIEW: &str = "jobs";
 
@@ -58,7 +58,7 @@ impl Plugin for Jobs {
                     host::notify(NotificationLevel::Info, "Choose an action", "A plugin notification");
                     return Ok(None);
                 }
-                use openidea_plugin::NotificationAction;
+                use oxidea_plugin::NotificationAction;
                 let command = if arg == Some("unknown") { "not-declared" } else { "context" };
                 let count = if arg == Some("four") { 4 } else { 3 };
                 let actions = (0..count)

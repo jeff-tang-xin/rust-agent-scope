@@ -380,7 +380,7 @@ fn second_window_on_same_project_works_in_memory() {
 #[ignore]
 fn bench_large_project() {
     use std::time::Instant;
-    let n: usize = std::env::var("OPENIDEA_BENCH_FILES").ok().and_then(|v| v.parse().ok()).unwrap_or(100_000);
+    let n: usize = std::env::var("OXIDEA_BENCH_FILES").ok().and_then(|v| v.parse().ok()).unwrap_or(100_000);
     let fx = Fixture::new(&[]);
     let t = Instant::now();
     let words = ["order", "user", "invoice", "payment", "cart", "session", "report", "config", "event", "queue"];
@@ -600,7 +600,7 @@ fn unindexed_index_never_scans_or_persists() {
 
 #[test]
 fn workspace_scope_excludes_state_from_scans_updates_and_cached_results() {
-    let fx = Fixture::new(&[(".openidea/workspace.json", "{}"), ("internal.rs", "fn hidden() {}")]);
+    let fx = Fixture::new(&[(".oxidea/workspace.json", "{}"), ("internal.rs", "fn hidden() {}")]);
     // Simulate a cache produced before the settings root was excluded.
     let old = fx.open();
     old.mark_recent(&fx.root.join("internal.rs"));
@@ -624,7 +624,7 @@ fn workspace_scope_excludes_state_from_scans_updates_and_cached_results() {
     assert!(idx.find_files("workspace.json", 100).is_empty());
     assert!(idx.recent_files().is_empty());
     assert_eq!(idx.find_files("visible", 100).len(), 1);
-    idx.update(&[fx.root.join("internal.rs"), fx.root.join(".openidea/workspace.json")], &[]);
+    idx.update(&[fx.root.join("internal.rs"), fx.root.join(".oxidea/workspace.json")], &[]);
     assert!(idx.wait_idle(WAIT));
     assert!(symbols(&idx, "hidden", SymbolFilter::All).is_empty());
     assert_eq!(symbols(&idx, "visible", SymbolFilter::All), ["visible"]);

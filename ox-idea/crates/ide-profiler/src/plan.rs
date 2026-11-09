@@ -158,7 +158,7 @@ fn jvm(root: &Path, config: &RunConfig, dir: &Path, out: &Path) -> ProfilePrepar
 fn perf(config: &RunConfig) -> Result<PathBuf, Box<ProfilePrepared>> {
     if !cfg!(target_os = "linux") {
         return Err(Box::new(unsupported(
-            "Native programs are profiled with Linux perf; on this system there is no sampling profiler OpenIDEA can drive without root.",
+            "Native programs are profiled with Linux perf; on this system there is no sampling profiler OXidea can drive without root.",
         )));
     }
     ide_run::which::find_executable("perf", &wrap::search_path(config)).ok_or_else(|| {

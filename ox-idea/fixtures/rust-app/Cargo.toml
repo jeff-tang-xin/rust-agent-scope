@@ -2,9 +2,9 @@
 name = "inventory"
 version = "0.1.0"
 edition = "2021"
-description = "OpenIDEA QA fixture: a tiny inventory CLI"
+description = "OXidea QA fixture: a tiny inventory CLI"
 
-# Standalone crate: not part of the OpenIDEA workspace.
+# Standalone crate: not part of the OXidea workspace.
 [workspace]
 
 [features]

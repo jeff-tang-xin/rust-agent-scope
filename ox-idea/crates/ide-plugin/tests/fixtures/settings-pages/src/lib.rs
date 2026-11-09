@@ -1,6 +1,6 @@
 //! Settings action example. A real connection test can use host::fetch with a
 //! declared network capability and a secret-backed Authorization header.
-use openidea_plugin::{Error, Invocation, NotificationLevel, Plugin, host, register_plugin};
+use oxidea_plugin::{Error, Invocation, NotificationLevel, Plugin, host, register_plugin};
 
 #[derive(Default)]
 pub struct Profiles;

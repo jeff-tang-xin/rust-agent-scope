@@ -6,7 +6,7 @@
 //!   plain JSON (no SSE streams: `GET` is 405). Every request carries
 //!   `Authorization: Bearer <token>` (random, per run); requests from another
 //!   `Origin` or `Host` are refused (DNS rebinding).
-//! - **Projects:** the `X-OpenIDEA-Project` header or the `?project=` query
+//! - **Projects:** the `X-OXidea-Project` header or the `?project=` query
 //!   names a folder; the server picks the open project containing it.
 //! - **Discovery:** `<app-data>/mcp/server.json` (`port`, `token`, `pid`,
 //!   `version`; readable only by the user) while the server runs.
@@ -29,7 +29,7 @@ pub use tokio_util::sync::CancellationToken;
 use std::path::{Path, PathBuf};
 
 /// The header naming the project a request is about (an absolute path).
-pub const PROJECT_HEADER: &str = "x-openidea-project";
+pub const PROJECT_HEADER: &str = "x-oxidea-project";
 /// The command-line flag that runs the executable as the stdio bridge.
 pub const STDIO_FLAG: &str = "--mcp-stdio";
 
@@ -134,21 +134,21 @@ mod tests {
         let url = endpoint_url(4321, Path::new("/home/me/my app/项目"));
         assert_eq!(url, "http://127.0.0.1:4321/mcp?project=/home/me/my%20app/%E9%A1%B9%E7%9B%AE");
         assert_eq!(
-            stdio_command(Path::new("/Applications/OpenIDEA.app/Contents/MacOS/openidea"), Path::new("/p")),
-            ["/Applications/OpenIDEA.app/Contents/MacOS/openidea", "--mcp-stdio", "--project", "/p"]
+            stdio_command(Path::new("/Applications/OXidea.app/Contents/MacOS/oxidea"), Path::new("/p")),
+            ["/Applications/OXidea.app/Contents/MacOS/oxidea", "--mcp-stdio", "--project", "/p"]
         );
     }
 
     #[test]
     fn stdio_requests_are_recognized() {
         let args = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-        assert_eq!(stdio_request(&args(&["openidea"])), None);
-        assert_eq!(stdio_request(&args(&["openidea", "/some/project"])), None);
-        assert_eq!(stdio_request(&args(&["openidea", "--mcp-stdio"])), Some(None));
+        assert_eq!(stdio_request(&args(&["oxidea"])), None);
+        assert_eq!(stdio_request(&args(&["oxidea", "/some/project"])), None);
+        assert_eq!(stdio_request(&args(&["oxidea", "--mcp-stdio"])), Some(None));
         assert_eq!(
-            stdio_request(&args(&["openidea", "--mcp-stdio", "--project", "/p"])),
+            stdio_request(&args(&["oxidea", "--mcp-stdio", "--project", "/p"])),
             Some(Some(PathBuf::from("/p")))
         );
-        assert_eq!(stdio_request(&args(&["openidea", "--project=/q", "--mcp-stdio"])), Some(Some(PathBuf::from("/q"))));
+        assert_eq!(stdio_request(&args(&["oxidea", "--project=/q", "--mcp-stdio"])), Some(Some(PathBuf::from("/q"))));
     }
 }

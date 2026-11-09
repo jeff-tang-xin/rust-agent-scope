@@ -1,7 +1,7 @@
 # container-runner — API 1.4 example
 
 Put this directory on PATH **before installing/granting** the plugin, so
-`process:openidea-example-wrapper` resolves to the included executable. Run
+`process:oxidea-example-wrapper` resolves to the included executable. Run
 **Example: Register Container Wrapper** in a trusted project. It registers a
 project run target, opens a keyed terminal, writes an Output channel and sets
 a window status item. The owned `terminal-exited` event updates that window.
@@ -22,7 +22,7 @@ Build from the repository root:
 ```sh
 plugins/build.sh official/container-runner
 cargo test --manifest-path plugins/official/container-runner/Cargo.toml
-cargo run -p ide-host --bin openidea-plugin -- check plugins/official/container-runner
+cargo run -p ide-host --bin oxidea-plugin -- check plugins/official/container-runner
 ```
 
 Install the built package folder through Settings › Plugins › Install from

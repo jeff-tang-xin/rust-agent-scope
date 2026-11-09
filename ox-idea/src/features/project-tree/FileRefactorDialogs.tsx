@@ -70,7 +70,7 @@ export function pendingFileRefactorDialog(): FileRefactorRequest | null {
 // ---------------------------------------------------------------------------
 // Remembered options (IDEA keeps the last choice per dialog)
 
-const OPTIONS_KEY = "openidea.projectTree.refactorOptions";
+const OPTIONS_KEY = "oxidea.projectTree.refactorOptions";
 interface StoredOptions extends FileRefactorOptions {
   openInEditor: boolean;
 }
@@ -322,7 +322,7 @@ function MoveDialog({ request }: { request: Extract<FileRefactorRequest, { kind:
   );
 }
 
-const COPY_OPEN_KEY = "openidea.projectTree.copyOpenInEditor";
+const COPY_OPEN_KEY = "oxidea.projectTree.copyOpenInEditor";
 
 function CopyDialog({ request }: { request: Extract<FileRefactorRequest, { kind: "copy" }> }) {
   const root = useProjectTree((s) => s.root) ?? "";

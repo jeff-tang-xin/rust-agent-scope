@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "./fixtures";
 
 const xml = readFileSync(
-  process.env.OPENIDEA_ICLS_FIXTURE ?? "src/platform/__fixtures__/colorSchemes/monokai-php.icls",
+  process.env.OXIDEA_ICLS_FIXTURE ?? "src/platform/__fixtures__/colorSchemes/monokai-php.icls",
   "utf8",
 );
 

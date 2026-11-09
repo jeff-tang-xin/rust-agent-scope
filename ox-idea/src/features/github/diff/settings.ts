@@ -14,7 +14,7 @@ export interface ReviewDiffSettings {
   autoMarkViewed: boolean;
 }
 
-const KEY = "openidea.github.reviewDiff.v1";
+const KEY = "oxidea.github.reviewDiff.v1";
 
 /** IntelliJ's defaults. */
 const DEFAULTS: ReviewDiffSettings = {

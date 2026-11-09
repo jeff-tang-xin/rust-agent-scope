@@ -43,7 +43,7 @@ export function openHunkPopup(view: EditorView, hunk: EditorHunk, path: string) 
   const doc = view.state.doc;
   const endPos = hunk.to > hunk.from ? Math.max(hunk.from, hunk.to - 1) : Math.min(hunk.from, doc.length);
   const coords = view.coordsAtPos(doc.lineAt(endPos).from);
-  const gutterRect = view.dom.querySelector(".cm-openidea-lane")?.getBoundingClientRect();
+  const gutterRect = view.dom.querySelector(".cm-oxidea-lane")?.getBoundingClientRect();
   const x = gutterRect ? gutterRect.right : (coords?.left ?? 0);
   const y = coords ? (hunk.to > hunk.from ? coords.bottom : coords.top) : 0;
   openFor = view;

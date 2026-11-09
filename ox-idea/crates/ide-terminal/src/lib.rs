@@ -185,7 +185,7 @@ impl TerminalManager {
         let info = TerminalInfo { id, title: shell_title(&shell), pid: child.process_id() };
         let exited = Arc::new(AtomicBool::new(false));
         let writer = ide_core::input::InputWriter::new(
-            format!("openidea-term-write-{}", id.0),
+            format!("oxidea-term-write-{}", id.0),
             writer,
             #[cfg(unix)]
             wait_writable,
@@ -405,7 +405,7 @@ fn terminate(session: &Session) {
             libc::kill(-pid, libc::SIGHUP);
         }
         let exited = session.exited.clone();
-        let _ = std::thread::Builder::new().name("openidea-term-reaper".into()).spawn(move || {
+        let _ = std::thread::Builder::new().name("oxidea-term-reaper".into()).spawn(move || {
             let deadline = Instant::now() + KILL_GRACE;
             while Instant::now() < deadline {
                 if exited.load(Ordering::Acquire) {
@@ -429,7 +429,7 @@ fn spawn_reader(
     tx: mpsc::Sender<Msg>,
     #[cfg(unix)] mut wait_readable: impl FnMut() -> std::io::Result<()> + Send + 'static,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new().name(format!("openidea-term-read-{}", id.0)).spawn(move || {
+    std::thread::Builder::new().name(format!("oxidea-term-read-{}", id.0)).spawn(move || {
         let mut buf = vec![0u8; 16 * 1024];
         loop {
             match reader.read(&mut buf) {
@@ -469,7 +469,7 @@ fn spawn_waiter(
     mut child: Box<dyn portable_pty::Child + Send + Sync>,
     tx: mpsc::Sender<Msg>,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new().name(format!("openidea-term-wait-{}", id.0)).spawn(move || {
+    std::thread::Builder::new().name(format!("oxidea-term-wait-{}", id.0)).spawn(move || {
         let code = match child.wait() {
             Ok(status) if status.signal().is_none() => Some(status.exit_code() as i32),
             Ok(_) => None,
@@ -492,7 +492,7 @@ fn spawn_pump(
     sink: SharedSink,
     started: Instant,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new().name(format!("openidea-term-pump-{}", id.0)).spawn(move || {
+    std::thread::Builder::new().name(format!("oxidea-term-pump-{}", id.0)).spawn(move || {
         let first_output = std::cell::Cell::new(true);
         let on_output = move |text: String| {
             if first_output.replace(false) {
@@ -646,14 +646,14 @@ pub fn available_shells() -> Vec<String> {
 /// argument-less) POSIX shell is started as a login shell, like Terminal.app,
 /// the Git Bash shortcut and IDEA: login start-up is what loads the completions
 /// and prompts users expect (`/etc/profile`, Git for Windows' git-completion).
-/// `OPENIDEA_SKIP_SHELL_ENV` disables the implicit login argument; explicit
+/// `OXIDEA_SKIP_SHELL_ENV` disables the implicit login argument; explicit
 /// arguments still take precedence, and interactive startup files still run.
 pub fn resolve_shell(shell: Option<&str>, args: &[String]) -> (String, Vec<String>) {
     let shell = shell.map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).unwrap_or_else(default_shell);
     if !args.is_empty() {
         return (shell, args.to_vec());
     }
-    let login = std::env::var_os("OPENIDEA_SKIP_SHELL_ENV").is_none()
+    let login = std::env::var_os("OXIDEA_SKIP_SHELL_ENV").is_none()
         && matches!(shell_title(&shell).as_str(), "zsh" | "bash" | "sh" | "fish" | "ksh" | "dash" | "tcsh" | "csh");
     let args = if login { vec!["-l".to_owned()] } else { Vec::new() };
     (shell, args)
@@ -714,7 +714,7 @@ fn terminal_env(user: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
     env.insert("TERM".to_owned(), "xterm-256color".to_owned());
     env.insert("COLORTERM".to_owned(), "truecolor".to_owned());
-    env.insert("TERM_PROGRAM".to_owned(), "OpenIDEA".to_owned());
+    env.insert("TERM_PROGRAM".to_owned(), "OXidea".to_owned());
     env.insert("TERM_PROGRAM_VERSION".to_owned(), env!("CARGO_PKG_VERSION").to_owned());
     let has_lang = user.contains_key("LANG") || std::env::var_os("LANG").is_some_and(|v| !v.is_empty());
     if !has_lang {
@@ -902,7 +902,7 @@ mod tests {
         options.shell = Some("sh".into());
         assert!(h.manager.spawn_program(options, "test".into(), h.sink.clone(), Box::new(|_| {})).is_err());
         let mut options = sh("exit 0");
-        options.cwd = std::env::temp_dir().join(format!("openidea-missing-{}", std::process::id())).into();
+        options.cwd = std::env::temp_dir().join(format!("oxidea-missing-{}", std::process::id())).into();
         assert!(!options.cwd.exists());
         assert!(h.manager.spawn_program(options, "test".into(), h.sink.clone(), Box::new(|_| {})).is_err());
         assert!(h.manager.list().is_empty());
@@ -923,12 +923,12 @@ mod tests {
     #[test]
     fn env_is_applied() {
         let h = harness();
-        let mut opts = sh("printf '%s|%s|%s' \"$TERM\" \"$TERM_PROGRAM\" \"$OPENIDEA_X\"");
-        opts.env.insert("OPENIDEA_X".into(), "42".into());
+        let mut opts = sh("printf '%s|%s|%s' \"$TERM\" \"$TERM_PROGRAM\" \"$OXIDEA_X\"");
+        opts.env.insert("OXIDEA_X".into(), "42".into());
         let (info, rx) = spawn_collect(&h, opts);
         assert_eq!(wait_exit(&h, info.id), Some(0));
         let out: String = rx.try_iter().collect();
-        assert!(out.contains("xterm-256color|OpenIDEA|42"), "{out:?}");
+        assert!(out.contains("xterm-256color|OXidea|42"), "{out:?}");
     }
 
     #[cfg(unix)]

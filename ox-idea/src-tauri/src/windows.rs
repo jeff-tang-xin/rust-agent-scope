@@ -25,7 +25,7 @@ use tauri::utils::config::{Color, WindowConfig};
 use tauri::{AppHandle, Emitter, Manager, Theme, WebviewWindow, WebviewWindowBuilder};
 
 /// Tells a window that a pending launch is waiting for it.
-pub const LAUNCH_EVENT: &str = "openidea://launch";
+pub const LAUNCH_EVENT: &str = "oxidea://launch";
 const MAIN: &str = "main";
 const PREFIX: &str = "project-";
 const CASCADE: f64 = 28.0;
@@ -51,13 +51,13 @@ pub struct Launch {
     pub settings_page: Option<String>,
     /// Settings windows: edit the global layer only ("Settings for New Projects").
     pub new_projects: bool,
-    /// Where to place the caret in some of `files` (`openidea --line 12 --column 5 <file>`).
+    /// Where to place the caret in some of `files` (`oxidea --line 12 --column 5 <file>`).
     #[serde(default)]
     pub positions: Vec<FilePosition>,
     /// Comparison windows: the revisions to compare (boxed: most launches have none).
     #[serde(default)]
     pub comparison: Option<Box<ComparisonLaunch>>,
-    /// `openidea diff a.txt b.txt`: the two files to open in the diff viewer (boxed: most launches have none).
+    /// `oxidea diff a.txt b.txt`: the two files to open in the diff viewer (boxed: most launches have none).
     #[serde(default)]
     pub diff: Option<Box<DiffFilesLaunch>>,
     /// Deployment windows: the server and local selection to compare.
@@ -96,7 +96,7 @@ pub struct ComparisonLaunch {
     pub repo: Option<ide_core::IpcPath>,
 }
 
-/// The two files of a command-line diff (`openidea diff a.txt b.txt`), both sides editable.
+/// The two files of a command-line diff (`oxidea diff a.txt b.txt`), both sides editable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DiffFilesLaunch {
     pub left: ide_core::IpcPath,
@@ -394,10 +394,10 @@ pub fn cycle_target(sorted: &[String], current: &str, forward: bool) -> Option<S
 /// Flags followed by a value (`--line 12`).
 const VALUE_FLAGS: [&str; 2] = ["--line", "--column"];
 
-/// The subcommand opening two files side by side (`openidea diff a.txt b.txt`).
+/// The subcommand opening two files side by side (`oxidea diff a.txt b.txt`).
 const DIFF_ARG: &str = "diff";
 
-/// The project path from command-line arguments (`openidea /path/to/project`):
+/// The project path from command-line arguments (`oxidea /path/to/project`):
 /// the first argument after the binary that is not a flag or a flag's value, resolved against `cwd`.
 pub fn cli_path(args: &[String], cwd: &Path) -> Option<PathBuf> {
     let mut rest = args.iter().skip(1);
@@ -418,9 +418,9 @@ pub fn cli_path(args: &[String], cwd: &Path) -> Option<PathBuf> {
 /// What the command line asks to open (arguments after the binary, resolved against `cwd`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliLaunch {
-    /// `openidea diff a.txt b.txt`: the two files side by side in the diff viewer.
+    /// `oxidea diff a.txt b.txt`: the two files side by side in the diff viewer.
     Diff(DiffFilesLaunch),
-    /// A project folder or a file (`openidea /path/to/project`).
+    /// A project folder or a file (`oxidea /path/to/project`).
     Path(PathBuf),
 }
 
@@ -433,7 +433,7 @@ pub fn cli_launch(args: &[String], cwd: &Path) -> Option<CliLaunch> {
             }
             // One file is no pair: open it like any path.
             [one] => Some(CliLaunch::Path(one.clone())),
-            // `openidea diff` with no files: like starting without arguments.
+            // `oxidea diff` with no files: like starting without arguments.
             [] => None,
         };
     }
@@ -1185,7 +1185,7 @@ fn focus_any(app: &AppHandle) {
     }
 }
 
-/// Opens what the `openidea` command asked for, like [`open_paths`]; files open at their
+/// Opens what the `oxidea` command asked for, like [`open_paths`]; files open at their
 /// 1-based line and column. Without targets, focuses a window.
 pub fn open_targets(app: &AppHandle, targets: Vec<ide_cli::Target>) {
     if targets.is_empty() {
@@ -1206,7 +1206,7 @@ pub fn open_targets(app: &AppHandle, targets: Vec<ide_cli::Target>) {
     open_paths(app, paths);
 }
 
-/// `openidea diff a.txt b.txt` while the app is running: hands the pair to the window the user is
+/// `oxidea diff a.txt b.txt` while the app is running: hands the pair to the window the user is
 /// looking at (a project window, never an auxiliary one), else opens a new window for it.
 pub(crate) fn open_diff_files(app: &AppHandle, diff: DiffFilesLaunch) {
     let launch = Launch { diff: Some(Box::new(diff)), ..Default::default() };
@@ -1512,7 +1512,7 @@ fn centered(px: f64, py: f64, pw: f64, ph: f64, w: f64, h: f64) -> (f64, f64) {
 fn dev_font_preferences(
     builder: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>,
 ) -> WebviewWindowBuilder<'_, tauri::Wry, AppHandle> {
-    if std::env::var("OPENIDEA_DEV_DISALLOW_USER_FONTS").as_deref() == Ok("1") {
+    if std::env::var("OXIDEA_DEV_DISALLOW_USER_FONTS").as_deref() == Ok("1") {
         use objc2::{MainThreadMarker, msg_send, sel};
         use objc2_foundation::NSObjectProtocol;
         let config = unsafe {
@@ -1630,16 +1630,16 @@ mod tests {
     #[test]
     fn cli_path_skips_flags_and_resolves_relative() {
         let cwd = Path::new("/work");
-        let args = s(&["openidea", "--verbose", "proj"]);
+        let args = s(&["oxidea", "--verbose", "proj"]);
         assert_eq!(cli_path(&args, cwd), Some(PathBuf::from("/work/proj")));
-        assert_eq!(cli_path(&s(&["openidea", "/abs/p"]), cwd), Some(PathBuf::from("/abs/p")));
-        assert_eq!(cli_path(&s(&["openidea"]), cwd), None);
-        assert_eq!(cli_path(&s(&["openidea", "-psn_0_123"]), cwd), None);
+        assert_eq!(cli_path(&s(&["oxidea", "/abs/p"]), cwd), Some(PathBuf::from("/abs/p")));
+        assert_eq!(cli_path(&s(&["oxidea"]), cwd), None);
+        assert_eq!(cli_path(&s(&["oxidea", "-psn_0_123"]), cwd), None);
         // A flag's value is not the path.
-        let args = s(&["openidea", "--line", "120", "--column", "8", "src/Main.java"]);
+        let args = s(&["oxidea", "--line", "120", "--column", "8", "src/Main.java"]);
         assert_eq!(cli_path(&args, cwd), Some(PathBuf::from("/work/src/Main.java")));
         assert_eq!(
-            cli_path(&s(&["openidea", "--line=3", "a b/文件.rs"]), cwd),
+            cli_path(&s(&["oxidea", "--line=3", "a b/文件.rs"]), cwd),
             Some(PathBuf::from("/work/a b/文件.rs"))
         );
     }
@@ -1649,49 +1649,49 @@ mod tests {
         let cwd = Path::new("/work");
         // Two paths: a diff pair; relative paths resolve against the cwd.
         assert_eq!(
-            cli_launch(&s(&["openidea", "diff", "a.txt", "b.txt"]), cwd),
+            cli_launch(&s(&["oxidea", "diff", "a.txt", "b.txt"]), cwd),
             Some(CliLaunch::Diff(DiffFilesLaunch { left: "/work/a.txt".into(), right: "/work/b.txt".into() }))
         );
         // Absolute paths stay absolute; a path with spaces is one argument (the shell unquotes it
         // before the arguments reach us).
         assert_eq!(
-            cli_launch(&s(&["openidea", "diff", "/abs/my a.txt", "my b.txt"]), cwd),
+            cli_launch(&s(&["oxidea", "diff", "/abs/my a.txt", "my b.txt"]), cwd),
             Some(CliLaunch::Diff(DiffFilesLaunch { left: "/abs/my a.txt".into(), right: "/work/my b.txt".into() }))
         );
         // Flags and their values are not file paths.
         assert_eq!(
-            cli_launch(&s(&["openidea", "diff", "--line", "3", "a.txt", "b.txt"]), cwd),
+            cli_launch(&s(&["oxidea", "diff", "--line", "3", "a.txt", "b.txt"]), cwd),
             Some(CliLaunch::Diff(DiffFilesLaunch { left: "/work/a.txt".into(), right: "/work/b.txt".into() }))
         );
         // One file is no pair: it opens like any path.
         assert_eq!(
-            cli_launch(&s(&["openidea", "diff", "a.txt"]), cwd),
+            cli_launch(&s(&["oxidea", "diff", "a.txt"]), cwd),
             Some(CliLaunch::Path(PathBuf::from("/work/a.txt")))
         );
         // No files at all: like starting without arguments.
-        assert_eq!(cli_launch(&s(&["openidea", "diff"]), cwd), None);
+        assert_eq!(cli_launch(&s(&["oxidea", "diff"]), cwd), None);
         // Only a leading `diff` is the subcommand; the rest still opens a path.
         assert_eq!(
-            cli_launch(&s(&["openidea", "proj", "diff", "a.txt"]), cwd),
+            cli_launch(&s(&["oxidea", "proj", "diff", "a.txt"]), cwd),
             Some(CliLaunch::Path(PathBuf::from("/work/proj")))
         );
     }
 
     #[test]
     fn cli_position_is_one_based_on_the_command_line() {
-        assert_eq!(cli_position(&s(&["openidea", "--line", "120", "--column", "8", "f"])), Some((119, 7)));
-        assert_eq!(cli_position(&s(&["openidea", "--line=5", "f"])), Some((4, 0)));
-        assert_eq!(cli_position(&s(&["openidea", "--line", "0", "f"])), Some((0, 0)));
-        assert_eq!(cli_position(&s(&["openidea", "--column", "8", "f"])), None);
-        assert_eq!(cli_position(&s(&["openidea", "--line", "x", "f"])), None);
-        assert_eq!(cli_position(&s(&["openidea", "f"])), None);
+        assert_eq!(cli_position(&s(&["oxidea", "--line", "120", "--column", "8", "f"])), Some((119, 7)));
+        assert_eq!(cli_position(&s(&["oxidea", "--line=5", "f"])), Some((4, 0)));
+        assert_eq!(cli_position(&s(&["oxidea", "--line", "0", "f"])), Some((0, 0)));
+        assert_eq!(cli_position(&s(&["oxidea", "--column", "8", "f"])), None);
+        assert_eq!(cli_position(&s(&["oxidea", "--line", "x", "f"])), None);
+        assert_eq!(cli_position(&s(&["oxidea", "f"])), None);
     }
 
     #[test]
     fn a_launch_carries_the_positions_of_its_files() {
         let st = WindowsState::default();
         let file = std::env::current_exe().unwrap();
-        let other = std::env::temp_dir().join("openidea-not-opened.txt");
+        let other = std::env::temp_dir().join("oxidea-not-opened.txt");
         st.set_position(&file, (11, 4));
         st.set_position(&other, (1, 0));
         st.add_files("main", vec![file.clone()]);

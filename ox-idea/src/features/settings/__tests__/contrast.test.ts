@@ -71,7 +71,7 @@ describe("theme tokens", () => {
   // Light values are PyCharm Islands Light's own. Its text-secondary grey, brand blue
   // and status colours are ~4.3:1 on the #f7f8f9 dialog surface, comments /
   // metadata / inlay text ~3.4:1, and line numbers / change bars are decorative
-  // (~2:1); the thresholds pin those values rather than WCAG@@OPENIDEAS@@.
+  // (~2:1); the thresholds pin those values rather than WCAG@@OXIDEAS@@.
   const LIGHT_STRONG_SURFACES = ["--bg-app", "--bg-popup"];
 
   it("light text meets WCAG AA on the editor / popup surfaces", () => {

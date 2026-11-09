@@ -33,7 +33,7 @@ function token(
   };
 }
 
-export const openideaHighlightStyle = HighlightStyle.define([
+export const oxideaHighlightStyle = HighlightStyle.define([
   // Markdown tags whole links / quotes; listed first so marks, URL and title inside keep their own colours.
   token(t.link, "link", { effect: "underline" }),
   token(t.quote, "string"),

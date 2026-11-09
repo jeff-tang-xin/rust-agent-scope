@@ -19,7 +19,7 @@ use tokio::sync::Notify;
 
 const DELAY: Duration = Duration::from_millis(750);
 const SOURCE: &str = "kotlin-bridge";
-const COMMAND: &str = "openidea.kotlin.replace";
+const COMMAND: &str = "oxidea.kotlin.replace";
 
 #[derive(Default)]
 struct Revision {

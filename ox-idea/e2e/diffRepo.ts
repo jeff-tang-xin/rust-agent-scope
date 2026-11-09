@@ -143,7 +143,7 @@ export function buildDiffRepo(dir: string): string {
     writeFileSync(join(dir, path), text);
   };
   git(dir, "init", "-q", "-b", "main");
-  git(dir, "config", "user.email", "e2e@openidea.dev");
+  git(dir, "config", "user.email", "e2e@oxidea.dev");
   git(dir, "config", "user.name", "e2e");
   git(dir, "config", "core.autocrlf", "false");
   for (const c of CASES) if (c.before !== null) write(c.path, c.before);
@@ -160,7 +160,7 @@ export function buildDiffRepo(dir: string): string {
 }
 
 export function tempDiffRepo(): string {
-  return buildDiffRepo(join(mkdtempSync(join(tmpdir(), "openidea-diff-")), "repo"));
+  return buildDiffRepo(join(mkdtempSync(join(tmpdir(), "oxidea-diff-")), "repo"));
 }
 
 /** HEAD and working-tree texts of `path` ("" when missing on that side). */

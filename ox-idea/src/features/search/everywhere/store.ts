@@ -28,8 +28,8 @@ interface SeState {
   filters: SeFilters;
 }
 
-const PREVIEW_KEY = "openidea.search.everywherePreview.v1";
-const FILTERS_KEY = "openidea.search.everywhereFilters.v1";
+const PREVIEW_KEY = "oxidea.search.everywherePreview.v1";
+const FILTERS_KEY = "oxidea.search.everywhereFilters.v1";
 
 export const useSearchEverywhere = create<SeState>(() => ({
   open: false,
@@ -115,7 +115,7 @@ export function hideSearchEverywhere() {
   useSearchEverywhere.setState({ open: false });
 }
 
-const RECENT_ACTIONS_KEY = "openidea.search.recentActions.v1";
+const RECENT_ACTIONS_KEY = "oxidea.search.recentActions.v1";
 const MAX_RECENT_ACTIONS = 12;
 
 export function recentActions(): string[] {
@@ -127,7 +127,7 @@ export function pushRecentAction(id: string) {
   saveJson(RECENT_ACTIONS_KEY, [id, ...recentActions().filter((x) => x !== id)].slice(0, MAX_RECENT_ACTIONS));
 }
 
-const HISTORY_KEY = "openidea.search.everywhereHistory.v1";
+const HISTORY_KEY = "oxidea.search.everywhereHistory.v1";
 const MAX_HISTORY = 50;
 
 interface HistoryEntry {

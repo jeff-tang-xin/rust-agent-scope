@@ -1,7 +1,7 @@
 /**
  * Multi-window: one project per window. New windows are created by the
  * backend (`window_open_project` / `window_new`) and told what to open via a
- * pending launch, taken here on startup and on `openidea://launch`.
+ * pending launch, taken here on startup and on `oxidea://launch`.
  *
  * Loose files opened without a project (dropped on the Welcome screen, File ›
  * Open File…, a file path on the command line) open in LightEdit: a window with
@@ -26,7 +26,7 @@ import { chooseProjectWindow } from "@/workbench/projectWindow";
 import { cycleWindowTab, useWindowGroup } from "@/platform/windowGroups";
 import { showWorkspaceDialog } from "./WorkspaceDialog";
 
-export const LAUNCH_EVENT = "openidea://launch";
+export const LAUNCH_EVENT = "oxidea://launch";
 
 function errorText(e: unknown) {
   return e instanceof Error ? e.message : String(e);
@@ -236,7 +236,7 @@ export async function consumeLaunch(): Promise<void> {
 }
 
 /**
- * `openidea diff a.txt b.txt`: the two files side by side in the diff viewer (both editable).
+ * `oxidea diff a.txt b.txt`: the two files side by side in the diff viewer (both editable).
  * Without a project or LightEdit session the right file opens one first, like a launched file does.
  */
 async function openCliDiff(diff: { left: string; right: string }): Promise<void> {

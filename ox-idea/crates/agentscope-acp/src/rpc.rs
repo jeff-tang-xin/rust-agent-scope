@@ -1,4 +1,4 @@
-//! 行分帧 JSON-RPC 2.0 连接：ACP 的传输层（对齐 OpenIDEA `Framing::Lines`）。
+//! 行分帧 JSON-RPC 2.0 连接：ACP 的传输层（对齐 OXidea `Framing::Lines`）。
 //!
 //! - 每行一个 JSON 对象（UTF-8，`\n` 结尾）；
 //! - 入站请求（method+id）由上层 [`serve`](crate::serve) 分发；

@@ -5,7 +5,7 @@ import { useProject } from "@/platform/project";
 import { editorService, type OpenOptions } from "@/workbench/contributions";
 import { windowBackgroundHex } from "@/workbench/theme";
 
-const OPEN_SOURCE = "openidea://deployment/open-source";
+const OPEN_SOURCE = "oxidea://deployment/open-source";
 
 export function showDeploymentComparison(server: string, paths: string[]) {
   return call(commands.windowOpenDeployment(server, paths, windowBackgroundHex()));

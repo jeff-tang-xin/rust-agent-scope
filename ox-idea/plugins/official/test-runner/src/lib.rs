@@ -1,6 +1,6 @@
 //! Lines beginning `test ` get a gutter button; the executable accepts the name as a filter.
-use openidea_plugin::language_features::{Document, GutterAction, LanguageFeatures};
-use openidea_plugin::{
+use oxidea_plugin::language_features::{Document, GutterAction, LanguageFeatures};
+use oxidea_plugin::{
     Error, Invocation, Plugin, PluginRunConfiguration, PluginTestEvent, RunConfigurations, TestFailed, TestPassed,
     TestResults, TestStart, host, register_plugin,
 };
@@ -19,7 +19,7 @@ impl RunConfigurations for TestRunner {
         vec![PluginRunConfiguration {
             id: "tests".into(),
             name: "Example tests".into(),
-            program: "openidea-example-tests".into(),
+            program: "oxidea-example-tests".into(),
             test: true,
             framework: Some("plugin".into()),
             ..Default::default()
@@ -90,10 +90,10 @@ register_plugin!(TestRunner, run_configurations, test_results, language_features
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
     #[test]
     fn filters_reach_runs_and_split_output_builds_the_test_tree() {
-        let mock = MockHost::install().with_capabilities(&["process:openidea-example-tests"]);
+        let mock = MockHost::install().with_capabilities(&["process:oxidea-example-tests"]);
         let mut plugin = TestRunner::default();
         mock.set_run_configurations(plugin.configurations("/project"));
         plugin.run_command("test", &mock.invocation(), Some("adds")).unwrap();

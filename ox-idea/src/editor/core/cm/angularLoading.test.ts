@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { highlightTree, tags as t } from "@lezer/highlight";
 import { findLanguageDescription, loadSupport } from "./languages";
-import { openideaHighlightStyle } from "./highlight";
+import { oxideaHighlightStyle } from "./highlight";
 
 it("lazily loads Angular templates with the editor's HTML and expression colours", async () => {
   const desc = findLanguageDescription("Angular Template", "/angular/src/app/app.component.html");
@@ -10,7 +10,7 @@ it("lazily loads Angular templates with the editor's HTML and expression colours
   expect(support?.language.name).toBe("angular");
   const doc = '<button [disabled]="busy">{{ name }}</button> @if (ready) { <p>Ready</p> }';
   const tokens: { text: string; cls: string }[] = [];
-  highlightTree(support!.language.parser.parse(doc), openideaHighlightStyle, (from, to, cls) => {
+  highlightTree(support!.language.parser.parse(doc), oxideaHighlightStyle, (from, to, cls) => {
     tokens.push({ text: doc.slice(from, to), cls });
   });
   for (const [text, tag] of [
@@ -22,7 +22,7 @@ it("lazily loads Angular templates with the editor's HTML and expression colours
     ["}}", t.special(t.brace)],
     ["@if", t.controlKeyword],
   ] as const) {
-    const cls = openideaHighlightStyle.style([tag]);
+    const cls = oxideaHighlightStyle.style([tag]);
     expect(cls).toBeTruthy();
     expect(tokens).toContainEqual({ text, cls });
   }

@@ -71,8 +71,8 @@ function NotebookDocument({ session }: { session: NotebookSession }) {
   const editor = useProject((s) => s.settings?.editor as { fontSize?: number; lineHeight?: number } | undefined);
   const fontVars = {
     "--markdown-preview-font-size": `${markdownFontSize}px`,
-    ...(editor?.fontSize ? { "--openidea-editor-font-size": `${editor.fontSize}px` } : {}),
-    ...(editor?.lineHeight ? { "--openidea-editor-line-height": `${editor.lineHeight}px` } : {}),
+    ...(editor?.fontSize ? { "--oxidea-editor-font-size": `${editor.fontSize}px` } : {}),
+    ...(editor?.lineHeight ? { "--oxidea-editor-line-height": `${editor.lineHeight}px` } : {}),
   } as CSSProperties;
   const disabled = state.frozen || !state.snapshot;
   const historyDisabled = disabled || state.running;

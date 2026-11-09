@@ -1,11 +1,11 @@
-//! MyBatis Navigator for OpenIDEA: a mapper interface (`com.acme.UserMapper`)
+//! MyBatis Navigator for OXidea: a mapper interface (`com.acme.UserMapper`)
 //! and the XML with `<mapper namespace="com.acme.UserMapper">` point at each
 //! other: gutter arrows and Go to Definition on methods and statement ids,
 //! completion of statement ids and `#{parameters}`.
 
-use openidea_plugin::providers::{CompletionItem, CompletionKind, Document, LineMarker, Providers};
-use openidea_plugin::text::{offset, position};
-use openidea_plugin::{Error, Invocation, Location, Plugin, Position, Project, Range, host, register_plugin};
+use oxidea_plugin::providers::{CompletionItem, CompletionKind, Document, LineMarker, Providers};
+use oxidea_plugin::text::{offset, position};
+use oxidea_plugin::{Error, Invocation, Location, Plugin, Position, Project, Range, host, register_plugin};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -438,7 +438,7 @@ register_plugin!(Navigator, providers);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     const JAVA: &str = "package com.acme;\n\nimport org.apache.ibatis.annotations.Param;\n\npublic interface UserMapper {\n    User findById(@Param(\"id\") long id);\n\n    int insert(User user);\n\n    default void helper() {}\n\n    List<User> search(String name, int limit);\n}\n";
     const XML: &str = "<?xml version=\"1.0\"?>\n<mapper namespace=\"com.acme.UserMapper\">\n  <select id=\"findById\" resultType=\"User\">\n    select * from users where id = #{id}\n  </select>\n  <insert id=\"insert\">\n    insert into users values (#{user})\n  </insert>\n  <select id=\"\">\n  </select>\n</mapper>\n";

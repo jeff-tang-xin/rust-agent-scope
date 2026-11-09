@@ -1,4 +1,4 @@
-package openidea:plugin@1.4.0;
+package oxidea:plugin@1.4.0;
 
 /// Embedded languages. This host routes plugin providers, not embedded LSP servers.
 interface injections {

@@ -33,13 +33,13 @@ const markdown = {
   ".cm-lsp-markdown a": { color: "var(--link)", textDecoration: "none", cursor: "pointer" },
   ".cm-lsp-markdown a:hover": { color: "var(--link-hover)", textDecoration: "underline" },
   ".cm-lsp-markdown code": {
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
     fontSize: "var(--fs-small)",
     color: "var(--fg-emphasis)",
   },
   ".cm-lsp-markdown pre, .cm-lsp-code": {
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
     fontSize: "var(--fs-ui)",
     lineHeight: "1.5",
@@ -84,13 +84,13 @@ export const lspTheme = EditorView.theme({
   // --- completion (IDEA lookup: icon column, bold blue match, grey tail/type, advertiser) ---
   ".cm-tooltip.cm-tooltip-autocomplete.cm-lsp-completion": {
     ...tooltipSurface,
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
     fontSize: "var(--fs-code)",
     overflow: "hidden",
   },
   ".cm-tooltip.cm-tooltip-autocomplete.cm-lsp-completion > ul": {
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
     minWidth: "420px",
     maxWidth: "min(720px, 80vw)",
@@ -234,7 +234,7 @@ export const lspTheme = EditorView.theme({
   },
   ".cm-lsp-link-button:hover": { color: "var(--link-hover)", textDecoration: "underline" },
   ".cm-lsp-signature": {
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
     fontSize: "var(--fs-code)",
     padding: "6px 10px",
@@ -309,7 +309,7 @@ export const lspTheme = EditorView.theme({
     listStyle: "none",
     margin: "0 -8px 4px",
     padding: "0",
-    fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+    fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
     fontWeight: "var(--fw-code, 400)",
     fontSize: "var(--fs-ui)",
     color: "var(--fg)",
@@ -331,9 +331,9 @@ export const lspTheme = EditorView.theme({
   },
   // Above the sticky gutters (z-index 200).
   ".cm-lsp-bulb-gutter": { zIndex: "201", backgroundColor: "var(--bg-editor-gutter, var(--bg-editor))" },
-  ".cm-lsp-bulb .cm-openidea-icon": { display: "inline-flex", borderRadius: "var(--radius-small)", padding: "1px" },
-  ".cm-lsp-bulb:hover .cm-openidea-icon": { backgroundColor: "var(--bg-toolbar-hover)" },
-  ".cm-lsp-bulb .cm-lsp-bulb-fix-icon, .cm-lsp-bulb-fix .cm-openidea-icon:first-child": { display: "none" },
+  ".cm-lsp-bulb .cm-oxidea-icon": { display: "inline-flex", borderRadius: "var(--radius-small)", padding: "1px" },
+  ".cm-lsp-bulb:hover .cm-oxidea-icon": { backgroundColor: "var(--bg-toolbar-hover)" },
+  ".cm-lsp-bulb .cm-lsp-bulb-fix-icon, .cm-lsp-bulb-fix .cm-oxidea-icon:first-child": { display: "none" },
   ".cm-lsp-bulb-fix .cm-lsp-bulb-fix-icon": { display: "inline-flex" },
 
   // --- inlay hints (rounded grey chips) -------------------------------------

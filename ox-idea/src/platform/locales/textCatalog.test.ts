@@ -172,7 +172,7 @@ const UNTRANSLATED = new Set<string>([
   "PHP",
   "Python",
   "npm",
-  "OpenIDEA",
+  "OXidea",
   "Oracle",
   "Spring",
   "Spring Boot",

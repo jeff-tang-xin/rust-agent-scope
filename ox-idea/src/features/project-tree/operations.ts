@@ -353,7 +353,7 @@ export function selectionAfterDelete(rows: readonly ProjectNode[], deleted: read
 const SAFE_DELETE_MAX_FILES = 20;
 const SAFE_DELETE_TIMEOUT_MS = 15_000;
 const SAFE_DELETE_PROGRESS_DELAY_MS = 400;
-const SAFE_DELETE_KEY = "openidea.projectTree.safeDelete";
+const SAFE_DELETE_KEY = "oxidea.projectTree.safeDelete";
 
 function safeDeleteEnabled(): boolean {
   try {

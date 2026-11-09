@@ -6,5 +6,5 @@ fn main() {
     if let Some(code) = ide_ssh::askpass::run_helper() {
         std::process::exit(code);
     }
-    openidea_lib::run()
+    oxidea_lib::run()
 }

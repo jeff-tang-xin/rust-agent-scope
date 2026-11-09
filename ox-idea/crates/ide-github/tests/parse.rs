@@ -66,9 +66,9 @@ fn review_comments_across_pages() {
 
 #[test]
 fn repo_view() {
-    let r = parse_repo(r#"{"defaultBranchRef":{"name":"main"},"nameWithOwner":"l0ng-ai/openidea","url":"https://github.com/l0ng-ai/openidea"}"#)
+    let r = parse_repo(r#"{"defaultBranchRef":{"name":"main"},"nameWithOwner":"l0ng-ai/oxidea","url":"https://github.com/l0ng-ai/oxidea"}"#)
         .unwrap();
-    assert_eq!(r.name_with_owner, "l0ng-ai/openidea");
+    assert_eq!(r.name_with_owner, "l0ng-ai/oxidea");
     assert_eq!(r.default_branch.as_deref(), Some("main"));
     assert!(r.merge_commit_allowed && r.squash_merge_allowed && r.rebase_merge_allowed, "unknown: allowed");
     assert_eq!(r.viewer_permission, "");

@@ -737,7 +737,7 @@ describe("session state across tasks and hosts", () => {
         removed: 2,
       },
     ];
-    localStorage.setItem("openidea.agents.changesOpen.v1", JSON.stringify({ A: true }));
+    localStorage.setItem("oxidea.agents.changesOpen.v1", JSON.stringify({ A: true }));
     useAgents.setState({ docked: "A", sessionLocation: "toolWindow" });
     render(<AgentsView />);
     await screen.findByText("Answer A");
@@ -763,7 +763,7 @@ describe("session state across tasks and hosts", () => {
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(message);
     expect(message).toHaveValue("Draft to keep");
     expect(useAgents.getState().composers.get("A")?.text).toBe("Draft to keep");
-    expect(JSON.parse(localStorage.getItem("openidea.agents.changesOpen.v1")!).A).toBe(true);
+    expect(JSON.parse(localStorage.getItem("oxidea.agents.changesOpen.v1")!).A).toBe(true);
   });
 
   it.each([false, true])("retains scrolling and follow-output (%s) when moving in both directions", async (stick) => {

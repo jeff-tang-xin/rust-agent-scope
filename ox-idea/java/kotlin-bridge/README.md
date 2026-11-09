@@ -4,17 +4,17 @@ App-owned source, licensed under this repository's Apache-2.0 license. The jar
 contains no third-party implementation classes. JDT LS and Maven supply their
 respective APIs at runtime.
 
-`KotlinLibraries` is a JDT LS delegate command. `openidea.kotlin.replace` takes
+`KotlinLibraries` is a JDT LS delegate command. `oxidea.kotlin.replace` takes
 one complete array of `{projectUri, libraries: [{path, test}]}` objects and returns
 the number of changed projects. Paths name fully published, immutable directories.
 An empty array withdraws all owned libraries. Only library entries carrying
-`ai.openidea.kotlin=true` are removed; all other `IClasspathEntry` objects are
+`ai.oxidea.kotlin=true` are removed; all other `IClasspathEntry` objects are
 retained, including containers, access rules, attributes and project references.
 A Java model listener restores the desired snapshot after Maven reimport.
 
 `IsolatedOutput` is a Java 8 Maven lifecycle participant, activated only in the
 private editor build via `-Dmaven.ext.class.path=<jar>` and
-`-Dopenidea.kotlin.staging=<absolute-directory>`. It redirects reactor output
+`-Doxidea.kotlin.staging=<absolute-directory>`. It redirects reactor output
 before lifecycle planning and records Maven's resolved dependency closure after
 each session, including failed builds. An execution listener records each module's
 Kotlin compile/test-compile targets as successful, failed or skipped. The host uses
@@ -48,7 +48,7 @@ run the build compiler. Archive order and timestamps are deterministic.
 
 ```sh
 python3 java/kotlin-bridge/build.py /path/to/jdtls /path/to/maven
-shasum -a 256 java/kotlin-bridge/openidea-kotlin-bridge.jar
+shasum -a 256 java/kotlin-bridge/oxidea-kotlin-bridge.jar
 ```
 
 Committed jar SHA-256:

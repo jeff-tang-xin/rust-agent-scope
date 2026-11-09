@@ -27,8 +27,8 @@ function marks(color: string) {
   let m = markCache.get(color);
   if (!m) {
     m = {
-      line: Decoration.mark({ class: "cm-openidea-todo", attributes: { style: `--todo-color: ${color}` } }),
-      keyword: Decoration.mark({ class: "cm-openidea-todo-keyword" }),
+      line: Decoration.mark({ class: "cm-oxidea-todo", attributes: { style: `--todo-color: ${color}` } }),
+      keyword: Decoration.mark({ class: "cm-oxidea-todo-keyword" }),
     };
     markCache.set(color, m);
   }
@@ -82,8 +82,8 @@ export function todoDecorations(view: EditorView, settings: TodoSettings): Decor
 }
 
 const theme = EditorView.baseTheme({
-  ".cm-openidea-todo, .cm-openidea-todo *": { color: "var(--todo-color) !important", fontStyle: "italic" },
-  ".cm-openidea-todo-keyword, .cm-openidea-todo-keyword *": {
+  ".cm-oxidea-todo, .cm-oxidea-todo *": { color: "var(--todo-color) !important", fontStyle: "italic" },
+  ".cm-oxidea-todo-keyword, .cm-oxidea-todo-keyword *": {
     fontWeight: "var(--fw-code-bold, 700)",
     fontStyle: "normal",
   },

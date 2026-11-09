@@ -10,7 +10,7 @@ const status: McpServerStatus = {
   project: "/p",
   url: "http://127.0.0.1:1234/mcp?project=/p",
   token: "secret",
-  stdioCommand: ["/Applications/OpenIDEA.app/Contents/MacOS/openidea", "--mcp-stdio", "--project", "/p"],
+  stdioCommand: ["/Applications/OXidea.app/Contents/MacOS/oxidea", "--mcp-stdio", "--project", "/p"],
 };
 
 describe("MCP server settings", () => {
@@ -22,7 +22,7 @@ describe("MCP server settings", () => {
   });
   it("copies a reusable stdio configuration without the token", () => {
     const config = stdioConfig(status)!;
-    expect(JSON.parse(config).mcpServers.openidea).toEqual({
+    expect(JSON.parse(config).mcpServers.oxidea).toEqual({
       type: "stdio",
       command: status.stdioCommand[0],
       args: status.stdioCommand.slice(1),
@@ -31,7 +31,7 @@ describe("MCP server settings", () => {
     expect(stdioConfig({ ...status, stdioCommand: [] })).toBeNull();
   });
   it("copies the current HTTP endpoint and bearer header", () => {
-    expect(JSON.parse(httpConfig(status)!).mcpServers.openidea).toEqual({
+    expect(JSON.parse(httpConfig(status)!).mcpServers.oxidea).toEqual({
       type: "http",
       url: status.url,
       headers: { Authorization: "Bearer secret" },

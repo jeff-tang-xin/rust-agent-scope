@@ -1,4 +1,4 @@
-//! Memory footprint of everything OpenIDEA runs: the backend, its WebView helper
+//! Memory footprint of everything OXidea runs: the backend, its WebView helper
 //! processes, language servers and the processes started by Run / Debug /
 //! terminals.
 //!
@@ -535,13 +535,13 @@ mod tests {
         ProcEntry { pid, ppid, name: name.into() }
     }
 
-    /// 100 = OpenIDEA; 200 jdtls (java) with a child; 300 rust-analyzer with a
+    /// 100 = OXidea; 200 jdtls (java) with a child; 300 rust-analyzer with a
     /// proc-macro server; 400 a terminal shell running cargo → rustc; 500 a
     /// debug adapter; 600 a WebView2-style child; 900 an unrelated process.
     fn table() -> ProcessTable {
         ProcessTable::from_entries([
             e(1, 0, "launchd"),
-            e(100, 1, "openidea"),
+            e(100, 1, "oxidea"),
             e(200, 100, "java"),
             e(201, 200, "java-helper"),
             e(300, 100, "rust-analyzer"),

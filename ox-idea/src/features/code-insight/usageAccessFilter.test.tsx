@@ -31,7 +31,7 @@ describe("read/write visibility", () => {
   });
   it("starts with both on and repairs invalid persisted state", () => {
     expect(loadAccessOptions()).toEqual({ read: true, write: true });
-    localStorage.setItem("openidea.usages.accessFilter.v1", '{"read":false,"write":false}');
+    localStorage.setItem("oxidea.usages.accessFilter.v1", '{"read":false,"write":false}');
     expect(loadAccessOptions()).toEqual({ read: true, write: true });
   });
 });

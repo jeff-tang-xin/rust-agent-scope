@@ -37,7 +37,7 @@ export const overwriteField = StateField.define<boolean>({
   provide: (f) => [
     Prec.highest(overwriteInput),
     EditorView.editorAttributes.compute([f], (s): Record<string, string> =>
-      s.field(f) ? { class: "cm-openidea-blockCaret" } : {},
+      s.field(f) ? { class: "cm-oxidea-blockCaret" } : {},
     ),
   ],
 });

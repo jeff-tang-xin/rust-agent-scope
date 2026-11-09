@@ -82,7 +82,7 @@ export function syncProjection(): () => void {
 
 // --- theme ------------------------------------------------------------------
 
-export const PLUGIN_THEME_STYLE_ID = "openidea-plugin-theme";
+export const PLUGIN_THEME_STYLE_ID = "oxidea-plugin-theme";
 
 /** Stylesheet for a plugin theme. Its selector outranks every built-in theme block. */
 export function pluginThemeCss(theme: ActiveTheme["theme"]): string {
@@ -139,7 +139,7 @@ export function providePluginThemePreviews(): () => void {
 }
 
 /** localStorage key read by public/boot.js: the selected theme's stylesheet, applied before the app loads. */
-export const PLUGIN_THEME_CACHE_KEY = "openidea.pluginTheme";
+export const PLUGIN_THEME_CACHE_KEY = "oxidea.pluginTheme";
 
 export interface CachedPluginTheme {
   /** `data-plugin-theme`: `<pluginId>/<themeId>`. */

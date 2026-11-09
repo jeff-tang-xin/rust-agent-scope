@@ -147,7 +147,7 @@ function FindInFilesDialog() {
   const [historyMenu, setHistoryMenu] = useState<"find" | "replace" | null>(null);
   const [contextMenu, setContextMenu] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
-  // OpenIDEA's Replace › Preview: the preview shows the replacement as a diff.
+  // OXidea's Replace › Preview: the preview shows the replacement as a diff.
   const [previewMode, setPreviewMode] = useState(false);
   const [diffPreview, setDiffPreview] = useState<{ key: string; lines: PreviewLine[] } | null>(null);
   const [initialSize] = useState(loadFindPopupSize);

@@ -2,7 +2,7 @@
  * Recent filter expressions of the Logcat tool window, kept in `localStorage` so
  * they survive a restart (IDEA's logcat keeps a short history too). Newest first.
  */
-const KEY = "openidea.logcat.filters";
+const KEY = "oxidea.logcat.filters";
 const MAX = 20;
 
 function store(): Storage | null {

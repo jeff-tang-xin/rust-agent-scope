@@ -11,7 +11,7 @@ body:
     attributes:
       label: Before you start
       options:
-        - label: I searched [existing issues](https://github.com/l0ng-ai/openidea/issues?q=is%3Aissue) and this hasn't been requested yet.
+        - label: I searched [existing issues](https://github.com/l0ng-ai/oxidea/issues?q=is%3Aissue) and this hasn't been requested yet.
           required: true
   - type: textarea
     id: problem

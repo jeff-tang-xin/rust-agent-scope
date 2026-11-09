@@ -16,8 +16,8 @@ import time
 import urllib.parse
 
 home = pathlib.Path(sys.argv[1]).resolve()
-bundle = pathlib.Path(__file__).resolve().parents[1] / 'openidea-java-usages.jar'
-work = pathlib.Path(tempfile.mkdtemp(prefix='openidea-hierarchy-'))
+bundle = pathlib.Path(__file__).resolve().parents[1] / 'oxidea-java-usages.jar'
+work = pathlib.Path(tempfile.mkdtemp(prefix='oxidea-hierarchy-'))
 config = work / 'config'
 config.mkdir()
 system, machine = platform.system(), platform.machine().lower()
@@ -148,12 +148,12 @@ def command(name, *args):
 
 def members(file, needle, kind):
     line, col = position(file, needle)
-    return command('openidea.java.hierarchy.members', uri(file), line, col, kind)
+    return command('oxidea.java.hierarchy.members', uri(file), line, col, kind)
 
 
 def refactor(file, needle, kind, target, choices):
     line, col = position(file, needle)
-    return command('openidea.java.hierarchy.refactor', uri(file), line, col, kind, target, choices)
+    return command('oxidea.java.hierarchy.refactor', uri(file), line, col, kind, target, choices)
 
 
 def offset(text, pos):
@@ -192,7 +192,7 @@ def body(text, name):
 try:
     init = request('initialize', {'processId': None, 'rootUri': project.as_uri(), 'workspaceFolders': [{'uri': project.as_uri(), 'name': 'zoo'}], 'capabilities': {'workspace': {'workspaceEdit': {'documentChanges': True}}}, 'initializationOptions': {'bundles': [str(bundle)], 'settings': {'java': {'import': {'gradle': {'enabled': False}, 'maven': {'enabled': False}}}}}})
     commands = init['capabilities']['executeCommandProvider']['commands']
-    assert 'openidea.java.hierarchy.members' in commands and 'openidea.java.hierarchy.refactor' in commands, commands
+    assert 'oxidea.java.hierarchy.members' in commands and 'oxidea.java.hierarchy.refactor' in commands, commands
     send({'jsonrpc': '2.0', 'method': 'initialized', 'params': {}})
     for name, text in sources.items():
         send({'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': uri(name), 'languageId': 'java', 'version': 1, 'text': text}}})

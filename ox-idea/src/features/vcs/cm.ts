@@ -317,19 +317,19 @@ export const viewerTheme = EditorView.theme(
       height: "100%",
       backgroundColor: "var(--bg-app)",
       color: "var(--fg)",
-      fontSize: "var(--openidea-editor-font-size, var(--fs-code))",
+      fontSize: "var(--oxidea-editor-font-size, var(--fs-code))",
       ...findLocals,
     },
     ".cm-scroller": {
-      fontFamily: "var(--openidea-editor-font, var(--font-mono))",
+      fontFamily: "var(--oxidea-editor-font, var(--font-mono))",
       fontWeight: "var(--fw-code, 400)",
-      lineHeight: "var(--openidea-editor-line-height, var(--lh-code))",
+      lineHeight: "var(--oxidea-editor-line-height, var(--lh-code))",
       fontVariantLigatures: "none",
     },
-    "&.cm-openidea-ligatures .cm-scroller": { fontVariantLigatures: "normal" },
+    "&.cm-oxidea-ligatures .cm-scroller": { fontVariantLigatures: "normal" },
     ".cm-content": { caretColor: "var(--caret, var(--fg-strong))", WebkitUserSelect: "text", userSelect: "text" },
     ...caretStyles,
-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection, .cm-openidea-selected, &.cm-focused .cm-openidea-selected":
+    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection, .cm-oxidea-selected, &.cm-focused .cm-oxidea-selected":
       {
         backgroundColor: "var(--bg-selected-strong)",
       },
@@ -401,7 +401,7 @@ export const viewerTheme = EditorView.theme(
     ".cm-collapsedLines:before": { content: "none" },
     ".cm-collapsedLines:after": { content: "none" },
     // Clear of the overview lane over the scrollbar (12px wide).
-    "&.cm-openidea-withOverview .cm-deletedChunk .cm-chunkButtons": { insetInlineEnd: "17px" },
+    "&.cm-oxidea-withOverview .cm-deletedChunk .cm-chunkButtons": { insetInlineEnd: "17px" },
     ".cm-chunkButtons button": {
       font: "inherit",
       fontFamily: "var(--font-ui)",

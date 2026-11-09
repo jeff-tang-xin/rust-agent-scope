@@ -1,6 +1,6 @@
 //! A command does repository work; its lens only offers the command.
-use openidea_plugin::language_features::{CodeLens, Document, LanguageFeatures};
-use openidea_plugin::{Decoration, Error, Invocation, Plugin, Position, Range, host, register_plugin};
+use oxidea_plugin::language_features::{CodeLens, Document, LanguageFeatures};
+use oxidea_plugin::{Decoration, Error, Invocation, Plugin, Position, Range, host, register_plugin};
 
 #[derive(Default)]
 pub struct BlameAnnotations;
@@ -44,7 +44,7 @@ register_plugin!(BlameAnnotations, language_features);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::{BlameLine, mock::MockHost};
+    use oxidea_plugin::{BlameLine, mock::MockHost};
     #[test]
     fn annotations_use_utf16_line_ends_and_require_vcs_permission() {
         let mock = MockHost::install();

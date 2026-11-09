@@ -1,4 +1,4 @@
-package openidea:plugin@1.4.0;
+package oxidea:plugin@1.4.0;
 
 /// Declarative views: tool windows declared
 /// under `[[contributes.views]]` and custom editors under
@@ -74,7 +74,7 @@ interface view-types {
         table(table),
         /// HTML shown in a sandboxed frame: no scripts from elsewhere, no
         /// network, no IDE API. Its script talks to the plugin with
-        /// `openidea.postMessage(text)` / `openidea.onMessage(fn)`.
+        /// `oxidea.postMessage(text)` / `oxidea.onMessage(fn)`.
         html(string),
         /// A body added after 1.0; an IDE that doesn't know it says it needs updating.
         other(extension),

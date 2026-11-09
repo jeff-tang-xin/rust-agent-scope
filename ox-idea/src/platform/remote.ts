@@ -1,7 +1,7 @@
 import { confirmProjectTrust } from "./projectTrust";
 /**
  * Remote development: in a window whose project lives on another machine, the
- * commands that machine's `openidea-server` answers are routed to it (through
+ * commands that machine's `oxidea-server` answers are routed to it (through
  * the `remote_invoke` command) instead of running locally. Routing happens below
  * the generated bindings, so features call `commands.*` as usual.
  */
@@ -288,9 +288,9 @@ export interface RecentRemote {
   openedAtMs: number;
 }
 
-const RECENT_KEY = "openidea.remote.recent";
+const RECENT_KEY = "oxidea.remote.recent";
 const RECENT_MAX = 20;
-const TRUST_MIGRATION_KEY = "openidea.remote.trustMigration";
+const TRUST_MIGRATION_KEY = "oxidea.remote.trustMigration";
 
 /** Snapshot existing user-owned recents before any new connection is remembered. */
 export function initializeRemoteTrustMigration() {

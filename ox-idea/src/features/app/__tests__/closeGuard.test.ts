@@ -26,7 +26,7 @@ const base: CloseInput = {
   confirmTerminate: false,
   processes: [],
   dirty: 0,
-  project: "openidea",
+  project: "oxidea",
 };
 
 describe("decideClose", () => {
@@ -250,7 +250,7 @@ it("confirmLeave asks about running processes before closing", async () => {
   const { confirmLeave } = await import("../closeGuard");
   const { d, asked } = deps([{ button: "cancel", checked: false }]);
   d.runningProcesses = vi.fn(async () => ["app"]);
-  await expect(confirmLeave(d, "openidea")).resolves.toBe(false);
+  await expect(confirmLeave(d, "oxidea")).resolves.toBe(false);
   expect(asked[0]?.title).toContain("app");
   expect(asked[0]?.body).toContain("app");
 });

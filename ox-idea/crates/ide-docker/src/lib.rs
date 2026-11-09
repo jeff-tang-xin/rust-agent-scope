@@ -32,7 +32,7 @@ pub fn docker_executable() -> Option<PathBuf> {
     static DOCKER: OnceLock<Option<PathBuf>> = OnceLock::new();
     DOCKER
         .get_or_init(|| {
-            if let Some(explicit) = std::env::var_os("OPENIDEA_DOCKER").map(PathBuf::from).filter(|p| p.is_file()) {
+            if let Some(explicit) = std::env::var_os("OXIDEA_DOCKER").map(PathBuf::from).filter(|p| p.is_file()) {
                 return Some(explicit);
             }
             if let Ok(found) = which::which("docker") {

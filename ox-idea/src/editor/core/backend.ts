@@ -62,7 +62,7 @@ export interface DocBackend {
   /** Files changed on disk (used to refresh nothing but closed-file state). */
   onFsChanged?(handler: (e: { removed: string[] }) => void): () => void;
   /**
-   * Every OpenIDEA window lost focus to another application. Also seen while focus is in a frame
+   * Every OXidea window lost focus to another application. Also seen while focus is in a frame
    * (a plugin's web view), which hides the window's own `blur`.
    */
   onApplicationDeactivated?(handler: () => void): () => void;

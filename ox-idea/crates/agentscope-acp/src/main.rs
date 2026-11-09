@@ -16,7 +16,8 @@ async fn main() {
         )
         .with_writer(std::io::stderr)
         .init();
-    if let Err(error) = agentscope_acp::serve(stdin(), tokio::io::stdout()).await {
+    let env: Vec<(String, String)> = std::env::vars().collect();
+    if let Err(error) = agentscope_acp::serve(stdin(), tokio::io::stdout(), env).await {
         tracing::error!(%error, "acp: 服务循环退出");
         std::process::exit(1);
     }

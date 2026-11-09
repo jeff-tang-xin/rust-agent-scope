@@ -1,5 +1,5 @@
 [package]
-name = "openidea-plugin-misbehave"
+name = "oxidea-plugin-misbehave"
 version = "0.1.0"
 edition = "2024"
 publish = false

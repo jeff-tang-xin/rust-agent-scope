@@ -189,7 +189,7 @@ function PluginViewContent({
         {hasDetail ? (
           <SplitGroup
             orientation="horizontal"
-            storageKey={`openidea.plugins.detailSplit.${JSON.stringify([pluginId, view])}`}
+            storageKey={`oxidea.plugins.detailSplit.${JSON.stringify([pluginId, view])}`}
           >
             <SplitPanel id={`${splitId}-items`} defaultSize="40%" minSize="100px">
               <div className={styles.master}>

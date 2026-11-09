@@ -15,7 +15,7 @@ const read = (p: string) => readFileSync(p, "utf8");
 const css = read("src/styles/tokens.css");
 const groups = themeTokenGroups(css);
 const sets = tokenSets(groups);
-// The official Harbor Night theme, where new themes start (`openidea-plugin new --template theme`).
+// The official Harbor Night theme, where new themes start (`oxidea-plugin new --template theme`).
 const TEMPLATE = "plugins/official/harbor-night";
 const themeSrc = read(`${TEMPLATE}/themes/harbor-night.theme.json`);
 const schemeSrc = read(`${TEMPLATE}/themes/harbor-night.scheme.json`);
@@ -217,7 +217,7 @@ describe("IntelliJ theme import", () => {
     expect(toml).toContain('id = "theme-sea"');
     expect(toml).toContain('name = "Sea \\"Deep\\""');
     expect(toml).toContain('description = "a\\\\b\\u000ac"');
-    expect(toml).toContain('engines.openidea = "^1.0"');
+    expect(toml).toContain('engines.oxidea = "^1.0"');
     expect(toml).toContain('editor-scheme = "themes/sea.scheme.json"');
   });
 

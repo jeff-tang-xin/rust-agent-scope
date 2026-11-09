@@ -22,16 +22,16 @@
     align-items: center;
   }
   label.caption {
-    color: var(--openidea-fg-muted);
+    color: var(--oxidea-fg-muted);
     font-size: 11px;
   }
   input[type="text"],
   textarea {
-    font-family: var(--openidea-font-mono, ui-monospace, monospace);
+    font-family: var(--oxidea-font-mono, ui-monospace, monospace);
     font-size: 12px;
-    color: var(--openidea-fg);
-    background: var(--openidea-bg-input, transparent);
-    border: 1px solid var(--openidea-border);
+    color: var(--oxidea-fg);
+    background: var(--oxidea-bg-input, transparent);
+    border: 1px solid var(--oxidea-border);
     border-radius: 4px;
     padding: 4px 6px;
     outline: none;
@@ -39,44 +39,44 @@
   }
   input[type="text"]:focus,
   textarea:focus {
-    border-color: var(--openidea-focus-ring, var(--openidea-accent));
+    border-color: var(--oxidea-focus-ring, var(--oxidea-accent));
   }
   input.pattern {
     flex: 1;
   }
   input.invalid {
-    border-color: var(--openidea-danger);
+    border-color: var(--oxidea-danger);
   }
   .flags {
     display: flex;
     gap: 2px;
   }
   .flags button {
-    font-family: var(--openidea-font-mono, monospace);
+    font-family: var(--oxidea-font-mono, monospace);
     font-size: 12px;
     width: 24px;
     height: 24px;
     padding: 0;
-    color: var(--openidea-fg-muted);
+    color: var(--oxidea-fg-muted);
     background: transparent;
     border: 1px solid transparent;
     border-radius: 4px;
     cursor: pointer;
   }
   .flags button:hover {
-    background: var(--openidea-bg-hover);
+    background: var(--oxidea-bg-hover);
   }
   .flags button[aria-pressed="true"] {
-    color: var(--openidea-fg-on-accent);
-    background: var(--openidea-accent);
+    color: var(--oxidea-fg-on-accent);
+    background: var(--oxidea-accent);
   }
   .status {
     font-size: 11px;
-    color: var(--openidea-fg-muted);
+    color: var(--oxidea-fg-muted);
     min-height: 14px;
   }
   .status.error {
-    color: var(--openidea-danger);
+    color: var(--oxidea-danger);
   }
   /* The text: a transparent textarea over a backdrop that draws the matches. */
   .editor {
@@ -93,7 +93,7 @@
     height: 100%;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-family: var(--openidea-font-mono, ui-monospace, monospace);
+    font-family: var(--oxidea-font-mono, ui-monospace, monospace);
     font-size: 12px;
     line-height: 1.5;
     padding: 4px 6px;
@@ -104,8 +104,8 @@
   .editor textarea {
     background: transparent;
     resize: none;
-    border-color: var(--openidea-border);
-    caret-color: var(--openidea-fg);
+    border-color: var(--oxidea-border);
+    caret-color: var(--oxidea-fg);
   }
   .editor .backdrop {
     color: transparent;
@@ -114,13 +114,13 @@
   mark {
     color: transparent;
     border-radius: 2px;
-    background: color-mix(in srgb, var(--openidea-accent) 35%, transparent);
+    background: color-mix(in srgb, var(--oxidea-accent) 35%, transparent);
   }
   mark.alt {
-    background: color-mix(in srgb, var(--openidea-info, var(--openidea-accent)) 30%, transparent);
+    background: color-mix(in srgb, var(--oxidea-info, var(--oxidea-accent)) 30%, transparent);
   }
   mark.current {
-    outline: 1px solid var(--openidea-accent);
+    outline: 1px solid var(--oxidea-accent);
   }
   .replaced {
     flex: 1;
@@ -128,17 +128,17 @@
     margin: 0;
     white-space: pre-wrap;
     overflow: auto;
-    font-family: var(--openidea-font-mono, monospace);
+    font-family: var(--oxidea-font-mono, monospace);
     font-size: 12px;
-    border: 1px solid var(--openidea-border);
+    border: 1px solid var(--oxidea-border);
     border-radius: 4px;
     padding: 4px 6px;
-    color: var(--openidea-fg-strong);
+    color: var(--oxidea-fg-strong);
   }
   .list {
     flex: 2;
     overflow: auto;
-    border: 1px solid var(--openidea-border);
+    border: 1px solid var(--oxidea-border);
     border-radius: 4px;
   }
   table {
@@ -155,30 +155,30 @@
   th {
     position: sticky;
     top: 0;
-    background: var(--openidea-bg-elevated, var(--openidea-bg));
-    color: var(--openidea-fg-muted);
+    background: var(--oxidea-bg-elevated, var(--oxidea-bg));
+    color: var(--oxidea-fg-muted);
     font-weight: normal;
   }
   td.mono {
-    font-family: var(--openidea-font-mono, monospace);
+    font-family: var(--oxidea-font-mono, monospace);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   td.none {
-    color: var(--openidea-fg-muted);
+    color: var(--oxidea-fg-muted);
   }
   tr.match {
     cursor: pointer;
   }
   tr.match:hover {
-    background: var(--openidea-bg-hover);
+    background: var(--oxidea-bg-hover);
   }
   tr.match.current {
-    background: var(--openidea-bg-selected);
+    background: var(--oxidea-bg-selected);
   }
   .empty {
     padding: 8px;
-    color: var(--openidea-fg-muted);
+    color: var(--oxidea-fg-muted);
     font-size: 12px;
   }
 </style>
@@ -263,7 +263,7 @@
 
     function run() {
       seq += 1;
-      openidea.postMessage(
+      oxidea.postMessage(
         JSON.stringify({
           op: "run",
           seq,
@@ -329,7 +329,7 @@
       if (row) select(Number(row.dataset.i));
     });
 
-    openidea.onMessage((raw) => {
+    oxidea.onMessage((raw) => {
       let m;
       try {
         m = JSON.parse(raw);

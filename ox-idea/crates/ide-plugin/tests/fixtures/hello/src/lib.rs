@@ -1,9 +1,9 @@
-//! Sample OpenIDEA plugin, written with the `openidea-plugin` SDK.
-//! Build with `openidea-plugin build crates/ide-plugin/tests/fixtures/hello` (see plugins/README.md).
+//! Sample OXidea plugin, written with the `oxidea-plugin` SDK.
+//! Build with `oxidea-plugin build crates/ide-plugin/tests/fixtures/hello` (see plugins/README.md).
 
-use openidea_plugin::details::{Details, Pane, ProcessLog, Tab};
-use openidea_plugin::views::{Body, Button, TreeItem, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Context, Error, Invocation, LogLevel, NotificationLevel, Plugin, host, register_plugin};
+use oxidea_plugin::details::{Details, Pane, ProcessLog, Tab};
+use oxidea_plugin::views::{Body, Button, TreeItem, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Context, Error, Invocation, LogLevel, NotificationLevel, Plugin, host, register_plugin};
 use std::collections::BTreeSet;
 
 #[derive(Default)]
@@ -132,7 +132,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     #[test]
     fn civil_dates() {

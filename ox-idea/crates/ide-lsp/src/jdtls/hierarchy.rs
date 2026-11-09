@@ -9,8 +9,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-const MEMBERS: &str = "openidea.java.hierarchy.members";
-const REFACTOR: &str = "openidea.java.hierarchy.refactor";
+const MEMBERS: &str = "oxidea.java.hierarchy.members";
+const REFACTOR: &str = "oxidea.java.hierarchy.refactor";
 
 /// The extension's answer: a result, or why the position can't be refactored.
 #[derive(Deserialize)]

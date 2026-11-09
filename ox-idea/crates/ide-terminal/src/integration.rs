@@ -14,52 +14,52 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const ZSHENV: &str = r#"# OpenIDEA shell integration (generated)
-_openidea_dir=$ZDOTDIR
-ZDOTDIR=${OPENIDEA_USER_ZDOTDIR:-$HOME}
+const ZSHENV: &str = r#"# OXidea shell integration (generated)
+_oxidea_dir=$ZDOTDIR
+ZDOTDIR=${OXIDEA_USER_ZDOTDIR:-$HOME}
 [[ -f $ZDOTDIR/.zshenv ]] && . $ZDOTDIR/.zshenv
-OPENIDEA_USER_ZDOTDIR=$ZDOTDIR
-ZDOTDIR=$_openidea_dir
+OXIDEA_USER_ZDOTDIR=$ZDOTDIR
+ZDOTDIR=$_oxidea_dir
 "#;
 
-const ZPROFILE: &str = r#"# OpenIDEA shell integration (generated)
-ZDOTDIR=$OPENIDEA_USER_ZDOTDIR
+const ZPROFILE: &str = r#"# OXidea shell integration (generated)
+ZDOTDIR=$OXIDEA_USER_ZDOTDIR
 [[ -f $ZDOTDIR/.zprofile ]] && . $ZDOTDIR/.zprofile
-OPENIDEA_USER_ZDOTDIR=$ZDOTDIR
-ZDOTDIR=$_openidea_dir
+OXIDEA_USER_ZDOTDIR=$ZDOTDIR
+ZDOTDIR=$_oxidea_dir
 "#;
 
-const ZSHRC: &str = r#"# OpenIDEA shell integration (generated)
-ZDOTDIR=$OPENIDEA_USER_ZDOTDIR
+const ZSHRC: &str = r#"# OXidea shell integration (generated)
+ZDOTDIR=$OXIDEA_USER_ZDOTDIR
 [[ -f $ZDOTDIR/.zshrc ]] && . $ZDOTDIR/.zshrc
-OPENIDEA_USER_ZDOTDIR=$ZDOTDIR
-ZDOTDIR=$_openidea_dir
-_openidea_osc7() { printf '\e]133;D\a\e]7;file://%s%s\a' "${HOST}" "${PWD}" }
-_openidea_preexec() { printf '\e]133;C\a' }
+OXIDEA_USER_ZDOTDIR=$ZDOTDIR
+ZDOTDIR=$_oxidea_dir
+_oxidea_osc7() { printf '\e]133;D\a\e]7;file://%s%s\a' "${HOST}" "${PWD}" }
+_oxidea_preexec() { printf '\e]133;C\a' }
 # First, so the command counts as finished before other hooks set the prompt's title.
-precmd_functions=(_openidea_osc7 ${precmd_functions:#_openidea_osc7})
-preexec_functions+=(_openidea_preexec)
+precmd_functions=(_oxidea_osc7 ${precmd_functions:#_oxidea_osc7})
+preexec_functions+=(_oxidea_preexec)
 # Startup files that ran before this one (e.g. /etc/zshrc's
 # HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history) resolved HISTFILE against this
-# generated directory, since OpenIDEA starts zsh as a login shell (-l) and the
+# generated directory, since OXidea starts zsh as a login shell (-l) and the
 # restore below used to be gated on non-login. Hand both back to the user: a
-# HISTFILE they configured themselves is never under $_openidea_dir and is kept.
-if [[ $HISTFILE == "$_openidea_dir"/* ]]; then
-  HISTFILE=${OPENIDEA_USER_ZDOTDIR:-$HOME}/.zsh_history
+# HISTFILE they configured themselves is never under $_oxidea_dir and is kept.
+if [[ $HISTFILE == "$_oxidea_dir"/* ]]; then
+  HISTFILE=${OXIDEA_USER_ZDOTDIR:-$HOME}/.zsh_history
 fi
-ZDOTDIR=${OPENIDEA_USER_ZDOTDIR:-$HOME}
-unset OPENIDEA_USER_ZDOTDIR _openidea_dir
+ZDOTDIR=${OXIDEA_USER_ZDOTDIR:-$HOME}
+unset OXIDEA_USER_ZDOTDIR _oxidea_dir
 "#;
 
-const ZLOGIN: &str = r#"# OpenIDEA shell integration (generated)
-ZDOTDIR=${OPENIDEA_USER_ZDOTDIR:-$HOME}
+const ZLOGIN: &str = r#"# OXidea shell integration (generated)
+ZDOTDIR=${OXIDEA_USER_ZDOTDIR:-$HOME}
 [[ -f $ZDOTDIR/.zlogin ]] && . $ZDOTDIR/.zlogin
-unset OPENIDEA_USER_ZDOTDIR _openidea_dir
+unset OXIDEA_USER_ZDOTDIR _oxidea_dir
 "#;
 
-const BASHRC: &str = r#"# OpenIDEA shell integration (generated)
-if [ "${OPENIDEA_LOGIN:-}" = 1 ]; then
-  unset OPENIDEA_LOGIN
+const BASHRC: &str = r#"# OXidea shell integration (generated)
+if [ "${OXIDEA_LOGIN:-}" = 1 ]; then
+  unset OXIDEA_LOGIN
   [ -f /etc/profile ] && . /etc/profile
   if [ -f ~/.bash_profile ]; then . ~/.bash_profile
   elif [ -f ~/.bash_login ]; then . ~/.bash_login
@@ -68,10 +68,10 @@ if [ "${OPENIDEA_LOGIN:-}" = 1 ]; then
 else
   [ -f ~/.bashrc ] && . ~/.bashrc
 fi
-__openidea_osc7() { printf '\e]133;D\a\e]7;file://%s%s\a' "${HOSTNAME}" "${PWD}"; }
+__oxidea_osc7() { printf '\e]133;D\a\e]7;file://%s%s\a' "${HOSTNAME}" "${PWD}"; }
 case ";${PROMPT_COMMAND:-};" in
-  *";__openidea_osc7;"*) ;;
-  *) PROMPT_COMMAND="__openidea_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+  *";__oxidea_osc7;"*) ;;
+  *) PROMPT_COMMAND="__oxidea_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
 esac
 # PS0 (bash 4.4+) prints before each command runs.
 case "${PS0:-}" in
@@ -81,13 +81,13 @@ esac
 "#;
 
 const FISH_INIT: &str = concat!(
-    r#"function __openidea_osc7 --on-event fish_prompt; printf '\e]133;D\a\e]7;file://%s%s\a' (hostname) $PWD; end; "#,
-    r#"function __openidea_preexec --on-event fish_preexec; printf '\e]133;C\a'; end"#,
+    r#"function __oxidea_osc7 --on-event fish_prompt; printf '\e]133;D\a\e]7;file://%s%s\a' (hostname) $PWD; end; "#,
+    r#"function __oxidea_preexec --on-event fish_preexec; printf '\e]133;C\a'; end"#,
 );
 
 /// Directory holding the generated startup files (written on demand).
 fn scripts_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("openidea-shell-integration-{}", env!("CARGO_PKG_VERSION")))
+    std::env::temp_dir().join(format!("oxidea-shell-integration-{}", env!("CARGO_PKG_VERSION")))
 }
 
 fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
@@ -117,7 +117,7 @@ pub(crate) fn apply(shell_name: &str, args: &mut Vec<String>, env: &mut BTreeMap
             write_if_changed(&zdir.join(".zlogin"), ZLOGIN)?;
             let user = env.get("ZDOTDIR").cloned().or_else(|| std::env::var("ZDOTDIR").ok()).filter(|v| !v.is_empty());
             if let Some(user) = user {
-                env.insert("OPENIDEA_USER_ZDOTDIR".into(), user);
+                env.insert("OXIDEA_USER_ZDOTDIR".into(), user);
             }
             env.insert("ZDOTDIR".into(), zdir.to_string_lossy().into_owned());
             Ok(())
@@ -128,10 +128,10 @@ pub(crate) fn apply(shell_name: &str, args: &mut Vec<String>, env: &mut BTreeMap
                 return false;
             }
             (|| -> std::io::Result<()> {
-                let rc = dir.join("bash").join("openidea.bashrc");
+                let rc = dir.join("bash").join("oxidea.bashrc");
                 write_if_changed(&rc, BASHRC)?;
                 if args.iter().any(|a| a == "-l" || a == "--login") {
-                    env.insert("OPENIDEA_LOGIN".into(), "1".into());
+                    env.insert("OXIDEA_LOGIN".into(), "1".into());
                 }
                 *args = vec!["--init-file".into(), rc.to_string_lossy().into_owned(), "-i".into()];
                 Ok(())
@@ -167,7 +167,7 @@ mod tests {
         assert!(apply("bash", &mut args, &mut env));
         assert_eq!(args[0], "--init-file");
         assert!(Path::new(&args[1]).is_file());
-        assert_eq!(env.get("OPENIDEA_LOGIN").map(String::as_str), Some("1"));
+        assert_eq!(env.get("OXIDEA_LOGIN").map(String::as_str), Some("1"));
     }
 
     #[test]
@@ -189,24 +189,24 @@ mod tests {
         assert!(apply("zsh", &mut args, &mut env));
         let dir = PathBuf::from(&env["ZDOTDIR"]);
         assert!(dir.join(".zshrc").is_file());
-        assert_eq!(env["OPENIDEA_USER_ZDOTDIR"], "/home/me/zsh");
+        assert_eq!(env["OXIDEA_USER_ZDOTDIR"], "/home/me/zsh");
         assert_eq!(args, vec!["-l"]);
     }
 
     #[test]
     fn zsh_restores_zdotdir_and_histfile_for_login_shells() {
-        // OpenIDEA starts zsh as a login shell (`zsh -l`), so the restore at the
+        // OXidea starts zsh as a login shell (`zsh -l`), so the restore at the
         // end of the generated .zshrc must not be gated on non-login shells,
         // and HISTFILE resolved against the generated directory (e.g. by
         // /etc/zshrc's `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history`) must be
         // re-pointed at the user's directory.
         assert!(!ZSHRC.contains("[[ ! -o login ]]"));
-        assert!(ZSHRC.contains("HISTFILE=${OPENIDEA_USER_ZDOTDIR:-$HOME}/.zsh_history"));
-        assert!(ZSHRC.contains("ZDOTDIR=${OPENIDEA_USER_ZDOTDIR:-$HOME}"));
-        assert!(ZSHRC.contains("unset OPENIDEA_USER_ZDOTDIR _openidea_dir"));
+        assert!(ZSHRC.contains("HISTFILE=${OXIDEA_USER_ZDOTDIR:-$HOME}/.zsh_history"));
+        assert!(ZSHRC.contains("ZDOTDIR=${OXIDEA_USER_ZDOTDIR:-$HOME}"));
+        assert!(ZSHRC.contains("unset OXIDEA_USER_ZDOTDIR _oxidea_dir"));
         // Login shells that never read .zshrc (non-interactive ones) restore via .zlogin.
-        assert!(ZLOGIN.contains("ZDOTDIR=${OPENIDEA_USER_ZDOTDIR:-$HOME}"));
-        assert!(ZLOGIN.contains("unset OPENIDEA_USER_ZDOTDIR _openidea_dir"));
+        assert!(ZLOGIN.contains("ZDOTDIR=${OXIDEA_USER_ZDOTDIR:-$HOME}"));
+        assert!(ZLOGIN.contains("unset OXIDEA_USER_ZDOTDIR _oxidea_dir"));
         if cfg!(windows) {
             return; // apply() only integrates on Unix
         }
@@ -214,6 +214,6 @@ mod tests {
         let mut env = BTreeMap::from([("ZDOTDIR".to_owned(), "/home/me/zsh".to_owned())]);
         assert!(apply("zsh", &mut args, &mut env));
         let zshrc = std::fs::read_to_string(PathBuf::from(&env["ZDOTDIR"]).join(".zshrc")).unwrap();
-        assert!(zshrc.contains("HISTFILE=${OPENIDEA_USER_ZDOTDIR:-$HOME}/.zsh_history"));
+        assert!(zshrc.contains("HISTFILE=${OXIDEA_USER_ZDOTDIR:-$HOME}/.zsh_history"));
     }
 }

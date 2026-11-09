@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { syntaxHighlighting } from "@codemirror/language";
-import { openideaHighlightStyle } from "../../core/cm/highlight";
+import { oxideaHighlightStyle } from "../../core/cm/highlight";
 import { setSyntaxHighlights, syntaxHighlightField } from "../../core/cm/syntaxHighlight";
 
 // One `property` token over the whole word, as jdtls reports an instance field.
@@ -49,7 +49,7 @@ async function editor(extensions: Extension[]) {
 describe("semantic decorations vs the syntax highlighter", () => {
   it("keeps semantic roles inside supplemental backend syntax marks", async () => {
     vi.useFakeTimers();
-    const view = await editor([syntaxHighlightField, syntaxHighlighting(openideaHighlightStyle), semanticExtension()]);
+    const view = await editor([syntaxHighlightField, syntaxHighlighting(oxideaHighlightStyle), semanticExtension()]);
     view.dispatch({ effects: setSyntaxHighlights.of({ kinds: ["variable"], data: [0, 13, 0] }) });
     const sem = view.contentDOM.querySelector(".cm-sem-property")!;
     expect(sem).not.toBeNull();

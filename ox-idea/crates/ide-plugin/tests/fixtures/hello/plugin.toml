@@ -2,13 +2,13 @@ id = "hello"
 name = "Hello"
 version = "0.3.0"
 description = "Sample plugin: inserts today's date, counts words in the active file and shows a tool window with a tree."
-authors = ["OpenIDEA contributors"]
+authors = ["OXidea contributors"]
 change-notes = """
 0.3.0 — a Greetings tool window (tree view), an editor context menu entry, a shortcut and a status bar item.
 0.2.0 — plugin API 0.2: edits are versioned, one undo step for every cursor.
 0.1.0 — first release: Insert Date and Word Count of Active File commands.
 """
-engines.openidea = "^1.0"
+engines.oxidea = "^1.0"
 wasm = "dist/plugin.wasm"
 # Loaded the first time one of its commands runs.
 activation = ["on-command:*", "on-view:greetings"]

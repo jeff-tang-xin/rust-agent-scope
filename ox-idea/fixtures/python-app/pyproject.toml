@@ -1,7 +1,7 @@
 [project]
-name = "openidea-fixture-tasks"
+name = "oxidea-fixture-tasks"
 version = "0.1.0"
-description = "OpenIDEA QA fixture: a tiny task tracker"
+description = "OXidea QA fixture: a tiny task tracker"
 requires-python = ">=3.10"
 dependencies = []
 

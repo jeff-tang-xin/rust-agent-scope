@@ -1,6 +1,6 @@
 //! The IDE backend without a UI toolkit: open projects per window, terminals,
 //! processes, settings and the remote services. The desktop shell (`src-tauri`)
-//! wraps one [`Host`] and adds windows and menus; `openidea-server`
+//! wraps one [`Host`] and adds windows and menus; `oxidea-server`
 //! runs one on a remote machine and serves it over JSON-RPC ([`rpc`]).
 
 pub mod data_dirs;
@@ -11,6 +11,7 @@ mod kotlin_bridge;
 pub mod mcp;
 pub mod notebook;
 pub mod ops;
+pub mod ox_tools;
 mod phpstan;
 pub mod plugins;
 mod project;

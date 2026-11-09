@@ -205,7 +205,7 @@ describe("tool window persistence", () => {
   });
 
   it("survives corrupt storage", () => {
-    localStorage.setItem("openidea.layout.v1:/work/c", "{not json");
+    localStorage.setItem("oxidea.layout.v1:/work/c", "{not json");
     loadToolWindowLayout("/work/c");
     expect(isToolWindowVisible("project")).toBe(true);
   });
@@ -349,7 +349,7 @@ describe("split areas", () => {
 
   it("migrates a layout saved with one area per side", () => {
     localStorage.setItem(
-      "openidea.layout.v1:/work/old",
+      "oxidea.layout.v1:/work/old",
       JSON.stringify({
         visible: { left: "bookmarks", right: "terminal", bottom: "problems" },
         sizes: { left: 300, right: 300, bottom: 200 },
@@ -371,7 +371,7 @@ describe("split areas", () => {
     expect(isToolWindowVisible("problems")).toBe(true);
     expect(useToolWindowLayout.getState().sizes.left).toBe(300);
     showToolWindow("project");
-    expect(JSON.parse(localStorage.getItem("openidea.layout.v1:/work/old")!)).toMatchObject({
+    expect(JSON.parse(localStorage.getItem("oxidea.layout.v1:/work/old")!)).toMatchObject({
       v: 2,
       visible: { left: "project", "left-split": "bookmarks", "right-split": "terminal" },
     });
@@ -379,7 +379,7 @@ describe("split areas", () => {
 
   it("moves a late-registered window recorded in the wrong area to its own", () => {
     const sync = installToolWindowLayoutSync();
-    localStorage.setItem("openidea.layout.v1:/work/late", JSON.stringify({ visible: { left: "late" } }));
+    localStorage.setItem("oxidea.layout.v1:/work/late", JSON.stringify({ visible: { left: "late" } }));
     loadToolWindowLayout("/work/late");
     expect(useToolWindowLayout.getState().visible.left).toBe("late");
     disposers.push(

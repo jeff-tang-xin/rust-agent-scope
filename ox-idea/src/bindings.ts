@@ -959,11 +959,11 @@ export const commands = {
 	settingsPage: string | null,
 	/**  Settings windows: edit the global layer only ("Settings for New Projects"). */
 	newProjects: boolean,
-	/**  Where to place the caret in some of `files` (`openidea --line 12 --column 5 <file>`). */
+	/**  Where to place the caret in some of `files` (`oxidea --line 12 --column 5 <file>`). */
 	positions?: FilePosition[],
 	/**  Comparison windows: the revisions to compare (boxed: most launches have none). */
 	comparison?: ComparisonLaunch | null,
-	/**  `openidea diff a.txt b.txt`: the two files to open in the diff viewer (boxed: most launches have none). */
+	/**  `oxidea diff a.txt b.txt`: the two files to open in the diff viewer (boxed: most launches have none). */
 	diff?: DiffFilesLaunch | null,
 	/**  Deployment windows: the server and local selection to compare. */
 	deployment?: DeploymentLaunch | null,
@@ -994,9 +994,9 @@ export const commands = {
 	 */
 	menuSetDisabled: (ids: string[]) => __TAURI_INVOKE<void>("menu_set_disabled", { ids }),
 	appLogLocation: () => typedError<LogLocation, IdeError>(__TAURI_INVOKE("app_log_location")),
-	/**  Installs the `openidea` command for this user. */
+	/**  Installs the `oxidea` command for this user. */
 	appCliInstall: () => typedError<CliInstallation, IdeError>(__TAURI_INVOKE("app_cli_install")),
-	/**  Removes the installed `openidea` command; returns the links removed. */
+	/**  Removes the installed `oxidea` command; returns the links removed. */
 	appCliUninstall: () => typedError<IpcPath[], IdeError>(__TAURI_INVOKE("app_cli_uninstall")),
 	appBuildInfo: () => __TAURI_INVOKE<BuildInfo>("app_build_info"),
 	appCheckUpdate: (source: UpdateSource) => typedError<UpdateCheck, IdeError>(__TAURI_INVOKE("app_check_update", { source })),
@@ -1084,7 +1084,7 @@ export const commands = {
 	pluginGrant: (id: string, consent: Consent) => typedError<PluginInfo, IdeError>(__TAURI_INVOKE("plugin_grant", { id, consent })),
 	/**  Grants or revokes one declared capability. */
 	pluginSetCapability: (id: string, capability: string, granted: boolean) => typedError<PluginInfo, IdeError>(__TAURI_INVOKE("plugin_set_capability", { id, capability, granted })),
-	/**  Links a development plugin folder (`openidea-plugin link` does the same from a terminal). */
+	/**  Links a development plugin folder (`oxidea-plugin link` does the same from a terminal). */
 	pluginLink: (path: string) => typedError<PluginInfo, IdeError>(__TAURI_INVOKE("plugin_link", { path })),
 	pluginUnlink: (id: string) => typedError<null, IdeError>(__TAURI_INVOKE("plugin_unlink", { id })),
 	/**  Validated assets of a plugin whose id starts with `prefix` (icon theme mapping and SVGs). */
@@ -1193,13 +1193,13 @@ export const commands = {
 	 */
 	pluginLogTabSpawn: (pluginId: string, key: string, on: string[], cols: number, rows: number, onOutput: Channel<string>) => typedError<TerminalInfo, IdeError>(__TAURI_INVOKE("plugin_log_tab_spawn", { pluginId, key, on, cols, rows, onOutput })),
 	/**
-	 *  Writes what a web view saves (`openidea.saveFile`) to the path the user
+	 *  Writes what a web view saves (`oxidea.saveFile`) to the path the user
 	 *  chose in the save dialog, on this machine.
 	 */
 	pluginWebSaveFile: (path: string, base64: string) => typedError<null, IdeError>(__TAURI_INVOKE("plugin_web_save_file", { path, base64 })),
 	/**
 	 *  Reads the file the user picked in an open dialog for a web view
-	 *  (`openidea.openFile`), on this machine; base64.
+	 *  (`oxidea.openFile`), on this machine; base64.
 	 */
 	pluginWebReadFile: (path: string) => typedError<string, IdeError>(__TAURI_INVOKE("plugin_web_read_file", { path })),
 	/**  Gutter markers of plugin `line-markers` providers for an open document. */
@@ -1531,7 +1531,9 @@ export type AgentCommand = {
 };
 
 /**  Why the executable cannot be changed in built-in agent settings. */
-export type AgentCommandReadOnlyReason = "packageRunner" | "registry" | "customAgent";
+export type AgentCommandReadOnlyReason = "packageRunner" | "registry" | "customAgent" | 
+/**  The agent runs in-process (the OX agent): there is no executable to point at. */
+"inProcess";
 
 export type AgentCommandSource = "command" | "skill";
 
@@ -2132,7 +2134,7 @@ export type BuildEvent =
 
 export type BuildInfo = {
 	version: string,
-	/**  Build id from CI (`OPENIDEA_BUILD` at compile time), else `dev`. */
+	/**  Build id from CI (`OXIDEA_BUILD` at compile time), else `dev`. */
 	build: string,
 	profile: string,
 	os: string,
@@ -3462,7 +3464,7 @@ export type Diagnostic = {
 	server?: string | null,
 };
 
-/**  The two files of a command-line diff (`openidea diff a.txt b.txt`), both sides editable. */
+/**  The two files of a command-line diff (`oxidea diff a.txt b.txt`), both sides editable. */
 export type DiffFilesLaunch = {
 	left: IpcPath,
 	right: IpcPath,
@@ -4545,7 +4547,7 @@ export type GradleProject = {
 export type GradleRunUsing = 
 /**  A `JavaExec` task on the source set's runtime classpath (`gradleRun.gradle`). */
 "gradle" | 
-/**  The Java language server's classpath, launched by OpenIDEA. */
+/**  The Java language server's classpath, launched by OXidea. */
 "ide";
 
 /**  Build Tools › Gradle. */
@@ -5245,11 +5247,11 @@ export type JdkVendor = {
 
 /**
  *  A JetBrains IDE's File › Manage IDE Settings › Export Settings… archive: every
- *  entry name, and the text of the entries OpenIDEA maps (the frontend does the mapping).
+ *  entry name, and the text of the entries OXidea maps (the frontend does the mapping).
  */
 export type JetBrainsSettings = {
 	entries: string[],
-	/**  Entry name → text, for `colors/*.icls` and the `options/*.xml` files OpenIDEA reads. */
+	/**  Entry name → text, for `colors/*.icls` and the `options/*.xml` files OXidea reads. */
 	files: { [key in string]: string },
 };
 
@@ -5459,11 +5461,11 @@ export type Launch = {
 	settingsPage: string | null,
 	/**  Settings windows: edit the global layer only ("Settings for New Projects"). */
 	newProjects: boolean,
-	/**  Where to place the caret in some of `files` (`openidea --line 12 --column 5 <file>`). */
+	/**  Where to place the caret in some of `files` (`oxidea --line 12 --column 5 <file>`). */
 	positions?: FilePosition[],
 	/**  Comparison windows: the revisions to compare (boxed: most launches have none). */
 	comparison?: ComparisonLaunch | null,
-	/**  `openidea diff a.txt b.txt`: the two files to open in the diff viewer (boxed: most launches have none). */
+	/**  `oxidea diff a.txt b.txt`: the two files to open in the diff viewer (boxed: most launches have none). */
 	diff?: DiffFilesLaunch | null,
 	/**  Deployment windows: the server and local selection to compare. */
 	deployment?: DeploymentLaunch | null,
@@ -6594,7 +6596,7 @@ export type PluginSource =
 "installed" | 
 /**  Loaded from `<project>/.oxidea/plugins/<dir>/` while that project is open. */
 "dev" | 
-/**  A development plugin linked from any folder (`openidea-plugin link`). */
+/**  A development plugin linked from any folder (`oxidea-plugin link`). */
 "linked";
 
 export type PluginStats = {
@@ -8866,7 +8868,7 @@ export type WebGoto = {
 /**  The page of a web view, for the client to load in its frame. */
 export type WebPage = {
 	/**
-	 *  `<plugin id>/<revision>/<entry>` under the `openidea-plugin` scheme. The
+	 *  `<plugin id>/<revision>/<entry>` under the `oxidea-plugin` scheme. The
 	 *  revision changes with the installed package, so a cached file is never
 	 *  stale; relative URLs in the page resolve to the package's files.
 	 */

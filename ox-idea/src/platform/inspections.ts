@@ -489,7 +489,7 @@ export interface SeenCode {
   sample: string;
 }
 
-const SEEN_KEY = "openidea.inspections.seenCodes";
+const SEEN_KEY = "oxidea.inspections.seenCodes";
 const SEEN_LIMIT = 500;
 let seen: Map<string, SeenCode> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

@@ -81,7 +81,7 @@ pub fn build_project() -> Tool {
         "Triggers building of the project or specified files, waits for completion, and returns build errors.
 Use this tool to build the project or compile files and get detailed information about compilation errors and warnings.
 You have to use this tool after performing edits to validate if the edits are valid.
-In OpenIDEA the project's build system builds it (Maven, Gradle, Cargo, Go or TypeScript); with `filesToRebuild`, the \
+In OXidea the project's build system builds it (Maven, Gradle, Cargo, Go or TypeScript); with `filesToRebuild`, the \
 modules containing those files. Asks the user first for every call. Problems have the project-relative \
 `file` and 1-based `line` / `column`; at most 300 problems are listed, and `isSuccess` is false whenever one of them \
 is an ERROR. On timeout (at most 1 hour; 0 times out at once) the build is stopped.",

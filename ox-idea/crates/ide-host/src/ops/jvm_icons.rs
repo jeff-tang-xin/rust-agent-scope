@@ -108,7 +108,7 @@ mod tests {
     use super::*;
     #[test]
     fn huge_files_read_only_a_prefix() {
-        let path = std::env::temp_dir().join(format!("openidea-icon-prefix-{}.java", std::process::id()));
+        let path = std::env::temp_dir().join(format!("oxidea-icon-prefix-{}.java", std::process::id()));
         let file = File::create(&path).unwrap();
         file.set_len(100 * 1024 * 1024).unwrap();
         assert_eq!(prefix(&path).unwrap().len(), PREFIX_BYTES as usize);

@@ -1,7 +1,7 @@
 /**
  * Angular template language: HTML whose text and binding attributes are
  * Angular syntax (`angular.grammar`), expressions parsed as JavaScript. From
- * @codemirror/lang-angular 0.1.4 (MIT, see LICENSE); changed by OpenIDEA:
+ * @codemirror/lang-angular 0.1.4 (MIT, see LICENSE); changed by OXidea:
  * control-flow blocks, `@let`, key and animation binding names, structural
  * directives' microsyntax, runs of text that entities split (`a && b`)
  * parsed as one, and folding blocks.

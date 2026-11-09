@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const icons = join(root, "src-tauri", "icons");
 const tempRoot = realpathSync(tmpdir());
-const output = mkdtempSync(join(tempRoot, "openidea-windows-icons-"));
+const output = mkdtempSync(join(tempRoot, "oxidea-windows-icons-"));
 function removeOutput() {
   // Only remove the unique directory this invocation created inside the system temp directory.
   if (dirname(realpathSync(output)) !== tempRoot) throw new Error("Unexpected icon output directory");

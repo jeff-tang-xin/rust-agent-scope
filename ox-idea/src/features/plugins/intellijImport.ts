@@ -1,7 +1,7 @@
 /**
  * Settings › Plugins › Import IntelliJ Theme: an IntelliJ theme plugin (a
  * Marketplace `.jar` / `.zip`, a plugin folder of an installed IDE) or a
- * `.theme.json` becomes an OpenIDEA theme plugin — read by the host, converted
+ * `.theme.json` becomes an OXidea theme plugin — read by the host, converted
  * here (`intellijTheme.ts`), installed through the usual install page. Its
  * themes join the others; which one to use is chosen in Settings › Appearance.
  */

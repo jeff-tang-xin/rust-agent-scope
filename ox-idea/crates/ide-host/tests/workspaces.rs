@@ -92,9 +92,9 @@ async fn linked_projects_share_navigation_but_keep_files_repositories_and_run_di
     assert_eq!(project.content_roots(), vec![roots[0].clone()]);
     assert!(project.documents.text_of(&roots[0].join("same.txt")).unwrap().starts_with("unsaved"));
     assert!(roots[1].join("same.txt").exists());
-    assert!(!roots[1].join(".openidea").exists());
+    assert!(!roots[1].join(".oxidea").exists());
     let invalid = base.join("invalid");
-    std::fs::create_dir_all(invalid.join(".openidea")).unwrap();
+    std::fs::create_dir_all(invalid.join(".oxidea")).unwrap();
     std::fs::write(invalid.join(ide_workspace::workspace::FILE), "broken").unwrap();
     assert!(host.open_project("main", &invalid).is_err());
     assert!(Arc::ptr_eq(&host.project("main").unwrap(), &project));

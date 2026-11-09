@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const SERVICE: &str = "ai.l0ng.openidea";
+const SERVICE: &str = "ai.l0ng.oxidea";
 
 /// Serialises read-modify-write of the index files (several stores may share one).
 static LOCK: Mutex<()> = Mutex::new(());

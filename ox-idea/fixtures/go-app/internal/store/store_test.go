@@ -40,8 +40,8 @@ func TestSearch(t *testing.T) {
 }
 
 func TestIntentionallyFailing(t *testing.T) {
-	if os.Getenv("OPENIDEA_FAIL") == "" {
-		t.Skip("set OPENIDEA_FAIL=1 to run")
+	if os.Getenv("OXIDEA_FAIL") == "" {
+		t.Skip("set OXIDEA_FAIL=1 to run")
 	}
 	// FIXME: wrong on purpose (QA: failing test in the test tree)
 	if len(New().Search("")) != 1 {

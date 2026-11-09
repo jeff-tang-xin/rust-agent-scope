@@ -20,7 +20,7 @@ pub fn run(discovery: &Path, project: Option<PathBuf>) -> i32 {
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("openidea --mcp-stdio: {e}");
+            eprintln!("oxidea --mcp-stdio: {e}");
             return 1;
         }
     };
@@ -28,7 +28,7 @@ pub fn run(discovery: &Path, project: Option<PathBuf>) -> i32 {
     match runtime.block_on(bridge(discovery, &project, stdin, tokio::io::stdout())) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("openidea --mcp-stdio: {e}");
+            eprintln!("oxidea --mcp-stdio: {e}");
             1
         }
     }
@@ -80,7 +80,7 @@ async fn relay(discovery: &Path, project: &Path, message: &Value, scope: &str) -
             Ok(reply) => return Some(reply),
             Err(_) => String::from_utf8_lossy(&body).trim().to_owned(),
         },
-        Ok((status, _)) => format!("OpenIDEA answered {status}"),
+        Ok((status, _)) => format!("OXidea answered {status}"),
         Err(e) => e,
     };
     let errors: Vec<Value> = requests(message).into_iter().map(|id| error_response(id, NOT_OPEN, &failure)).collect();
@@ -105,7 +105,7 @@ fn requests(message: &Value) -> Vec<Value> {
 async fn post(discovery: &Path, project: &Path, message: &Value, scope: &str) -> Result<(StatusCode, Bytes), String> {
     let not_running = || {
         format!(
-            "OpenIDEA's MCP server is not running. Start OpenIDEA, open {} in it, and turn on Settings › Tools › MCP Server",
+            "OXidea's MCP server is not running. Start OXidea, open {} in it, and turn on Settings › Tools › MCP Server",
             project.display()
         )
     };
@@ -113,7 +113,7 @@ async fn post(discovery: &Path, project: &Path, message: &Value, scope: &str) ->
     let stream = tokio::net::TcpStream::connect(("127.0.0.1", info.port)).await.map_err(|_| not_running())?;
     let (mut sender, conn) = hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
         .await
-        .map_err(|e| format!("cannot reach OpenIDEA: {e}"))?;
+        .map_err(|e| format!("cannot reach OXidea: {e}"))?;
     tokio::spawn(conn);
     let request = Request::post(format!("/mcp?project={}", crate::encode_query(&project.to_string_lossy())))
         .header(header::HOST, format!("127.0.0.1:{}", info.port))
@@ -123,8 +123,8 @@ async fn post(discovery: &Path, project: &Path, message: &Value, scope: &str) ->
         .header(header::ACCEPT, "application/json, text/event-stream")
         .body(Full::new(Bytes::from(message.to_string())))
         .map_err(|e| e.to_string())?;
-    let response = sender.send_request(request).await.map_err(|e| format!("cannot reach OpenIDEA: {e}"))?;
+    let response = sender.send_request(request).await.map_err(|e| format!("cannot reach OXidea: {e}"))?;
     let status = response.status();
-    let body = response.into_body().collect().await.map_err(|e| format!("OpenIDEA's answer: {e}"))?.to_bytes();
+    let body = response.into_body().collect().await.map_err(|e| format!("OXidea's answer: {e}"))?.to_bytes();
     Ok((status, body))
 }

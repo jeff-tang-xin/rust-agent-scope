@@ -1,8 +1,8 @@
 /**
- * Memory indicator ("OpenIDEA 560M") with a details popup. Unlike IDEA's JVM heap
+ * Memory indicator ("OXidea 560M") with a details popup. Unlike IDEA's JVM heap
  * there is no maximum to measure headroom against, so the widget shows the
- * footprint of OpenIDEA's own processes and no fill bar; the popup breaks down
- * OpenIDEA, language servers and other processes.
+ * footprint of OXidea's own processes and no fill bar; the popup breaks down
+ * OXidea, language servers and other processes.
  */
 import { useEffect, useRef } from "react";
 import clsx from "clsx";

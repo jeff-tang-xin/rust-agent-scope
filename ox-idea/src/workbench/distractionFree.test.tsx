@@ -51,7 +51,7 @@ afterEach(() => {
   useKeymap.setState({ overrides: {} });
 });
 
-const savedVisible = () => JSON.parse(localStorage.getItem("openidea.layout.v1:/work/df")!).visible;
+const savedVisible = () => JSON.parse(localStorage.getItem("oxidea.layout.v1:/work/df")!).visible;
 
 describe("distraction free mode", () => {
   it("toggles with one action whose title flips Enter / Exit, publishing a context key", async () => {
@@ -102,7 +102,7 @@ describe("distraction free mode", () => {
 
   it("survives an app restart and re-applies to a newly loaded project", () => {
     setDistractionFree(true);
-    expect(localStorage.getItem("openidea.distractionFree")).toBe("1");
+    expect(localStorage.getItem("oxidea.distractionFree")).toBe("1");
     // Restart: fresh module, layout and session state; only localStorage remains.
     sessionStorage.clear();
     useDistractionFree.setState({ active: false });
@@ -113,7 +113,7 @@ describe("distraction free mode", () => {
     expect(isToolWindowVisible("project")).toBe(false);
     setDistractionFree(false);
     expect(isToolWindowVisible("project")).toBe(true);
-    expect(localStorage.getItem("openidea.distractionFree")).toBeNull();
+    expect(localStorage.getItem("oxidea.distractionFree")).toBeNull();
   });
 
   it("is unbound in the IntelliJ keymap (⌃⌘D is macOS Look Up) and Escape does not exit", () => {

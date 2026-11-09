@@ -1,4 +1,4 @@
-/** Locating and reading the rc file: `~/.openideavimrc`, else `~/.ideavimrc`. */
+/** Locating and reading the rc file: `~/.oxideavimrc`, else `~/.ideavimrc`. */
 import { create } from "zustand";
 import { call, commands, isTauri } from "@/platform/ipc";
 import { parseVimrc, RC_FILES, sourcedPaths, type RcIgnored, type RcParseResult } from "./rc";

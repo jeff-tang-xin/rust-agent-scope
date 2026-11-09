@@ -1,4 +1,4 @@
-use openidea_plugin::{Error, Invocation, Plugin, register_plugin};
+use oxidea_plugin::{Error, Invocation, Plugin, register_plugin};
 
 #[derive(Default)]
 struct FileTemplates;

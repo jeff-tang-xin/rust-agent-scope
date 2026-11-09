@@ -136,7 +136,7 @@ async fn eventually(mut f: impl FnMut() -> bool) {
 #[tokio::test(flavor = "multi_thread")]
 async fn connects_to_a_running_server_requests_and_reconnects() {
     let (port, log, _accept) = mock_server().await;
-    let h = harness(godot_cfg(port, "openidea-no-such-godot"));
+    let h = harness(godot_cfg(port, "oxidea-no-such-godot"));
     let doc = h.open("player.gd", "extends Node2D\n");
     h.wait_status(ServerStatus::Ready, 1).await;
     assert_eq!(log.requests.lock().first().map(String::as_str), Some("initialize"));
@@ -166,7 +166,7 @@ async fn connects_to_a_running_server_requests_and_reconnects() {
 #[tokio::test(flavor = "multi_thread")]
 async fn nothing_listening_and_no_executable_reports_how_to_fix_it() {
     let (port, _reserved) = idle_port();
-    let h = harness(godot_cfg(port, "openidea-no-such-godot"));
+    let h = harness(godot_cfg(port, "oxidea-no-such-godot"));
     h.open("player.gd", "extends Node\n");
     h.wait_status(ServerStatus::Missing, 1).await;
     let (_, message) = h.statuses().into_iter().rfind(|(s, _)| *s == ServerStatus::Missing).unwrap();

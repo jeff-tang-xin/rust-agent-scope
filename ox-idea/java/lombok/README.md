@@ -1,6 +1,6 @@
 # Lombok agent for JDT LS
 
-`lombok-1.18.48-openidea.3.jar` is the app-provided Java agent for JDT LS. It includes:
+`lombok-1.18.48-oxidea.3.jar` is the app-provided Java agent for JDT LS. It includes:
 
 - [projectlombok/lombok#4059](https://github.com/projectlombok/lombok/pull/4059), which restores
   `lombok.config` lookup after Equinox removed `getModuleClassLoader(boolean)`.
@@ -40,27 +40,27 @@ workspace migration test when changing its path.
     - `3f3a80b857a969839ab1baba12767aec4965ac32`
 - Then `git apply` [`patches/builder-compact-constructor.patch`](patches/builder-compact-constructor.patch)
   (changes `src/core/lombok/eclipse/handlers/HandleBuilder.java` only).
-- Upstream version: `1.18.48`; `openidea.3` identifies this distribution of the patched agent
-  (`openidea.1` had #4059 only; `openidea.2` added #4089).
+- Upstream version: `1.18.48`; `oxidea.3` identifies this distribution of the patched agent
+  (`oxidea.1` had #4059 only; `oxidea.2` added #4089).
   Upstream's own `java -jar ... --version` still reports `1.18.48`.
 - SHA-256: `26069a8138680f5e1100c83cd064d6aa7314385a1afcef74269cdcc41beb0442`
 - License: [MIT, including bundled component notices](LICENSE), also retained inside the jar.
 - Build environment: macOS arm64, Temurin 25.0.5, Apache Ant 1.10.15, upstream Ivy setup
-  (`openidea.1` was built with OpenJDK 23.0.1).
+  (`oxidea.1` was built with OpenJDK 23.0.1).
 
 Build using the upstream Ant entry point described in its contributing guide:
 
 ```sh
 git clone https://github.com/projectlombok/lombok.git
 cd lombok
-git checkout -b openidea-1.18.48 v1.18.48
+git checkout -b oxidea-1.18.48 v1.18.48
 git fetch https://github.com/chagong/lombok.git fix-equinox-bundle-wiring
 git fetch https://github.com/Rawi01/lombok.git eclipse-constructor-call-statement
 git cherry-pick 2d535482a913de46c27d06c5b0b294918ede3f9c 3098f4dd78b5349c2f382e7310e64db810dd380b
 git cherry-pick 7832faa49b35c839088866daf865384c82cd555f 3f3a80b857a969839ab1baba12767aec4965ac32
-git apply /path/to/openidea/java/lombok/patches/builder-compact-constructor.patch
+git apply /path/to/oxidea/java/lombok/patches/builder-compact-constructor.patch
 ant dist
-cp dist/lombok.jar /path/to/openidea/java/lombok/lombok-1.18.48-openidea.3.jar
+cp dist/lombok.jar /path/to/oxidea/java/lombok/lombok-1.18.48-oxidea.3.jar
 ```
 
 The changelog context conflicts because the first commit adds a release-note line under the
@@ -72,9 +72,9 @@ skipped). The #4089 commits apply cleanly. The final source diff from v1.18.48 c
 `EclipseHandlerUtil`, `HandleConstructor`, `HandleFieldNameConstants`, `HandleNonNull`,
 `HandleSneakyThrows`, `HandleStandardException`, `HandleSuperBuilder`, `HandleUtilityClass` (#4089)
 and `HandleBuilder` (the compact-constructor patch); no other Java source changes were made.
-`openidea.3` was built with the unmodified upstream build scripts. (`openidea.2`'s build checkout
+`oxidea.3` was built with the unmodified upstream build scripts. (`oxidea.2`'s build checkout
 reordered the two remote resolvers in `buildScripts/ivysettings.xml` to try Maven Central before
-Eclipse staging and used a local HTTP/HTTPS proxy for downloads.) Compared with `openidea.2`, the
+Eclipse staging and used a local HTTP/HTTPS proxy for downloads.) Compared with `oxidea.2`, the
 only changed class is `HandleBuilder`; other differences are build timestamps in the generated
 `META-INF/services` files and the nested `mavenEcjBootstrapAgent.jar`. Ant's timestamps mean a
 rebuild need not be byte-identical; `SHA256SUMS` records the checked-in artifact and is verified by
@@ -95,20 +95,20 @@ On macOS arm64 with JDT LS 1.63.0 / Equinox 3.25.0, server OpenJDK 25 and projec
   identical `javap` output, including default `void` setters.
 - Upstream `PatchFixesHiderTest` passed both the standard OSGi and legacy Equinox lookup tests.
 
-`openidea.2` (#4089) on macOS arm64, JDT LS 1.63.0-202610191322 (ECJ
+`oxidea.2` (#4089) on macOS arm64, JDT LS 1.63.0-202610191322 (ECJ
 `compiler.batch_3.46.200.v20261008-1115`), server Temurin 25:
 
 - ECJ batch with the agent, compliance 17 and 25, against ECJ 3.46.200 and 3.46.100: `@SneakyThrows`
   constructors with implicit `super()`, explicit `super()` and `this()`; `@NonNull` constructor
   parameters; `@RequiredArgsConstructor` with an initialized final field, `@AllArgsConstructor`,
-  `@NoArgsConstructor`, `@Builder` record, `@Value @Builder`, `@UtilityClass`. `openidea.1` failed
-  with "Internal Error compiling" on 3.46.200; `openidea.2` compiled on both ECJ versions, the
+  `@NoArgsConstructor`, `@Builder` record, `@Value @Builder`, `@UtilityClass`. `oxidea.1` failed
+  with "Internal Error compiling" on 3.46.200; `oxidea.2` compiled on both ECJ versions, the
   programs ran with identical output, and `@NonNull` checks run after the constructor call again.
-- Real JDT LS `java/buildWorkspace(true)` of the same sources with the agent: `openidea.1` reported
-  Failed with three internal errors and wrote no classes; `openidea.2` Succeeded with all classes.
-- `java/java-usages/tests/verify.py` and `read-write.py` passed with `openidea.2`.
+- Real JDT LS `java/buildWorkspace(true)` of the same sources with the agent: `oxidea.1` reported
+  Failed with three internal errors and wrote no classes; `oxidea.2` Succeeded with all classes.
+- `java/java-usages/tests/verify.py` and `read-write.py` passed with `oxidea.2`.
 
-`openidea.3` (compact-constructor builders) on macOS arm64, JDT LS ECJ
+`oxidea.3` (compact-constructor builders) on macOS arm64, JDT LS ECJ
 `compiler.batch_3.46.200.v20261008-1115`, Temurin 25:
 
 - [`tests/verify.py`](tests/verify.py) compiles and runs
@@ -116,8 +116,8 @@ On macOS arm64 with JDT LS 1.63.0 / Equinox 3.25.0, server OpenJDK 25 and projec
   ECJ plus the agent: builders on compact constructors (with validation, `toBuilder`, `setterPrefix`,
   generics, `@Singular`, `@NonNull`, empty records), a long-form canonical constructor, a
   non-canonical record constructor, type-level record builders, and the #4089 constructor cases.
-  Both passed with `openidea.3`; with `openidea.2`, ECJ failed on every compact-constructor builder.
-- `java/java-usages/tests/verify.py` and `read-write.py` passed with `openidea.3`.
+  Both passed with `oxidea.3`; with `oxidea.2`, ECJ failed on every compact-constructor builder.
+- `java/java-usages/tests/verify.py` and `read-write.py` passed with `oxidea.3`.
 
 Windows and Linux runtime validation has not been performed. Rust tests cover source selection
 for both supported architectures on all three OS variants, offline provisioning, corruption

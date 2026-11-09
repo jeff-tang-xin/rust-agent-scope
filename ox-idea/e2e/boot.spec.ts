@@ -5,7 +5,7 @@ test("a module evaluation failure replaces the splash with copyable details", as
     route.fulfill({ contentType: "text/javascript", body: 'throw new Error("Simulated startup failure");' }),
   );
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "OpenIDEA could not start" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "OXidea could not start" })).toBeVisible();
   await expect(page.locator("#splash")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Startup error details" })).toHaveValue(/Simulated startup failure/);
   await expect(page.getByRole("button", { name: "Copy details" })).toBeFocused();
@@ -36,7 +36,7 @@ test("a rejected boot shows Chinese diagnostics without application modules", as
       route.fulfill({ contentType: "text/javascript", body: 'await Promise.reject(new Error("Boot rejected"));' }),
     );
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "OpenIDEA 无法启动" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "OXidea 无法启动" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "启动错误详情" })).toHaveValue(/Boot rejected/);
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", {
@@ -48,7 +48,7 @@ test("a rejected boot shows Chinese diagnostics without application modules", as
     expect(await page.evaluate(() => sessionStorage.getItem("copied-diagnostics"))).toContain("Boot rejected");
     const popup = page.waitForEvent("popup");
     await page.getByRole("link", { name: "报告问题" }).click();
-    await expect(await popup).toHaveURL("https://github.com/l0ng-ai/openidea/issues/new?template=bug_report.yml");
+    await expect(await popup).toHaveURL("https://github.com/l0ng-ai/oxidea/issues/new?template=bug_report.yml");
   } finally {
     await context.close();
   }

@@ -1,7 +1,7 @@
 id = "test.commit"
 name = "Commit fixture"
 version = "0.1.0"
-engines.openidea = "^1.3"
+engines.oxidea = "^1.3"
 wasm = "dist/plugin.wasm"
 activation = ["on-command:*"]
 

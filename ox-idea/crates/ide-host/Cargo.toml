@@ -6,10 +6,13 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "openidea-server"
+name = "oxidea-server"
 path = "src/bin/server.rs"
 
 [dependencies]
+agentscope-acp = { path = "../agentscope-acp" }
+agentscope-core = { path = "../../../crates/agentscope-core" }
+async-trait.workspace = true
 encoding_rs.workspace = true
 ide-core.workspace = true
 ide-mcp.workspace = true

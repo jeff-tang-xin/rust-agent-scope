@@ -1,12 +1,12 @@
-//! Regex Tester for OpenIDEA: a tool window whose page (an `html` body) sends
+//! Regex Tester for OXidea: a tool window whose page (an `html` body) sends
 //! the pattern, flags, text and replacement as you type; the plugin matches
 //! them with Rust's `regex` (linear time, so no pattern can hang it) and posts
 //! the matches back, in UTF-16 offsets the page can highlight. *Use Selection*
 //! takes the focused editor's selection as the text.
 
-use openidea_plugin::host;
-use openidea_plugin::views::{Body, Button, View, ViewEvent, Viewport, Views};
-use openidea_plugin::{Error, Invocation, Plugin, register_plugin};
+use oxidea_plugin::host;
+use oxidea_plugin::views::{Body, Button, View, ViewEvent, Viewport, Views};
+use oxidea_plugin::{Error, Invocation, Plugin, register_plugin};
 use regex::RegexBuilder;
 use serde_json::{Value, json};
 
@@ -198,7 +198,7 @@ register_plugin!(RegexTester, views);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openidea_plugin::mock::MockHost;
+    use oxidea_plugin::mock::MockHost;
 
     fn run(pattern: &str, flags: &str, text: &str, replace: Option<&str>) -> Value {
         evaluate(&Run {

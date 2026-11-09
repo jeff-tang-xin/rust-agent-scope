@@ -106,7 +106,7 @@ function pickColor(view: EditorView, from: number, color: ColorMatch, at: { x: n
 
 export function colorPreviewGutter(ctx: EditorDocContext): Extension {
   return gutter({
-    class: `${styles.gutter} cm-openidea-gutter-colors`,
+    class: `${styles.gutter} cm-oxidea-gutter-colors`,
     lineMarker: (view, block) => {
       const color = lineColor(view, block.from, ctx.language);
       return color ? new Swatch(color, !view.state.readOnly) : null;

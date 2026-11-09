@@ -33,7 +33,7 @@ import { tx } from "@/platform/i18n";
 
 type Node = { kind: "root"; id: string } | { kind: "item"; id: string; node: HierarchyNode };
 
-const OPTIONS_KEY = "openidea.hierarchy.view.v1";
+const OPTIONS_KEY = "oxidea.hierarchy.view.v1";
 
 /** Autoscroll to Source: selecting a node shows it in the editor (IDEA: off). Persisted. */
 export const useHierarchyOptions = create<{ autoscroll: boolean }>(() => {

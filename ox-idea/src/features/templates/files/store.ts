@@ -12,7 +12,7 @@ import { loadJson, saveJson } from "../storage";
 import { BUILTIN_CODE_TEMPLATES, BUILTIN_FILE_TEMPLATES, BUILTIN_INCLUDES } from "./builtins";
 import { fragmentResolver, type FileTemplate, type IncludeResolver, type TemplateFragment } from "./model";
 
-export const FILE_TEMPLATES_KEY = "openidea.fileTemplates.v1";
+export const FILE_TEMPLATES_KEY = "oxidea.fileTemplates.v1";
 const BUILTIN_IDS = new Set(BUILTIN_FILE_TEMPLATES.map((t) => t.id));
 const BUILTIN_INCLUDE_NAMES = new Set(BUILTIN_INCLUDES.map((f) => f.name));
 

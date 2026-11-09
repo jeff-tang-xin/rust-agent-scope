@@ -4,7 +4,7 @@ name: Language smoke
 # server the app starts by default: crates/ide-host/tests/language_smoke.rs.
 # Opening the fixture with its build tool and SDK (Maven / Gradle sync, the virtualenv, the
 # JDK): the ignored tests of crates/ide-host/tests/project_smoke.rs.
-# Then running and testing each fixture through the run store and openidea-server
+# Then running and testing each fixture through the run store and oxidea-server
 # (Run, Run tests, the test tree, Rerun Failed Tests): smoke/run.test.ts; and debugging its
 # entry point with the debugger the IDE installs (breakpoint, frames, variables, evaluate,
 # Step Over, Resume): smoke/debug.test.ts.
@@ -118,7 +118,7 @@ jobs:
         run: cargo test --locked -p ide-host --test project_smoke -- --ignored --exact python_venv
 
       - run: pnpm install --frozen-lockfile
-      - run: cargo build --locked -p ide-host --bin openidea-server
+      - run: cargo build --locked -p ide-host --bin oxidea-server
       - run: pnpm smoke smoke/run.test.ts -t "^${{ matrix.language }}$"
       - run: pnpm smoke smoke/debug.test.ts -t "^${{ matrix.language }}$"
         # The IDE installs the debugger from GitHub releases: authenticated, against rate limits.

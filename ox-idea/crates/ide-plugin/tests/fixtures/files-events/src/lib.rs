@@ -1,4 +1,4 @@
-use openidea_plugin::{Error, Event, FilesChanged, Invocation, Plugin, host, register_plugin};
+use oxidea_plugin::{Error, Event, FilesChanged, Invocation, Plugin, host, register_plugin};
 
 #[derive(Default)]
 struct FilesEvents;
@@ -16,7 +16,7 @@ impl Plugin for FilesEvents {
                 Ok(None)
             }
             "unsubscribe" => {
-                host::unsubscribe(openidea_plugin::EventKind::FilesChanged);
+                host::unsubscribe(oxidea_plugin::EventKind::FilesChanged);
                 Ok(None)
             }
             _ => Err(Error::NotFound(id.into())),

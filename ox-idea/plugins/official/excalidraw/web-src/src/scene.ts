@@ -25,7 +25,7 @@ export interface Scene {
 }
 
 /** `source` of files that had none (Excalidraw would write the page's address). */
-export const SOURCE = "https://openidea.dev";
+export const SOURCE = "https://oxidea.dev";
 
 type Skeleton = NonNullable<Parameters<typeof convertToExcalidrawElements>[0]>[number];
 
@@ -79,7 +79,7 @@ export function parseScene(text: string): { scene: Scene } | { error: string } {
     { refreshDimensions: false, repairBindings: true },
   );
   // The page's own address (what Excalidraw writes here) is no source worth keeping.
-  const own = /^(openidea-plugin:|https?:\/\/openidea-plugin\.localhost)/;
+  const own = /^(oxidea-plugin:|https?:\/\/oxidea-plugin\.localhost)/;
   const source =
     typeof data.source === "string" && data.source.trim() && !own.test(data.source) ? data.source : undefined;
   return { scene: { elements: restored.elements, appState: restored.appState, files: restored.files ?? {}, source } };

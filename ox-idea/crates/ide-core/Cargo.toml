@@ -1,6 +1,6 @@
 [package]
 name = "ide-core"
-description = "Shared vocabulary of OpenIDEA: ids, text coordinates, events, errors, settings"
+description = "Shared vocabulary of OXidea: ids, text coordinates, events, errors, settings"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

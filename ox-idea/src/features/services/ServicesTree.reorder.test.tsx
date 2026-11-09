@@ -40,7 +40,7 @@ beforeEach(() => {
     ],
     sessions: [],
   });
-  localStorage.setItem("openidea.services.runTypes:/services", '["spring-boot","npm"]');
+  localStorage.setItem("oxidea.services.runTypes:/services", '["spring-boot","npm"]');
   useServicesTree.setState({
     roots: {},
     selectedKey: null,
@@ -129,8 +129,8 @@ describe("service reordering integration", () => {
     act(() => project("/other"));
     pointer(window, "pointerup", 26);
     expect(document.querySelector('[aria-hidden="true"][role="treeitem"]')).toBeNull();
-    expect(localStorage.getItem("openidea.services.runOrder:/other")).toBeNull();
-    expect(localStorage.getItem("openidea.services.runOrder:/services")).toBeNull();
+    expect(localStorage.getItem("oxidea.services.runOrder:/other")).toBeNull();
+    expect(localStorage.getItem("oxidea.services.runOrder:/services")).toBeNull();
     vi.restoreAllMocks();
   });
 

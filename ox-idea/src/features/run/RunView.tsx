@@ -322,7 +322,7 @@ export function RunTabs() {
       activeId={"session" in current ? current.session.id : current.trace.id}
       onSelect={(id) => useRun.setState({ activeSession: id })}
       onClose={(id) => (traces.some((t) => t.id === id) ? closeStackTrace(id) : void closeSessionTab(id))}
-      panelIdPrefix="openidea-run"
+      panelIdPrefix="oxidea-run"
     />
   );
 }
@@ -366,8 +366,8 @@ export function RunView() {
       <div
         className={styles.panel}
         role="tabpanel"
-        id={`openidea-run-panel-${id}`}
-        aria-labelledby={`openidea-run-tab-${id}`}
+        id={`oxidea-run-panel-${id}`}
+        aria-labelledby={`oxidea-run-tab-${id}`}
       >
         {"session" in current ? (
           <SessionPanel key={id} session={current.session} />

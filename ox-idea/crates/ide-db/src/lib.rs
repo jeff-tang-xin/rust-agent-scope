@@ -330,7 +330,7 @@ impl DbManager {
         let (recorder, statements) = std::sync::mpsc::channel::<(String, String, f64)>();
         {
             let history = history.clone();
-            let spawned = std::thread::Builder::new().name("openidea-db-history".into()).spawn(move || {
+            let spawned = std::thread::Builder::new().name("oxidea-db-history".into()).spawn(move || {
                 for (source, text, time) in statements {
                     if let Err(e) = history.add(&source, &text, time) {
                         tracing::warn!("{}", e.message);
@@ -1118,7 +1118,7 @@ impl DbManager {
         if driver == DbDriver::Oracle {
             // EXPLAIN PLAN writes PLAN_TABLE; the plan is read (and cleaned up) separately.
             let plan_id = format!(
-                "OPENIDEA{}",
+                "OXIDEA{}",
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos())
             );
             self.run(

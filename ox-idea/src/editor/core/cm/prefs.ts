@@ -37,7 +37,7 @@ import { markdownImages } from "./markdownImages";
 import { selectionMarks } from "./selectionMarks";
 import { seamlessSelection } from "./selectionLayer";
 import type { EditorExtras } from "@/platform/editorSettings";
-import { openideaHighlightStyle } from "./highlight";
+import { oxideaHighlightStyle } from "./highlight";
 import {
   cursorHumpLeft,
   cursorHumpRight,
@@ -175,7 +175,7 @@ export function marginGuides(columns: readonly number[]): Extension {
 /** Lines (0-based) that start a function / method, from the document outline. */
 export const setMethodLines = StateEffect.define<number[]>();
 
-const separatorDeco = Decoration.line({ class: "cm-openidea-methodSeparator" });
+const separatorDeco = Decoration.line({ class: "cm-oxidea-methodSeparator" });
 
 const methodLines = StateField.define<number[]>({
   create: () => [],
@@ -328,7 +328,7 @@ export function richTextHtml(view: EditorView, from: number, to: number): string
   try {
     highlightTree(
       syntaxTree(state),
-      openideaHighlightStyle,
+      oxideaHighlightStyle,
       (a, b, cls) => {
         const s = Math.max(a, from);
         const e = Math.min(b, to);
@@ -383,7 +383,7 @@ export const fontZoom = StateField.define<number>({
         const z = s.field(f);
         const attrs: Record<string, string> = {};
         if (z)
-          attrs.style = `--openidea-editor-font-size: calc(var(--openidea-editor-base-size, var(--fs-code)) + ${z}px); --openidea-editor-line-height: calc(var(--openidea-editor-base-line, var(--lh-code)) + ${Math.round(z * 1.6)}px)`;
+          attrs.style = `--oxidea-editor-font-size: calc(var(--oxidea-editor-base-size, var(--fs-code)) + ${z}px); --oxidea-editor-line-height: calc(var(--oxidea-editor-base-line, var(--lh-code)) + ${Math.round(z * 1.6)}px)`;
         return attrs;
       }),
     ),
@@ -437,11 +437,11 @@ const noSurround = EditorView.inputHandler.of((view, from, to, text) => {
 
 /** Gutter icon groups of Settings › Editor › General › Gutter Icons (stable gutter classes). */
 export const GUTTER_ICON_GROUPS = [
-  { id: "run", gutterClass: "cm-openidea-gutter-run" },
-  { id: "bookmarks", gutterClass: "cm-openidea-bookmarks" },
-  { id: "inheritors", gutterClass: "cm-openidea-gutter-lineMarkers" },
-  { id: "supers", gutterClass: "cm-openidea-gutter-lineMarkers" },
-  { id: "colors", gutterClass: "cm-openidea-gutter-colors" },
+  { id: "run", gutterClass: "cm-oxidea-gutter-run" },
+  { id: "bookmarks", gutterClass: "cm-oxidea-bookmarks" },
+  { id: "inheritors", gutterClass: "cm-oxidea-gutter-lineMarkers" },
+  { id: "supers", gutterClass: "cm-oxidea-gutter-lineMarkers" },
+  { id: "colors", gutterClass: "cm-oxidea-gutter-colors" },
 ] as const;
 
 export interface PrefsOptions {
@@ -497,7 +497,7 @@ const caretGlide = ViewPlugin.fromClass(
     set(on: boolean) {
       if (on === this.on) return;
       this.on = on;
-      this.view.scrollDOM.querySelector(":scope > .cm-cursorLayer")?.classList.toggle("cm-openidea-caretGlide", on);
+      this.view.scrollDOM.querySelector(":scope > .cm-cursorLayer")?.classList.toggle("cm-oxidea-caretGlide", on);
     }
   },
 );
@@ -505,9 +505,9 @@ const caretGlide = ViewPlugin.fromClass(
 export function caretExtension(prefs: EditorExtras): Extension {
   const a = prefs.appearance;
   const classes = [
-    a.blockCaret && "cm-openidea-blockCaret",
-    a.smoothCaretBlinking && "cm-openidea-smoothCaretBlink",
-    a.smoothCaretMovement && `cm-openidea-caretMotion-${a.caretMovementStyle === "gliding" ? "gliding" : "snappy"}`,
+    a.blockCaret && "cm-oxidea-blockCaret",
+    a.smoothCaretBlinking && "cm-oxidea-smoothCaretBlink",
+    a.smoothCaretMovement && `cm-oxidea-caretMotion-${a.caretMovementStyle === "gliding" ? "gliding" : "snappy"}`,
   ].filter(Boolean);
   return [
     // Before drawSelection: its measure request must run before the cursor layer redraws.
@@ -537,13 +537,13 @@ export function prefsExtension(o: PrefsOptions): Extension {
   if (prefs.appearance.hardWrapGuides && !o.distractionFree)
     out.push(marginGuides([o.hardWrapAt, ...prefs.codeStyle.visualGuides]));
   if (prefs.appearance.methodSeparators)
-    out.push(EditorView.editorAttributes.of({ class: "cm-openidea-methodSeparators" }));
+    out.push(EditorView.editorAttributes.of({ class: "cm-oxidea-methodSeparators" }));
   const hidden = GUTTER_ICON_GROUPS.filter(
     (grp) => !prefs.showGutterIcons || prefs.gutterIconsDisabled.includes(grp.id),
   );
   if (hidden.length)
     out.push(
-      EditorView.editorAttributes.of({ class: hidden.map((grp) => `cm-openidea-hideGutter-${grp.id}`).join(" ") }),
+      EditorView.editorAttributes.of({ class: hidden.map((grp) => `cm-oxidea-hideGutter-${grp.id}`).join(" ") }),
     );
   if (g.wheelZoom) out.push(wheelZoom);
   if (!g.dragAndDrop) out.push(noTextDrag);

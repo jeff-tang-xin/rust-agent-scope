@@ -206,7 +206,7 @@ async fn java_app() {
     let p = open("java-app").await;
     let model = ops::build::build_model(&p.host, WINDOW).await.unwrap();
     let maven = model.maven.expect("a Maven model");
-    assert_eq!(maven.projects.iter().map(|m| m.artifact_id.as_str()).collect::<Vec<_>>(), ["openidea-fixture-orders"]);
+    assert_eq!(maven.projects.iter().map(|m| m.artifact_id.as_str()).collect::<Vec<_>>(), ["oxidea-fixture-orders"]);
     assert!(maven.projects[0].dependencies.iter().any(|d| d.artifact_id == "junit-jupiter"), "{maven:?}");
 }
 
@@ -225,7 +225,7 @@ async fn kotlin_gradle() {
     let model = ops::build::build_model(&p.host, WINDOW).await.unwrap();
     assert_eq!(model.gradle.len(), 1, "one independent Gradle build");
     let gradle = &model.gradle[0];
-    assert_eq!(gradle.projects.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["openidea-fixture-library"]);
+    assert_eq!(gradle.projects.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["oxidea-fixture-library"]);
 }
 
 /// Maven / Gradle sync (Reload in the build tool window): the build's own model.

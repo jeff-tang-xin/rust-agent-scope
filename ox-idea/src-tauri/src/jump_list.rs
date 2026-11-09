@@ -1,6 +1,6 @@
 //! Windows taskbar Jump List: the recent projects of the running window.
 //!
-//! The list is built while OpenIDEA runs, so its taskbar button offers the same
+//! The list is built while OXidea runs, so its taskbar button offers the same
 //! recent projects as Welcome / File › Open Recent. `set_app_id` must run before
 //! the first window is created so the taskbar groups every launch under one
 //! AppUserModelID.
@@ -64,7 +64,7 @@ mod imp {
 
     pub fn refresh(app: &tauri::AppHandle, items: Vec<RecentProject>) {
         let app_id = app.config().identifier.clone();
-        let worker = std::thread::Builder::new().name("openidea-jump-list".into()).spawn(move || {
+        let worker = std::thread::Builder::new().name("oxidea-jump-list".into()).spawn(move || {
             let _guard = UPDATE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             let com = ComGuard::new();
             if let Err(error) = update(&app_id, &items) {

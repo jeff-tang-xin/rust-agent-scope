@@ -1,5 +1,5 @@
-use openidea_plugin::inlay_hints::{Document, InlayHint, InlayHints, InlayKind};
-use openidea_plugin::{Error, Invocation, Plugin, Range, register_plugin, text};
+use oxidea_plugin::inlay_hints::{Document, InlayHint, InlayHints, InlayKind};
+use oxidea_plugin::{Error, Invocation, Plugin, Range, register_plugin, text};
 
 #[derive(Default)]
 struct Fixture;

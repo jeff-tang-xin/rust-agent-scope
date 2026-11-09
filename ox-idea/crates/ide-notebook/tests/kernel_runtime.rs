@@ -1,4 +1,4 @@
-//! Opt-in native acceptance tests. Set OPENIDEA_TEST_PYTHON to an absolute
+//! Opt-in native acceptance tests. Set OXIDEA_TEST_PYTHON to an absolute
 //! ipykernel-enabled interpreter and run this target with --ignored.
 //! These tests execute real Python over authenticated native ZeroMQ, no server.
 
@@ -14,7 +14,7 @@ type Outputs = Arc<Mutex<Vec<KernelOutput>>>;
 
 fn python() -> PathBuf {
     let path = PathBuf::from(
-        std::env::var_os("OPENIDEA_TEST_PYTHON").expect("set OPENIDEA_TEST_PYTHON to a real ipykernel Python"),
+        std::env::var_os("OXIDEA_TEST_PYTHON").expect("set OXIDEA_TEST_PYTHON to a real ipykernel Python"),
     );
     assert!(path.is_absolute());
     path
@@ -76,7 +76,7 @@ async fn cancelled_before_admission_cannot_become_an_interpreter_error() {
 }
 
 #[tokio::test]
-#[ignore = "requires OPENIDEA_TEST_PYTHON with real ipykernel"]
+#[ignore = "requires OXIDEA_TEST_PYTHON with real ipykernel"]
 async fn real_kernel_preserves_state_interpreter_mime_and_request_identity() {
     let root = tempfile::tempdir().unwrap();
     let statuses = Arc::new(Mutex::new(Vec::new()));
@@ -91,7 +91,7 @@ from IPython.display import display, update_display, clear_output
 persisted_value = 41
 print('native stdout', flush=True)
 print('native stderr', file=sys.stderr, flush=True)
-display({'application/x-openidea-test': {'opaque': [1, {'unknown': 'kept'}]}, 'text/plain': 'custom'}, raw=True, display_id='stable-display')
+display({'application/x-oxidea-test': {'opaque': [1, {'unknown': 'kept'}]}, 'text/plain': 'custom'}, raw=True, display_id='stable-display')
 update_display({'text/plain': 'updated'}, raw=True, display_id='stable-display')
 clear_output(wait=True)
 display({'text/html': '<table><tr><td>42</td></tr></table>', 'image/svg+xml': '<svg xmlns="http://www.w3.org/2000/svg"/>'}, raw=True)
@@ -108,7 +108,7 @@ persisted_value + 1
     assert!(outputs.iter().any(|o| o.kind == "stream"
         && o.content["name"] == "stderr"
         && o.content["text"].as_str().unwrap().contains("native stderr")));
-    assert!(outputs.iter().any(|o| o.content["data"]["application/x-openidea-test"]["opaque"][1]["unknown"] == "kept"));
+    assert!(outputs.iter().any(|o| o.content["data"]["application/x-oxidea-test"]["opaque"][1]["unknown"] == "kept"));
     assert!(
         outputs
             .iter()
@@ -199,7 +199,7 @@ async fn real_interrupt_drains_and_keeps_interpreter_state() {
 }
 
 #[tokio::test]
-#[ignore = "requires OPENIDEA_TEST_PYTHON with real ipykernel"]
+#[ignore = "requires OXIDEA_TEST_PYTHON with real ipykernel"]
 async fn token_cancellation_is_not_success_when_python_catches_keyboard_interrupt() {
     let root = tempfile::tempdir().unwrap();
     let manager = manager(root.path());
@@ -220,7 +220,7 @@ async fn token_cancellation_is_not_success_when_python_catches_keyboard_interrup
 }
 
 #[tokio::test]
-#[ignore = "requires OPENIDEA_TEST_PYTHON with real ipykernel"]
+#[ignore = "requires OXIDEA_TEST_PYTHON with real ipykernel"]
 async fn stale_parent_output_is_dropped_and_restart_invalidates_state() {
     let root = tempfile::tempdir().unwrap();
     let manager = manager(root.path());
@@ -267,7 +267,7 @@ threading.Thread(target=old_worker, daemon=True).start()
 }
 
 #[tokio::test]
-#[ignore = "requires OPENIDEA_TEST_PYTHON with real ipykernel"]
+#[ignore = "requires OXIDEA_TEST_PYTHON with real ipykernel"]
 async fn process_death_and_output_overflow_fail_explicitly_and_can_restart() {
     let root = tempfile::tempdir().unwrap();
     let manager = manager(root.path());
@@ -294,14 +294,14 @@ async fn process_death_and_output_overflow_fail_explicitly_and_can_restart() {
 }
 
 #[tokio::test]
-#[ignore = "requires OPENIDEA_TEST_PYTHON and OPENIDEA_TEST_PYTHON_SECOND"]
+#[ignore = "requires OXIDEA_TEST_PYTHON and OXIDEA_TEST_PYTHON_SECOND"]
 async fn changing_selected_python_recreates_kernel_instead_of_reusing_old_environment() {
     let root = tempfile::tempdir().unwrap();
     let manager = manager(root.path());
     let notebook = root.path().join("selection.ipynb");
     let first = python();
     let second = PathBuf::from(
-        std::env::var_os("OPENIDEA_TEST_PYTHON_SECOND").expect("set a second absolute ipykernel interpreter path"),
+        std::env::var_os("OXIDEA_TEST_PYTHON_SECOND").expect("set a second absolute ipykernel interpreter path"),
     );
     assert_ne!(first, second);
     let (result, outputs) = run(&manager, &notebook, &first,

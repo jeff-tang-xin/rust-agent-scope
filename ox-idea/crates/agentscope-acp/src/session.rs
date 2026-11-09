@@ -7,16 +7,20 @@
 //!   答复以确认消息元数据回灌 agent 续跑（对齐 agentscope 的确认协议）。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agentscope_core::event::{AgentEventKind, ConfirmResult};
 use agentscope_core::message::ToolResultState;
-use agentscope_core::{Agent, ContentBlock, Model, Msg, RuntimeContext, Toolkit};
+use agentscope_core::{ContentBlock, Model, Msg, RuntimeContext, Toolkit};
 use agentscope_harness::agent::{HarnessAgent, HarnessAgentBuilder};
+use agentscope_harness::middleware_memory::{MemoryFlushMiddleware, MemoryMaintenanceMiddleware};
 use agentscope_harness::tools::{LocalShellBackend, ShellExecuteTool};
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
+use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::WorkspaceManager;
+use agentscope_harness::MemoryConfig;
+use agentscope_harness::{Filesystem, LocalFilesystem, LocalFsMode, PathPolicy};
 use serde_json::{json, Value};
 
 use crate::protocol;
@@ -46,19 +50,23 @@ struct AcpSession {
 /// 会话表：sessionId → 会话。
 pub struct AcpSessionHub {
     sessions: Mutex<HashMap<String, Arc<AcpSession>>>,
+    /// 模型配置（provider/api key/model/base_url），进程内模式下由宿主注入，
+    /// 独立进程模式下来自进程环境。
+    env: Vec<(String, String)>,
 }
 
 impl AcpSessionHub {
-    pub fn new() -> Self {
+    pub fn new(env: Vec<(String, String)>) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            env,
         }
     }
 
     /// `session/new`：解析 cwd → 装配 agent → 登记。
     pub async fn create_session(&self, params: Value) -> Result<Value, RpcError> {
         let cwd = protocol::parse_new_session(&params)?;
-        let model = build_model_from_env().map_err(RpcError::internal)?;
+        let model = build_model(&self.env).map_err(RpcError::internal)?;
         let session_id = uuid::Uuid::new_v4().to_string();
         let agent = assemble_agent(&cwd, model).map_err(RpcError::internal)?;
         self.sessions.lock().unwrap().insert(
@@ -96,7 +104,18 @@ impl AcpSessionHub {
 /// 装配一个面向 ACP 会话的 agent：文件工具 + 本地 shell 锚定 cwd，
 /// 系统提示词声明工作目录与能力边界。
 fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>, String> {
-    let workspace = Arc::new(WorkspaceManager::new(PathBuf::from(cwd)));
+    // 本地磁盘文件系统层（Sandboxed：文件工具的绝对路径一律拒绝，锚定 cwd）。
+    let sandboxed = |root: PathBuf| {
+        Arc::new(LocalFilesystem::new(
+            root.clone(),
+            LocalFsMode::Sandboxed,
+            PathPolicy::empty(),
+        )) as Arc<dyn Filesystem>
+    };
+    let workspace = Arc::new(WorkspaceManager::with_filesystem(
+        PathBuf::from(cwd),
+        sandboxed(PathBuf::from(cwd)),
+    ));
     let fs = workspace
         .filesystem()
         .cloned()
@@ -108,6 +127,47 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>,
     toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
         LocalShellBackend::new_anchored(PathBuf::from(cwd)),
     ))));
+    // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.ox`，跨 worktree 共享）。
+    let host_ctx = crate::ox_context_for(Path::new(cwd));
+    let ide_section = if host_ctx.tools.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<String> = host_ctx.tools.iter().map(|t| t.name().to_owned()).collect();
+        for tool in host_ctx.tools {
+            toolkit.register(tool);
+        }
+        format!(
+            "\n## IDE 语义工具\n\
+             - 你还拥有一组 IDE 语义工具（{}），它们理解项目索引、编辑器与构建系统。\n\
+             - 语义搜索、符号导航、引用查找、补丁应用、重命名、问题检查、构建运行、Git 操作等，优先用这些工具而非裸 shell。\n",
+            names.join(", ")
+        )
+    };
+    // 记忆管线（仅宿主注入 memory_root 时启用）：memory_save/get/search 工具 +
+    // flush（Layer1 每日台账）与 maintenance（Layer2 MEMORY.md 合并）两个中间件。
+    let memory_ws = host_ctx
+        .memory_root
+        .map(|root| {
+            Arc::new(WorkspaceManager::with_filesystem(
+                root.clone(),
+                sandboxed(root),
+            ))
+        });
+    if let Some(ws) = &memory_ws {
+        let tools = MemoryToolSet::new(Arc::clone(ws));
+        toolkit.register(Arc::new(tools.memory_save));
+        toolkit.register(Arc::new(tools.memory_get));
+        toolkit.register(Arc::new(tools.memory_search));
+    }
+    let memory_section = if memory_ws.is_some() {
+        "\n## 记忆\n\
+         - 你有两层长期记忆：MEMORY.md（精炼的长期知识）与 memory/ 每日台账。\n\
+         - 用 memory_save 沉淀值得跨会话保留的结论（用户偏好、项目约定、架构决策、踩坑记录）。\n\
+         - 用 memory_search / memory_get 回忆过往结论，避免重复劳动与已知坑。\n"
+            .to_owned()
+    } else {
+        String::new()
+    };
     let sys_prompt = format!(
         "你是 OX Hareness，OXidea 内置的 AI 编码智能体，基于 AgentScope 框架驱动。\n\n\
          ## 环境\n\
@@ -115,7 +175,8 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>,
          - 当前工作目录：{cwd}——这是你的工作区根，所有文件操作与命令都在此执行。\n\n\
          ## 能力\n\
          - 文件工具：读取、写入、搜索、列出工作区内的文件；一切路径限制在工作区内。\n\
-         - Shell 工具：在当前工作目录执行非交互、有界的命令（编译、测试、git 等）。\n\n\
+         - Shell 工具：在当前工作目录执行非交互、有界的命令（编译、测试、git 等）。\n\
+         {ide_section}{memory_section}\n\
          ## 工作方式\n\
          - 理解先于动作：改代码前先读相关文件，理清调用链与既有约定，不凭猜测下手。\n\
          - 外科手术式修改：只改必须改的地方，沿用项目既有风格，不顺手重构无关代码。\n\
@@ -125,27 +186,54 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>,
          - 简洁直接，用 Markdown；涉及代码时给完整可运行的片段。\n\
          - 与用户同语言交流：用户用中文就用中文，用英文就用英文。"
     );
-    let agent = HarnessAgentBuilder::new()
+    let mut builder = HarnessAgentBuilder::new()
         .name("ox-hareness")
         .sys_prompt(sys_prompt)
-        .model(model)
+        .model(Arc::clone(&model))
         .toolkit(toolkit)
         .workspace(PathBuf::from(cwd))
-        .max_iters(30)
-        .build()
-        .map_err(|e| format!("装配 agent 失败: {e}"))?;
+        .max_iters(30);
+    if let Some(ws) = &memory_ws {
+        builder = builder
+            .with_memory_workspace(Arc::clone(ws))
+            .middleware(Arc::new(MemoryFlushMiddleware::new(
+                Arc::clone(ws),
+                Arc::clone(&model),
+                &MemoryConfig::default(),
+            )))
+            .middleware(Arc::new(MemoryMaintenanceMiddleware::new(
+                Arc::clone(ws),
+                Arc::clone(&model),
+                &MemoryConfig::default(),
+            )));
+    }
+    let agent = builder.build().map_err(|e| format!("装配 agent 失败: {e}"))?;
     Ok(Arc::new(agent))
 }
 
-/// 从环境变量构建模型实例（对齐 studio factory 的分发模式）：
+/// 从给定环境构建模型实例（对齐 studio factory 的分发模式）：
 /// - `AGENTSCOPE_PROVIDER`：dashscope（默认）/ openai / anthropic / gemini / ollama
 /// - `AGENTSCOPE_API_KEY` / `AGENTSCOPE_MODEL` / `AGENTSCOPE_BASE_URL`（可选）
-pub fn build_model_from_env() -> Result<Arc<dyn Model>, String> {
-    let provider = std::env::var("AGENTSCOPE_PROVIDER").unwrap_or_else(|_| "dashscope".into());
-    let model_name = std::env::var("AGENTSCOPE_MODEL")
-        .map_err(|_| "缺少 AGENTSCOPE_MODEL 环境变量（如 qwen3-coder-plus）".to_string())?;
-    let api_key = std::env::var("AGENTSCOPE_API_KEY").unwrap_or_default();
-    let base_url = std::env::var("AGENTSCOPE_BASE_URL").unwrap_or_default();
+pub fn build_model(env: &[(String, String)]) -> Result<Arc<dyn Model>, String> {
+    let var = |name: &str| {
+        env.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    let provider = match var("AGENTSCOPE_PROVIDER").is_empty() {
+        false => var("AGENTSCOPE_PROVIDER"),
+        true => "dashscope".into(),
+    };
+    let model_name = {
+        let name = var("AGENTSCOPE_MODEL");
+        if name.is_empty() {
+            return Err("缺少 AGENTSCOPE_MODEL 配置（如 qwen3-coder-plus）".to_string());
+        }
+        name
+    };
+    let api_key = var("AGENTSCOPE_API_KEY");
+    let base_url = var("AGENTSCOPE_BASE_URL");
     let model: Arc<dyn Model> = match provider.as_str() {
         "dashscope" => {
             let mut m = agentscope_model_dashscope::DashScopeChatModel::new(&api_key, &model_name);
@@ -379,7 +467,7 @@ mod tests {
     use agentscope_core::{ChatResponse, Error};
     use serde_json::json;
     use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
 
     /// 预置响应序列的 Mock 模型（对齐 core 测试的形态）。
     struct MockModel {

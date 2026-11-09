@@ -41,7 +41,7 @@ export function hideSplash(): void {
             setTimeout(() => {
               if (document.documentElement.dataset.boot === "failed") return;
               el.remove();
-              window.dispatchEvent(new Event("openidea:boot-ready"));
+              window.dispatchEvent(new Event("oxidea:boot-ready"));
             }, 200);
           },
           completeBar(el) ? FILL_MS : 0,

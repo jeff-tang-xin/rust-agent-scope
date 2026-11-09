@@ -67,7 +67,7 @@ it("shows Cursor approvals separately from its execution mode and sends the choi
     <ConfigPickers
       config={[
         option("mode", "mode", ["Agent", "Plan", "Ask"]),
-        option("openidea.cursor.approval", "approval", ["ask", "bypass"]),
+        option("oxidea.cursor.approval", "approval", ["ask", "bypass"]),
       ]}
       onChange={onChange}
     />,
@@ -75,7 +75,7 @@ it("shows Cursor approvals separately from its execution mode and sends the choi
   expect(screen.getByText("Agent")).toBeVisible();
   fireEvent.click(screen.getByLabelText("Approvals"));
   fireEvent.click(screen.getByRole("option", { name: "Bypass approvals" }));
-  expect(onChange).toHaveBeenCalledWith("openidea.cursor.approval", "bypass");
+  expect(onChange).toHaveBeenCalledWith("oxidea.cursor.approval", "bypass");
 });
 
 it("shows Allow All as a switch and sends on/off values", () => {

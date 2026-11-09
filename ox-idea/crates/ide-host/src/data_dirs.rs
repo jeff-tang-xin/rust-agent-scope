@@ -103,7 +103,7 @@ fn migrate_entries(data: &Path, local: &Path) {
         }
     }
     if !copies.is_empty() {
-        let result = std::thread::Builder::new().name("openidea-data-migration".into()).spawn(move || {
+        let result = std::thread::Builder::new().name("oxidea-data-migration".into()).spawn(move || {
             for (source, target) in copies {
                 tracing::info!(?source, ?target, "copying legacy data in background");
                 if let Err(error) = copy_then_remove(&source, &target) {

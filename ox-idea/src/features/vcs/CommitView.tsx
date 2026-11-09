@@ -97,7 +97,7 @@ import { refreshNow, repoName, selectRepo, useVcs } from "./store";
 import styles from "./CommitView.module.css";
 
 /** MIME type of changed files dragged between change lists (absolute paths, newline-separated). */
-const CHANGES_MIME = "application/x-openidea-changes";
+const CHANGES_MIME = "application/x-oxidea-changes";
 
 /** Shown text of a node: group names are translated, except the names of user change lists. */
 function nodeText(n: ChangeNode): string {

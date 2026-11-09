@@ -145,11 +145,11 @@ export interface PluginsBackend {
     onError: (message: string) => void,
     onExit: (code: number | null) => void,
   ): () => void;
-  /** The URL of a web view's page (`web = …`), under the `openidea-plugin` scheme. */
+  /** The URL of a web view's page (`web = …`), under the `oxidea-plugin` scheme. */
   webPageUrl(pluginId: string, view: string): Promise<string>;
-  /** Save dialog for a web view's `openidea.saveFile`; the path written, or `null` when cancelled. */
+  /** Save dialog for a web view's `oxidea.saveFile`; the path written, or `null` when cancelled. */
   saveWebFile(name: string, filters: FileFilter[] | undefined, bytes: Uint8Array): Promise<string | null>;
-  /** Open dialog for a web view's `openidea.openFile`; `null` when cancelled. */
+  /** Open dialog for a web view's `oxidea.openFile`; `null` when cancelled. */
   openWebFile(filters: FileFilter[] | undefined): Promise<{ name: string; data: Uint8Array } | null>;
   /** Which of a plugin's declared secrets are stored (values never come back). */
   secrets(pluginId: string): Promise<PluginSecretState[]>;
@@ -172,12 +172,12 @@ export interface FileFilter {
 }
 
 /**
- * `path` under the `openidea-plugin` scheme, as the platform's webview spells
+ * `path` under the `oxidea-plugin` scheme, as the platform's webview spells
  * custom schemes (WebView2 maps them onto `http://<scheme>.localhost`).
  */
 export function webSchemeUrl(path: string, windows = /windows/i.test(navigator.userAgent)): string {
   const encoded = path.split("/").map(encodeURIComponent).join("/");
-  return windows ? `http://openidea-plugin.localhost/${encoded}` : `openidea-plugin://localhost/${encoded}`;
+  return windows ? `http://oxidea-plugin.localhost/${encoded}` : `oxidea-plugin://localhost/${encoded}`;
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -412,7 +412,7 @@ function sampleUi(id: string): UiContribution[] {
 
 function samplePlugins(): PluginInfo[] {
   const base = {
-    authors: ["OpenIDEA contributors"],
+    authors: ["OXidea contributors"],
     homepage: null,
     changeNotes: null,
     icon: null,
@@ -444,7 +444,7 @@ function samplePlugins(): PluginInfo[] {
       name: "Hello",
       version: "0.1.0",
       description: "Sample plugin: inserts today's date and counts words in the active file.",
-      path: "~/Library/Application Support/ai.l0ng.openidea/plugins/hello",
+      path: "~/Library/Application Support/ai.l0ng.oxidea/plugins/hello",
       status: "inactive",
       hasCode: true,
       activation: ["on-startup-finished"],
@@ -461,7 +461,7 @@ function samplePlugins(): PluginInfo[] {
       name: "Harbor Night Theme",
       version: "1.0.0",
       description: "Example dark theme: slate surfaces, a teal accent and a warm syntax palette.",
-      path: "~/Library/Application Support/ai.l0ng.openidea/plugins/theme-harbor-night",
+      path: "~/Library/Application Support/ai.l0ng.oxidea/plugins/theme-harbor-night",
       status: "static",
       hasCode: false,
       contributions: SAMPLE_THEMES.map((t) => ({ point: "themes", label: t.name })),
@@ -472,7 +472,7 @@ function samplePlugins(): PluginInfo[] {
       name: "Toy Language",
       version: "0.1.0",
       description: "Language support for .toy files: detection, comments and indentation.",
-      path: "~/Library/Application Support/ai.l0ng.openidea/plugins/language-toy",
+      path: "~/Library/Application Support/ai.l0ng.oxidea/plugins/language-toy",
       status: "static",
       hasCode: false,
       contributions: [{ point: "languages", label: "Toy (.toy)" }],

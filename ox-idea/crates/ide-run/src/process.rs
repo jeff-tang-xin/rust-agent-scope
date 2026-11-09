@@ -360,7 +360,7 @@ impl ProcessManager {
         }
         if let Some(dir) = options.ruby_reporter.as_deref().filter(|_| crate::ruby_reporter::applies(config)) {
             crate::ruby_preload::add(&mut env.vars, dir, crate::ruby_reporter::FEATURE, !env.clear);
-            env.vars.insert("OPENIDEA_TEST_REPORT".into(), "1".into());
+            env.vars.insert("OXIDEA_TEST_REPORT".into(), "1".into());
         }
         let on_output: OutputFn = Arc::from(on_output);
         let on_output = match extras.output_file.as_deref() {
@@ -500,7 +500,7 @@ impl ProcessManager {
         let waiter_entry = entry.clone();
         let run_root = root.to_path_buf();
         std::thread::Builder::new()
-            .name(format!("openidea-run-wait-{}", id.0))
+            .name(format!("oxidea-run-wait-{}", id.0))
             .spawn(move || {
                 let mut status = child.wait();
                 if status.as_ref().is_ok_and(ExitStatus::success)
@@ -622,7 +622,7 @@ impl ProcessManager {
             return Err(IdeError::internal(format!("failed to start output threads: {e}")));
         }
         std::thread::Builder::new()
-            .name(format!("openidea-run-wait-{}", id.0))
+            .name(format!("oxidea-run-wait-{}", id.0))
             .spawn(move || {
                 let status = child.wait();
                 drop(temp);
@@ -710,7 +710,7 @@ impl ProcessManager {
         }
         let entry = entry.clone();
         std::thread::Builder::new()
-            .name(format!("openidea-run-stop-{}", id.0))
+            .name(format!("oxidea-run-stop-{}", id.0))
             .spawn(move || {
                 let exits_within = |limit: Duration| {
                     let deadline = Instant::now() + limit;
@@ -1040,7 +1040,7 @@ fn spawn_reader(
     #[cfg(unix)] mut wait_readable: Option<Box<dyn FnMut() -> std::io::Result<()> + Send>>,
 ) -> std::io::Result<()> {
     let label = if stream == Stream::Stdout { "out" } else { "err" };
-    std::thread::Builder::new().name(format!("openidea-run-{label}-{}", id.0)).spawn(move || {
+    std::thread::Builder::new().name(format!("oxidea-run-{label}-{}", id.0)).spawn(move || {
         let mut buf = vec![0u8; 16 * 1024];
         loop {
             match pipe.read(&mut buf) {
@@ -1092,7 +1092,7 @@ fn spawn_pump(
     encoding: Option<String>,
     notice: Option<String>,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new().name(format!("openidea-run-pump-{}", entry.id.0)).spawn(move || {
+    std::thread::Builder::new().name(format!("oxidea-run-pump-{}", entry.id.0)).spawn(move || {
         let mut out_dec = OutputDecoder::for_label(encoding.as_deref());
         let mut err_dec = OutputDecoder::for_label(encoding.as_deref());
         // "Picked up JAVA_TOOL_OPTIONS: …" from every JVM given the console encoding, on
@@ -1292,7 +1292,7 @@ fn input_writer(
     #[cfg(unix)] wait_writable: impl FnMut() -> std::io::Result<()> + Send + 'static,
 ) -> std::io::Result<ide_core::input::InputWriter> {
     ide_core::input::InputWriter::new(
-        format!("openidea-run-input-{}", id.0),
+        format!("oxidea-run-input-{}", id.0),
         writer,
         #[cfg(unix)]
         wait_writable,
@@ -1308,7 +1308,7 @@ mod tests {
 
     #[test]
     fn shell_lines_use_cmd_verbatim_on_windows() {
-        let line = r#"(if not exist "C:\T\openidea-run" mkdir "C:\T\openidea-run") && "C:\Program Files\rustc.exe" -o "C:\T\openidea-run\hi.exe" hi.rs"#;
+        let line = r#"(if not exist "C:\T\oxidea-run" mkdir "C:\T\oxidea-run") && "C:\Program Files\rustc.exe" -o "C:\T\oxidea-run\hi.exe" hi.rs"#;
         let inv = shell_invocation(line, true, Some(r"C:\Windows\system32\cmd.exe".into()));
         assert_eq!(inv.program, PathBuf::from(r"C:\Windows\system32\cmd.exe"));
         assert_eq!(inv.args, ["/D", "/S", "/C", &format!("\"{line}\"")]);

@@ -2,7 +2,7 @@
 
 ## Project Lombok
 
-`java/lombok/lombok-1.18.48-openidea.3.jar` contains Project Lombok v1.18.48 with the Equinox
+`java/lombok/lombok-1.18.48-oxidea.3.jar` contains Project Lombok v1.18.48 with the Equinox
 classloader fix from [projectlombok/lombok#4059](https://github.com/projectlombok/lombok/pull/4059),
 the [compact record constructor builder fix](java/lombok/patches/builder-compact-constructor.patch)
 and the ECJ constructor-call fix from [projectlombok/lombok#4089](https://github.com/projectlombok/lombok/pull/4089).
@@ -81,15 +81,15 @@ the IntelliJ Platform merge implementation (`MergeRangeUtil`, `MergeResolveUtil`
 `ChunkOptimizer.LineChunkOptimizer` and `MergeConflictModel`). Modified from the
 originals. Copyright 2000-2026 JetBrains s.r.o. and contributors. Apache License 2.0 (below).
 
-`src/ui/openidea/**` holds OpenIDEA's own file-type icons drawn in the expui style for
+`src/ui/oxidea/**` holds OXidea's own file-type icons drawn in the expui style for
 languages whose JetBrains icons are not open source (Go, Ruby, Dart, Lua, Zig,
 Svelte, …). Those using the page-with-corner-badge layout (`goMod`, `goWork`,
 `dotenv`, `readme`, `lock`, `license`) reuse the page outline of the Apache-2.0
 expui `fileTypes/h.svg`; that outline is modified from the original by JetBrains.
-`src/ui/openidea/runConfigurations/springBoot*.svg` (the Spring Boot run configuration
-leaf) is OpenIDEA's own drawing.
+`src/ui/oxidea/runConfigurations/springBoot*.svg` (the Spring Boot run configuration
+leaf) is OXidea's own drawing.
 
-The lettering in `src-tauri/icons/source/openidea-wordmark*.svg` is outlined from
+The lettering in `src-tauri/icons/source/oxidea-wordmark*.svg` is outlined from
 Inter Tight (Copyright 2022 The Inter Project Authors, SIL Open Font License 1.1,
 https://github.com/rsms/inter-tight).
 
@@ -144,13 +144,13 @@ SOFTWARE.
 
 The tool installer (`crates/ide-tools`, Settings › Languages & Frameworks ›
 Language Servers) downloads third-party language servers and debuggers into the
-user's app-data directory only when the user asks; none of them ships with OpenIDEA.
+user's app-data directory only when the user asks; none of them ships with OXidea.
 
 - **Microsoft java-debug** (Java debugger, loaded into jdtls as a bundle):
   `com.microsoft.java.debug.plugin-*.jar` from <https://github.com/microsoft/java-debug>,
   Copyright (c) Microsoft Corporation, licensed under the
   [Eclipse Public License 1.0](https://github.com/microsoft/java-debug/blob/main/LICENSE.txt)
-  (EPL-1.0; it embeds `commons-io` and `rxjava`/`reactive-streams`, Apache-2.0). OpenIDEA
+  (EPL-1.0; it embeds `commons-io` and `rxjava`/`reactive-streams`, Apache-2.0). OXidea
   takes the jar from the `vscjava.vscode-java-debug` extension package on Open VSX
   (<https://open-vsx.org/extension/vscjava/vscode-java-debug>, the extension itself is
   MIT-licensed), verifies its published SHA-256 and extracts only the jar; it is used
@@ -173,7 +173,7 @@ version, licence and affix file) that en_US lacks. They are checked with the
 `crates/ide-spell/src/dict/cspell-terms.txt` (programming terms the spell checker accepts)
 is derived from the software-terms, typescript, node, rust, fullstack, golang, java, cpp,
 shell and css dictionaries of [cspell-dicts](https://github.com/streetsidesoftware/cspell-dicts)
-(October 2026): lowercased, filtered and merged by OpenIDEA. Copyright Street Side Software;
+(October 2026): lowercased, filtered and merged by OXidea. Copyright Street Side Software;
 MIT licence, full text in `crates/ide-spell/src/dict/LICENSE-cspell-dicts`.
 
 ## CodeMirror Angular template language
@@ -183,7 +183,7 @@ MIT licence, full text in `crates/ide-spell/src/dict/LICENSE-cspell-dicts`.
 [@codemirror/lang-angular](https://github.com/codemirror/lang-angular) 0.1.4
 (commit `ecc5038f`). Copyright (C) 2018-2021 by Marijn Haverbeke and others; MIT
 licence, full text in `src/editor/core/cm/angular/LICENSE`. Modifications by
-OpenIDEA: control-flow blocks (`@if`, `@for`, `@switch`, `@defer`, ...) and `@let`
+OXidea: control-flow blocks (`@if`, `@for`, `@switch`, `@defer`, ...) and `@let`
 declarations, key and animation binding names (`(keydown.enter)`, `[@fade]`,
 `(@fade.done)`), runs of text that entities split (`a && b`) parsed as one, and one
 token for `{` and `}`.
@@ -194,7 +194,7 @@ token for `{` and `}`.
 queries of [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter)
 (`runtime/queries/`, commit `29212d82`, October 2026), Apache License 2.0 (the
 same text as the Apache-2.0 licence below). Copyright the nvim-treesitter
-contributors. Modifications by OpenIDEA: `inherits:` chains flattened (ecma,
+contributors. Modifications by OXidea: `inherits:` chains flattened (ecma,
 c → cpp, php_only), node names adapted to the bundled grammar versions
 (Kotlin for tree-sitter-kotlin-ng, Dart, Swift, Haskell, C#, Bash), member
 definitions re-kinded as `field` / `method`, and missing scopes, definitions and

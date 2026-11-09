@@ -13,8 +13,8 @@ import threading
 import time
 
 home, lombok = map(lambda p: pathlib.Path(p).resolve(), sys.argv[1:3])
-bundle = pathlib.Path(__file__).resolve().parents[1] / 'openidea-java-usages.jar'
-work = pathlib.Path(tempfile.mkdtemp(prefix='openidea-usages-'))
+bundle = pathlib.Path(__file__).resolve().parents[1] / 'oxidea-java-usages.jar'
+work = pathlib.Path(tempfile.mkdtemp(prefix='oxidea-usages-'))
 config = work / 'config'
 config.mkdir()
 system, machine = platform.system(), platform.machine().lower()
@@ -29,7 +29,7 @@ project.mkdir()
 (project / '.project').write_text('<projectDescription><name>accessors</name><buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name></buildCommand></buildSpec><natures><nature>org.eclipse.jdt.core.javanature</nature></natures></projectDescription>')
 (project / '.classpath').write_text(f'<classpath><classpathentry kind="src" path="src"/><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/><classpathentry kind="lib" path="{lombok}"/><classpathentry kind="output" path="bin"/></classpath>')
 source = (pathlib.Path(__file__).parent / 'ReadWrite.java').read_text()
-index_stress = os.environ.get('OPENIDEA_USAGES_INDEX_STRESS') == '1'
+index_stress = os.environ.get('OXIDEA_USAGES_INDEX_STRESS') == '1'
 if index_stress:
     # Keep the original nested/method-reference cases, but cross the index threshold
     # for both standard and fluent accessors without changing their expected rows.
@@ -84,7 +84,7 @@ try:
     for field in ['count','score','items','next']:
         line,text=next((i,t) for i,t in enumerate(source.splitlines()) if f'public int {field};' in t or f'public int[] {field};' in t or f'public Bean {field};' in t)
         col=text.index(field)
-        evidence['cases'][field]=request('workspace/executeCommand',{'command':'openidea.java.usages','arguments':[file.as_uri(),line,col,False]})
+        evidence['cases'][field]=request('workspace/executeCommand',{'command':'oxidea.java.usages','arguments':[file.as_uri(),line,col,False]})
     errors=[d for m in transcript if m.get('method')=='textDocument/publishDiagnostics' for d in m['params']['diagnostics'] if d.get('severity')==1]
     assert not errors, errors
     expected={8:['read'],9:['write'],10:['readWrite'],11:['readWrite'],12:['readWrite'],13:['read','write'],14:['read','write'],15:['read','write'],16:['unknown'],17:['unknown'],21:['write']}
@@ -106,7 +106,7 @@ try:
     # about successful responses. Send cancellation immediately after dispatch.
     line,text=next((i,t) for i,t in enumerate(source.splitlines()) if 'public int count;' in t)
     seq += 1
-    send({'jsonrpc':'2.0','id':seq,'method':'workspace/executeCommand','params':{'command':'openidea.java.usages','arguments':[file.as_uri(),line,text.index('count'),False]}})
+    send({'jsonrpc':'2.0','id':seq,'method':'workspace/executeCommand','params':{'command':'oxidea.java.usages','arguments':[file.as_uri(),line,text.index('count'),False]}})
     send({'jsonrpc':'2.0','method':'$/cancelRequest','params':{'id':seq}})
     deadline=time.monotonic()+30
     while True:

@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in OpenIDEA doesn't work as expected
+description: Something in OXidea doesn't work as expected
 labels: [bug]
 body:
   - type: markdown
@@ -13,19 +13,19 @@ body:
     attributes:
       label: Before you start
       options:
-        - label: I searched [existing issues](https://github.com/l0ng-ai/openidea/issues?q=is%3Aissue) and this hasn't been reported yet.
+        - label: I searched [existing issues](https://github.com/l0ng-ai/oxidea/issues?q=is%3Aissue) and this hasn't been reported yet.
           required: true
-        - label: I'm on the [latest release](https://github.com/l0ng-ai/openidea/releases/latest), or I noted below that I can't update.
+        - label: I'm on the [latest release](https://github.com/l0ng-ai/oxidea/releases/latest), or I noted below that I can't update.
           required: true
   - type: textarea
     id: environment
     attributes:
       label: Environment
       description: |
-        Open **About OpenIDEA** (macOS: OpenIDEA menu; Windows/Linux: Help menu), click **Copy Info**, and paste it here. Also mention the project type if it matters (e.g. Gradle multi-module, Spring Boot, Go workspace) and whether you use remote development.
+        Open **About OXidea** (macOS: OXidea menu; Windows/Linux: Help menu), click **Copy Info**, and paste it here. Also mention the project type if it matters (e.g. Gradle multi-module, Spring Boot, Go workspace) and whether you use remote development.
       render: text
       placeholder: |
-        About OpenIDEA
+        About OXidea
         Version: 0.1.33
         Build: ...
         Platform: macOS aarch64
@@ -35,7 +35,7 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
-      description: Start from opening OpenIDEA or a project. A small sample project or snippet helps a lot.
+      description: Start from opening OXidea or a project. A small sample project or snippet helps a lot.
       placeholder: |
         1. Open a Gradle project whose settings.gradle includes modules in a loop
         2. Open the Gradle tool window
@@ -66,7 +66,7 @@ body:
     attributes:
       label: Logs
       description: |
-        Use **Help → Show Log in Finder / Explorer / Files** to find `openidea.log` and paste the lines around the problem, or attach the file. Include console output or error messages too. Check for tokens or passwords before posting.
+        Use **Help → Show Log in Finder / Explorer / Files** to find `oxidea.log` and paste the lines around the problem, or attach the file. Include console output or error messages too. Check for tokens or passwords before posting.
       render: text
   - type: textarea
     id: extra

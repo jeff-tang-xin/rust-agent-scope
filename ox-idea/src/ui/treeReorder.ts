@@ -19,7 +19,7 @@ export function useTreeReorder<T>(
   rows: readonly ReorderRow<T>[],
   reorder: TreeReorder<T> | undefined,
 ) {
-  const type = `application/x-openidea-tree-${useId()}`;
+  const type = `application/x-oxidea-tree-${useId()}`;
   const latest = useRef({ rows, reorder });
   useLayoutEffect(() => {
     latest.current = { rows, reorder };

@@ -194,7 +194,7 @@ pub fn shorten(
 
 /// Where launches put their pathing jars / argfiles.
 pub fn default_temp_dir() -> PathBuf {
-    std::env::temp_dir().join("openidea-classpath")
+    std::env::temp_dir().join("oxidea-classpath")
 }
 
 fn temp_file(dir: &Path, ext: &str) -> PathBuf {
@@ -269,7 +269,7 @@ pub fn file_url(path: &str, dir: bool) -> String {
 /// `META-INF/MANIFEST.MF` listing `entries`, lines wrapped at 72 bytes (continuations start with a space).
 pub fn manifest(entries: &[PathBuf]) -> String {
     let urls: Vec<String> = entries.iter().map(|e| file_url(&e.to_string_lossy(), e.is_dir())).collect();
-    let mut out = String::from("Manifest-Version: 1.0\r\nCreated-By: OpenIDEA\r\n");
+    let mut out = String::from("Manifest-Version: 1.0\r\nCreated-By: OXidea\r\n");
     out.push_str(&wrap_header(&format!("Class-Path: {}", urls.join(" "))));
     out.push_str("\r\n");
     out

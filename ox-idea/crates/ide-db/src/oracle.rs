@@ -289,7 +289,7 @@ impl OracleConnection {
 
 fn open(state: &State) -> oracle::Result<OracleHandle> {
     let mut connector = oracle::Connector::new(state.user.clone(), state.password.clone(), state.connect.clone());
-    connector.driver_name("OpenIDEA");
+    connector.driver_name("OXidea");
     if let Some(n) = state.statement_cache {
         connector.stmt_cache_size(n);
     }
@@ -585,15 +585,15 @@ mod tests {
         assert!(client_dir("").expect("the search path").is_none());
     }
 
-    /// A live server, skipped unless `OPENIDEA_ORACLE_TEST` is
-    /// `user/password@host:port/service` (and `OPENIDEA_ORACLE_CLIENT` names the
+    /// A live server, skipped unless `OXIDEA_ORACLE_TEST` is
+    /// `user/password@host:port/service` (and `OXIDEA_ORACLE_CLIENT` names the
     /// Instant Client when it is not on the search path).
     ///
     /// Checking out a connection runs `is_valid`, so this fails if the ping is
     /// not a query (bb8 silently retries a rejected check-out until it times out).
     #[tokio::test]
     async fn a_pooled_connection_runs_queries() {
-        let Some(spec) = std::env::var("OPENIDEA_ORACLE_TEST").ok().filter(|s| !s.is_empty()) else { return };
+        let Some(spec) = std::env::var("OXIDEA_ORACLE_TEST").ok().filter(|s| !s.is_empty()) else { return };
         let (auth, addr) = spec.split_once('@').expect("user/password@host:port/service");
         let (user, password) = auth.split_once('/').expect("user/password");
         let (host, rest) = addr.split_once(':').expect("host:port/service");
@@ -605,7 +605,7 @@ mod tests {
             database: service.into(),
             user: user.into(),
             options: crate::source::DbOptions {
-                instant_client: std::env::var("OPENIDEA_ORACLE_CLIENT").unwrap_or_default(),
+                instant_client: std::env::var("OXIDEA_ORACLE_CLIENT").unwrap_or_default(),
                 ..Default::default()
             },
             ..Default::default()
@@ -631,16 +631,16 @@ mod tests {
         // PL/SQL units reach the server with their closing `END;`.
         pool.rows("begin null; end;", 0).await.expect("anonymous block");
         pool.rows("declare n number := 1; begin n := n + 1; end;", 0).await.expect("declare block");
-        let proc = "create or replace procedure openidea_p(a number) is\n  x number := a;\nbegin\n  x := x + 1;\nend;";
+        let proc = "create or replace procedure oxidea_p(a number) is\n  x number := a;\nbegin\n  x := x + 1;\nend;";
         let rows = pool.rows(&format!("{proc}\nselect 7 from dual;"), 1).await.expect("procedure, then a query");
         assert_eq!(rows.first().and_then(|r| r.first().cloned().flatten()).as_deref(), Some("7"));
-        pool.rows("begin openidea_p(1); end;", 0).await.expect("call the procedure");
-        let package = "create or replace package openidea_k as\n  function f return number;\nend openidea_k;\n/\n\
-                       create or replace package body openidea_k as\n  function f return number is begin return 8; end;\nend openidea_k;\n/";
+        pool.rows("begin oxidea_p(1); end;", 0).await.expect("call the procedure");
+        let package = "create or replace package oxidea_k as\n  function f return number;\nend oxidea_k;\n/\n\
+                       create or replace package body oxidea_k as\n  function f return number is begin return 8; end;\nend oxidea_k;\n/";
         pool.rows(package, 0).await.expect("package spec and body");
-        let rows = pool.rows("select openidea_k.f from dual", 1).await.expect("call the package");
+        let rows = pool.rows("select oxidea_k.f from dual", 1).await.expect("call the package");
         assert_eq!(rows.first().and_then(|r| r.first().cloned().flatten()).as_deref(), Some("8"));
-        pool.rows("drop package openidea_k; drop procedure openidea_p", 0).await.expect("clean up");
+        pool.rows("drop package oxidea_k; drop procedure oxidea_p", 0).await.expect("clean up");
 
         // LOB cells are read through locators.
         let rows = pool.rows("select to_clob('abc'), to_blob(hextoraw('0A0B')) from dual", 1).await.expect("LOBs");

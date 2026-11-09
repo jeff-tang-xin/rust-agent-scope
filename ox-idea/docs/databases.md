@@ -3,13 +3,13 @@
 The Database tool window (View ▸ Tool Windows ▸ Database) connects to SQLite,
 PostgreSQL, MySQL/MariaDB, Microsoft SQL Server, ClickHouse and Oracle, plus the
 wire-compatible products listed in **New ▸ Data Source**. Connections are saved
-per project in `.openidea/data-sources.toml`; passwords live outside the project
+per project in `.oxidea/data-sources.toml`; passwords live outside the project
 (and never in that file).
 
 ## Oracle: Oracle Instant Client
 
 Oracle support uses the Oracle Call Interface, so the Oracle client libraries
-must be installed on the machine. OpenIDEA does not bundle them: install the
+must be installed on the machine. OXidea does not bundle them: install the
 **Oracle Instant Client** for your platform and point the data source at it.
 
 1. Download the _Basic_ (or _Basic Light_) package of Oracle Instant Client

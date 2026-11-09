@@ -982,7 +982,7 @@ mod tests {
     fn api4_menu_locations_require_api4_and_declared_commands() {
         for location in ["editor.title", "mainToolbar", "problems.context", "searchResults.context"] {
             for (api, valid) in [("^1.3", false), ("^1.4", true)] {
-                let manifest=ide_extension::Manifest::parse(&format!("id='test'\nname='Test'\nversion='1.0.0'\nengines.openidea='{api}'\n[[contributes.commands]]\nid='check'\ntitle='Check'")).unwrap();
+                let manifest=ide_extension::Manifest::parse(&format!("id='test'\nname='Test'\nversion='1.0.0'\nengines.oxidea='{api}'\n[[contributes.commands]]\nid='check'\ntitle='Check'")).unwrap();
                 let pkg = Package::new(manifest, std::path::PathBuf::from("/unused"));
                 let decl =
                     toml::from_str(&format!("menu='{location}'\ncommand='check'\nwhen='editorLang == sql'")).unwrap();
@@ -1124,7 +1124,7 @@ mod tests {
         for (name, text) in files {
             std::fs::write(dir.path().join(LOCALES_DIR).join(name), text).unwrap();
         }
-        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.openidea = \"^1.0\"";
+        let src = "id = \"p\"\nname = \"P\"\nversion = \"1.0.0\"\nengines.oxidea = \"^1.0\"";
         let pkg = Package::new(ide_extension::Manifest::parse(src).unwrap(), dir.path().to_path_buf());
         (dir, pkg)
     }

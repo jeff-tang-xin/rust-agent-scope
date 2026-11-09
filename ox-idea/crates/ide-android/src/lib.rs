@@ -53,11 +53,11 @@ fn sdk_roots() -> Vec<PathBuf> {
     roots
 }
 
-/// Locates the adb executable once per process; `OPENIDEA_ADB` overrides.
+/// Locates the adb executable once per process; `OXIDEA_ADB` overrides.
 pub fn adb_executable() -> Option<PathBuf> {
     static ADB: OnceLock<Option<PathBuf>> = OnceLock::new();
     ADB.get_or_init(|| {
-        if let Some(explicit) = std::env::var_os("OPENIDEA_ADB").map(PathBuf::from).filter(|p| p.is_file()) {
+        if let Some(explicit) = std::env::var_os("OXIDEA_ADB").map(PathBuf::from).filter(|p| p.is_file()) {
             return Some(explicit);
         }
         let name = exe("adb");
@@ -86,7 +86,7 @@ pub fn adb_executable() -> Option<PathBuf> {
 fn executable() -> IdeResult<PathBuf> {
     adb_executable().ok_or_else(|| {
         IdeError::unavailable(
-            "adb was not found: install the Android SDK platform-tools, or set ANDROID_HOME (or OPENIDEA_ADB)",
+            "adb was not found: install the Android SDK platform-tools, or set ANDROID_HOME (or OXIDEA_ADB)",
         )
     })
 }
