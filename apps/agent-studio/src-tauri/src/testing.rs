@@ -120,6 +120,53 @@ pub struct CaseResult {
 }
 
 /// 测试任务：关联需求与用例，执行结果逐用例记录。
+/// 执行批次：每次点火（test_run_task）一条，最新在末尾。结果快照在
+/// 封账时写入——未封账（finished_at == 0）= 进行中或中断，由
+/// test_finish_task / 看门狗 done / 下次点火补封。历史轮次据此可追溯
+/// （上一轮跑了哪些、结果如何），不再被下一轮覆盖式结果槽抹掉。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunRecord {
+    /// 第几轮（1 起，按点火顺序递增）。
+    pub seq: u32,
+    /// continue（继续执行/重跑，按筛选）| force（强制全量）。
+    pub trigger: String,
+    pub started_at: u64,
+    /// 封账时刻；0 = 未封账（进行中/中断）。
+    #[serde(default)]
+    pub finished_at: u64,
+    /// 本轮计划执行的用例 id。
+    pub targets: Vec<String>,
+    /// 封账时的结果快照（轻量：只记 case_id + status，不存步骤/截图）。
+    #[serde(default)]
+    pub outcomes: Vec<RunOutcome>,
+}
+
+/// 批次内单条用例的结果快照。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunOutcome {
+    pub case_id: String,
+    /// pass | fail | blocked | skipped | error | running（未跑完）。
+    pub status: String,
+}
+
+/// 封账最新未封账批次：用当前结果槽快照填充 outcomes。幂等——
+/// 全部已封账时不动。上一轮中断/暂停的场景在下次点火时补封。
+pub(crate) fn seal_open_run(task: &mut TestTask, now: u64) {
+    if let Some(last) = task.runs.last_mut() {
+        if last.finished_at == 0 {
+            last.finished_at = now;
+            last.outcomes = task
+                .results
+                .iter()
+                .map(|r| RunOutcome {
+                    case_id: r.case_id.clone(),
+                    status: r.status.clone(),
+                })
+                .collect();
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestTask {
     pub id: String,
@@ -148,6 +195,9 @@ pub struct TestTask {
     /// 已归档（列表默认隐藏，归档区查看；done 任务手动归档，防列表膨胀）。
     #[serde(default)]
     pub archived: bool,
+    /// 执行批次历史（每次点火一条，最新在末尾；见 `RunRecord`）。
+    #[serde(default)]
+    pub runs: Vec<RunRecord>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -723,6 +773,17 @@ pub async fn test_run_task(
         let path = root.join("tasks.json");
         let mut items: Vec<TestTask> = load_json(&path);
         if let Some(t) = items.iter_mut().find(|t| t.id == task_id) {
+            // 批次：上一轮未封账（中断/暂停）先补封，再开新轮——
+            // 历史轮次的结果快照不被本轮覆盖。
+            seal_open_run(t, now);
+            t.runs.push(RunRecord {
+                seq: t.runs.len() as u32 + 1,
+                trigger: if force { "force" } else { "continue" }.into(),
+                started_at: now,
+                finished_at: 0,
+                targets: targets.iter().map(|c| c.id.clone()).collect(),
+                outcomes: vec![],
+            });
             t.results = results;
             t.status = "running".into();
             t.finished_at = 0;
@@ -1262,6 +1323,7 @@ impl TestWatchdog {
             if remaining.is_empty() {
                 // 结果槽全部终态但任务状态没跟上（旧数据）——不续跑。
                 self.emit("done", Some("全部用例已有结论".into()), done, total);
+                self.seal_run();
                 break;
             }
             self.emit(
@@ -1356,6 +1418,17 @@ impl TestWatchdog {
                 t.pause_note = note.to_string();
                 save_json(&path, &tasks);
             }
+        }
+    }
+
+    /// 看门狗判定任务完成时的批次兜底封账（LLM 忘调 test_finish_task
+    /// 或旧数据场景；正常路径由 finish 工具封账）。
+    fn seal_run(&self) {
+        let path = self.tasks_path();
+        let mut tasks: Vec<TestTask> = load_json(&path);
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
+            seal_open_run(t, now_ms());
+            let _ = save_json(&path, &tasks);
         }
     }
 
@@ -2347,6 +2420,67 @@ mod tests {
     }
 
     #[test]
+    fn run_batch_seal_keeps_history_and_reopens() {
+        // 批次生命周期：开批 → 封账（快照定格）→ 幂等 → 新一轮不覆盖历史。
+        let mut task = TestTask {
+            id: "t1".into(),
+            name: "回归".into(),
+            base_url: String::new(),
+            config_id: String::new(),
+            requirement_ids: vec![],
+            case_ids: vec!["c1".into(), "c2".into()],
+            status: "running".into(),
+            results: vec![
+                CaseResult {
+                    case_id: "c1".into(),
+                    status: "fail".into(),
+                    ..Default::default()
+                },
+                CaseResult {
+                    case_id: "c2".into(),
+                    status: "pass".into(),
+                    ..Default::default()
+                },
+            ],
+            started_at: 0,
+            pause_note: String::new(),
+            archived: false,
+            runs: vec![RunRecord {
+                seq: 1,
+                trigger: "continue".into(),
+                started_at: 10,
+                finished_at: 0,
+                targets: vec!["c1".into(), "c2".into()],
+                outcomes: vec![],
+            }],
+            created_at: 0,
+            finished_at: 0,
+        };
+        // 第 1 轮交付封账：快照定格在 fail/pass。
+        seal_open_run(&mut task, 100);
+        assert_eq!(task.runs[0].finished_at, 100);
+        assert_eq!(task.runs[0].outcomes.len(), 2);
+        assert_eq!(task.runs[0].outcomes[0].status, "fail");
+        // 幂等：已封账再封不动。
+        seal_open_run(&mut task, 200);
+        assert_eq!(task.runs[0].finished_at, 100);
+        // 第 2 轮点火：c1 修复后回归通过——第 1 轮历史不被覆盖。
+        task.runs.push(RunRecord {
+            seq: 2,
+            trigger: "continue".into(),
+            started_at: 300,
+            finished_at: 0,
+            targets: vec!["c1".into()],
+            outcomes: vec![],
+        });
+        task.results[0].status = "pass".into();
+        seal_open_run(&mut task, 400);
+        assert_eq!(task.runs[0].outcomes[0].status, "fail");
+        assert_eq!(task.runs[1].outcomes[0].status, "pass");
+        assert_eq!(task.runs[1].finished_at, 400);
+    }
+
+    #[test]
     fn strip_helpers_clean_labels_and_numbers() {
         assert_eq!(strip_step_number("1. 打开登录页"), "打开登录页");
         assert_eq!(strip_step_number("2、输入密码"), "输入密码");
@@ -2411,6 +2545,7 @@ mod tests {
                 created_at: 0,
                 finished_at: 0,
                 archived: false,
+                runs: vec![],
             }],
             bugs: vec![Bug {
                 id: "b1".into(),

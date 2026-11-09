@@ -24,6 +24,7 @@ import {
   type TestBug,
   type TestConfig,
   type TestRequirement,
+  type TestRunRecord,
   type TestTask,
   type TestingData,
   type WorkspaceConfig,
@@ -188,6 +189,32 @@ type TurnWait = { ok: boolean; timedOut: boolean };
 
 const fmtTime = (ms: number) =>
   ms > 0 ? new Date(ms).toLocaleString("zh-CN", { hour12: false }) : "—";
+
+/** 批次历史摘要（任务卡「第 N 轮」徽标的 hover 提示，每轮一行）。
+ * 未封账轮次（finished_at=0）用当前结果槽实时统计——它就是最近一轮。 */
+function runHistoryTitle(runs: TestRunRecord[], task: TestTask): string {
+  return runs
+    .map((r) => {
+      const stat = (st: string) =>
+        r.finished_at === 0
+          ? task.results.filter((x) => r.targets.includes(x.case_id) && x.status === st)
+              .length
+          : r.outcomes.filter((o) => o.status === st).length;
+      const state =
+        r.finished_at === 0 && r.outcomes.length === 0
+          ? stat("pass") + stat("fail") + stat("blocked") + stat("error") === 0
+            ? "待执行"
+            : "进行中"
+          : "";
+      return (
+        `第${r.seq}轮·${r.trigger === "force" ? "全量" : "继续"}（${r.targets.length}条）` +
+        `：✅${stat("pass")} ❌${stat("fail")} ⛔${stat("blocked")}` +
+        (r.finished_at === 0 ? `（${state}）` : "") +
+        ` · ${fmtTime(r.started_at)}`
+      );
+    })
+    .join("\n");
+}
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "待执行",
@@ -957,6 +984,7 @@ export default function TestWorkbench({
                 id: "",
                 status: "pending",
                 results: [],
+                runs: [],
                 started_at: 0,
                 pause_note: "",
                 archived: false,
@@ -1467,6 +1495,15 @@ function TasksTab({
                   <div className="test-item-sub">
                     {t.case_ids.length} 用例 · ✅{counts.pass} ❌{counts.fail} ⛔
                     {counts.blocked}
+                    {t.runs.length > 0 && (
+                      <span
+                        className="link-btn"
+                        title={runHistoryTitle(t.runs, t)}
+                        style={{ marginLeft: 4 }}
+                      >
+                        · 第 {t.runs.length} 轮
+                      </span>
+                    )}
                     {t.config_id
                       ? ` · ${data.configs.find((c) => c.id === t.config_id)?.name ?? "配置已删除"}`
                       : ""}
@@ -1535,12 +1572,13 @@ function TasksTab({
                           : "执行"}
                   </button>
                   <button
-                    className="icon-btn"
+                    className="icon-btn danger"
                     disabled={runningTaskId !== ""}
-                    title="强制全量重跑（忽略「已通过」与「待修 Bug」筛选，覆盖已有结果）"
+                    title="强制全量重跑（忽略「已通过」与「待修 Bug」筛选，覆盖已有结果）——不是刷新，刷新用面板右上角的 ⟳"
                     onClick={() => onRun(t, true)}
+                    style={{ width: "auto", padding: "0 6px", fontSize: 11 }}
                   >
-                    ⟳
+                    全量
                   </button>
                   <button className="icon-btn" title="甘特图" onClick={() => onGantt(t)}>
                     ▤

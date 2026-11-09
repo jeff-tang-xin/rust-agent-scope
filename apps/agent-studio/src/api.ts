@@ -280,6 +280,24 @@ export interface TestConfig {
 }
 
 /** 测试任务：关联需求与用例，创建后由前端编排器逐用例自动执行。 */
+/** 执行批次内单条用例的结果快照（封账时定格）。 */
+export interface TestRunOutcome {
+  case_id: string;
+  /** pass / fail / blocked / skipped / error / running（未跑完）。 */
+  status: string;
+}
+
+/** 执行批次：每次点火一条，最新在末尾；finished_at=0 表示进行中/中断。 */
+export interface TestRunRecord {
+  seq: number;
+  /** continue（继续执行/重跑）| force（强制全量）。 */
+  trigger: string;
+  started_at: number;
+  finished_at: number;
+  targets: string[];
+  outcomes: TestRunOutcome[];
+}
+
 export interface TestTask {
   id: string;
   name: string;
@@ -298,6 +316,8 @@ export interface TestTask {
   pause_note: string;
   /** 已归档（列表默认隐藏，归档区查看；done 任务手动归档，防列表膨胀）。 */
   archived: boolean;
+  /** 执行批次历史（每轮结果快照，可追溯上一轮哪几条挂了）。 */
+  runs: TestRunRecord[];
   created_at: number;
   finished_at: number;
 }

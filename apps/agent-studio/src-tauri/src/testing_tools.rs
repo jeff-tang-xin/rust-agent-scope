@@ -629,6 +629,9 @@ All cases concluded => task auto-closes as done."
             task.status = "paused".into();
         }
         task.pause_note = note.clone();
+        // 本轮交付即封账：done（全部完成）与 paused（本轮到此为止）都封——
+        // 批次历史记录「这一轮跑到哪、结果如何」，不被下一轮覆盖。
+        super::testing::seal_open_run(task, now_ms());
         let summary = progress_line(task);
         let name = task.name.clone();
         let done = task.status == "done";
@@ -692,6 +695,7 @@ mod tests {
             created_at: now_ms(),
             finished_at: 0,
             archived: false,
+            runs: vec![],
         };
         save_json(&store.tasks_path(), &vec![task.clone()]).unwrap();
         task
