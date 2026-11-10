@@ -244,7 +244,11 @@ const OX_ENV_KEYS = {
   apiKey: "AGENTSCOPE_API_KEY",
   model: "AGENTSCOPE_MODEL",
   baseUrl: "AGENTSCOPE_BASE_URL",
+  maxIters: "AGENTSCOPE_MAX_ITERS",
 } as const;
+
+/** ReAct iteration caps offered for the OX agent; an unset key means the default (100). */
+const OX_MAX_ITERS = ["30", "50", "100", "200", "500"] as const;
 
 /** Providers accepted by `AGENTSCOPE_PROVIDER`; an unset key means the dashscope default. */
 const OX_PROVIDERS = ["dashscope", "openai", "anthropic", "gemini", "ollama"] as const;
@@ -334,6 +338,22 @@ function OxModelFields({
           disabled={saving}
           placeholder="Optional override"
           onChange={(e) => patch(OX_ENV_KEYS.baseUrl, e.target.value)}
+        />
+      </div>
+      <label className={styles.label} htmlFor="ox-max-iters">
+        <T>Max iterations</T>
+      </label>
+      <div className={styles.controls}>
+        <Select
+          id="ox-max-iters"
+          value={get(OX_ENV_KEYS.maxIters)}
+          disabled={saving}
+          options={[
+            { value: "", label: "Default (100)" },
+            ...OX_MAX_ITERS.map((n) => ({ value: n, label: n })),
+          ]}
+          onChange={(v) => patch(OX_ENV_KEYS.maxIters, v)}
+          aria-label={tx("Max iterations")}
         />
       </div>
       <p className={styles.hint}>

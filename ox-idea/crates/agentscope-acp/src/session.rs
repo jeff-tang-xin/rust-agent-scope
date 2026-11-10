@@ -68,7 +68,7 @@ impl AcpSessionHub {
         let cwd = protocol::parse_new_session(&params)?;
         let model = build_model(&self.env).map_err(RpcError::internal)?;
         let session_id = uuid::Uuid::new_v4().to_string();
-        let agent = assemble_agent(&cwd, model).map_err(RpcError::internal)?;
+        let agent = assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
         self.sessions.lock().unwrap().insert(
             session_id.clone(),
             Arc::new(AcpSession {
@@ -101,9 +101,21 @@ impl AcpSessionHub {
     }
 }
 
+/// ReAct 迭代上限：`AGENTSCOPE_MAX_ITERS` 可配（设置界面写入 env），缺省 100。
+/// 一轮 = 一次模型调用 + 工具执行；真实工程任务（追调用链、多文件改动、编译验证）
+/// 几十轮很常见，上限太低会在任务中途以 "max iterations exceeded" 截断。
+fn max_iters_from(env: &[(String, String)]) -> usize {
+    env.iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("AGENTSCOPE_MAX_ITERS"))
+        .map(|(_, v)| v.trim().parse::<usize>().ok())
+        .flatten()
+        .filter(|n| *n > 0)
+        .unwrap_or(100)
+}
+
 /// 装配一个面向 ACP 会话的 agent：文件工具 + 本地 shell 锚定 cwd，
 /// 系统提示词声明工作目录与能力边界。
-fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>, String> {
+fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) -> Result<Arc<HarnessAgent>, String> {
     // 本地磁盘文件系统层（Sandboxed：文件工具的绝对路径一律拒绝，锚定 cwd）。
     let sandboxed = |root: PathBuf| {
         Arc::new(LocalFilesystem::new(
@@ -200,11 +212,9 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>,
         .model(Arc::clone(&model))
         .toolkit(toolkit)
         .workspace(PathBuf::from(cwd))
-        // ReAct 迭代上限（一轮 = 一次模型调用 + 工具执行）：真实工程任务（追调用链、
-        // 多文件改动、编译验证）30 轮经常不够，跑到一半被截断报
-        // "max iterations exceeded"；100 轮覆盖绝大多数任务，同时保留死循环保护。
-        // TODO: 接到 provider 配置上做成设置项（ox provider 尚无 config options 机制）。
-        .max_iters(100);
+        // ReAct 迭代上限（一轮 = 一次模型调用 + 工具执行）：`AGENTSCOPE_MAX_ITERS`
+        // 可配（设置界面），缺省 100——真实工程任务 30 轮经常不够，跑到一半被截断。
+        .max_iters(max_iters_from(env));
     if let Some(ws) = &memory_ws {
         builder = builder
             .with_memory_workspace(Arc::clone(ws))
@@ -835,6 +845,20 @@ mod tests {
             content_block_text(&other).contains("\"k\":1")
                 || content_block_text(&other).contains("\"k\": 1")
         );
+    }
+
+    #[test]
+    fn max_iters_reads_env_with_sane_fallback() {
+        let env = |v: &str| vec![("AGENTSCOPE_MAX_ITERS".to_owned(), v.to_owned())];
+        assert_eq!(max_iters_from(&env("200")), 200);
+        assert_eq!(max_iters_from(&env(" 50 ")), 50);
+        // 非法与无意义值回落缺省；空 env 同。
+        assert_eq!(max_iters_from(&env("abc")), 100);
+        assert_eq!(max_iters_from(&env("0")), 100);
+        assert_eq!(max_iters_from(&env("-5")), 100);
+        assert_eq!(max_iters_from(&[]), 100);
+        // 大小写不敏感（env 键约定大写，宿主注入路径不保证）。
+        assert_eq!(max_iters_from(&[("agentscope_max_iters".to_owned(), "30".to_owned())]), 30);
     }
 
     // AgentEvent 构造引用（防 import 漂移）。
