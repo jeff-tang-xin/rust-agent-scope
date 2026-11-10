@@ -11,7 +11,7 @@ use ide_host::ops::agent;
 use ide_tools::InstallEvent;
 use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::{State, Window};
+use tauri::{Manager, State, Window};
 
 /// Streams the project's agent events to this window; returns every task.
 #[tauri::command]
