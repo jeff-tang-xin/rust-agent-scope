@@ -790,13 +790,40 @@ type UserEntry = Extract<AgentEntry, { type: "user" }>;
  * over the whole accumulated text) happens once when the turn ends; doing it per
  * delta is what stalled long replies, and batching it made the stream choppy.
  */
+/** Typewriter for streamed plain text: reveals characters at a steady,
+ * self-adapting pace instead of dumping each delta batch in one chunk.
+ * The reveal lags the stream slightly (bounded) and plays at a constant
+ * per-frame rate; when the model bursts, the pace catches up (capped) so
+ * the lag stays under ~1s. Turn end swaps to <Markdown> for the full text. */
 function StreamText({ text }: { text: string }) {
-  const [shown, setShown] = useState("");
+  const [shown, setShown] = useState(text.length);
+  const progress = useRef(text.length);
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setShown(text));
+    // Already caught up (or remounted with full text): nothing to play.
+    if (text.length <= progress.current) {
+      progress.current = text.length;
+      setShown(text.length);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const target = text.length;
+      const cur = progress.current;
+      if (cur >= target) return; // caught up; next delta restarts the loop
+      // Self-adapting pace: ~1 char/frame while the lag is small (a steady
+      // stream slower than typical model output, so it keeps playing
+      // smoothly), proportional catch-up when behind, capped at 20 chars
+      // per frame (~1200 chars/s at 60fps).
+      const behind = target - cur;
+      const step = Math.max(1, Math.min(20, Math.ceil(behind / 30)));
+      progress.current = Math.min(target, cur + step);
+      setShown(progress.current);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [text]);
-  return <div className={styles.streamText}>{shown}</div>;
+  return <div className={styles.streamText}>{text.slice(0, shown)}</div>;
 }
 
 /** Message text with file references and skills as tags, distinct from prose. */
