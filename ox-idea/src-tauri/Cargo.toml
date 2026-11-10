@@ -21,6 +21,7 @@ tauri-plugin-mcp-bridge = "0.13"
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
 tracing-appender = "0.2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript.workspace = true
