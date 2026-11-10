@@ -263,11 +263,11 @@ fn registry_path() -> Option<std::ffi::OsString> {
         let text = match raw {
             winreg::RegValue { vtype: winreg::enums::RegType::REG_EXPAND_SZ, bytes } => {
                 let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c.get(1).copied().unwrap_or(0)])).collect();
-                expand_env_vars(&String::from_utf16_lossy(&wide))
+                expand_env_vars(&decode_utf16(&wide))
             }
             winreg::RegValue { vtype: winreg::enums::RegType::REG_SZ, bytes } => {
                 let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c.get(1).copied().unwrap_or(0)])).collect();
-                String::from_utf16_lossy(&wide)
+                decode_utf16(&wide)
             }
             // Path 只可能是 SZ / EXPAND_SZ；其余类型（理论上不出现）跳过。
             _ => return None,
@@ -286,7 +286,17 @@ fn registry_path() -> Option<std::ffi::OsString> {
     if parts.is_empty() {
         return None;
     }
-    Some(parts.join(";").into())
+    let joined: String = parts.join(";");
+    // 最终防线：任何残留 NUL 都会让 `set_var` panic（WinAPI 不接受 NUL）——
+    // 启动崩溃比 PATH 旧严重得多，这里再滤一次兜住 expand 展开值等来源。
+    Some(joined.chars().filter(|&c| c != '\0').collect::<String>().into())
+}
+
+/// 注册表 REG_SZ 的 UTF-16 解码：去掉全部 NUL——UTF-16 的终止符与损坏值里的
+/// 内嵌 NUL 都会出现，`set_var` 遇 NUL 直接 panic（启动路径绝不能崩）。
+#[cfg(windows)]
+fn decode_utf16(wide: &[u16]) -> String {
+    String::from_utf16_lossy(wide).chars().filter(|&c| c != '\0').collect()
 }
 
 /// 展开 `%VAR%`（找不到的变量保留原样——与 `ExpandEnvironmentStringsW` 一致）。
@@ -318,6 +328,28 @@ fn expand_env_vars(text: &str) -> String {
 
 #[cfg(not(unix))]
 pub fn inherit_login_shell_env(_identifier: &str) {}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn decode_utf16_strips_every_nul() {
+        // 尾部终止符 + 内嵌 NUL（损坏值）都必须清掉：set_var 遇 NUL 会 panic。
+        let wide: Vec<u16> = "C:\\bin\0;C:\\bin2\\\0;tail\0".encode_utf16().collect();
+        assert_eq!(decode_utf16(&wide), "C:\\bin;C:\\bin2\\;tail");
+        assert!(!decode_utf16(&wide).contains('\0'));
+    }
+
+    #[test]
+    fn registry_path_never_contains_nul() {
+        // 真实注册表读取（本机必有 PATH）：返回值必须可直接 set_var。
+        if let Some(path) = registry_path() {
+            let text = path.to_string_lossy();
+            assert!(!text.contains('\0'), "registry PATH contains NUL: {text:?}");
+        }
+    }
+}
 
 #[cfg(all(test, unix))]
 mod tests {
