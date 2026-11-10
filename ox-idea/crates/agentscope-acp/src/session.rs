@@ -171,6 +171,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     }
     // 记忆管线（仅宿主注入 memory_root 时启用）：memory_save/get/search 工具 +
     // flush（Layer1 每日台账）与 maintenance（Layer2 MEMORY.md 合并）两个中间件。
+    // MEMORY.md 的启动注入在 harness 层统一做（HarnessAgentBuilder::build）。
     let memory_ws = host_ctx
         .memory_root
         .map(|root| {
@@ -199,8 +200,9 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     let memory_section = if memory_ws.is_some() {
         "\n## 记忆\n\
          - 你有两层长期记忆：MEMORY.md（精炼的长期知识）与 memory/ 每日台账。\n\
-         - 用 memory_save 沉淀值得跨会话保留的结论（用户偏好、项目约定、架构决策、踩坑记录）。\n\
-         - 用 memory_search / memory_get 回忆过往结论，避免重复劳动与已知坑。\n"
+         - 用 memory_save 沉淀值得跨会话保留的结论（用户偏好、项目约定、架构决策、踩坑记录）——任务收尾时务必沉淀，不要只留在对话里。\n\
+         - 用 memory_search / memory_get 回忆过往结论，避免重复劳动与已知坑。\n\
+         - 数据边界：写记忆只能 memory_save（系统落盘，你只提供内容）；禁止用 write_file/edit_file 创建或修改 .oxidea/agent 下的 MEMORY.md、memory/**、blackboard.json——那会绕过系统结构造成数据错乱。\n"
             .to_owned()
     } else {
         String::new()
@@ -232,6 +234,25 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          - 汇报包含：{report_items}；部分完成时明确说明哪些完成、哪些没有。\n\
          - 与用户同语言交流：用户用中文就用中文，用英文就用英文。"
     );
+    // 权限上下文：只读工具免确认（按 is_read_only 动态收集，新只读工具无需改这里），
+    // 写工具（write/edit/execute 类）走 HITL 往返；`AGENTSCOPE_PERMISSION_MODE=bypass`
+    // 时全放行（对齐 Claude bypassPermissions 语义，ide-agent 随任务启动注入）。
+    let mut permission = agentscope_core::permission::PermissionContextState::default();
+    for name in toolkit.tool_names() {
+        if toolkit.get(&name).is_some_and(|tool| tool.is_read_only()) {
+            permission.add_allow_rule(agentscope_core::permission::PermissionRule {
+                tool_name: name,
+                rule_content: None,
+                behavior: agentscope_core::permission::PermissionBehavior::Allow,
+                source: "project".to_owned(),
+            });
+        }
+    }
+    if env.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("AGENTSCOPE_PERMISSION_MODE") && v.trim().eq_ignore_ascii_case("bypass")
+    }) {
+        permission = permission.with_mode(agentscope_core::permission::PermissionMode::Bypass);
+    }
     let mut builder = HarnessAgentBuilder::new()
         .name("ox-hareness")
         .sys_prompt(sys_prompt)
@@ -240,8 +261,8 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         .workspace(PathBuf::from(cwd))
         // ReAct 迭代上限（一轮 = 一次模型调用 + 工具执行）：`AGENTSCOPE_MAX_ITERS`
         // 可配（设置界面），缺省 100——真实工程任务 30 轮经常不够，跑到一半被截断。
-        .max_iters(max_iters_from(env));
-    if let Some(ws) = &memory_ws {
+        .max_iters(max_iters_from(env))
+        .permission_context(permission);    if let Some(ws) = &memory_ws {
         builder = builder
             .with_memory_workspace(Arc::clone(ws))
             .middleware(Arc::new(MemoryFlushMiddleware::new(

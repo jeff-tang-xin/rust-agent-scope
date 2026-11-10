@@ -1506,6 +1506,19 @@ impl Task {
         let spec = tokio::task::spawn_blocking(move || spec.resolve_for_launch(&launch_cwd))
             .await
             .map_err(|e| e.to_string())?;
+        // The in-process OX agent reads its approval policy from the env: the harness
+        // assembles a permission context from it (default: read-only tools auto-allowed,
+        // writes go through HITL; `bypass` approves everything at the engine).
+        let mut spec = spec;
+        if spec.driver == provider::Driver::Ox {
+            let bypass = {
+                let s = self.state.lock();
+                config::bypass_approvals(&s.task.config)
+            };
+            if bypass {
+                spec.env.push(("AGENTSCOPE_PERMISSION_MODE".to_owned(), "bypass".to_owned()));
+            }
+        }
         self.stderr.lock().clear();
         self.config_sent.lock().clear();
         let weak = Arc::downgrade(self);

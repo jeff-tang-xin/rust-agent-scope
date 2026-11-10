@@ -385,6 +385,12 @@ impl Tool for TestListTasks {
         "test_list_tasks"
     }
 
+    /// 只读列举（读 .ox/testing 任务清单），免确认——否则 LLM 每次自查 task_id
+    /// 都卡在 HITL 授权上。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "List test tasks in this workspace with task_id / name / status / progress. \
 Call it to confirm the task_id BEFORE executing a task: task_id is the 32-char \

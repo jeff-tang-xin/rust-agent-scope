@@ -85,6 +85,10 @@ pub const GENERAL_PURPOSE_BASE_PROMPT: &str = "You are a highly capable general-
 /// `general-purpose` 条目名（对齐 Java 固定条目）。
 pub const GENERAL_PURPOSE_NAME: &str = "general-purpose";
 
+/// MEMORY.md 注入系统提示的字符上限：超出按字符截断（UTF-8 安全），
+/// 细节引导模型用 memory_search 查询每日台账。
+const MEMORY_INJECT_CHARS: usize = 12_000;
+
 /// `general-purpose` 条目描述（对齐 Java 固定描述）。
 pub const GENERAL_PURPOSE_DESCRIPTION: &str = "General-purpose subagent with same capabilities as the main agent. Use for any isolated task that can be fully delegated.";
 
@@ -907,7 +911,28 @@ impl HarnessAgentBuilder {
         let mut builder = ReActAgent::builder()
             .name(&agent_id)
             .model(model.clone());
-        if let Some(prompt) = self.sys_prompt {
+        // 启动即载入 MEMORY.md（对齐 Easy-Claw 平台的 memory_context 机制）：
+        // 新会话带着过往沉淀的上下文——记忆管线的「读」不依赖模型主动 search，
+        // 否则每次启动都是失忆状态（工具在、管线死）。超出上限按字符截断，
+        // 细节引导模型用 memory_search 查询。
+        let sys_prompt = self.sys_prompt.map(|prompt| {
+            self.memory_workspace
+                .as_ref()
+                .and_then(|ws| {
+                    let md = std::fs::read_to_string(ws.root().join("MEMORY.md")).ok()?;
+                    let md = md.trim();
+                    (!md.is_empty()).then(|| {
+                        let mut injected = md.to_owned();
+                        if injected.chars().count() > MEMORY_INJECT_CHARS {
+                            injected = injected.chars().take(MEMORY_INJECT_CHARS).collect();
+                            injected.push_str("\n…（已截断，细节用 memory_search 查询）");
+                        }
+                        format!("{prompt}\n### 已载入的 MEMORY.md\n{injected}\n")
+                    })
+                })
+                .unwrap_or(prompt)
+        });
+        if let Some(prompt) = sys_prompt {
             builder = builder.sys_prompt(prompt);
         }
         builder = builder.toolkit(toolkit.copy());
