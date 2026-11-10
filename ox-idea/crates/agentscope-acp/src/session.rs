@@ -200,7 +200,11 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>,
         .model(Arc::clone(&model))
         .toolkit(toolkit)
         .workspace(PathBuf::from(cwd))
-        .max_iters(30);
+        // ReAct 迭代上限（一轮 = 一次模型调用 + 工具执行）：真实工程任务（追调用链、
+        // 多文件改动、编译验证）30 轮经常不够，跑到一半被截断报
+        // "max iterations exceeded"；100 轮覆盖绝大多数任务，同时保留死循环保护。
+        // TODO: 接到 provider 配置上做成设置项（ox provider 尚无 config options 机制）。
+        .max_iters(100);
     if let Some(ws) = &memory_ws {
         builder = builder
             .with_memory_workspace(Arc::clone(ws))
