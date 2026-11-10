@@ -65,7 +65,6 @@ fn probe(root: &Path) -> Vec<Datasource> {
     if let Ok(rd) = fs::read_dir(root) {
         for e in rd.flatten() {
             let p = e.path();
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
             let is_db_file = {
                 let s = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
                 matches!(s.as_str(), "db" | "sqlite" | "sqlite3")

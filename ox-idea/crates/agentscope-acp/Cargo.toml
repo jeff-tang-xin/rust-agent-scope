@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 agentscope-core = { path = "../../../crates/agentscope-core" }
+agentscope-browser = { path = "../../../crates/agentscope-browser" }
 agentscope-harness = { path = "../../../crates/agentscope-harness" }
 agentscope-model-anthropic = { path = "../../../crates/agentscope-model-anthropic" }
 agentscope-model-dashscope = { path = "../../../crates/agentscope-model-dashscope" }

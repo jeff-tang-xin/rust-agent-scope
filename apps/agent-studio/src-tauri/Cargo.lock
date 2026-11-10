@@ -69,6 +69,7 @@ dependencies = [
 name = "agent-studio"
 version = "0.1.0"
 dependencies = [
+ "agentscope-browser",
  "agentscope-core",
  "agentscope-harness",
  "agentscope-model-anthropic",
@@ -100,6 +101,19 @@ dependencies = [
  "tokio",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "agentscope-browser"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "base64 0.23.1",
+ "chromiumoxide",
+ "futures",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

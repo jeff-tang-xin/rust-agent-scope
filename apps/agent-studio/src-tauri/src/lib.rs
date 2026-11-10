@@ -1,5 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-mod browser_tool;
+// 浏览器工具集已下沉为框架级 crate（studio 与 ox-idea 共用）；别名保持
+// `crate::browser_tool::X` 路径不变，factory.rs 无需改动。
+use agentscope_browser as browser_tool;
 // testing 的 #[tauri::command] 生成的隐藏宏（__cmd__test_* 等）经 #[macro_use]
 // 进入后续模块作用域——必须声明在 mod commands 之前（macro_rules 按源码顺序可见）。
 #[macro_use]

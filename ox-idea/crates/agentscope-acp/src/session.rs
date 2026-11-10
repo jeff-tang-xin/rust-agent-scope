@@ -186,6 +186,23 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         toolkit.register(Arc::new(tools.memory_get));
         toolkit.register(Arc::new(tools.memory_search));
     }
+    // 浏览器工具集（CDP 驱动本机 Chromium 系浏览器，headless）：与 studio 共用
+    // 框架级 crate。全部 is_read_only=true → 自动进权限白名单免确认；截图存
+    // `.oxidea/screenshots/`。浏览器懒启动：首次工具调用才拉起进程。
+    let browser_ctx = Arc::new(agentscope_browser::BrowserCtx {
+        session: Arc::new(agentscope_browser::BrowserSession::new()),
+        screenshots_dir: Path::new(cwd).join(".oxidea/screenshots"),
+    });
+    macro_rules! register_browser {
+        ($($tool:ident),+ $(,)?) => {
+            $(toolkit.register(Arc::new(agentscope_browser::$tool { ctx: Arc::clone(&browser_ctx) }));)+
+        };
+    }
+    register_browser!(
+        BrowserNavigate, BrowserSnapshot, BrowserClick, BrowserType, BrowserScreenshot,
+        BrowserClose, BrowserEvaluate, BrowserClickAt, BrowserTypeAt, BrowserHoverAt,
+        BrowserScrollAt, BrowserDrag,
+    );
     let blackboard_section = if has_blackboard {
         "\n## 黑板报\n\
          - 黑板是工作现场的信号流（区别于记忆的沉淀知识）：发现（finding）、结论（conclusion）、风险（risk）、提醒（note），跨会话共享、只增不改。\n\

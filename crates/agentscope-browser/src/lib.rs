@@ -1,15 +1,18 @@
-// 内置浏览器自动化工具集：给 Agent 一个真实 Chromium 浏览器（headless，
-// 真实渲染不失真），支持导航、读页面结构、点击、输入、截图、关闭。
-//
-// 底层：chromiumoxide（CDP 协议）驱动本机 Edge/Chrome/Chromium——三者同为
-// Chromium 内核，CDP 协议通用，不挑品牌。浏览器进程懒启动（首次工具调用
-// 才拉起），会话级复用同一标签页；用户手动关掉浏览器后下次调用自动重启。
-//
-// 浏览器可执行文件发现（跨平台）：环境变量 STUDIO_BROWSER_PATH 显式指定
-// 优先；否则用 chromiumoxide 自带发现（CHROME 环境变量 → PATH which →
-// Windows 注册表 → 各平台常见安装路径），Edge/Chrome/Chromium 均可。
-//
-// 截图保存到工作区 `.ox/screenshots/`（用户可在文件面板查看）。
+//! 浏览器自动化工具集（框架级，studio 与 ox-idea 共用）：给 Agent 一个真实
+//! Chromium 浏览器（headless，真实渲染不失真），支持导航、读页面结构、点击、
+//! 输入、截图、执行 JS、关闭。
+//!
+//! 底层：chromiumoxide（CDP 协议）驱动本机 Edge/Chrome/Chromium——三者同为
+//! Chromium 内核，CDP 协议通用，不挑品牌。浏览器进程懒启动（首次工具调用
+//! 才拉起），会话级复用同一标签页；用户手动关掉浏览器后下次调用自动重启。
+//!
+//! 浏览器可执行文件发现（跨平台）：环境变量 `AGENTSCOPE_BROWSER_PATH`（或
+//! 兼容旧名 `STUDIO_BROWSER_PATH`）显式指定优先；否则用 chromiumoxide 自带
+//! 发现（CHROME 环境变量 → PATH which → Windows 注册表 → 各平台常见安装
+//! 路径），Edge/Chrome/Chromium 均可。
+//!
+//! 截图目录由宿主经 [`BrowserCtx::screenshots_dir`] 注入（studio 用
+//! `.ox/screenshots/`，ox-idea 用 `.oxidea/screenshots/`）。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,10 +30,12 @@ use agentscope_core::tool::{Tool, ToolOutput};
 /// chromiumoxide 自带的跨平台发现（CHROME 环境变量 → PATH which → Windows
 /// 注册表 → Windows/macOS 常见安装路径），Edge/Chrome/Chromium 均可。
 pub fn find_browser_executable() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("STUDIO_BROWSER_PATH") {
-        let p = PathBuf::from(p);
-        if p.is_file() {
-            return Some(p);
+    for key in ["AGENTSCOPE_BROWSER_PATH", "STUDIO_BROWSER_PATH"] {
+        if let Ok(p) = std::env::var(key) {
+            let p = PathBuf::from(p);
+            if p.is_file() {
+                return Some(p);
+            }
         }
     }
     chromiumoxide::detection::default_executable(
@@ -100,7 +105,7 @@ impl BrowserSession {
         }
         let exe = find_browser_executable().ok_or_else(|| {
             "未找到 Chromium 系浏览器。请安装 Microsoft Edge 或 Google Chrome（任一即可），\
-             或设置环境变量 STUDIO_BROWSER_PATH 指向浏览器可执行文件"
+             或设置环境变量 AGENTSCOPE_BROWSER_PATH 指向浏览器可执行文件"
                 .to_string()
         })?;
         // headless 静默运行：不弹浏览器窗口，画面经 CDP 截图流到右侧
@@ -116,7 +121,7 @@ impl BrowserSession {
         // 每次启动都撞同一把锁、永远起不来。每次换新目录天然绕开，
         // 死亡重建（下方 *guard = None 后重入）也随之自愈。
         let user_data_dir = std::env::temp_dir().join(format!(
-            "studio-browser-{}-{}",
+            "agentscope-browser-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
