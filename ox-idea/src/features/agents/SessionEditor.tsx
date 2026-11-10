@@ -1800,6 +1800,11 @@ function PermissionLine({ task, entry }: { task: AgentTask; entry: PermissionEnt
             ) : (
               <span className={styles.permissionDetail}>{shortTitle(task, detail)}</span>
             )}
+            {entry.preview && (
+              <pre className={styles.permissionCommand} tabIndex={0} aria-label="Preview">
+                <code>{entry.preview}</code>
+              </pre>
+            )}
             {!entry.questions?.length && (
               <PermissionAnswers task={task} entry={entry} className={styles.permissionAnswers} />
             )}

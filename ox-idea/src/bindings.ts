@@ -1616,6 +1616,11 @@ cancellable: boolean } |
  *  of question to answer instead of an option.
  */
 questions?: AgentQuestion[]; 
+/**
+ *  A preview of the pending change (a diff, or the content a write would produce),
+ *  extracted from the request so the approval UI can show what is about to happen.
+ */
+preview?: string | null; 
 /**  Name of the chosen option, or `None` while pending. Cancelled requests read "Cancelled". */
 chosen: string | null } | { type: "error"; message: string };
 

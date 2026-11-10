@@ -1852,6 +1852,7 @@ impl Task {
             Some(label) => format!("{label}: {title}"),
             None => title,
         };
+        let preview = permission_preview(params);
         let options: Vec<AgentPermissionOption> = params
             .get("options")
             .and_then(Value::as_array)
@@ -1872,8 +1873,14 @@ impl Task {
             .map(|question| question.answer_key.clone().unwrap_or_else(|| question.question.clone()))
             .collect();
         let (tx, rx) = std::sync::mpsc::channel();
-        let entry =
-            self.push_entry(AgentEntry::Permission { id, title, options: options.clone(), questions, chosen: None });
+        let entry = self.push_entry(AgentEntry::Permission {
+            id,
+            title,
+            options: options.clone(),
+            questions,
+            preview,
+            chosen: None,
+        });
         self.permissions.lock().insert(id, tx);
         self.set_status(AgentStatus::NeedsInput, None);
         self.approve_pending();
@@ -2033,6 +2040,32 @@ fn permission_title(params: &Value) -> String {
         }
     }
     title.unwrap_or("The agent asks for permission").to_owned()
+}
+
+/// A preview of the pending change for the approval UI: external agents (Cursor et
+/// al.) send a diff block under `subject.toolCall.content`; our in-process agent
+/// sends `toolCall.rawInput`, where write-like tools carry the payload under a
+/// known key. `None` when the request carries nothing previewable (e.g. a shell
+/// command — the title already shows it).
+fn permission_preview(params: &Value) -> Option<String> {
+    let from_diff = params
+        .get("subject")
+        .and_then(|s| s.get("toolCall"))
+        .and_then(|t| t.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|blocks| {
+            blocks.iter().find_map(|b| {
+                let patch = b.get("patch")?.get("text")?.as_str()?;
+                (!patch.trim().is_empty()).then(|| patch.to_string())
+            })
+        });
+    from_diff.or_else(|| {
+        let input = params.get("toolCall")?.get("rawInput")?;
+        ["patch", "patch_text", "content", "new_string"]
+            .iter()
+            .find_map(|k| input.get(*k).and_then(Value::as_str))
+            .map(str::to_string)
+    })
 }
 
 /// The script of a `<shell> -c <quoted script>` command line, when the whole line is exactly that.

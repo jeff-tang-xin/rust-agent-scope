@@ -440,6 +440,7 @@ mod tests {
             title: "Run?".into(),
             options: vec![],
             questions: vec![],
+            preview: None,
             chosen: None,
         });
         assert_eq!(t.end_turn(None), vec![2, 3]);
