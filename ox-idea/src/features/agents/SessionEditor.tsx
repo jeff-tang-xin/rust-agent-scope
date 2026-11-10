@@ -667,7 +667,12 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
   const replies = useMemo(() => (entries && !subagent ? replyTurns(entries) : null), [entries, subagent]);
   const times = useMemo(() => (entries && !subagent ? replyTimes(entries) : null), [entries, subagent]);
   const busy = subagent ? subagentWorking(subagent.status) : isBusy(task.status);
-  const lastIndex = entries ? entries.length - 1 : -1;
+  // 流式判定用最后一个 agent/thought entry：steer 的用户消息插入后，agent
+  // 当前步的输出仍追加在它前面（timeline open_stream），打字机要跟着那条
+  // 消息走——用 entries.length-1 会被用户消息顶掉，原消息冻结在中途。
+  const lastStreamIndex = entries
+    ? entries.findLastIndex((e) => e.type === "agent" || e.type === "thought")
+    : -1;
   // Keep the row stable when earlier history is prepended; its author can move with the work.
   const rows = useMemo(() => (entries ? conversationRows(entries, start) : []), [entries, start]);
   const authorHeaders = useMemo(() => {
@@ -693,12 +698,12 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
         turnCount={turns?.size ?? 0}
         reply={replies?.get(row.index)}
         time={times?.get(row.index) ?? null}
-        working={row.index === lastIndex && busy}
+        working={row.index === lastStreamIndex && busy}
         onOpenSubagent={onOpenSubagent}
         onDiagramDrawn={onDiagramDrawn}
       />
     ),
-    [task, turns, replies, times, lastIndex, busy, onOpenSubagent, onDiagramDrawn],
+    [task, turns, replies, times, lastStreamIndex, busy, onOpenSubagent, onDiagramDrawn],
   );
   return (
     <div className={styles.streamArea}>
@@ -751,7 +756,7 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
                 </div>
               )}
               {row.kind === "process" ? (
-                <ProcessRun row={row} task={task} lastIndex={lastIndex} busy={busy} renderRow={renderRow} />
+                <ProcessRun row={row} task={task} lastIndex={lastStreamIndex} busy={busy} renderRow={renderRow} />
               ) : (
                 renderRow(row)
               )}

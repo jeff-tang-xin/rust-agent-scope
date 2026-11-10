@@ -17,6 +17,11 @@ pub(crate) struct Timeline {
     cards: HashMap<String, usize>,
     /// Session messages, by message id.
     messages: HashMap<String, usize>,
+    /// 打开中的流式 entry（Agent/Thought）：steer 的 User entry 插入不打断它，
+    /// 当前步的后续 delta 仍追加到原 entry——否则原消息冻结在中途、新 entry
+    /// 只有零星后续，看起来像「输出断了」。tool_call/plan（步边界）与
+    /// end_turn（turn 结束）关闭它；User entry 不关。
+    open_stream: Option<usize>,
 }
 
 /// What a `session/update` changed in the timeline.
@@ -81,6 +86,8 @@ impl Timeline {
                     }
                 };
                 self.merge_tool(index, update);
+                // 步边界：工具调用开启新步，流式 entry 关闭（下一步的文本开新 entry）。
+                self.open_stream = None;
                 out.changed.push(index);
             }
             "tool_call_update" => {
@@ -107,6 +114,8 @@ impl Timeline {
                     None => self.push(entry),
                 };
                 self.plan = Some(index);
+                // 步边界：plan 更新同样关闭流式 entry。
+                self.open_stream = None;
                 out.changed.push(index);
             }
             _ => {}
@@ -115,15 +124,45 @@ impl Timeline {
     }
 
     fn append_text(&mut self, thought: bool, text: &str) -> usize {
-        match self.entries.last_mut() {
-            Some(AgentEntry::Agent { text: t }) if !thought => t.push_str(text),
-            Some(AgentEntry::Thought { text: t }) if thought => t.push_str(text),
-            _ => {
-                let text = text.to_owned();
-                return self.push(if thought { AgentEntry::Thought { text } } else { AgentEntry::Agent { text } });
+        // 打开中的流式 entry：steer 的 User entry 插入不打断它——当前步的
+        // 后续 delta 仍追加到原 entry。类型不匹配（thought/text 块切换）时
+        // 关闭旧 entry，走正常逻辑开新 entry。
+        if let Some(i) = self.open_stream {
+            let matched = match self.entries.get(i) {
+                Some(AgentEntry::Agent { .. }) => !thought,
+                Some(AgentEntry::Thought { .. }) => thought,
+                _ => false,
+            };
+            if matched {
+                match &mut self.entries[i] {
+                    AgentEntry::Agent { text: t } | AgentEntry::Thought { text: t } => {
+                        t.push_str(text)
+                    }
+                    _ => {}
+                }
+                return i;
             }
+            self.open_stream = None;
         }
-        self.entries.len() - 1
+        match self.entries.last_mut() {
+            Some(AgentEntry::Agent { text: t }) if !thought => {
+                t.push_str(text);
+                return self.mark_open(self.entries.len() - 1);
+            }
+            Some(AgentEntry::Thought { text: t }) if thought => {
+                t.push_str(text);
+                return self.mark_open(self.entries.len() - 1);
+            }
+            _ => {}
+        }
+        let text = text.to_owned();
+        let i = self.push(if thought { AgentEntry::Thought { text } } else { AgentEntry::Agent { text } });
+        self.mark_open(i)
+    }
+
+    fn mark_open(&mut self, i: usize) -> usize {
+        self.open_stream = Some(i);
+        i
     }
 
     fn merge_tool(&mut self, index: usize, update: &Value) {
@@ -290,6 +329,8 @@ impl Timeline {
     /// and records when the turn ended (`done`) on the message that started it.
     pub fn end_turn(&mut self, done: Option<f64>) -> Vec<usize> {
         let mut changed = Vec::new();
+        // turn 结束：流式 entry 关闭（下一个 turn 的文本开新 entry）。
+        self.open_stream = None;
         // A steered message rides along in a running turn; the one that started it owns its end.
         let started = self.entries.iter().rposition(|e| matches!(e, AgentEntry::User { steered: false, .. }));
         for (i, e) in self.entries.iter_mut().enumerate() {

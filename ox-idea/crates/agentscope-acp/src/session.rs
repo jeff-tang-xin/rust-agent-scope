@@ -461,8 +461,16 @@ where
     let mut msg = Msg::new(Role::User, "user", content);
     loop {
         let runtime = RuntimeContext::new().with_session_id(session_id.to_owned());
-        let mut rx = match session.agent.stream_events(runtime, msg.clone()).await {
-            Ok(rx) => rx,
+        // 拿执行句柄（detach 版会留下继续跑的执行 task——LLM 调用/工具执行/
+        // 状态写入全继续，表现为「停了还在后台跑」，新 prompt 还会与它并发
+        // 写同一 AgentState）。取消时必须 abort 这个句柄。
+        let (mut rx, exec_task) = match session
+            .agent
+            .delegate()
+            .stream_events_with_context(runtime, msg.clone())
+            .await
+        {
+            Ok(pair) => pair,
             Err(error) => return PromptOutcome::Error(error.to_string()),
         };
         let mut confirm_reply_id: Option<String> = None;
@@ -641,6 +649,11 @@ where
         // 收尾 flush：写失败只置取消终局（flush_chunk 内部处理），不再 break。
         let _ = flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome).await;
         let _ = flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome).await;
+        // 取消终局（session/cancel 或写失败断连）：abort 执行 task，真正中断
+        // agent——否则旧 turn 继续跑（烧 token、写状态），新 prompt 与它并发。
+        if matches!(outcome, Some(PromptOutcome::Cancelled)) {
+            exec_task.abort();
+        }
         match (outcome, confirm_reply_id) {
             // 事件流自然结束：本轮终局。
             (Some(outcome), _) => return outcome,
