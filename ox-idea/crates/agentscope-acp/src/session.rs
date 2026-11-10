@@ -23,6 +23,7 @@ use agentscope_harness::workspace::WorkspaceManager;
 use agentscope_harness::MemoryConfig;
 use agentscope_harness::{Filesystem, LocalFilesystem, LocalFsMode, PathPolicy};
 use serde_json::{json, Value};
+use tokio::sync::watch;
 
 use crate::protocol;
 use crate::rpc::RpcConn;
@@ -46,6 +47,12 @@ struct AcpSession {
     agent: Arc<HarnessAgent>,
     #[allow(dead_code)]
     cwd: PathBuf,
+    /// turn 是否在跑：steer 只在运行中接受（空闲时插队没有消费者，消息会
+    /// 泄漏在队列里），prompt 防重入也靠它。
+    busy: std::sync::atomic::AtomicBool,
+    /// 取消信号：`session/cancel` 置 true，drive_turn 的 select 竞争感知。
+    /// watch 保留最新值——通知到达时 drive_turn 即使还没进入等待也不会丢。
+    cancel_tx: watch::Sender<bool>,
 }
 
 /// 会话表：sessionId → 会话。
@@ -70,11 +77,14 @@ impl AcpSessionHub {
         let model = build_model(&self.env).map_err(RpcError::internal)?;
         let session_id = uuid::Uuid::new_v4().to_string();
         let agent = assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
+        let (cancel_tx, _cancel_rx) = watch::channel(false);
         self.sessions.lock().unwrap().insert(
             session_id.clone(),
             Arc::new(AcpSession {
                 agent,
                 cwd: PathBuf::from(&cwd),
+                busy: std::sync::atomic::AtomicBool::new(false),
+                cancel_tx,
             }),
         );
         Ok(protocol::new_session_result(&session_id))
@@ -97,8 +107,50 @@ impl AcpSessionHub {
                 )))
             }
         };
+        // 防重入：上一 turn 未结束时拒绝新 prompt（ide-agent 的 run 循环串行
+        // 发 prompt，这里是 spawn 化后主循环不再串行化的防御）。
+        if session.busy.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return Err(RpcError::invalid_params("该会话已有 turn 在运行"));
+        }
+        // 清掉上一 turn 可能残留的取消信号。
+        let _ = session.cancel_tx.send(false);
         let outcome = drive_turn(&session, &session_id, content, conn).await;
+        session.busy.store(false, std::sync::atomic::Ordering::Release);
         crate::prompt_response(outcome)
+    }
+
+    /// `_oxidea/steer`：运行中插队。消息进 agent 的 steer 队列，ReAct 循环在
+    /// 下一步开始前注入（`steer_injected`）。空闲会话拒绝——没有消费者，
+    /// 消息会泄漏在队列里；ide-agent 收到错误后把消息退回排队队列。
+    pub fn steer(&self, params: &Value) -> Result<Value, RpcError> {
+        let (session_id, content) = protocol::parse_steer(params)?;
+        let session = match self.sessions.lock().unwrap().get(&session_id).cloned() {
+            Some(session) => session,
+            None => {
+                return Err(RpcError::invalid_params(format!(
+                    "未知 sessionId: {}",
+                    session_id
+                )))
+            }
+        };
+        if !session.busy.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(RpcError::invalid_params("会话空闲，无需插队"));
+        }
+        session
+            .agent
+            .push_steer(session_id.clone(), Msg::new(Role::User, "user", content));
+        Ok(json!({}))
+    }
+
+    /// `session/cancel` 通知：置取消信号，drive_turn 的 select 竞争感知后
+    /// 以 `stopReason: "cancelled"` 结束当前 turn。
+    pub fn cancel(&self, params: &Value) {
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
+            return;
+        };
+        if let Some(session) = self.sessions.lock().unwrap().get(session_id).cloned() {
+            let _ = session.cancel_tx.send(true);
+        }
     }
 }
 
@@ -363,21 +415,35 @@ pub fn build_model(env: &[(String, String)]) -> Result<Arc<dyn Model>, String> {
 /// delta 微批的攒批阈值（字节）：同块连续增量攒到这个量再发一帧。
 const DELTA_FLUSH_BYTES: usize = 256;
 
-/// 把攒住的 delta 一次性发为 ACP chunk 通知（空 buffer 跳过）。
-async fn send_chunk<W>(conn: &RpcConn<W>, session_id: &str, buffer: &mut String, thought: bool)
+/// flush 一块增量；写失败（消费者断开，如 ide-agent abort/kill）→ 置取消
+/// 终局并返回 false，drive_turn 据此终止而非对着断开的连接空转。
+async fn flush_chunk<W>(
+    conn: &RpcConn<W>,
+    session_id: &str,
+    buffer: &mut String,
+    thought: bool,
+    outcome: &mut Option<PromptOutcome>,
+) -> bool
 where
     W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     if buffer.is_empty() {
-        return;
+        return true;
     }
     let update = if thought {
         protocol::agent_thought_chunk(session_id, buffer)
     } else {
         protocol::agent_message_chunk(session_id, buffer)
     };
-    conn.notify("session/update", update).await;
+    if conn.try_notify("session/update", update).await.is_err() {
+        if outcome.is_none() {
+            *outcome = Some(PromptOutcome::Cancelled);
+        }
+        buffer.clear();
+        return false;
+    }
     buffer.clear();
+    true
 }
 
 async fn drive_turn<W>(
@@ -406,33 +472,66 @@ where
         // 其它事件时先清空——把每 token 一帧 JSON 压成更少的帧流。
         let mut pending_text = String::new();
         let mut pending_thought = String::new();
-        while let Some(event) = rx.recv().await {
+        let mut cancel_rx = session.cancel_tx.subscribe();
+        'events: while let Some(event) = tokio::select! {
+            biased;
+            // `session/cancel`：置终局 Cancelled（循环后的公共收尾把攒住的
+            // 增量发完），prompt 响应 stopReason=cancelled，ide-agent 据此
+            // 把会话状态归位。watch 保留最新值，通知先到也不丢。
+            changed = cancel_rx.changed() => match changed {
+                Ok(()) if *cancel_rx.borrow() => {
+                    outcome = Some(PromptOutcome::Cancelled);
+                    break 'events;
+                }
+                // 取消信号被重置（新 turn 开始）：继续等事件。
+                Ok(()) => continue 'events,
+                // 发送端没了（会话销毁）：按事件流关闭处理。
+                Err(_) => None,
+            },
+            event = rx.recv() => event,
+        } {
             match event.kind {
                 AgentEventKind::TextBlockDelta { delta, .. } => {
-                    if !pending_thought.is_empty() {
-                        send_chunk(conn, session_id, &mut pending_thought, true).await;
+                    if !pending_thought.is_empty()
+                        && !flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome)
+                            .await
+                    {
+                        break 'events;
                     }
                     pending_text.push_str(&delta);
-                    if pending_text.len() >= DELTA_FLUSH_BYTES {
-                        send_chunk(conn, session_id, &mut pending_text, false).await;
+                    if pending_text.len() >= DELTA_FLUSH_BYTES
+                        && !flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome)
+                            .await
+                    {
+                        break 'events;
                     }
                     continue;
                 }
                 AgentEventKind::ThinkingBlockDelta { delta, .. } => {
-                    if !pending_text.is_empty() {
-                        send_chunk(conn, session_id, &mut pending_text, false).await;
+                    if !pending_text.is_empty()
+                        && !flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome)
+                            .await
+                    {
+                        break 'events;
                     }
                     pending_thought.push_str(&delta);
-                    if pending_thought.len() >= DELTA_FLUSH_BYTES {
-                        send_chunk(conn, session_id, &mut pending_thought, true).await;
+                    if pending_thought.len() >= DELTA_FLUSH_BYTES
+                        && !flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome)
+                            .await
+                    {
+                        break 'events;
                     }
                     continue;
                 }
                 _ => {}
             }
             // 非 delta 事件：先把攒住的增量发完，保持时间线顺序。
-            send_chunk(conn, session_id, &mut pending_text, false).await;
-            send_chunk(conn, session_id, &mut pending_thought, true).await;
+            if !flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome).await {
+                break 'events;
+            }
+            if !flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome).await {
+                break 'events;
+            }
             match event.kind {
                 AgentEventKind::ToolCallStart {
                     tool_call_id,
@@ -539,13 +638,19 @@ where
             }
         }
         // 事件流关闭：把攒住的增量发完再定终局。
-        send_chunk(conn, session_id, &mut pending_text, false).await;
-        send_chunk(conn, session_id, &mut pending_thought, true).await;
+        // 收尾 flush：写失败只置取消终局（flush_chunk 内部处理），不再 break。
+        let _ = flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome).await;
+        let _ = flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome).await;
         match (outcome, confirm_reply_id) {
             // 事件流自然结束：本轮终局。
             (Some(outcome), _) => return outcome,
             // 事件流在权限挂起后结束（agent ASKING 挂起返回）：回灌确认结果续跑。
             (None, Some(reply_id)) => {
+                // 权限往返期间收到取消：不回灌续跑，直接终局（agent 侧停在
+                // ASKING，未决工具由 pending recovery 兜底）。
+                if *session.cancel_tx.subscribe().borrow() {
+                    return PromptOutcome::Cancelled;
+                }
                 msg = confirm_message(&reply_id, confirm_results);
             }
             // 事件流关闭但既无终局也无权限挂起：视为异常中断。
@@ -601,13 +706,26 @@ mod tests {
     /// 预置响应序列的 Mock 模型（对齐 core 测试的形态）。
     struct MockModel {
         responses: Mutex<Vec<ChatResponse>>,
+        /// 每次调用收到的消息文本（验证 steer 注入等输入侧行为）。
+        seen: Mutex<Vec<Vec<String>>>,
     }
 
     impl MockModel {
         fn new(responses: Vec<ChatResponse>) -> Arc<Self> {
             Arc::new(Self {
                 responses: Mutex::new(responses),
+                seen: Mutex::new(Vec::new()),
             })
+        }
+
+        /// 第 `n` 次调用（0 起）收到的消息文本列表。
+        fn seen_texts(&self, call: usize) -> Vec<String> {
+            self.seen
+                .lock()
+                .unwrap()
+                .get(call)
+                .cloned()
+                .unwrap_or_default()
         }
     }
 
@@ -615,8 +733,17 @@ mod tests {
     impl Model for MockModel {
         async fn call(
             &self,
-            _request: agentscope_core::ChatRequest,
+            request: agentscope_core::ChatRequest,
         ) -> Result<ChatResponse, Error> {
+            let texts: Vec<String> = request
+                .messages
+                .iter()
+                .filter_map(|m| match m.content.first() {
+                    Some(ContentBlock::Text { text }) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect();
+            self.seen.lock().unwrap().push(texts);
             self.responses
                 .lock()
                 .unwrap()
@@ -652,15 +779,16 @@ mod tests {
         responses: Vec<ChatResponse>,
         with_echo: bool,
         ask_echo: bool,
-    ) -> Arc<HarnessAgent> {
+    ) -> (Arc<HarnessAgent>, Arc<MockModel>) {
         let mut toolkit = Toolkit::new();
         if with_echo {
             toolkit.register(Arc::new(EchoTool));
         }
+        let model = MockModel::new(responses);
         let mut builder = HarnessAgentBuilder::new()
             .name("test")
             .sys_prompt("test")
-            .model(MockModel::new(responses))
+            .model(model.clone())
             .toolkit(toolkit)
             .max_iters(5);
         if ask_echo {
@@ -678,7 +806,8 @@ mod tests {
             };
             builder = builder.permission_context(state);
         }
-        Arc::new(builder.build().expect("build agent"))
+        let agent = Arc::new(builder.build().expect("build agent"));
+        (agent, model)
     }
 
     /// 模拟 ACP client 端：读 agent 发出的帧；遇到 request_permission
@@ -689,15 +818,20 @@ mod tests {
         agent: Arc<HarnessAgent>,
         text: &str,
         grant_option: Option<&str>,
+        cancel_before_grant: bool,
+        steer_text: Option<&str>,
     ) -> (Vec<Value>, PromptOutcome) {
         let (client, server) = tokio::io::duplex(256 * 1024);
         let (server_read, server_write) = tokio::io::split(server);
         let conn = Arc::new(RpcConn::new(server_write));
         let (mut client_read, mut client_write) = tokio::io::split(client);
 
+        let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
         let session = AcpSession {
             agent,
             cwd: PathBuf::from("."),
+            busy: std::sync::atomic::AtomicBool::new(false),
+            cancel_tx,
         };
 
         // 读循环：消费 server 端入站帧（client 回的响应），配对给等待者。
@@ -733,6 +867,8 @@ mod tests {
         );
 
         // client 端循环：读帧 → request_permission 时回响应。
+        let cancel_tx = session.cancel_tx.clone();
+        let steer_agent = session.agent.clone();
         let client_loop = async move {
             let mut reader = tokio::io::BufReader::new(&mut client_read);
             let mut notifications = Vec::new();
@@ -751,6 +887,23 @@ mod tests {
                 };
                 if frame.get("method").and_then(Value::as_str) == Some("session/request_permission")
                 {
+                    // 模拟 serve 主循环转发 cancel 通知：权限答复前置取消信号
+                    // （真实链路里通知先于答复帧到达）。
+                    if cancel_before_grant {
+                        let _ = cancel_tx.send(true);
+                    }
+                    // 模拟 _oxidea/steer：权限挂起（busy）窗口内插队，消息进
+                    // agent 的 steer 队列，续跑后应出现在下一轮模型输入里。
+                    if let Some(steer) = steer_text {
+                        steer_agent.push_steer(
+                            "sess-1".to_string(),
+                            Msg::new(
+                                Role::User,
+                                "user",
+                                vec![ContentBlock::Text { text: steer.to_string() }],
+                            ),
+                        );
+                    }
                     let id = frame["id"].clone();
                     let option_id = grant_option.unwrap_or("reject_once");
                     let response = json!({
@@ -784,8 +937,8 @@ mod tests {
 
     #[tokio::test]
     async fn plain_text_reply_streams_chunks_and_ends_turn() {
-        let agent = build_agent(vec![ChatResponse::from_text("你好，世界")], false, false);
-        let (notifications, outcome) = run_drive_turn(agent, "打个招呼", None).await;
+        let (agent, _model) = build_agent(vec![ChatResponse::from_text("你好，世界")], false, false);
+        let (notifications, outcome) = run_drive_turn(agent, "打个招呼", None, false, None).await;
         assert_eq!(outcome, PromptOutcome::EndTurn);
         let chunks: Vec<&Value> = notifications.iter().map(update_of).collect();
         let text: String = chunks
@@ -799,7 +952,7 @@ mod tests {
     #[tokio::test]
     async fn tool_call_maps_to_started_and_completed() {
         // 注意：MockModel.pop() 从尾部弹出，故先弹的（工具调用）放后面。
-        let agent = build_agent(
+        let (agent, _model) = build_agent(
             vec![
                 ChatResponse::from_text("工具跑完了"),
                 ChatResponse {
@@ -817,7 +970,7 @@ mod tests {
             true,
             false,
         );
-        let (notifications, outcome) = run_drive_turn(agent, "echo 一下", None).await;
+        let (notifications, outcome) = run_drive_turn(agent, "echo 一下", None, false, None).await;
         assert_eq!(outcome, PromptOutcome::EndTurn);
         let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
         let started = updates
@@ -837,7 +990,7 @@ mod tests {
     #[tokio::test]
     async fn permission_ask_round_trip_grants_and_continues() {
         // pop 从尾部弹出：先弹工具调用，后弹最终回复。
-        let agent = build_agent(
+        let (agent, _model) = build_agent(
             vec![
                 ChatResponse::from_text("授权后完成"),
                 ChatResponse {
@@ -855,7 +1008,7 @@ mod tests {
             true,
             true, // echo 配 ask 规则 → 触发 RequireUserConfirm
         );
-        let (notifications, outcome) = run_drive_turn(agent, "跑 echo", Some("allow_once")).await;
+        let (notifications, outcome) = run_drive_turn(agent, "跑 echo", Some("allow_once"), false, None).await;
         assert_eq!(outcome, PromptOutcome::EndTurn, "授权后应续跑到终局");
         let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
         // 工具最终 completed（授权生效）
@@ -874,7 +1027,7 @@ mod tests {
     #[tokio::test]
     async fn permission_rejection_marks_tool_failed() {
         // pop 从尾部弹出：先弹工具调用，后弹最终回复。
-        let agent = build_agent(
+        let (agent, _model) = build_agent(
             vec![
                 ChatResponse::from_text("那就算了"),
                 ChatResponse {
@@ -892,7 +1045,7 @@ mod tests {
             true,
             true,
         );
-        let (notifications, outcome) = run_drive_turn(agent, "跑 echo", Some("reject_once")).await;
+        let (notifications, outcome) = run_drive_turn(agent, "跑 echo", Some("reject_once"), false, None).await;
         assert_eq!(outcome, PromptOutcome::EndTurn);
         let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
         assert!(
@@ -901,6 +1054,111 @@ mod tests {
                 .any(|u| u["sessionUpdate"] == "tool_call_update" && u["status"] == "failed"),
             "拒绝后工具应标记失败: {updates:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn cancel_during_permission_round_trip_ends_turn_cancelled() {
+        // pop 从尾部弹出：先弹工具调用，后弹最终回复。
+        let (agent, _model) = build_agent(
+            vec![
+                ChatResponse::from_text("授权后完成"),
+                ChatResponse {
+                    content: vec![ContentBlock::ToolUse {
+                        id: "call_c".into(),
+                        name: "echo".into(),
+                        input: json!({ "text": "需要授权" }),
+                        state: None,
+                        content: None,
+                    }],
+                    usage: None,
+                    finish_reason: None,
+                },
+            ],
+            true,
+            true,
+        );
+        // 权限答复前注入取消信号（模拟 session/cancel 通知先到）→ 不回灌
+        // 续跑，直接终局 cancelled；第二轮回复不应出现。
+        let (notifications, outcome) =
+            run_drive_turn(agent, "跑 echo", Some("allow_once"), true, None).await;
+        assert_eq!(outcome, PromptOutcome::Cancelled);
+        let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
+        assert!(
+            !updates
+                .iter()
+                .any(|u| u["sessionUpdate"] == "agent_message_chunk"
+                    && u["content"]["text"] == "授权后完成"),
+            "取消后不应有第二轮回复: {updates:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn steer_joins_running_turn_and_reaches_model() {
+        // pop 从尾部弹出：先弹工具调用，后弹最终回复。
+        let (agent, model) = build_agent(
+            vec![
+                ChatResponse::from_text("授权后完成"),
+                ChatResponse {
+                    content: vec![ContentBlock::ToolUse {
+                        id: "call_s".into(),
+                        name: "echo".into(),
+                        input: json!({ "text": "需要授权" }),
+                        state: None,
+                        content: None,
+                    }],
+                    usage: None,
+                    finish_reason: None,
+                },
+            ],
+            true,
+            true,
+        );
+        // 权限挂起（busy）窗口内插队 → 续跑后消息应出现在下一轮模型输入里。
+        let (notifications, outcome) =
+            run_drive_turn(agent, "跑 echo", Some("allow_once"), false, Some("插队：改跑两次"))
+                .await;
+        assert_eq!(outcome, PromptOutcome::EndTurn);
+        let second_call = model.seen_texts(1);
+        assert!(
+            second_call.iter().any(|t| t.contains("插队：改跑两次")),
+            "steer 消息应注入下一轮模型输入: {second_call:?}"
+        );
+        let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
+        assert!(
+            updates
+                .iter()
+                .any(|u| u["sessionUpdate"] == "tool_call_update" && u["status"] == "completed"),
+            "插队不应影响工具完成: {updates:?}"
+        );
+    }
+
+    #[test]
+    fn steer_rejects_idle_session() {
+        let hub = crate::AcpSessionHub::new(Vec::new());
+        let (agent, _model) = build_agent(vec![], false, false);
+        let (cancel_tx, _rx) = tokio::sync::watch::channel(false);
+        hub.sessions.lock().unwrap().insert(
+            "s1".to_string(),
+            Arc::new(AcpSession {
+                agent,
+                cwd: PathBuf::from("."),
+                busy: std::sync::atomic::AtomicBool::new(false),
+                cancel_tx,
+            }),
+        );
+        let params = json!({
+            "sessionId": "s1",
+            "prompt": [{ "type": "text", "text": "插队" }],
+        });
+        // 空闲会话拒绝插队（没有消费者，消息会泄漏在队列里）。
+        assert!(hub.steer(&params).is_err());
+        // busy 后接受。
+        if let Some(session) = hub.sessions.lock().unwrap().get("s1") {
+            session
+                .busy
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        assert!(hub.steer(&params).is_ok());
     }
 
     #[test]

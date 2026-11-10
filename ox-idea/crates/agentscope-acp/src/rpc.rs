@@ -61,9 +61,14 @@ impl<W: AsyncWrite + Unpin + Send + 'static> RpcConn<W> {
     }
 
     /// 发通知（无 id，无响应）。
-    pub async fn notify(&self, method: &str, params: Value) {
+    /// 发通知帧；写失败（对端断开）返回 Err，调用方可据此终止 turn。
+    pub async fn try_notify(&self, method: &str, params: Value) -> std::io::Result<()> {
         let frame = json!({ "jsonrpc": "2.0", "method": method, "params": params });
-        if let Err(error) = self.send_line(&frame).await {
+        self.send_line(&frame).await
+    }
+
+    pub async fn notify(&self, method: &str, params: Value) {
+        if let Err(error) = self.try_notify(method, params).await {
             tracing::warn!(%error, "acp: 写通知失败");
         }
     }

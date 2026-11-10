@@ -19,6 +19,9 @@ pub fn initialize_result() -> Value {
         "agentCapabilities": {
             "loadSession": false,
             "promptCapabilities": { "image": true },
+            // ide-agent 从 _meta 读扩展能力：steer=true 声明支持运行中插队
+            // （_oxidea/steer 请求），false 时插队消息退回队列等 turn 结束。
+            "_meta": { "/oxidea/steer": true },
         },
         "agentInfo": {
             "name": "agentscope",
@@ -38,6 +41,7 @@ pub fn new_session_result(session_id: &str) -> Value {
         "agentCapabilities": {
             "loadSession": false,
             "promptCapabilities": { "image": true },
+            "_meta": { "/oxidea/steer": true },
         },
     })
 }
@@ -159,8 +163,32 @@ pub fn parse_prompt(params: &Value) -> Result<(String, Vec<ContentBlock>), RpcEr
         .get("prompt")
         .and_then(Value::as_array)
         .ok_or_else(|| RpcError::invalid_params("session/prompt 缺 prompt 数组"))?;
-    // text 块拼接成一条文本；image 块（base64）转成框架的 Image 内容块——
-    // 多模态模型直接看图（ide-agent 侧已按 capabilities.image 协商过能力）。
+    let content = content_blocks(blocks)?
+        .ok_or_else(|| RpcError::invalid_params("session/prompt 无可识别内容"))?;
+    Ok((session_id, content))
+}
+
+/// `_oxidea/steer` 参数：`{ sessionId, prompt: [blocks] }`（prompt 形态与
+/// session/prompt 相同，ide-agent 侧 `content()` 产出）。
+pub fn parse_steer(params: &Value) -> Result<(String, Vec<ContentBlock>), RpcError> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::invalid_params("_oxidea/steer 缺 sessionId"))?
+        .to_owned();
+    let blocks = params
+        .get("prompt")
+        .and_then(Value::as_array)
+        .ok_or_else(|| RpcError::invalid_params("_oxidea/steer 缺 prompt 数组"))?;
+    let content = content_blocks(blocks)?
+        .ok_or_else(|| RpcError::invalid_params("_oxidea/steer 无可识别内容"))?;
+    Ok((session_id, content))
+}
+
+/// ACP content 块数组 → 框架内容块：text 块拼接成一条文本；image 块（base64）
+/// 转成框架的 Image 内容块——多模态模型直接看图（ide-agent 侧已按
+/// capabilities.image 协商过能力）。`Ok(None)` = 无可识别内容。
+fn content_blocks(blocks: &[Value]) -> Result<Option<Vec<ContentBlock>>, RpcError> {
     let mut text = String::new();
     let mut content: Vec<ContentBlock> = Vec::new();
     for block in blocks {
@@ -191,13 +219,13 @@ pub fn parse_prompt(params: &Value) -> Result<(String, Vec<ContentBlock>), RpcEr
             _ => {}
         }
     }
-    if !text.trim().is_empty() || !content.is_empty() {
-        if !text.trim().is_empty() {
-            content.insert(0, ContentBlock::Text { text });
-        }
-        return Ok((session_id, content));
+    if text.trim().is_empty() && content.is_empty() {
+        return Ok(None);
     }
-    Err(RpcError::invalid_params("session/prompt 无可识别内容"))
+    if !text.trim().is_empty() {
+        content.insert(0, ContentBlock::Text { text });
+    }
+    Ok(Some(content))
 }
 
 /// 从 `session/new` 参数取 cwd（工作目录，agent 的文件工具锚定于此）。

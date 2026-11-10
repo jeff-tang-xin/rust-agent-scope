@@ -65,8 +65,8 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let conn = RpcConn::new(writer);
-    let hub = AcpSessionHub::new(env);
+    let conn = Arc::new(RpcConn::new(writer));
+    let hub = Arc::new(AcpSessionHub::new(env));
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();
@@ -87,14 +87,37 @@ where
             // 入站请求 → 分发
             (Some(method), Some(id)) => {
                 let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
-                match handle_request(&hub, &conn, &method, params).await {
-                    Ok(result) => conn.respond(id, result).await,
-                    Err(error) => conn.respond_error(id, error.code, &error.message).await,
+                if method == "session/prompt" {
+                    // spawn：一个 turn 可能跑很久，主循环必须继续读帧——
+                    // session/cancel 通知与 _oxidea/steer 请求都在 turn 期间
+                    // 到达，阻塞读帧它们就永远进不来（stop 失效的根因）。
+                    // 同会话防重入由 hub.prompt 的 busy 标志兜住。
+                    let hub = hub.clone();
+                    let conn = conn.clone();
+                    tokio::spawn(async move {
+                        match handle_request(&hub, &conn, "session/prompt", params).await {
+                            Ok(result) => conn.respond(id, result).await,
+                            Err(error) => {
+                                conn.respond_error(id, error.code, &error.message).await
+                            }
+                        }
+                    });
+                } else {
+                    match handle_request(&hub, &conn, &method, params).await {
+                        Ok(result) => conn.respond(id, result).await,
+                        Err(error) => conn.respond_error(id, error.code, &error.message).await,
+                    }
                 }
             }
-            // 通知（无 id）：目前只有 session/cancel，MVP 记录后忽略（见 session 模块 TODO）。
+            // 通知（无 id）：`session/cancel` 置取消信号，drive_turn 的 select
+            // 竞争感知后以 cancelled 终局；其余记录后忽略。
             (Some(method), None) => {
-                tracing::debug!(%method, "acp: 收到通知（当前协议面不处理）");
+                if method == "session/cancel" {
+                    let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+                    hub.cancel(&params);
+                } else {
+                    tracing::debug!(%method, "acp: 收到通知（当前协议面不处理）");
+                }
             }
             // 出站请求的响应（有 id 无 method）→ 配对回等待者
             (None, Some(id)) => conn.resolve_pending(id, msg).await,
@@ -148,6 +171,9 @@ async fn handle_request(
         }
         "session/new" => hub.create_session(params).await,
         "session/prompt" => hub.prompt(params, conn).await,
+        // 运行中插队（ide-agent 的 ⌘↵ / steer 能力）：消息进 agent 的 steer
+        // 队列，ReAct 下一步开始前注入。
+        "_oxidea/steer" => hub.steer(&params),
         "session/load" => Err(RpcError::new(
             -32601,
             "session/load not supported (loadSession: false)",

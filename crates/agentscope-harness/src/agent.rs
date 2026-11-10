@@ -373,6 +373,12 @@ impl HarnessAgent {
         Ok(rx)
     }
 
+    /// 运行中插入消息（steer）：ReAct 循环在下一步开始前注入（对应 Java
+    /// `pushSteer`）。调用已结束则留在队列里，由调用方结算时取走。
+    pub fn push_steer(&self, session_id: impl Into<String>, msg: Msg) {
+        self.delegate.push_steer(session_id, msg);
+    }
+
     /// 会话 id 缺省：`RuntimeContext.session_id` > builder 的 `default_session_id` >
     /// agent id（对齐 Java `ensureSessionDefaults` 的会话部分；workspace 属性袋注入
     /// 随 SubagentsMiddleware 批次补齐）。
