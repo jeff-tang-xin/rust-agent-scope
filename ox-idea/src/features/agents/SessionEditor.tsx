@@ -784,6 +784,21 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
 
 type UserEntry = Extract<AgentEntry, { type: "user" }>;
 
+/**
+ * Streaming reply as plain text, catching up to the latest text every animation
+ * frame — a smooth typewriter. Markdown rendering (parse + sanitize + highlight
+ * over the whole accumulated text) happens once when the turn ends; doing it per
+ * delta is what stalled long replies, and batching it made the stream choppy.
+ */
+function StreamText({ text }: { text: string }) {
+  const [shown, setShown] = useState("");
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setShown(text));
+    return () => cancelAnimationFrame(raf);
+  }, [text]);
+  return <div className={styles.streamText}>{shown}</div>;
+}
+
 /** Message text with file references and skills as tags, distinct from prose. */
 function MessageText({ text }: { text: string }) {
   return (
@@ -1061,16 +1076,19 @@ const Entry = memo(function Entry({
       return (
         <div className={styles.agentMessage}>
           <div className={styles.agentCard}>
-            <AgentReply
-              text={entry.text}
-              cwd={task.cwd}
-              task={task}
-              reply={reply}
-              turnCount={turnCount}
-              onDiagramDrawn={onDiagramDrawn}
-              actions={false}
-              streaming={working}
-            />
+            {working ? (
+              <StreamText text={entry.text} />
+            ) : (
+              <AgentReply
+                text={entry.text}
+                cwd={task.cwd}
+                task={task}
+                reply={reply}
+                turnCount={turnCount}
+                onDiagramDrawn={onDiagramDrawn}
+                actions={false}
+              />
+            )}
           </div>
           <div className={styles.messageFooter}>
             <MessageTime sentMs={time?.sentMs ?? null} doneMs={time?.doneMs ?? null} at="done" />
@@ -1095,7 +1113,11 @@ const Entry = memo(function Entry({
             }
           >
             <div className={styles.thoughtBody}>
-              <Markdown text={entry.text} cwd={task.cwd} streaming={working} onDiagramDrawn={onDiagramDrawn} />
+              {working ? (
+                <StreamText text={entry.text} />
+              ) : (
+                <Markdown text={entry.text} cwd={task.cwd} onDiagramDrawn={onDiagramDrawn} />
+              )}
             </div>
           </Fold>
         </div>
@@ -1148,7 +1170,6 @@ const Entry = memo(function Entry({
             cwd={task.cwd}
             task={task}
             onDiagramDrawn={onDiagramDrawn}
-            streaming={working}
           />
         </div>
       );
@@ -1671,7 +1692,6 @@ function SubagentCard({
               cwd={task.cwd}
               task={task}
               onDiagramDrawn={onDiagramDrawn}
-              streaming={working}
             />
           </div>
         </Fold>

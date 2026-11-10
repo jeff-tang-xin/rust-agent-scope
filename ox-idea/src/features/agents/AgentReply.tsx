@@ -14,7 +14,6 @@ export function AgentReply({
   turnCount = 0,
   onDiagramDrawn,
   actions = true,
-  streaming = false,
 }: {
   text: string;
   cwd: string;
@@ -24,12 +23,10 @@ export function AgentReply({
   onDiagramDrawn?: () => void;
   /** False when the caller supplies the message footer. */
   actions?: boolean;
-  /** While the turn is running: throttled markdown re-render (see Markdown). */
-  streaming?: boolean;
 }) {
   return (
     <div className={styles.reply}>
-      <Markdown text={text} cwd={cwd} streaming={streaming} onDiagramDrawn={onDiagramDrawn} />
+      <Markdown text={text} cwd={cwd} onDiagramDrawn={onDiagramDrawn} />
       {actions && text.trim() && (
         <div className={styles.replyFooter}>
           <ReplyActions text={text} task={task} reply={reply} turnCount={turnCount} />
