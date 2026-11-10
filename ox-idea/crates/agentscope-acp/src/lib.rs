@@ -33,8 +33,8 @@ use crate::session::{AcpSessionHub, PromptOutcome};
 pub struct OxHostContext {
     /// IDE 语义工具（搜索/符号/补丁/构建/VCS 等），注册进 agent 的 Toolkit。
     pub tools: Vec<Arc<dyn Tool>>,
-    /// 记忆工作区锚点（如 `<项目根>/.ox`，与 memory_save 工具同根，跨 worktree
-    /// 共享项目记忆）；`None` 时该会话不接记忆管线。
+    /// 记忆工作区锚点（`<项目根>/.oxidea/agent`，与 memory_save 工具同根，跨
+    /// worktree 共享项目记忆）；`None` 时该会话不接记忆管线。
     pub memory_root: Option<std::path::PathBuf>,
 }
 

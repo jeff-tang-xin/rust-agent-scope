@@ -86,8 +86,15 @@ pub fn ox_tool_provider(host: Arc<Host>) -> OxToolProvider {
                 .collect(),
             Err(_) => Vec::new(),
         };
-        // 记忆锚 `<项目根>/.ox`：与 memory_save 工具同根，跨 worktree 共享项目记忆。
-        OxHostContext { tools, memory_root: Some(project.join(".ox")) }
+        // 记忆锚 `<项目根>/.oxidea/agent`：与 memory_save 工具同根，跨 worktree 共享项目记忆。
+        // 记忆是 per-user 状态：确保它留在版本库之外（与 /shelf/、/changelists.json 同一套机制）。
+        let memory_root = ide_core::project_dir::path(&project, "agent");
+        if let Err(e) =
+            ide_vcs::changelists::ensure_ignored(&ide_core::project_dir::path(&project, ""), &["/agent/"])
+        {
+            tracing::warn!("could not update .oxidea/.gitignore: {e}");
+        }
+        OxHostContext { tools, memory_root: Some(memory_root) }
     })
 }
 

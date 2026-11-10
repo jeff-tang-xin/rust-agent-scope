@@ -127,7 +127,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>) -> Result<Arc<HarnessAgent>,
     toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
         LocalShellBackend::new_anchored(PathBuf::from(cwd)),
     ))));
-    // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.ox`，跨 worktree 共享）。
+    // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.oxidea/agent`，跨 worktree 共享）。
     let host_ctx = crate::ox_context_for(Path::new(cwd));
     let ide_section = if host_ctx.tools.is_empty() {
         String::new()
