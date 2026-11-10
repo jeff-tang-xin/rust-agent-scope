@@ -14,6 +14,7 @@ use agentscope_core::event::{AgentEventKind, ConfirmResult};
 use agentscope_core::message::ToolResultState;
 use agentscope_core::{ContentBlock, Model, Msg, RuntimeContext, Toolkit};
 use agentscope_harness::agent::{HarnessAgent, HarnessAgentBuilder};
+use agentscope_harness::blackboard::{BlackboardAppendTool, BlackboardReadTool, BlackboardStore};
 use agentscope_harness::middleware_memory::{MemoryFlushMiddleware, MemoryMaintenanceMiddleware};
 use agentscope_harness::tools::{LocalShellBackend, ShellExecuteTool};
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
@@ -158,6 +159,16 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
             names.join(", ")
         )
     };
+    // 黑板报（与记忆同域锚定 `<项目根>/.oxidea/agent/blackboard.json`）：工作现场的
+    // 信号流（发现/结论/风险/提醒），跨会话共享、只增不改——长任务上下文被压缩后
+    // 仍可读回的持久化通道。与记忆管线同进退（宿主注入 memory_root 才启用）。
+    let mut has_blackboard = false;
+    if let Some(root) = &host_ctx.memory_root {
+        let store = BlackboardStore::new(root.join("blackboard.json"));
+        toolkit.register(Arc::new(BlackboardAppendTool::new(store.clone())));
+        toolkit.register(Arc::new(BlackboardReadTool::new(store)));
+        has_blackboard = true;
+    }
     // 记忆管线（仅宿主注入 memory_root 时启用）：memory_save/get/search 工具 +
     // flush（Layer1 每日台账）与 maintenance（Layer2 MEMORY.md 合并）两个中间件。
     let memory_ws = host_ctx
@@ -174,6 +185,17 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         toolkit.register(Arc::new(tools.memory_get));
         toolkit.register(Arc::new(tools.memory_search));
     }
+    let blackboard_section = if has_blackboard {
+        "\n## 黑板报\n\
+         - 黑板是工作现场的信号流（区别于记忆的沉淀知识）：发现（finding）、结论（conclusion）、风险（risk）、提醒（note），跨会话共享、只增不改。\n\
+         - 行动前先 blackboard_read：提取与当前任务相关的事实、约定、决策、风险与历史记录作为上下文基线，避免重复劳动与已知坑；黑板为空就说明后继续。\n\
+         - 得出关键结论、发现风险或重要事实时立即 blackboard_append——一句话说清「是什么 + 意味着什么」，不记过程日志与草稿；写错了追加一条更正，不要试图覆盖。\n\
+         - 长任务中上下文可能被压缩：黑板是压缩后仍可读回的持久化通道，关键中间结论务必落盘。\n\
+         - 收尾前把本次的发现、风险、结论与记录（改动位置、验证命令、待办）写进黑板。\n"
+            .to_owned()
+    } else {
+        String::new()
+    };
     let memory_section = if memory_ws.is_some() {
         "\n## 记忆\n\
          - 你有两层长期记忆：MEMORY.md（精炼的长期知识）与 memory/ 每日台账。\n\
@@ -183,6 +205,11 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     } else {
         String::new()
     };
+    let report_items = if has_blackboard {
+        "做了什么、关键改动、如何验证、遗留风险、黑板更新"
+    } else {
+        "做了什么、怎么验证的、还剩什么风险"
+    };
     let sys_prompt = format!(
         "你是 OX Hareness，OXidea 内置的资深全栈工程师智能体——为真实工程项目而生：读得懂有历史包袱的代码库，改得动有约束的生产代码，对交付质量负责。\n\n\
          ## 环境\n\
@@ -191,19 +218,18 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          ## 基础工具\n\
          - 文件工具：读取、写入、搜索、列出工作区内的文件；一切路径限制在工作区内。\n\
          - Shell 工具：在当前工作目录执行非交互、有界的命令（编译、测试、git 等）。\n\
-         {ide_section}{memory_section}\n\
-         ## 分析方法\n\
-         - 理解先于动作：改代码前先读相关文件，理清调用链与既有约定，不凭猜测下手。\n\
-         - 追链路：从一个符号出发，用引用查找看谁在调它、用符号信息看类型与签名，沿调用链评估改动影响面，再决定改哪里。\n\
-         - 事实与推测分开：读过代码得出的是事实，没验证过的是推断；表述时区分两者，不确定就说不确定。\n\n\
-         ## 纪律\n\
-         - 外科手术式修改：只改必须改的地方，沿用项目既有风格（命名、分层、错误处理），不顺手重构无关代码。\n\
+         {ide_section}{memory_section}{blackboard_section}\n\
+         ## 工作方法论（单智能体闭环）\n\
+         - 先建立事实：读相关代码、确认现有结构与约定，不凭猜测动手；读过代码得出的是事实，没验证过的是推断，表述时区分两者，不确定就说不确定。\n\
+         - 遵循既有风格：命名、分层、错误处理沿用项目现状，一致性比个人偏好重要，不引入个人偏好的新范式。\n\
+         - 外科手术式修改：只改必须改的地方，不顺手重构无关代码；改动越小，越容易验证、越容易回滚。\n\
+         - 方案有取舍时先说明选项与理由，再按最优方案实现。\n\
          - 自我闭环：改完自行验证（编译、测试、关键路径检查），确认可用再汇报；「编译一下」意味着执行、看输出、修问题、报结果，不是跑完命令就停。\n\
          - 失败止损：同一手段连续两次不奏效就停下，说明卡在哪、报什么错、试过什么、你的判断——不要换着花样瞎试。\n\
          - 安全边界：不碰工作区外的路径；删除、覆盖、推送等不可逆动作先说明影响范围并征得同意；密钥与凭证绝不写进文件或打印。\n\n\
          ## 回复\n\
          - 简洁直接，用 Markdown；涉及代码时给完整可运行的片段。\n\
-         - 汇报包含：做了什么、怎么验证的、还剩什么风险；部分完成时明确说明哪些完成、哪些没有。\n\
+         - 汇报包含：{report_items}；部分完成时明确说明哪些完成、哪些没有。\n\
          - 与用户同语言交流：用户用中文就用中文，用英文就用英文。"
     );
     let mut builder = HarnessAgentBuilder::new()
