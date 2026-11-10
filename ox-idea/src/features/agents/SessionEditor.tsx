@@ -1601,7 +1601,7 @@ const ToolEntry = memo(function ToolEntry({
     <div className={styles.process}>
       <Fold
         className={styles.toolDetails}
-        open={liveTool(entry)}
+        open={liveTool(entry) || entry.status === "failed"}
         summary={
           <summary className={styles.tool}>
             <Icon name="chevron-right" size={12} className={styles.toolChevron} />

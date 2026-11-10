@@ -77,10 +77,26 @@ pub trait ShellBackend: Send + Sync {
     async fn execute(&self, command: &str, timeout_secs: u64) -> ExecuteResponse;
 }
 
+/// 防交互环境变量：已知工具的交互入口全部关掉（凭据提示、编辑器、包管理确认）。
+/// 与 stdin null 双保险——stdin 管"读输入的"，这些 env 管"检测终端/配置的"。
+const NON_INTERACTIVE_ENV: &[(&str, &str)] = &[
+    ("GIT_TERMINAL_PROMPT", "0"),      // git 不提示输凭据，直接失败
+    ("GIT_EDITOR", "true"),            // git 编辑器（commit/rebase -i）立即退出
+    ("EDITOR", "true"),                // 通用编辑器
+    ("VISUAL", "true"),                // 通用编辑器（部分工具优先读它）
+    ("CI", "true"),                    // npm/yarn 等检测 CI 走非交互模式
+    ("npm_config_yes", "true"),        // npm init / 安装确认默认 yes
+    ("PIP_NO_INPUT", "1"),             // pip 不提示确认
+    ("DEBIAN_FRONTEND", "noninteractive"), // apt 不交互
+];
+
 /// 本地进程执行后端（Rust 侧补充实现；Java 侧由各 sandbox 提供真实后端）。
 ///
 /// Windows 走 `cmd /C`，其余走 `sh -c`；输出超过 [`LocalShellBackend::MAX_OUTPUT_CHARS`]
 /// 截断并置 `truncated`。
+///
+/// 非交互约束：子进程 stdin 接 null + 注入 [`NON_INTERACTIVE_ENV`]——
+/// 交互式命令（等待确认/密码/编辑器）快速失败而非挂到超时。
 pub struct LocalShellBackend {
     max_output_chars: usize,
     /// 执行锚定目录（沙箱根）：设置后每次执行 `current_dir` 到该目录，
@@ -160,8 +176,16 @@ impl ShellBackend for LocalShellBackend {
             c
         };
         cmd.kill_on_drop(true)
+            // stdin 接 null：交互式命令（等待确认/密码/REPL）读 stdin 立即 EOF，
+            // 要么退出要么走默认值——不会挂到超时才被掐（对齐 remote_shell 的
+            // 非交互约束：命令必须非交互、有界、能自行结束）。
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        // 已知工具的交互入口全部关掉：凭据提示、编辑器、包管理确认。
+        for (key, value) in NON_INTERACTIVE_ENV {
+            cmd.env(key, value);
+        }
         if let Some(root) = &self.root {
             cmd.current_dir(root);
         }
@@ -209,7 +233,7 @@ impl ShellBackend for LocalShellBackend {
         text.push_str(&decode_process_output(&stderr_bytes));
         if timed_out {
             text.push_str(&format!(
-                "\n[命令执行超时（{timeout_secs}s），进程已终止；以上为终止前已产出的部分输出。长命令可用 timeout 参数调大上限后重试。]"
+                "\n[命令执行超时（{timeout_secs}s），进程已终止；以上为终止前已产出的部分输出。长命令可用 timeout 参数调大上限后重试。若命令卡在交互输入（确认/密码/编辑器），请改用非交互方式重跑（-y/--yes、管道输入、环境变量）。]"
             ));
         }
         let mut truncated = false;
@@ -274,8 +298,10 @@ impl Tool for ShellExecuteTool {
         "Execute a shell command. Use for git, npm, build, test, and other terminal operations. \
 Returns combined output and exit code. On timeout the process is killed and the partial output \
 produced so far is returned with a timeout notice — retry with a larger `timeout` for long-running \
-commands (default 30s). If a dedicated tool exists (e.g., read_file, write_file), \
-you MUST use it instead of shell commands."
+commands (default 30s). Commands MUST be non-interactive and bounded: stdin is detached (null) and \
+interactive prompts (confirmations, passwords, editors) fail fast instead of hanging — use \
+non-interactive flags (-y/--yes), piped input, or env vars instead. If a dedicated tool exists \
+(e.g., read_file, write_file), you MUST use it instead of shell commands."
     }
 
     fn parameters(&self) -> Value {
@@ -2119,6 +2145,37 @@ mod tests {
             .unwrap();
         assert_eq!(output.state, ToolResultState::Error);
         assert!(output.content.contains("relative path"));
+    }
+
+    /// 交互命令不挂起：读 stdin 的命令在 stdin null 下立即 EOF 返回，
+    /// 而不是挂到超时（30s）才被掐。
+    #[tokio::test]
+    async fn execute_interactive_command_returns_fast() {
+        let backend = LocalShellBackend::new();
+        let start = std::time::Instant::now();
+        // Windows: `more` 读 stdin；unix: `cat` 读 stdin。EOF → 立即退出。
+        let cmd = if cfg!(windows) { "more" } else { "cat" };
+        let resp = backend.execute(cmd, 30).await;
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "interactive command should return fast on stdin EOF, took {:?}",
+            start.elapsed()
+        );
+        assert_ne!(resp.exit_code, None);
+    }
+
+    /// 防交互 env 注入：子进程能看到 GIT_TERMINAL_PROMPT=0。
+    #[tokio::test]
+    async fn execute_injects_non_interactive_env() {
+        let backend = LocalShellBackend::new();
+        let cmd = if cfg!(windows) {
+            "echo %GIT_TERMINAL_PROMPT%"
+        } else {
+            "echo $GIT_TERMINAL_PROMPT"
+        };
+        let resp = backend.execute(cmd, 30).await;
+        assert_eq!(resp.exit_code, Some(0));
+        assert!(resp.output.contains('0'), "output: {:?}", resp.output);
     }
 
     #[tokio::test]

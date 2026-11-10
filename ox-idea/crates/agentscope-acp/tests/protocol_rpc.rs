@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use agentscope_acp::rpc::RpcConn;
 use agentscope_acp::{protocol, serve, set_ox_tool_provider, OxHostContext};
+use agentscope_core::message::Source;
+use agentscope_core::ContentBlock;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::io::duplex;
@@ -47,19 +49,41 @@ fn parse_prompt_concatenates_text_blocks() {
         "sessionId": "s1",
         "prompt": [
             { "type": "text", "text": "第一段" },
-            { "type": "image", "data": "..." },
+            { "type": "image", "data": "...", "mimeType": "image/png" },
             { "type": "text", "text": "第二段" },
         ],
     });
-    let (session_id, text) = protocol::parse_prompt(&params).unwrap();
+    let (session_id, content) = protocol::parse_prompt(&params).unwrap();
     assert_eq!(session_id, "s1");
-    assert_eq!(text, "第一段\n第二段");
+    // 文本在前（拼接），图片块按出现顺序保留。
+    assert_eq!(content.len(), 2);
+    assert_eq!(content[0], ContentBlock::Text { text: "第一段\n第二段".into() });
+    match &content[1] {
+        ContentBlock::Image { source: Source::Base64 { media_type, data }, .. } => {
+            assert_eq!(media_type, "image/png");
+            assert_eq!(data, "...");
+        }
+        other => panic!("expected image block, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_prompt_accepts_image_only() {
+    // 只贴图不写字：合法（多模态模型直接看图）。
+    let params = json!({
+        "sessionId": "s1",
+        "prompt": [{ "type": "image", "data": "aGk=" }],
+    });
+    let (_, content) = protocol::parse_prompt(&params).unwrap();
+    assert_eq!(content.len(), 1);
+    assert!(matches!(&content[0], ContentBlock::Image { .. }));
 }
 
 #[test]
 fn parse_prompt_rejects_missing_fields() {
     assert!(protocol::parse_prompt(&json!({ "prompt": [] })).is_err());
     assert!(protocol::parse_prompt(&json!({ "sessionId": "s" })).is_err());
+    // image 块缺 data：明确报错（优于静默丢图）。
     let empty = json!({ "sessionId": "s", "prompt": [{ "type": "image" }] });
     assert!(protocol::parse_prompt(&empty).is_err());
 }

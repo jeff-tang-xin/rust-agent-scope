@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agentscope_core::event::{AgentEventKind, ConfirmResult};
-use agentscope_core::message::ToolResultState;
+use agentscope_core::message::{Role, ToolResultState};
 use agentscope_core::{ContentBlock, Model, Msg, RuntimeContext, Toolkit};
 use agentscope_harness::agent::{HarnessAgent, HarnessAgentBuilder};
 use agentscope_harness::blackboard::{BlackboardAppendTool, BlackboardReadTool, BlackboardStore};
@@ -87,7 +87,7 @@ impl AcpSessionHub {
     where
         W: tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
-        let (session_id, text) = protocol::parse_prompt(&params)?;
+        let (session_id, content) = protocol::parse_prompt(&params)?;
         let session = match self.sessions.lock().unwrap().get(&session_id).cloned() {
             Some(session) => session,
             None => {
@@ -97,7 +97,7 @@ impl AcpSessionHub {
                 )))
             }
         };
-        let outcome = drive_turn(&session, &session_id, text, conn).await;
+        let outcome = drive_turn(&session, &session_id, content, conn).await;
         crate::prompt_response(outcome)
     }
 }
@@ -383,15 +383,16 @@ where
 async fn drive_turn<W>(
     session: &AcpSession,
     session_id: &str,
-    text: String,
+    content: Vec<ContentBlock>,
     conn: &RpcConn<W>,
 ) -> PromptOutcome
 where
     W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    // 首条：用户消息；权限往返后：确认答复消息（带 agentscope_confirm_results
-    // 元数据，agent 侧 apply 后续跑，不会重放成聊天内容）。
-    let mut msg = Msg::user("user", text);
+    // 首条：用户消息（文本 + 可选图片，多模态模型直接看图）；权限往返后：
+    // 确认答复消息（带 agentscope_confirm_results 元数据，agent 侧 apply 后续跑，
+    // 不会重放成聊天内容）。
+    let mut msg = Msg::new(Role::User, "user", content);
     loop {
         let runtime = RuntimeContext::new().with_session_id(session_id.to_owned());
         let mut rx = match session.agent.stream_events(runtime, msg.clone()).await {
@@ -724,7 +725,12 @@ mod tests {
         };
         tokio::spawn(reader_loop);
 
-        let drive = drive_turn(&session, "sess-1", text.to_string(), conn.as_ref());
+        let drive = drive_turn(
+            &session,
+            "sess-1",
+            vec![ContentBlock::Text { text: text.to_string() }],
+            conn.as_ref(),
+        );
 
         // client 端循环：读帧 → request_permission 时回响应。
         let client_loop = async move {

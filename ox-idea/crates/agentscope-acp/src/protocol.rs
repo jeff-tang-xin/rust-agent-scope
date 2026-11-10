@@ -4,6 +4,8 @@
 //! 与 ACP v1 规范：`session/update` 以 `update.sessionUpdate` 判别；
 //! `tool_call` 的 `kind`/`status` 用 v1 枚举字符串。
 
+use agentscope_core::message::Source;
+use agentscope_core::ContentBlock;
 use serde_json::{json, Value};
 
 use crate::RpcError;
@@ -16,7 +18,7 @@ pub fn initialize_result() -> Value {
         "protocolVersion": 1,
         "agentCapabilities": {
             "loadSession": false,
-            "promptCapabilities": {},
+            "promptCapabilities": { "image": true },
         },
         "agentInfo": {
             "name": "agentscope",
@@ -29,7 +31,15 @@ pub fn initialize_result() -> Value {
 
 /// `session/new` 响应。
 pub fn new_session_result(session_id: &str) -> Value {
-    json!({ "sessionId": session_id })
+    // promptCapabilities.image：声明接受图片输入（ide-agent 据此放行贴图，
+    // 否则 "This agent can't read images." 直接拒绝）。
+    json!({
+        "sessionId": session_id,
+        "agentCapabilities": {
+            "loadSession": false,
+            "promptCapabilities": { "image": true },
+        },
+    })
 }
 
 /// `session/update` 通知帧（外层）。
@@ -139,7 +149,7 @@ pub fn request_permission_params(
 
 /// 从 `session/prompt` 参数取 (sessionId, 拼接后的文本)。
 /// prompt 是 content block 数组，取全部 text 块拼接（图片等块 MVP 忽略）。
-pub fn parse_prompt(params: &Value) -> Result<(String, String), RpcError> {
+pub fn parse_prompt(params: &Value) -> Result<(String, Vec<ContentBlock>), RpcError> {
     let session_id = params
         .get("sessionId")
         .and_then(Value::as_str)
@@ -149,21 +159,45 @@ pub fn parse_prompt(params: &Value) -> Result<(String, String), RpcError> {
         .get("prompt")
         .and_then(Value::as_array)
         .ok_or_else(|| RpcError::invalid_params("session/prompt 缺 prompt 数组"))?;
+    // text 块拼接成一条文本；image 块（base64）转成框架的 Image 内容块——
+    // 多模态模型直接看图（ide-agent 侧已按 capabilities.image 协商过能力）。
     let mut text = String::new();
+    let mut content: Vec<ContentBlock> = Vec::new();
     for block in blocks {
-        if block.get("type").and_then(Value::as_str) == Some("text") {
-            if let Some(t) = block.get("text").and_then(Value::as_str) {
-                if !text.is_empty() {
-                    text.push('\n');
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(t) = block.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(t);
                 }
-                text.push_str(t);
             }
+            Some("image") => {
+                let data = block.get("data").and_then(Value::as_str).ok_or_else(|| {
+                    RpcError::invalid_params("image 块缺 data（仅支持 base64 内联图片）")
+                })?;
+                let mime_type = block
+                    .get("mimeType")
+                    .and_then(Value::as_str)
+                    .unwrap_or("image/png")
+                    .to_owned();
+                content.push(ContentBlock::Image {
+                    source: Source::Base64 { media_type: mime_type, data: data.to_owned() },
+                    min_pixels: None,
+                    max_pixels: None,
+                });
+            }
+            _ => {}
         }
     }
-    if text.trim().is_empty() {
-        return Err(RpcError::invalid_params("session/prompt 无文本内容"));
+    if !text.trim().is_empty() || !content.is_empty() {
+        if !text.trim().is_empty() {
+            content.insert(0, ContentBlock::Text { text });
+        }
+        return Ok((session_id, content));
     }
-    Ok((session_id, text))
+    Err(RpcError::invalid_params("session/prompt 无可识别内容"))
 }
 
 /// 从 `session/new` 参数取 cwd（工作目录，agent 的文件工具锚定于此）。

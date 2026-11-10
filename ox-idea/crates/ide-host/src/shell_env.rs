@@ -222,9 +222,98 @@ pub(crate) fn read_login_env(shell: &str, timeout: std::time::Duration) -> Optio
     Some(vars)
 }
 
-#[cfg(not(unix))]
+/// Windows GUI 进程继承 explorer 的 PATH 快照（登录时抓的），之后安装/修改的
+/// 工具（git、mvn、新 JDK…）不在里面——终端里有、IDE 里没有的经典错位。
+/// 从注册表读**最新的**系统 + 用户 PATH 合并进进程环境（启动早期单线程，
+/// 对齐 unix 侧 `set_var` 的安全前提）。已是最新则不动（从终端启动的场景）。
+#[cfg(windows)]
+pub fn inherit_login_shell_path(_identifier: &str) -> Option<fn()> {
+    if std::env::var_os("OXIDEA_SKIP_SHELL_ENV").is_some() {
+        return None;
+    }
+    let fresh = registry_path()?;
+    let current = std::env::var_os("PATH")?;
+    if fresh == current {
+        return None;
+    }
+    // SAFETY: documented to run at startup before any other thread reads the environment.
+    unsafe { std::env::set_var("PATH", fresh) };
+    Some(|| {})
+}
+
+#[cfg(all(not(unix), not(windows)))]
 pub fn inherit_login_shell_path(_identifier: &str) -> Option<fn()> {
     None
+}
+
+/// 注册表里的最新 PATH：系统（HKLM，在前）+ 用户（HKCU，在后）。
+/// `REG_EXPAND_SZ` 的 `%VAR%` 用当前进程环境展开（SystemRoot 等核心变量
+/// GUI 进程一定有）；读不到注册表返回 None（保持现状，不破坏启动）。
+#[cfg(windows)]
+fn registry_path() -> Option<std::ffi::OsString> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    let machine = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+        .ok()?;
+    let user = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Environment").ok();
+    let read = |key: &RegKey| -> Option<String> {
+        let raw = key.get_raw_value("Path").ok()?;
+        let text = match raw {
+            winreg::RegValue { vtype: winreg::enums::RegType::REG_EXPAND_SZ, bytes } => {
+                let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c.get(1).copied().unwrap_or(0)])).collect();
+                expand_env_vars(&String::from_utf16_lossy(&wide))
+            }
+            winreg::RegValue { vtype: winreg::enums::RegType::REG_SZ, bytes } => {
+                let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c.get(1).copied().unwrap_or(0)])).collect();
+                String::from_utf16_lossy(&wide)
+            }
+            // Path 只可能是 SZ / EXPAND_SZ；其余类型（理论上不出现）跳过。
+            _ => return None,
+        };
+        (!text.trim().is_empty()).then_some(text)
+    };
+    let mut parts = Vec::new();
+    if let Some(p) = read(&machine) {
+        parts.push(p);
+    }
+    if let Some(user) = &user {
+        if let Some(p) = read(user) {
+            parts.push(p);
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join(";").into())
+}
+
+/// 展开 `%VAR%`（找不到的变量保留原样——与 `ExpandEnvironmentStringsW` 一致）。
+#[cfg(windows)]
+fn expand_env_vars(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) => {
+                let name = &after[..end];
+                match std::env::var(name) {
+                    Ok(value) => out.push_str(&value),
+                    Err(_) => out.push_str(&rest[start..start + end + 2]),
+                }
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(not(unix))]
