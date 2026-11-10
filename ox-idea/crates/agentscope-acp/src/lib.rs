@@ -14,6 +14,7 @@
 //! `session/load` 未声明（`loadSession: false`）：会话状态由 agentscope 的
 //! state store 自管，进程重启后靠 agentscope 侧恢复，不走 ACP 重放。
 
+pub mod datasource;
 pub mod protocol;
 pub mod rpc;
 pub mod session;

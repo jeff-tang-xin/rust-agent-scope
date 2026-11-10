@@ -207,6 +207,9 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     } else {
         String::new()
     };
+    // 项目数据源探测：有配置的数据库才注入（告知 LLM 有哪些库、怎么连——
+    // 执行走 shell 工具的命令行客户端）；没有就不注入、不提。
+    let datasource_section = crate::datasource::probe_section(Path::new(cwd)).unwrap_or_default();
     let report_items = if has_blackboard {
         "做了什么、关键改动、如何验证、遗留风险、黑板更新"
     } else {
@@ -220,7 +223,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          ## 基础工具\n\
          - 文件工具：读取、写入、搜索、列出工作区内的文件；一切路径限制在工作区内。\n\
          - Shell 工具：在当前工作目录执行非交互、有界的命令（编译、测试、git 等）。\n\
-         {ide_section}{memory_section}{blackboard_section}\n\
+         {ide_section}{memory_section}{blackboard_section}{datasource_section}\n\
          ## 工作方法论（单智能体闭环）\n\
          - 先建立事实：读相关代码、确认现有结构与约定，不凭猜测动手；读过代码得出的是事实，没验证过的是推断，表述时区分两者，不确定就说不确定。\n\
          - 遵循既有风格：命名、分层、错误处理沿用项目现状，一致性比个人偏好重要，不引入个人偏好的新范式。\n\
