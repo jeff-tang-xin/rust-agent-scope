@@ -43,3 +43,6 @@ CLAUDE.local.md
 
 # Local reference screenshots
 pycharm-screenshots/
+
+# Updater signing private key (never commit; public half lives in src-tauri/tauri.conf.json)
+/src-tauri/oxidea-updater.key
