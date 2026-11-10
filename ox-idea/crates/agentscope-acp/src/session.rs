@@ -293,6 +293,26 @@ pub fn build_model(env: &[(String, String)]) -> Result<Arc<dyn Model>, String> {
 
 /// 驱动一轮 prompt：外层循环处理「权限挂起 → 确认回灌 → 续跑」的往返；
 /// 内层把事件流映射为 ACP 通知。事件流结束即本轮终局。
+/// delta 微批的攒批阈值（字节）：同块连续增量攒到这个量再发一帧。
+const DELTA_FLUSH_BYTES: usize = 256;
+
+/// 把攒住的 delta 一次性发为 ACP chunk 通知（空 buffer 跳过）。
+async fn send_chunk<W>(conn: &RpcConn<W>, session_id: &str, buffer: &mut String, thought: bool)
+where
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    if buffer.is_empty() {
+        return;
+    }
+    let update = if thought {
+        protocol::agent_thought_chunk(session_id, buffer)
+    } else {
+        protocol::agent_message_chunk(session_id, buffer)
+    };
+    conn.notify("session/update", update).await;
+    buffer.clear();
+}
+
 async fn drive_turn<W>(
     session: &AcpSession,
     session_id: &str,
@@ -314,22 +334,38 @@ where
         let mut confirm_reply_id: Option<String> = None;
         let mut confirm_results: Vec<ConfirmResult> = Vec::new();
         let mut outcome: Option<PromptOutcome> = None;
+        // delta 微批 buffer：同块连续增量攒到 ~256 字节再发一帧，块切换或
+        // 其它事件时先清空——把每 token 一帧 JSON 压成更少的帧流。
+        let mut pending_text = String::new();
+        let mut pending_thought = String::new();
         while let Some(event) = rx.recv().await {
             match event.kind {
                 AgentEventKind::TextBlockDelta { delta, .. } => {
-                    conn.notify(
-                        "session/update",
-                        protocol::agent_message_chunk(session_id, &delta),
-                    )
-                    .await;
+                    if !pending_thought.is_empty() {
+                        send_chunk(conn, session_id, &mut pending_thought, true).await;
+                    }
+                    pending_text.push_str(&delta);
+                    if pending_text.len() >= DELTA_FLUSH_BYTES {
+                        send_chunk(conn, session_id, &mut pending_text, false).await;
+                    }
+                    continue;
                 }
                 AgentEventKind::ThinkingBlockDelta { delta, .. } => {
-                    conn.notify(
-                        "session/update",
-                        protocol::agent_thought_chunk(session_id, &delta),
-                    )
-                    .await;
+                    if !pending_text.is_empty() {
+                        send_chunk(conn, session_id, &mut pending_text, false).await;
+                    }
+                    pending_thought.push_str(&delta);
+                    if pending_thought.len() >= DELTA_FLUSH_BYTES {
+                        send_chunk(conn, session_id, &mut pending_thought, true).await;
+                    }
+                    continue;
                 }
+                _ => {}
+            }
+            // 非 delta 事件：先把攒住的增量发完，保持时间线顺序。
+            send_chunk(conn, session_id, &mut pending_text, false).await;
+            send_chunk(conn, session_id, &mut pending_thought, true).await;
+            match event.kind {
                 AgentEventKind::ToolCallStart {
                     tool_call_id,
                     tool_call_name,
@@ -434,6 +470,9 @@ where
                 _ => {}
             }
         }
+        // 事件流关闭：把攒住的增量发完再定终局。
+        send_chunk(conn, session_id, &mut pending_text, false).await;
+        send_chunk(conn, session_id, &mut pending_thought, true).await;
         match (outcome, confirm_reply_id) {
             // 事件流自然结束：本轮终局。
             (Some(outcome), _) => return outcome,

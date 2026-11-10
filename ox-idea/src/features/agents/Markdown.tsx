@@ -6,7 +6,7 @@
  * the drawn diagram hides the code block, and `onDiagramDrawn` lets the conversation
  * follow the end when a diagram draws after the last streamed chunk.
  */
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Marked } from "marked";
 import DOMPurify from "dompurify";
 import { highlightInto } from "@/editor/lsp/markdown";
@@ -59,7 +59,8 @@ function purify(): ReturnType<typeof DOMPurify> {
   return p;
 }
 
-export function markdownHtml(text: string): string {
+export function markdownHtml(text: string, cache = true): string {
+  if (!cache) return renderHtml(text);
   let html = rendered.get(text);
   if (html === undefined) {
     html = renderHtml(text);
@@ -186,14 +187,31 @@ function enhance(root: HTMLElement, cwd: string, images: Map<string, Promise<str
 export function Markdown({
   text,
   cwd,
+  streaming = false,
   onDiagramDrawn,
 }: {
   text: string;
   cwd: string;
+  /** While the turn is running: re-render at most every ~120ms and skip the render cache (intermediate texts would pollute it). */
+  streaming?: boolean;
   /** A diagram drew after the message rendered: the conversation may follow the end. */
   onDiagramDrawn?: () => void;
 }) {
-  const html = useMemo(() => markdownHtml(text), [text]);
+  // Streaming throttle: the shown text lags behind the latest one by at most ~120ms.
+  // Every delta otherwise re-parses and re-sanitizes the whole accumulated text
+  // (the per-text render cache never hits while it grows), which stalls the UI on
+  // long replies. When the turn ends the final text renders immediately.
+  const [shown, setShown] = useState(text);
+  useEffect(() => {
+    if (!streaming) {
+      setShown(text);
+      return;
+    }
+    if (text === shown) return;
+    const timer = setTimeout(() => setShown(text), 120);
+    return () => clearTimeout(timer);
+  }, [text, shown, streaming]);
+  const html = useMemo(() => markdownHtml(shown, !streaming), [shown, streaming]);
   const ref = useRef<HTMLDivElement>(null);
   const images = useRef(new Map<string, Promise<string>>());
   /** The last drawing of each mermaid block, stood in while a changed one renders. */

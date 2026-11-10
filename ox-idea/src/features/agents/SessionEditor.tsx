@@ -1069,6 +1069,7 @@ const Entry = memo(function Entry({
               turnCount={turnCount}
               onDiagramDrawn={onDiagramDrawn}
               actions={false}
+              streaming={working}
             />
           </div>
           <div className={styles.messageFooter}>
@@ -1094,7 +1095,7 @@ const Entry = memo(function Entry({
             }
           >
             <div className={styles.thoughtBody}>
-              <Markdown text={entry.text} cwd={task.cwd} onDiagramDrawn={onDiagramDrawn} />
+              <Markdown text={entry.text} cwd={task.cwd} streaming={working} onDiagramDrawn={onDiagramDrawn} />
             </div>
           </Fold>
         </div>
@@ -1142,7 +1143,13 @@ const Entry = memo(function Entry({
           <div className={styles.messageFrom}>
             <T>Report to the parent agent</T>
           </div>
-          <AgentReply text={entry.text} cwd={task.cwd} task={task} onDiagramDrawn={onDiagramDrawn} />
+          <AgentReply
+            text={entry.text}
+            cwd={task.cwd}
+            task={task}
+            onDiagramDrawn={onDiagramDrawn}
+            streaming={working}
+          />
         </div>
       );
     case "permission":
@@ -1659,7 +1666,13 @@ function SubagentCard({
           }
         >
           <div className={styles.subagentReply}>
-            <AgentReply text={entry.reply} cwd={task.cwd} task={task} onDiagramDrawn={onDiagramDrawn} />
+            <AgentReply
+              text={entry.reply}
+              cwd={task.cwd}
+              task={task}
+              onDiagramDrawn={onDiagramDrawn}
+              streaming={working}
+            />
           </div>
         </Fold>
       )}

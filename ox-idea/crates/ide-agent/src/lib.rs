@@ -1240,9 +1240,17 @@ impl Task {
 
     fn flush(&self) {
         let indices = std::mem::take(&mut *self.dirty.lock());
+        // 同一 entry 在窗口内被多次 delta 命中时只 emit 最新快照——
+        // 重复事件是纯浪费：同 index 的旧快照会被新快照覆盖。
+        let mut unique: Vec<(Session, usize)> = Vec::new();
+        for key in indices {
+            if !unique.contains(&key) {
+                unique.push(key);
+            }
+        }
         let events: Vec<AgentEvent> = {
             let s = self.state.lock();
-            indices
+            unique
                 .into_iter()
                 .filter_map(|(subagent, i)| {
                     let entry = s.conversation.timeline(&subagent)?.entries.get(i)?.clone();
