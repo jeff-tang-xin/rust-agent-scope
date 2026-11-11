@@ -43,6 +43,7 @@ use crate::subagent::{
 };
 use crate::subagents_middleware::SubagentsMiddleware;
 use crate::task::{TaskRepository, WorkspaceTaskRepository};
+use crate::tools_agent_spawn::{AgentListTool, AgentSendTool, AgentSpawnCore, AgentSpawnTool};
 use crate::workspace::WorkspaceManager;
 
 /// 注入每个子代理系统提示的上下文节（逐字对齐 Java `SUBAGENT_CONTEXT_SECTION`）：
@@ -838,6 +839,22 @@ impl HarnessAgentBuilder {
                 task_repository.clone(),
             ))
         });
+        // 5.4) 子代理派发工具：SubagentsMiddleware 的系统提示（SUBAGENT_SECTION_TEMPLATE）
+        //      承诺了 agent_spawn / agent_send / agent_list，这三个工具必须真的进
+        //      function list——提示词承诺了工具面没有的工具，模型就会按提示调用、
+        //      收到 "tool not registered"，然后在既有工具里乱选（曾导致模型想派
+        //      子代理却反复误调 browser_navigate）。注册在子代理工厂固化 toolkit
+        //      快照之后：子代理是 leaf（提示词禁止再派生），不该拿到派发工具。
+        if let Some(manager) = &subagent_manager {
+            let core = AgentSpawnCore::new(
+                Arc::clone(manager),
+                Arc::clone(&task_repository),
+                0, // HarnessAgentBuilder 装配的是顶层主代理
+            );
+            toolkit.register(Arc::new(AgentSpawnTool::new(Arc::clone(&core))));
+            toolkit.register(Arc::new(AgentSendTool::new(Arc::clone(&core))));
+            toolkit.register(Arc::new(AgentListTool::new(core)));
+        }
         let mut plan_middleware: Option<Arc<PlanModeMiddleware>> = None;
 
         // 5.5) 计划模式：plan 三工具 + PlanModeMiddleware（对齐 Java HarnessAgent
@@ -1419,6 +1436,91 @@ mod tests {
         assert!(joined.contains("第一问"), "第二次请求缺少第一轮用户消息：{joined}");
         assert!(joined.contains("好的"), "第二次请求缺少第一轮助手回复：{joined}");
         assert!(joined.contains("第二问"), "缺少本次输入：{joined}");
+        agent.close();
+        std::fs::remove_dir_all(&workspace).ok();
+    }
+
+    /// 回归：SubagentsMiddleware 的系统提示（SUBAGENT_SECTION_TEMPLATE）承诺了
+    /// agent_spawn / agent_send / agent_list，build() 必须把它们注册进 function
+    /// list——提示词承诺了工具面没有的工具，模型按提示调用会收到
+    /// "tool not registered"，然后在既有工具里乱选（曾导致想派子代理却反复
+    /// 误调 browser_navigate）。用真实 agent_spawn 调用走通注册面。
+    #[tokio::test]
+    async fn build_registers_promised_subagent_tools() {
+        let workspace = temp_dir("spawn-registered");
+        let model = Arc::new(MockModel {
+            // pop 从尾部取：先弹 ToolUse（第一轮），再弹 Text（第二轮收尾）。
+            responses: Mutex::new(vec![
+                ChatResponse {
+                    content: vec![ContentBlock::Text {
+                        text: "done".to_string(),
+                    }],
+                    usage: None,
+                    finish_reason: Some("stop".to_string()),
+                },
+                ChatResponse {
+                    content: vec![ContentBlock::ToolUse {
+                        id: "call_1".to_string(),
+                        name: "agent_spawn".to_string(),
+                        input: json!({
+                            "agent_id": "general-purpose",
+                            "task": "say hi",
+                            "timeout_seconds": 0
+                        }),
+                        state: None,
+                        content: None,
+                    }],
+                    usage: None,
+                    finish_reason: Some("tool_calls".to_string()),
+                },
+            ]),
+        });
+        let agent = HarnessAgentBuilder::new()
+            .name("harness-main")
+            .model(model)
+            .workspace(&workspace)
+            // agent_spawn 非只读：默认权限会 RequireApproval 挂起，测试用
+            // Bypass 直接放行，专注验证「工具已注册并被执行」。
+            .permission_context(
+                agentscope_core::permission::PermissionContextState::default()
+                    .with_mode(agentscope_core::permission::PermissionMode::Bypass),
+            )
+            .build()
+            .unwrap();
+        let reply = agent
+            .call(RuntimeContext::new(), Msg::user("user", "hi"))
+            .await
+            .unwrap();
+        assert_eq!(reply.text(), "done");
+        // 工具结果回传：修复前 agent_spawn 未注册，结果为
+        // "tool not registered: agent_spawn"；修复后是 spawn 的真实输出。
+        let state = agent
+            .delegate()
+            .state_for(None, "harness-main")
+            .unwrap()
+            .expect("state should exist");
+        let mut spawn_result = String::new();
+        for msg in &state.context {
+            for block in &msg.content {
+                if let ContentBlock::ToolResult { name, output, .. } = block {
+                    if name == "agent_spawn" {
+                        for ob in output {
+                            if let ContentBlock::Text { text } = ob {
+                                spawn_result.push_str(text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            !spawn_result.is_empty(),
+            "应存在 agent_spawn 的工具结果（工具已注册并被执行）"
+        );
+        assert!(
+            !spawn_result.contains("tool not registered"),
+            "agent_spawn 应已注册进 function list，实际结果: {spawn_result}"
+        );
         agent.close();
         std::fs::remove_dir_all(&workspace).ok();
     }
