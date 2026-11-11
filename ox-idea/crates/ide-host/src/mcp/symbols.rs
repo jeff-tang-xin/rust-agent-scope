@@ -244,6 +244,55 @@ pub fn find_references() -> Tool {
             }
         }
         positions(&mut value);
+        // 输出形态对齐其他工具与原版 MCP findReferences：LSP 结果的 path 是
+        // 绝对路径，相对化到项目根（search_text 等工具给 agent 的都是相对
+        // 路径）；剥掉行源码 text 与冗余 uri——原版只返回位置，agent 需要
+        // 看代码时用 read_file。带源码行的结果在常用符号（上千处引用）下
+        // 会膨胀到数百 KB，撑爆模型上下文。
+        // 其余均为无损压缩：range 压扁为 [startLine, startCol, endLine,
+        // endCol]（同样的四个数，省一半嵌套开销）；kind/access 未分类
+        // （unknown）时省略字段——缺失与 unknown 对 agent 等价，有真实
+        // 分类时照常输出。影响面查询的语义是完备性，不做条数上限。
+        fn slim(value: &mut serde_json::Value, call: &Call) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    for key in ["kind", "access"] {
+                        if map.get(key).and_then(|v| v.as_str()) == Some("unknown") {
+                            map.remove(key);
+                        }
+                    }
+                    if let Some(r) = map.get_mut("range")
+                        && let Some(obj) = r.as_object_mut()
+                        && let (Some(sl), Some(sc)) = (
+                            obj.get("start").and_then(|s| s.get("line")).and_then(|v| v.as_u64()),
+                            obj.get("start").and_then(|s| s.get("col")).and_then(|v| v.as_u64()),
+                        )
+                        && let (Some(el), Some(ec)) = (
+                            obj.get("end").and_then(|s| s.get("line")).and_then(|v| v.as_u64()),
+                            obj.get("end").and_then(|s| s.get("col")).and_then(|v| v.as_u64()),
+                        )
+                    {
+                        *r = json!([sl, sc, el, ec]);
+                    }
+                    if let Some(p) = map.get("path").and_then(|v| v.as_str()) {
+                        let displayed = call.display(Path::new(p));
+                        map.insert("path".into(), serde_json::Value::String(displayed));
+                    }
+                    map.remove("text");
+                    map.remove("uri");
+                    for v in map.values_mut() {
+                        slim(v, call);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for v in items {
+                        slim(v, call);
+                    }
+                }
+                _ => {}
+            }
+        }
+        slim(&mut value, &call);
         Output::json(value)
     })
     .param(Param::required("filePath", ParamType::String, "Path relative to the project root"))
