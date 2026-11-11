@@ -4696,6 +4696,7 @@ version = "0.0.1"
 dependencies = [
  "agentscope-acp",
  "agentscope-core",
+ "agentscope-db",
  "async-trait",
  "base64 0.22.1",
  "blake3",

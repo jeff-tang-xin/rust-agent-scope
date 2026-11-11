@@ -86,6 +86,10 @@ pub fn ox_tool_provider(host: Arc<Host>) -> OxToolProvider {
                 .collect(),
             Err(_) => Vec::new(),
         };
+        // 数据库面板连接 → db_query/db_dml 工具（复用面板连接池与密码管理，
+        // 无连接时为空不注册）。
+        let mut tools = tools;
+        tools.extend(crate::ox_db_tools::db_tools(host.clone(), cwd));
         // 记忆锚 `<项目根>/.oxidea/agent`：与 memory_save 工具同根，跨 worktree 共享项目记忆。
         // 记忆是 per-user 状态：确保它留在版本库之外（与 /shelf/、/changelists.json 同一套机制）。
         let memory_root = ide_core::project_dir::path(&project, "agent");

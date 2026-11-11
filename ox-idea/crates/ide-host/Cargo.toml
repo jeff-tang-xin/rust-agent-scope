@@ -12,6 +12,7 @@ path = "src/bin/server.rs"
 [dependencies]
 agentscope-acp = { path = "../agentscope-acp" }
 agentscope-core = { path = "../../../crates/agentscope-core" }
+agentscope-db = { path = "../../../crates/agentscope-db" }
 async-trait.workspace = true
 encoding_rs.workspace = true
 ide-core.workspace = true

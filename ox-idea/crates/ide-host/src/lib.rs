@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod notebook;
 pub mod ops;
 pub mod ox_tools;
+pub mod ox_db_tools;
 mod phpstan;
 pub mod plugins;
 mod project;
