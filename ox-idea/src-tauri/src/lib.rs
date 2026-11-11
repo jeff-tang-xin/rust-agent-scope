@@ -178,6 +178,8 @@ pub fn run() {
     })
     .setup(move |app| {
         builder.mount_events(app);
+        // Toast 按 AUMID 归属应用；dev 的裸 exe 没有安装快捷方式，不注册则通知被静默丢弃。
+        notify::register_app_id(&app.config().identifier, "OXidea");
         let state = AppState::new(app.handle().clone())?;
         let windows = WindowsState::default();
         if let Ok(cwd) = std::env::current_dir() {
