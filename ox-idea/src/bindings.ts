@@ -1620,6 +1620,8 @@ doneMs?: number | null;
 steered?: boolean } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; id: string; title: string; 
 /**  ACP tool kind: `read`, `edit`, `execute`, `search`, `fetch`, `think`… */
 kind: string; status: AgentToolStatus; locations: IpcPath[]; 
+/**  The tool's JSON input (ACP `rawInput`), for the conversation's tool card; `None` in tasks saved before this was kept. */
+input?: string | null; 
 /**  Text the tool reported (command output…), truncated. */
 output: string | null; diffs: AgentToolDiff[] } | { type: "plan"; items: AgentPlanItem[] } | 
 /**  A subagent the agent started: its own session, whose entries are listed separately. */

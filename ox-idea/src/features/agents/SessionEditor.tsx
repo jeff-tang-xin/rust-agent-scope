@@ -670,9 +670,7 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
   // 流式判定用最后一个 agent/thought entry：steer 的用户消息插入后，agent
   // 当前步的输出仍追加在它前面（timeline open_stream），打字机要跟着那条
   // 消息走——用 entries.length-1 会被用户消息顶掉，原消息冻结在中途。
-  const lastStreamIndex = entries
-    ? entries.findLastIndex((e) => e.type === "agent" || e.type === "thought")
-    : -1;
+  const lastStreamIndex = entries ? entries.findLastIndex((e) => e.type === "agent" || e.type === "thought") : -1;
   // Keep the row stable when earlier history is prepended; its author can move with the work.
   const rows = useMemo(() => (entries ? conversationRows(entries, start) : []), [entries, start]);
   const authorHeaders = useMemo(() => {
@@ -1146,6 +1144,7 @@ const Entry = memo(function Entry({
         <div className={styles.process}>
           <Fold
             className={styles.thought}
+            open={working}
             summary={
               <summary>
                 {working ? (
@@ -1210,12 +1209,7 @@ const Entry = memo(function Entry({
           <div className={styles.messageFrom}>
             <T>Report to the parent agent</T>
           </div>
-          <AgentReply
-            text={entry.text}
-            cwd={task.cwd}
-            task={task}
-            onDiagramDrawn={onDiagramDrawn}
-          />
+          <AgentReply text={entry.text} cwd={task.cwd} task={task} onDiagramDrawn={onDiagramDrawn} />
         </div>
       );
     case "permission":
@@ -1585,6 +1579,16 @@ const ToolEntry = memo(function ToolEntry({
   task: AgentTask;
   entry: Extract<AgentEntry, { type: "tool" }>;
 }) {
+  const tx = useTx();
+  // rawInput 的 JSON 文本格式化后展示；解析失败原样显示。
+  const prettyInput = (() => {
+    if (!entry.input) return null;
+    try {
+      return JSON.stringify(JSON.parse(entry.input), null, 2);
+    } catch {
+      return entry.input;
+    }
+  })();
   const head = (
     <>
       <Icon name={TOOL_ICONS[entry.kind] ?? "run"} size={14} />
@@ -1605,11 +1609,16 @@ const ToolEntry = memo(function ToolEntry({
           <span className={styles.added}>+{d.added}</span> <span className={styles.removed}>−{d.removed}</span>
         </button>
       ))}
+      {entry.status === "completed" && (
+        <span className={clsx(styles.toolBadge, styles.toolBadgeDone)}>{tx("Done")}</span>
+      )}
+      {entry.status === "failed" && (
+        <span className={clsx(styles.toolBadge, styles.toolBadgeFailed)}>{tx("Failed")}</span>
+      )}
       {(entry.status === "running" || entry.status === "pending") && <Spinner size={12} />}
-      {entry.status === "failed" && <Icon name="error" size={12} />}
     </>
   );
-  if (!entry.output)
+  if (!prettyInput && !entry.output)
     return (
       <div className={styles.process}>
         <div className={styles.tool}>{head}</div>
@@ -1627,7 +1636,18 @@ const ToolEntry = memo(function ToolEntry({
           </summary>
         }
       >
-        <pre className={styles.output}>{entry.output}</pre>
+        {prettyInput && (
+          <div className={styles.toolSection}>
+            <div className={styles.toolSectionLabel}>{tx("Parameters")}</div>
+            <pre className={styles.output}>{prettyInput}</pre>
+          </div>
+        )}
+        {entry.output && (
+          <div className={styles.toolSection}>
+            <div className={styles.toolSectionLabel}>{tx("Output")}</div>
+            <pre className={styles.output}>{entry.output}</pre>
+          </div>
+        )}
       </Fold>
     </div>
   );
@@ -1732,12 +1752,7 @@ function SubagentCard({
           }
         >
           <div className={styles.subagentReply}>
-            <AgentReply
-              text={entry.reply}
-              cwd={task.cwd}
-              task={task}
-              onDiagramDrawn={onDiagramDrawn}
-            />
+            <AgentReply text={entry.reply} cwd={task.cwd} task={task} onDiagramDrawn={onDiagramDrawn} />
           </div>
         </Fold>
       )}

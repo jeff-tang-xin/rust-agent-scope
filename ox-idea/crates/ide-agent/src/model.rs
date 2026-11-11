@@ -347,6 +347,10 @@ pub enum AgentEntry {
         kind: String,
         status: AgentToolStatus,
         locations: Vec<IpcPath>,
+        /// The tool's JSON input (ACP `rawInput`), for the conversation's
+        /// tool card; `None` in tasks saved before this was kept.
+        #[serde(default)]
+        input: Option<String>,
         /// Text the tool reported (command output…), truncated.
         output: Option<String>,
         diffs: Vec<AgentToolDiff>,

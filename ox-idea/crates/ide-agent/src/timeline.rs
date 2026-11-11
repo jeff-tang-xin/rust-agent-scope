@@ -71,6 +71,8 @@ impl Timeline {
                     kind: update.get("kind").and_then(Value::as_str).unwrap_or("other").to_owned(),
                     status: tool_status(update.get("status")).unwrap_or(AgentToolStatus::Pending),
                     locations: locations(update.get("locations")),
+                    // rawInput 只在首帧出现；存 JSON 文本，卡片展开时格式化显示。
+                    input: update.get("rawInput").map(|v| v.to_string()),
                     output: None,
                     diffs: Vec::new(),
                 };
@@ -135,9 +137,7 @@ impl Timeline {
             };
             if matched {
                 match &mut self.entries[i] {
-                    AgentEntry::Agent { text: t } | AgentEntry::Thought { text: t } => {
-                        t.push_str(text)
-                    }
+                    AgentEntry::Agent { text: t } | AgentEntry::Thought { text: t } => t.push_str(text),
                     _ => {}
                 }
                 return i;

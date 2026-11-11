@@ -625,6 +625,34 @@
 .toolDiff:hover {
   background: var(--bg-hover);
 }
+.toolBadge {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-small);
+  line-height: 1;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.toolBadgeDone {
+  color: var(--success);
+}
+.toolBadgeFailed {
+  color: var(--danger);
+}
+.toolSection {
+  padding-top: 4px;
+}
+.toolSection + .toolSection {
+  padding-top: 8px;
+}
+.toolSectionLabel {
+  margin: 0 0 4px 2px;
+  font-size: var(--fs-small);
+  color: var(--fg-muted);
+}
 
 /* Reasoning and tool calls between messages, folded as one block per turn. */
 .processRun > summary {
