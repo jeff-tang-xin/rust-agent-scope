@@ -126,6 +126,22 @@ pub fn tool_call_finished(
     json!({ "sessionId": session_id, "update": update })
 }
 
+/// 上下文压缩状态（`compaction_update`）：Start → in_progress，End →
+/// completed（`detail` 作为摘要文本）。同一轮压缩的 Start/End 用同一个
+/// compactionId（取 reply_id），client 侧据此把「压缩中」卡片更新为完成。
+/// ide-agent 的 normalize.rs 已支持渲染该 sessionUpdate。
+pub fn compaction_update(session_id: &str, compaction_id: &str, status: &str, summary_text: &str) -> Value {
+    let mut update = json!({
+        "sessionUpdate": "compaction_update",
+        "compactionId": compaction_id,
+        "status": status,
+    });
+    if !summary_text.is_empty() {
+        update["summary"] = json!([{ "type": "text", "text": summary_text }]);
+    }
+    update_frame(session_id, update)
+}
+
 /// `session/request_permission` 请求参数：单个工具调用的授权询问。
 /// options 对齐 v1 的 kind 枚举（allow_once / allow_always / reject_once）。
 pub fn request_permission_params(

@@ -655,6 +655,30 @@ where
                     )
                     .await;
                 }
+                AgentEventKind::ContextCompactionStart { reply_id } => {
+                    // 压缩开始：摘要由模型生成，可能耗时数秒——先给前端
+                    // 「压缩中」状态，避免误判为卡死。
+                    conn.notify(
+                        "session/update",
+                        protocol::compaction_update(session_id, &reply_id, "in_progress", ""),
+                    )
+                    .await;
+                }
+                AgentEventKind::ContextCompactionEnd { reply_id, detail } => {
+                    // 压缩结束：detail（如「57 条消息合并为 1 条摘要」）作为
+                    // 卡片摘要文本；失败降级时不发 End，卡片停在 in_progress
+                    // 由后续轮次的新事件覆盖。
+                    conn.notify(
+                        "session/update",
+                        protocol::compaction_update(
+                            session_id,
+                            &reply_id,
+                            "completed",
+                            detail.as_deref().unwrap_or(""),
+                        ),
+                    )
+                    .await;
+                }
                 AgentEventKind::RequireUserConfirm {
                     reply_id,
                     tool_calls,
