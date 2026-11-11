@@ -51,6 +51,9 @@ struct Entry {
     config_id: String,
     name: String,
     pid: Mutex<Option<u32>>,
+    /// When the process was created (Windows, 100 ns ticks): lets `tree_alive` tell a
+    /// reused process id from the process that was actually started.
+    created: Mutex<Option<u64>>,
     stdin: Mutex<Option<ide_core::input::InputWriter>>,
     /// The PTY master of a terminal-emulated run (resize; dropped on exit).
     pty: Option<Mutex<Option<Box<dyn MasterPty + Send>>>>,
@@ -450,6 +453,7 @@ impl ProcessManager {
             config_id: config.id.clone(),
             name: config.name.clone(),
             pid: Mutex::new(Some(child.id())),
+            created: Mutex::new(ide_core::process::process_created(&child)),
             stdin: Mutex::new(stdin),
             pty: None,
             stop,
@@ -594,6 +598,7 @@ impl ProcessManager {
             config_id: config.id.clone(),
             name: config.name.clone(),
             pid: Mutex::new(child.process_id()),
+            created: Mutex::new(None),
             stdin: Mutex::new(Some(writer)),
             pty: Some(Mutex::new(Some(pair.master))),
             stop,
@@ -702,11 +707,11 @@ impl ProcessManager {
         }
         if already_stopping {
             // Second stop request: don't wait out the grace period.
-            kill_tree(pid, true);
+            kill_tree(pid, true, *entry.created.lock());
             return Ok(());
         }
         if entry.stop.is_none() {
-            kill_tree(pid, false);
+            kill_tree(pid, false, *entry.created.lock());
         }
         let entry = entry.clone();
         std::thread::Builder::new()
@@ -727,13 +732,27 @@ impl ProcessManager {
                     if exits_within(grace) {
                         return;
                     }
-                    kill_tree(pid, false);
+                    kill_tree(pid, false, *entry.created.lock());
                 }
                 // A first Stop only asks the process tree to exit, as IDEA does: it waits for
                 // the shutdown to finish (a Spring Boot app can take seconds) and a second Stop
                 // is what kills. Killing on a timer here cut shutdown logs off with SIGKILL.
+                #[cfg(unix)]
                 while group_alive(pid, &entry) {
                     std::thread::sleep(Duration::from_millis(50));
+                }
+                // Windows: `taskkill` walks a snapshot, so a process that raced it can survive
+                // the first kill and keep the port; re-kill until the tree is gone.
+                #[cfg(windows)]
+                {
+                    let mut last_kill = Instant::now();
+                    while group_alive(pid, &entry) {
+                        if last_kill.elapsed() >= Duration::from_secs(2) {
+                            kill_tree(pid, true, *entry.created.lock());
+                            last_kill = Instant::now();
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                 }
             })
             .map_err(|e| IdeError::internal(format!("failed to start stop thread: {e}")))?;
@@ -759,7 +778,7 @@ impl ProcessManager {
             if !entry.exited.load(Ordering::Acquire)
                 && let Some(pid) = *entry.pid.lock()
             {
-                kill_tree(pid, true);
+                kill_tree(pid, true, *entry.created.lock());
             }
         }
     }
@@ -770,7 +789,7 @@ impl ProcessManager {
             if !entry.exited.load(Ordering::Acquire)
                 && let Some(pid) = *entry.pid.lock()
             {
-                kill_tree(pid, true);
+                kill_tree(pid, true, *entry.created.lock());
             }
         }
     }
@@ -821,6 +840,7 @@ fn run_followup(
     (entry.output)(OutputChunk::System { text: format!("{}\n", inv.display) });
     let mut child = cmd.spawn()?;
     *pid = Some(child.id());
+    *entry.created.lock() = ide_core::process::process_created(&child);
     *entry.stdin.lock() = (|| -> std::io::Result<_> {
         Ok(match child.stdin.take() {
             Some(pipe) => {
@@ -988,8 +1008,10 @@ fn group_alive(pid: u32, _entry: &Entry) -> bool {
 }
 
 #[cfg(not(unix))]
-fn group_alive(_pid: u32, entry: &Entry) -> bool {
-    !entry.exited.load(Ordering::Acquire)
+fn group_alive(pid: u32, entry: &Entry) -> bool {
+    // The process itself or anything it started (a forked JVM holding a port) may still be
+    // running; the creation time recorded at spawn keeps a reused id from counting.
+    ide_core::process::tree_alive(pid, *entry.created.lock())
 }
 
 #[cfg(unix)]
@@ -1021,15 +1043,13 @@ fn add_raw_args(cmd: &mut Command, args: &[String]) {
 }
 
 #[cfg(windows)]
-fn kill_tree(pid: u32, _force: bool) {
-    use std::os::windows::process::CommandExt;
-    // Console children have no reliable graceful signal from outside their console.
-    let _ = Command::new("taskkill")
-        .args(["/T", "/F", "/PID", &pid.to_string()])
-        .creation_flags(ide_core::process::CREATE_NO_WINDOW)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+fn kill_tree(pid: u32, force: bool, created: Option<u64>) {
+    // `taskkill /T /F` plus a wait for what the process started to be gone: termination is
+    // asynchronous, and until then the port (or lock) it holds is still taken. Windows has
+    // no graceful signal from outside the console, so `force` makes no difference here. The
+    // creation time recorded at spawn finds the tree even when the process is already gone.
+    let _ = force;
+    ide_core::process::kill_tree_of_created(pid, created);
 }
 
 fn spawn_reader(
@@ -1194,6 +1214,22 @@ fn spawn_pump(
         {
             while group_alive(pid, &entry) {
                 std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        // Windows: the same wait for a Stop (the child exiting does not mean the forked JVM
+        // holding the port is gone), and a cleanup for a run that ended by itself — a crash
+        // included — but left processes behind, which would occupy the port of a rerun.
+        #[cfg(windows)]
+        if let Some(pid) = *entry.pid.lock() {
+            if entry.stopping.load(Ordering::Acquire) {
+                while group_alive(pid, &entry) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            } else if group_alive(pid, &entry) {
+                kill_tree(pid, true, *entry.created.lock());
+                while group_alive(pid, &entry) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
         }
         *entry.code.lock() = code;

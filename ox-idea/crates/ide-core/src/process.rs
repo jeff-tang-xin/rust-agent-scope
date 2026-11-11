@@ -28,6 +28,13 @@ pub fn prepare(cmd: &mut Command) -> &mut Command {
     host_env(cmd)
 }
 
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::FILETIME;
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{GetProcessTimes, TerminateProcess};
+
 /// Starts the child as the leader of its own process group on Unix, so [`kill_tree`] and
 /// [`terminate_tree`] reach what it starts in turn (`gh` → `git`, `npm` → `node`, `mvnw` →
 /// the JVM). A no-op elsewhere: on Windows the tree is found from the child's process id.
@@ -72,6 +79,14 @@ pub fn kill_tree_of(pid: u32) {
     let _ = pid;
 }
 
+/// [`kill_tree_of`] for a process known by its id *and* the creation time recorded at spawn
+/// (see [`process_created`]): when `pid` is already gone — a run that ended by itself and
+/// left its tree behind — that anchor still finds the orphans, so they get killed too.
+#[cfg(windows)]
+pub fn kill_tree_of_created(pid: u32, created: Option<u64>) {
+    taskkill_tree_from(pid, created);
+}
+
 /// [`kill_tree`] that first asks the group to exit: `SIGTERM`, then `grace`, then `SIGKILL`.
 /// Git removes its `index.lock` on `SIGTERM`, where `SIGKILL` leaves it behind and the next
 /// git command fails. Windows has no such signal to send from outside the child's console,
@@ -87,6 +102,69 @@ pub fn terminate_tree(child: &mut Child, grace: Duration) {
     #[cfg(not(unix))]
     let _ = grace;
     kill_tree(child);
+}
+
+/// When `child` was created, in 100 ns ticks since 1601 (Windows); `None` elsewhere or when
+/// the query fails. Recorded at spawn time, it lets [`tree_alive`] tell a reused process id
+/// from the process that was actually started.
+#[cfg(windows)]
+pub fn process_created(child: &Child) -> Option<u64> {
+    use std::os::windows::io::AsRawHandle;
+    let (mut created, mut exited, mut kernel, mut user) =
+        (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+    // SAFETY: the child's own handle, opened by `Command`, with query access; four out-parameters.
+    let ok = unsafe {
+        GetProcessTimes(child.as_raw_handle(), &mut created, &mut exited, &mut kernel, &mut user)
+    };
+    (ok != 0).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+}
+
+/// Whether anything of what `pid` started is still running: the process itself (when its
+/// creation time still matches `created`, so a reused id doesn't count) or any descendant.
+///
+/// - Unix: its process group is alive (`kill(-pid, 0)`), falling back to the process itself
+///   when it was not spawned with [`own_group`].
+/// - Windows: a Toolhelp snapshot walk from `pid`, counting only processes started after it
+///   (a parent's id is reused once it is gone).
+///
+/// This is what a Stop waits on: the direct child exiting does not mean what *it* started
+/// (a forked JVM holding a port) is gone.
+pub fn tree_alive(pid: u32, created: Option<u64>) -> bool {
+    #[cfg(unix)]
+    {
+        let _ = created;
+        if let Ok(id) = libc::pid_t::try_from(pid) {
+            // SAFETY: plain syscalls; signal 0 probes without signalling.
+            unsafe {
+                if libc::kill(-id, 0) == 0 {
+                    return true;
+                }
+                // Not a group leader after all (not spawned with `own_group`): the process itself.
+                return libc::kill(id, 0) == 0;
+            }
+        }
+        false
+    }
+    #[cfg(windows)]
+    {
+        if let Some(at) = created {
+            // Same process, and still running: a reused id names a process created *later*
+            // than ours, and a dead one whose object is still referenced reports an exit time.
+            if windows_tree::open(pid).is_some_and(|h| {
+                windows_tree::started(&h).is_some_and(|s| s == at) && windows_tree::still_running(&h)
+            }) {
+                return true;
+            }
+        } else if windows_tree::open(pid).is_some_and(|h| windows_tree::still_running(&h)) {
+            return true;
+        }
+        !windows_tree::descendants_from(pid, created).is_empty()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (pid, created);
+        false
+    }
 }
 
 #[cfg(unix)]
@@ -109,13 +187,28 @@ const TREE_EXIT_WAIT: Duration = Duration::from_secs(5);
 /// holds open can't be opened or deleted. The child itself is left to its owner to reap.
 #[cfg(windows)]
 fn taskkill_tree_of(pid: u32) {
-    let started = windows_tree::descendants(pid);
+    taskkill_tree_from(pid, None);
+}
+
+/// [`taskkill_tree_of`] with the creation time recorded at spawn: when `pid` is already
+/// gone (a run that ended by itself, leaving its tree behind), that anchor still finds the
+/// orphans it started, so they get killed and waited for too.
+#[cfg(windows)]
+fn taskkill_tree_from(pid: u32, root_started: Option<u64>) {
+    let mut tree = windows_tree::descendants_from(pid, root_started);
+    // The root itself, when still alive; a dead root's orphans are already in `tree`.
+    if let Some(root) = windows_tree::open(pid) {
+        tree.push(root);
+    }
     // When the child started nothing, killing it alone is the whole job:
     // `taskkill` would be a process spawn (measured at ~0.7 s here) for the
     // same outcome, and the callers kill the child themselves.
-    if started.is_empty() {
+    if tree.is_empty() {
         return;
     }
+    // `taskkill /T /F` first: one call reaches the whole tree, including processes that
+    // raced our snapshot. It fails when the root is already gone — the direct
+    // `TerminateProcess` below is what kills the orphans then.
     let mut taskkill = Command::new("taskkill");
     prepare(&mut taskkill)
         .args(["/T", "/F", "/PID", &pid.to_string()])
@@ -123,7 +216,13 @@ fn taskkill_tree_of(pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let _ = taskkill.status();
-    windows_tree::wait_all(&started, TREE_EXIT_WAIT);
+    // Whatever `taskkill` missed (orphans of a dead root, a process that raced its
+    // snapshot) dies here directly.
+    for process in &tree {
+        // SAFETY: a live process handle opened with terminate access.
+        unsafe { TerminateProcess(process.as_raw_handle(), 1) };
+    }
+    windows_tree::wait_all(&tree, TREE_EXIT_WAIT);
 }
 
 #[cfg(windows)]
@@ -136,14 +235,16 @@ mod windows_tree {
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+        WaitForSingleObject,
     };
 
     /// Every process `root` started, directly or not, opened so it can be waited for. A
     /// parent's id is reused once it is gone, so a process counts only if it started after
-    /// its parent.
-    pub(super) fn descendants(root: u32) -> Vec<OwnedHandle> {
-        let Some(root_started) = open(root).as_ref().and_then(started) else { return Vec::new() };
+    /// its parent. When `root` is already gone, `root_started` (recorded at spawn time)
+    /// still anchors that check, so orphans of a dead root are found.
+    pub(super) fn descendants_from(root: u32, root_started: Option<u64>) -> Vec<OwnedHandle> {
+        let Some(root_started) = root_started else { return Vec::new() };
         let processes = processes();
         let mut seen = HashSet::from([root]);
         let mut parents = vec![(root, root_started)];
@@ -192,20 +293,32 @@ mod windows_tree {
         out
     }
 
-    fn open(pid: u32) -> Option<OwnedHandle> {
+    pub(super) fn open(pid: u32) -> Option<OwnedHandle> {
         // SAFETY: plain call; a non-null result is a process handle owned by the caller.
-        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        let handle =
+            unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
         // SAFETY: as above.
         (!handle.is_null()).then(|| unsafe { OwnedHandle::from_raw_handle(handle) })
     }
 
     /// When the process started, in 100 ns ticks since 1601.
-    fn started(process: &OwnedHandle) -> Option<u64> {
+    pub(super) fn started(process: &OwnedHandle) -> Option<u64> {
         let (mut created, mut exited, mut kernel, mut user) =
             (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
         // SAFETY: a live process handle opened with query access; four out-parameters.
         let ok = unsafe { GetProcessTimes(process.as_raw_handle(), &mut created, &mut exited, &mut kernel, &mut user) };
         (ok != 0).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+    }
+
+    /// Whether the process has not exited yet: a dead process whose object is still
+    /// referenced (some handle open) can be opened and reports its times, but its exit
+    /// time is set — only a running one has none.
+    pub(super) fn still_running(process: &OwnedHandle) -> bool {
+        let (mut created, mut exited, mut kernel, mut user) =
+            (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+        // SAFETY: a process handle opened with query access; four out-parameters.
+        let ok = unsafe { GetProcessTimes(process.as_raw_handle(), &mut created, &mut exited, &mut kernel, &mut user) };
+        ok != 0 && exited.dwHighDateTime == 0 && exited.dwLowDateTime == 0
     }
 }
 
@@ -545,6 +658,26 @@ mod tests {
             !alive(grandchild)
         });
         assert!(gone, "the grandchild {grandchild} survived");
+    }
+
+    /// A run that ended by itself (a crash included) can leave processes behind: the tree
+    /// must still be seen (so a Stop reaches it) and killable (so a rerun doesn't start
+    /// into an occupied port) — even though the direct child, whose id anchors the walk,
+    /// is already gone.
+    #[cfg(windows)]
+    #[test]
+    fn tree_alive_and_kill_reach_orphans_of_a_dead_root() {
+        // `cmd` starts a background `ping` and exits right away; the ping outlives it.
+        let mut cmd = Command::new("cmd");
+        prepare(&mut cmd).args(["/c", "start /b ping -n 30 127.0.0.1 > nul"]);
+        let mut child = cmd.spawn().unwrap();
+        let created = process_created(&child);
+        let pid = child.id();
+        std::thread::sleep(Duration::from_millis(800));
+        let _ = child.wait();
+        assert!(tree_alive(pid, created), "the orphaned ping should keep the tree alive");
+        kill_tree_of_created(pid, created);
+        assert!(!tree_alive(pid, created), "after kill_tree_of_created nothing should be left");
     }
 
     #[cfg(windows)]
