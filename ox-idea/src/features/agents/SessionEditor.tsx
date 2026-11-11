@@ -803,26 +803,39 @@ type UserEntry = Extract<AgentEntry, { type: "user" }>;
 function StreamText({ text }: { text: string }) {
   const [shown, setShown] = useState(text.length);
   const progress = useRef(text.length);
+  const acc = useRef(0);
   useEffect(() => {
     // Already caught up (or remounted with full text): nothing to play.
     if (text.length <= progress.current) {
       progress.current = text.length;
+      acc.current = 0;
       setShown(text.length);
       return;
     }
     let raf = 0;
+    let idle = 0;
     const tick = () => {
-      const target = text.length;
-      const cur = progress.current;
-      if (cur >= target) return; // caught up; next delta restarts the loop
-      // Self-adapting pace: ~1 char/frame while the lag is small (a steady
-      // stream slower than typical model output, so it keeps playing
-      // smoothly), proportional catch-up when behind, capped at 20 chars
-      // per frame (~1200 chars/s at 60fps).
-      const behind = target - cur;
-      const step = Math.max(1, Math.min(20, Math.ceil(behind / 30)));
-      progress.current = Math.min(target, cur + step);
-      setShown(progress.current);
+      const behind = text.length - progress.current;
+      if (behind <= 0) {
+        // Caught up: keep the loop alive waiting for the next batch instead of
+        // stopping and visibly resuming per batch (the "choppy" feel); give up
+        // after ~1s idle — the next delta restarts the loop via this effect.
+        if (++idle > 60) return;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      idle = 0;
+      // Play ~1/30 of the backlog per frame: the reveal rate converges to the
+      // arrival rate (steady-state lag ≈ half a second of stream), so bursts
+      // accelerate and slow streams decelerate instead of sprint-and-stall.
+      // The accumulator allows sub-character frame rates for slow streams.
+      acc.current += Math.max(behind / 30, 1 / 6);
+      const take = Math.floor(acc.current);
+      if (take > 0) {
+        acc.current -= take;
+        progress.current = Math.min(text.length, progress.current + take);
+        setShown(progress.current);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
