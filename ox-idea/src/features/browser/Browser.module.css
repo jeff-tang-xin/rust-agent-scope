@@ -1,0 +1,45 @@
+.view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-editor);
+}
+
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.url {
+  flex: 1;
+  min-width: 80px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+}
+
+/* The live page: the frame is letterboxed, centered, never upscaled past its
+   device size (blurry); the canvas itself receives the input. */
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  background: var(--bg-editor);
+}
+
+.page {
+  outline: none;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: white;
+  cursor: default;
+}

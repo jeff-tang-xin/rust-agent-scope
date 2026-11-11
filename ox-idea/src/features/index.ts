@@ -28,6 +28,7 @@ import { activate as coverage } from "./coverage";
 import { activate as colorPreview } from "./color-preview";
 import { activate as profiler } from "./profiler";
 import { activate as logcat } from "./logcat";
+import { activate as browser } from "./browser";
 import { activate as buildTools } from "./build-tools";
 import { activate as build } from "./build";
 import { activate as templates, activateSettingsPages as templatesPages } from "./templates";
@@ -77,6 +78,7 @@ const features: Array<[string, Activate]> = [
   ["color-preview", colorPreview],
   ["profiler", profiler],
   ["logcat", logcat],
+  ["browser", browser],
   ["build-tools", buildTools],
   ["build", build],
   ["templates", templates],
