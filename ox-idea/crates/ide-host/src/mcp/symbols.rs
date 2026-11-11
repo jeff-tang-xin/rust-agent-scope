@@ -208,7 +208,7 @@ fn leads_declaration(line: &str, line_comment: Option<&str>) -> bool {
 }
 
 pub fn find_references() -> Tool {
-    Tool::new("find_references", "Find references using the language service and the IDE's project index. Positions are 1-based UTF-16. Reports incomplete results when analysis is still running.", |call| async move {
+    Tool::new("find_references", "Find references using the language service and the IDE's project index. Positions are 1-based UTF-16. Reports incomplete results when analysis is still running.\n\nBest for impact analysis of a specific declaration you are about to change (a method, class or field). Do not aim it at high-traffic names (common field names like `id`, `name`, `country`, or interface methods with many implementors): every reference in the workspace is returned and a popular symbol can produce thousands of them. For those, search_text within the relevant files instead, or narrow to a concrete declaration first with search_symbol / get_symbol_info.", |call| async move {
         let path = call.resolve_readable(&call.str("filePath")?).await?;
         let line = call.opt_i64("line")?.ok_or_else(|| IdeError::invalid("missing line"))?;
         let column = call.opt_i64("column")?.ok_or_else(|| IdeError::invalid("missing column"))?;
