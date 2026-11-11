@@ -396,6 +396,10 @@ impl Host {
     /// window stops what it started, but a quit from the Dock, the app menu or a logout
     /// exits without closing the windows, and the process trees would outlive the app.
     pub fn stop_processes_on_exit(&self) {
+        // Debug sessions first: their trees (the adapter and the program it launched,
+        // a forked JVM holding its debug port) are not in `processes`, and the async
+        // `stop` would wait on adapters that may never answer.
+        self.debugger.kill_all_on_exit();
         self.processes.kill_all();
         self.terminals.kill_all();
     }

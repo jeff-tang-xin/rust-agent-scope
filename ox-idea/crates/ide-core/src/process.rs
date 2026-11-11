@@ -110,12 +110,16 @@ pub fn terminate_tree(child: &mut Child, grace: Duration) {
 #[cfg(windows)]
 pub fn process_created(child: &Child) -> Option<u64> {
     use std::os::windows::io::AsRawHandle;
+    process_created_handle(child.as_raw_handle())
+}
+
+/// [`process_created`] for a raw process handle (a `tokio` child's `raw_handle()`).
+#[cfg(windows)]
+pub fn process_created_handle(handle: std::os::windows::io::RawHandle) -> Option<u64> {
     let (mut created, mut exited, mut kernel, mut user) =
         (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
-    // SAFETY: the child's own handle, opened by `Command`, with query access; four out-parameters.
-    let ok = unsafe {
-        GetProcessTimes(child.as_raw_handle(), &mut created, &mut exited, &mut kernel, &mut user)
-    };
+    // SAFETY: a process handle opened with query access; four out-parameters.
+    let ok = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
     (ok != 0).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 

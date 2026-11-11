@@ -379,6 +379,20 @@ fn bp(line: u32) -> Breakpoint {
 }
 
 #[tokio::test(start_paused = true)]
+async fn kill_all_on_exit_clears_live_sessions() {
+    let h = harness(Script::default());
+    let config = LaunchConfig { request: "launch".into(), ..config() };
+    let id = h.start(config).await.expect("the session starts");
+    assert_eq!(h.manager.sessions(None).len(), 1);
+    // App exit: no DAP round-trips — the trees die and the sessions are gone.
+    h.manager.kill_all_on_exit();
+    assert!(h.manager.sessions(None).is_empty());
+    // Idempotent: a second call (a restart racing the exit hook) must not panic.
+    h.manager.kill_all_on_exit();
+    let _ = id;
+}
+
+#[tokio::test(start_paused = true)]
 async fn slow_launch_and_attach_follow_adapter_startup() {
     for request in ["launch", "attach"] {
         for before_initialized in [true, false] {

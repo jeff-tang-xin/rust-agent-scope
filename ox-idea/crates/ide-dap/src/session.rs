@@ -279,6 +279,17 @@ impl Session {
     pub fn kill_processes(&self) {
         self.kotlin_relay.lock().take();
         if let Some(mut c) = self.adapter_process.lock().take() {
+            // The adapter (java-debug in launch mode) runs the program itself: killing
+            // the adapter alone would orphan it. On Windows the creation time anchors
+            // the walk, so orphans of an adapter that already died are reached too.
+            #[cfg(windows)]
+            {
+                let created = c.raw_handle().and_then(ide_core::process::process_created_handle);
+                if let Some(pid) = c.id() {
+                    ide_core::process::kill_tree_of_created(pid, created);
+                }
+            }
+            #[cfg(not(windows))]
             if self.adapter == "rdbg"
                 && let Some(pid) = c.id()
             {
@@ -349,12 +360,15 @@ pub(crate) fn signal_debuggee(s: &Arc<Session>, force: bool) {
     }
     #[cfg(windows)]
     {
-        let mut cmd = std::process::Command::new("taskkill");
-        cmd.args(["/PID", &pid.to_string(), "/T"]);
         if force {
-            cmd.arg("/F");
+            // `taskkill /T /F` alone misses what raced its snapshot; this also
+            // terminates the snapshot's processes directly and waits for them.
+            ide_core::process::kill_tree_of(pid as u32);
+        } else {
+            let mut cmd = std::process::Command::new("taskkill");
+            cmd.args(["/PID", &pid.to_string(), "/T"]);
+            let _ = cmd.status();
         }
-        let _ = cmd.status();
     }
     #[cfg(not(any(unix, windows)))]
     let _ = (pid, force);
@@ -391,7 +405,30 @@ pub(crate) async fn wait_for_debuggee(s: &Arc<Session>, terminate: bool) {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // Same loop as unix: the adapter answers `disconnect` before the program it
+        // launched has exited, and that program keeps its port until it is gone. The
+        // graceful `taskkill` (no `/F`) does nothing to a windowless JVM, so past the
+        // deadline the tree dies by force — a stopped debug session must not leave a
+        // forked JVM holding its debug port behind.
+        use std::time::Instant;
+        let pid = pid as u32;
+        let alive = || ide_core::process::tree_alive(pid, None);
+        let deadline = Instant::now() + DEBUGGEE_EXIT_WAIT;
+        while alive() {
+            if s.stop_force.swap(false, Ordering::AcqRel) {
+                ide_core::process::kill_tree_of(pid);
+            }
+            if Instant::now() >= deadline {
+                // The program ignored the terminate: do not leave it running.
+                ide_core::process::kill_tree_of(pid);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
     }
