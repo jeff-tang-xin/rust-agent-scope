@@ -131,41 +131,7 @@ impl WorkspaceConfig {
     }
 }
 
-/// 数据库服务器资源（≈ service 资源模型里的数据源；供数据库运维类
-/// agent 后续绑定的连接档案）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseServerConfig {
-    /// 展示名（唯一键；agent/会话通过名字引用）。
-    pub name: String,
-    /// 数据库类型：mysql | postgres | sqlite | sqlserver（驱动选择与展示用）。
-    pub db_type: String,
-    /// 主机（sqlite 类型时为文件路径，host/port 留空）。
-    #[serde(default)]
-    pub host: String,
-    /// 端口（0 = 未设置；sqlite 无需端口）。
-    #[serde(default)]
-    pub port: u16,
-    /// 库名（sqlite 为文件路径时与 host 二选一，约定填 host）。
-    #[serde(default)]
-    pub database: String,
-    #[serde(default)]
-    pub username: String,
-    /// 密码（仅存本地配置文件，与 api_key 同策略；不进日志与事件）。
-    #[serde(default)]
-    pub password: String,
-    /// 外部 CLI 可执行文件路径（可选，仅 Cli 驱动类型生效）：CLI 不在 PATH
-    /// 时手动指定——填可执行文件完整路径直接用，填目录则拼接程序名
-    /// （Windows 补 .exe）；留空按 PATH 探测（类似游戏盒子指定游戏地址）。
-    #[serde(default)]
-    pub cli_path: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-impl DatabaseServerConfig {
-    // 连接摘要由前端按 list_database_kinds 的元数据拼装（needs_port/needs_database），
-    // 后端不再重复实现一份 endpoint()。
-}
+pub use agentscope_db::DatabaseServerConfig;
 
 /// SSH 服务器档案（ops 工作区的远程资源；remote_shell / SFTP 文件操作都
 /// 挂在它上面）。密码仅存本地配置文件（与数据库密码、api_key 同策略），

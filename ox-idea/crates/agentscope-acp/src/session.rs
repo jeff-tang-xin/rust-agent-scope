@@ -276,9 +276,26 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     } else {
         String::new()
     };
-    // 项目数据源探测：有配置的数据库才注入（告知 LLM 有哪些库、怎么连——
-    // 执行走 shell 工具的命令行客户端）；没有就不注入、不提。
-    let datasource_section = crate::datasource::probe_section(Path::new(cwd)).unwrap_or_default();
+    // 项目数据源探测：一次扫描同时拿提示词数据与连接档案。提取出完整连接
+    // 信息的库注册 db 工具（db_query 只读免确认 / db_dml 变更走人工确认，
+    // 与 studio 共用框架级 agentscope-db crate）；没有档案的库保持走 shell
+    // 客户端（提示词节里说明）。没有发现就不注入、不提。
+    let (datasources, db_configs) = crate::datasource::probe_full(Path::new(cwd));
+    let datasource_section = if datasources.is_empty() {
+        String::new()
+    } else {
+        crate::datasource::render_section(&datasources)
+    };
+    if !db_configs.is_empty() {
+        let catalog = Arc::new(agentscope_db::DbCatalog::new());
+        catalog.replace_all(&db_configs);
+        toolkit.register(Arc::new(agentscope_db::DbQueryTool::new(
+            Arc::clone(&catalog),
+            None,
+            None,
+        )));
+        toolkit.register(Arc::new(agentscope_db::DbDmlTool::new(catalog, None, None)));
+    }
     let report_items = if has_blackboard {
         "做了什么、关键改动、如何验证、遗留风险、黑板更新"
     } else {

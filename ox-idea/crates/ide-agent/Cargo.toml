@@ -14,6 +14,7 @@ ide-jsonrpc.workspace = true
 ide-vcs.workspace = true
 ide-tools = { path = "../ide-tools" }
 agentscope-acp = { path = "../agentscope-acp" }
+agentscope-db = { path = "../../../crates/agentscope-db" }
 serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true

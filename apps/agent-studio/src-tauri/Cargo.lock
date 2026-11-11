@@ -71,6 +71,7 @@ version = "0.1.0"
 dependencies = [
  "agentscope-browser",
  "agentscope-core",
+ "agentscope-db",
  "agentscope-harness",
  "agentscope-model-anthropic",
  "agentscope-model-dashscope",
@@ -127,6 +128,19 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "agentscope-db"
+version = "0.1.0"
+dependencies = [
+ "agentscope-core",
+ "async-trait",
+ "encoding_rs",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

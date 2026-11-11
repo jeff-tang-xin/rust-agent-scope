@@ -1,0 +1,18 @@
+[package]
+name = "agentscope-db"
+version = "0.1.0"
+edition = "2021"
+description = "Database toolset for agentscope agents: read-only query (db_query, confirmation-free) and DML/DDL (db_dml, HITL-confirmed) over configured connection profiles, shared by the studio and ox-idea apps"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+agentscope-core = { path = "../agentscope-core" }
+async-trait = "0.1"
+encoding_rs = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time"] }
+
+[dev-dependencies]
+tempfile = "3"

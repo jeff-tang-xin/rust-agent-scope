@@ -19,12 +19,18 @@
 use std::fs;
 use std::path::Path;
 
+use agentscope_db::DatabaseServerConfig;
+
 /// 单个探测到的数据源：`kind` 是数据库类型，`detail` 是连接要点，
-/// `hint` 是给 LLM 的建议验证命令（走 shell 工具执行）。
+/// `hint` 是给 LLM 的建议验证命令（走 shell 工具执行）；
+/// `config` 是提取出的连接档案（能拿到完整连接信息时才有——有档案的库
+/// 注册 `db_query`/`db_dml` 工具，没有的保持走 shell 客户端）。
+#[derive(Clone)]
 pub struct Datasource {
     kind: &'static str,
     detail: String,
     hint: String,
+    config: Option<DatabaseServerConfig>,
 }
 
 /// 单文件读取上限：配置文件不该更大，超了按截断处理（探测是启发式的）。
@@ -32,22 +38,64 @@ const MAX_FILE: u64 = 64 * 1024;
 /// 注入提示的数据源条数上限：再多说明探测误报，宁缺毋滥。
 const MAX_ITEMS: usize = 8;
 
+/// 探测 `root` 项目下的数据源，一次扫描同时返回提示词数据与连接档案。
+pub fn probe_full(root: &Path) -> (Vec<Datasource>, Vec<DatabaseServerConfig>) {
+    let found = probe(root);
+    let mut names: Vec<String> = Vec::new();
+    let configs = found
+        .iter()
+        .filter_map(|ds| ds.config.clone())
+        .map(|mut cfg| {
+            let base = cfg.name.clone();
+            let mut n = 2;
+            while names.iter().any(|x| x == &cfg.name) {
+                cfg.name = format!("{base}-{n}");
+                n += 1;
+            }
+            names.push(cfg.name.clone());
+            cfg
+        })
+        .collect();
+    (found, configs)
+}
+
 /// 探测 `root` 项目下的数据源；渲染成系统提示节。没有发现返回 `None`
 /// （调用方不注入、不提数据库）。
 pub fn probe_section(root: &Path) -> Option<String> {
-    let found = probe(root);
+    let found = probe_full(root).0;
     if found.is_empty() {
-        return None;
+        None
+    } else {
+        Some(render_section(&found))
     }
+}
+
+/// 渲染数据源提示词节（`probe_full` 的调用方在注册完工具后用它拼提示词）。
+pub fn render_section(found: &[Datasource]) -> String {
     let mut section = String::from("\n## 本项目检测到的数据源\n\
-         - 以下数据库来自项目配置（未验证连通性）：连接与查询一律用 shell 工具跑命令行客户端，\
+         - 以下数据库来自项目配置（未验证连通性）。标注了「工具 id」的库已注册 \
+         db_query（只读，免确认）/ db_dml（变更，每次需人工确认）工具，优先用工具；\
+         其余连接与查询一律用 shell 工具跑命令行客户端，\
          不要尝试用文件工具读数据库文件（SQLite 除外，sqlite3 可直接打开）。\n\
          - 凭证在配置文件/环境变量里，不要把密码写进回复或日志；只读查询优先，\
          写操作先向用户确认。\n");
-    for ds in &found {
-        section.push_str(&format!("- **{}** — {}（验证：`{}`）\n", ds.kind, ds.detail, ds.hint));
+    for ds in found {
+        if let Some(cfg) = &ds.config {
+            section.push_str(&format!(
+                "- **{}** — {}（工具 id：`{}`；用 db_query/db_dml，database 参数填此 id）\n",
+                ds.kind, ds.detail, cfg.name
+            ));
+        } else {
+            section.push_str(&format!("- **{}** — {}（验证：`{}`）\n", ds.kind, ds.detail, ds.hint));
+        }
     }
-    Some(section)
+    section
+}
+
+/// 探测 `root` 项目下的数据源，返回提取出的连接档案（供工具注册）。
+/// 档案名已去重（同名追加 `-2`、`-3`…）；只含能拿到完整连接信息的库。
+pub fn probe_configs(root: &Path) -> Vec<DatabaseServerConfig> {
+    probe_full(root).1
 }
 
 /// 扫描项目根（一层 + Spring 固定资源目录），返回去重后的数据源清单。
@@ -72,10 +120,22 @@ fn probe(root: &Path) -> Vec<Datasource> {
             if is_db_file {
                 let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                 if size > 0 {
+                    let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("sqlite").to_owned();
                     found.push(Datasource {
                         kind: "SQLite",
                         detail: format!("库文件 `{}`（{} bytes）", p.display(), size),
                         hint: format!("sqlite3 \"{}\" \".tables\"", p.display()),
+                        config: Some(DatabaseServerConfig {
+                            name: file,
+                            db_type: "sqlite".to_owned(),
+                            host: p.display().to_string(),
+                            port: 0,
+                            database: String::new(),
+                            username: String::new(),
+                            password: String::new(),
+                            cli_path: String::new(),
+                            description: "项目根目录探测到的 SQLite 库文件".to_owned(),
+                        }),
                     });
                 }
                 continue;
@@ -114,7 +174,9 @@ fn probe(root: &Path) -> Vec<Datasource> {
     found
 }
 
-/// 读文件（超限截断），返回小写化的行列表供模式匹配。
+/// 读文件（超限截断），返回原始行列表供模式匹配。
+/// 注意：凭证值大小写敏感，行不做整体小写化；需要大小写无关匹配的
+/// 调用方在循环内自行 `to_lowercase()`。
 fn lines(path: &Path) -> Vec<String> {
     let ok = fs::metadata(path).map(|m| m.len() <= MAX_FILE).unwrap_or(false);
     if !ok {
@@ -123,7 +185,7 @@ fn lines(path: &Path) -> Vec<String> {
     fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
-        .map(|l| l.trim().to_ascii_lowercase())
+        .map(|l| l.trim().to_owned())
         .collect()
 }
 
@@ -133,6 +195,7 @@ fn scan_compose(path: &Path) -> Vec<Datasource> {
     let mut found = Vec::new();
     let mut current_image: Option<(&'static str, String)> = None;
     for l in &ls {
+        let l = l.to_ascii_lowercase();
         if let Some(img) = l.strip_prefix("- image:").or_else(|| l.split_once("image:").map(|(_, v)| v)) {
             let img = img.trim().trim_matches('"').trim_matches('\'');
             let kind = if img.starts_with("postgres") {
@@ -173,6 +236,7 @@ fn scan_compose(path: &Path) -> Vec<Datasource> {
                     kind: k,
                     detail: format!("docker-compose 服务镜像 `{img}`，宿主端口 {port}"),
                     hint: cmd,
+                    config: None,
                 });
                 current_image = None;
             }
@@ -182,77 +246,267 @@ fn scan_compose(path: &Path) -> Vec<Datasource> {
 }
 
 /// .env：DATABASE_URL / DB_* / POSTGRES_* / MYSQL_*。
+/// `DATABASE_URL` 能完整解析出 host/port/db/user/password 时生成连接档案；
+/// 分离变量（DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD 及 POSTGRES_/MYSQL_ 前缀）
+/// 凑齐 host+database 时也生成档案。
 fn scan_dotenv(path: &Path) -> Vec<Datasource> {
     let ls = lines(path);
     let mut found = Vec::new();
-    let mut url: Option<String> = None;
     let mut parts: Vec<String> = Vec::new();
-    for l in &ls {
-        let Some((k, v)) = l.split_once('=') else { continue };
-        let (k, v) = (k.trim(), v.trim().trim_matches('"').trim_matches('\''));
+    // 分离变量的原始值（小写键 → 原值），供档案提取。
+    let mut vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for raw in &ls {
+        let Some((k_raw, v_raw)) = raw.split_once('=') else { continue };
+        let k = k_raw.trim().to_ascii_lowercase();
+        let v = v_raw.trim().trim_matches('"').trim_matches('\'');
         if k == "database_url" {
-            url = Some(mask_password(v));
-        } else if matches!(k, "db_host" | "db_port" | "db_name" | "postgres_host" | "postgres_port" | "postgres_db" | "postgres_user" | "mysql_host" | "mysql_port" | "mysql_database") {
-            parts.push(format!("{k}={v}"));
+            parts.push(format!("{k}={}", mask_password(v)));
+            vars.insert("database_url_raw".to_owned(), v.to_owned());
+        } else if matches!(k.as_str(), "db_host" | "db_port" | "db_name" | "db_user" | "db_username" | "db_password" | "postgres_host" | "postgres_port" | "postgres_db" | "postgres_user" | "postgres_password" | "mysql_host" | "mysql_port" | "mysql_database" | "mysql_user" | "mysql_password") {
+            parts.push(format!("{k}={}", mask_password(v)));
+            vars.insert(k, v.to_owned());
         }
     }
-    if let Some(u) = url {
-        let kind = if u.contains("postgres") {
-            "PostgreSQL"
-        } else if u.contains("mysql") || u.contains("mariadb") {
-            "MySQL"
-        } else if u.contains("sqlite") {
-            "SQLite"
-        } else if u.contains("mongo") {
-            "MongoDB"
-        } else if u.contains("redis") {
-            "Redis"
-        } else {
-            "数据库"
-        };
-        found.push(Datasource {
-            kind,
-            detail: format!(".env `DATABASE_URL={u}`"),
-            hint: "按 URL 里的驱动选命令行客户端（psql / mysql / sqlite3）".to_owned(),
-        });
+    // DATABASE_URL → 完整档案。
+    if let Some(raw) = vars.get("database_url_raw") {
+        if let Some((db_type, user, pass, host, port, database)) = parse_db_url(raw) {
+            let kind = kind_of(db_type);
+            found.push(Datasource {
+                kind,
+                detail: format!(".env `DATABASE_URL={}`", mask_password(raw)),
+                hint: "已注册 db_query/db_dml 工具，直接用工具查询".to_owned(),
+                config: Some(DatabaseServerConfig {
+                    name: if database.is_empty() { host.clone() } else { database.clone() },
+                    db_type: db_type.to_owned(),
+                    host,
+                    port,
+                    database,
+                    username: user,
+                    password: pass,
+                    cli_path: String::new(),
+                    description: ".env DATABASE_URL 提取".to_owned(),
+                }),
+            });
+        }
     }
-    if !parts.is_empty() {
+    // 分离变量：凑齐 host + database 即建档案（密码可选）。
+    if vars.contains_key("db_host") || vars.contains_key("postgres_host") || vars.contains_key("mysql_host") {
+        let (host, port, database, user, pass) = pick_env_vars(&vars);
+        if !host.is_empty() && !database.is_empty() {
+            let db_type = if vars.contains_key("mysql_host") {
+                "mysql"
+            } else if vars.contains_key("postgres_host") {
+                "postgres"
+            } else if port == 3306 {
+                "mysql"
+            } else {
+                "postgres"
+            };
+            found.push(Datasource {
+                kind: kind_of(db_type),
+                detail: format!(".env {}", parts.join("、")),
+                hint: "已注册 db_query/db_dml 工具，直接用工具查询".to_owned(),
+                config: Some(DatabaseServerConfig {
+                    name: database.clone(),
+                    db_type: db_type.to_owned(),
+                    host,
+                    port,
+                    database,
+                    username: user,
+                    password: pass,
+                    cli_path: String::new(),
+                    description: ".env 分离变量提取".to_owned(),
+                }),
+            });
+        } else if !parts.is_empty() {
+            found.push(Datasource {
+                kind: "数据库（.env 变量）",
+                detail: format!(".env {}", parts.join("、")),
+                hint: "按变量判断类型后用对应命令行客户端".to_owned(),
+                config: None,
+            });
+        }
+    } else if !parts.is_empty() {
         found.push(Datasource {
             kind: "数据库（.env 变量）",
             detail: format!(".env {}", parts.join("、")),
             hint: "按变量判断类型后用对应命令行客户端".to_owned(),
+            config: None,
         });
     }
     found
 }
 
-/// Spring `jdbc:postgresql://host:port/db` 连接串。
+/// 从 .env 分离变量里按优先级取连接五元组（DB_* → POSTGRES_* → MYSQL_*）。
+fn pick_env_vars(vars: &std::collections::HashMap<String, String>) -> (String, u16, String, String, String) {
+    let get = |keys: &[&str]| -> Option<String> {
+        keys.iter().find_map(|k| vars.get(*k).filter(|v| !v.is_empty()).cloned())
+    };
+    let host = get(&["db_host", "postgres_host", "mysql_host"]).unwrap_or_default();
+    let port = get(&["db_port", "postgres_port", "mysql_port"])
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(0);
+    let database = get(&["db_name", "postgres_db", "mysql_database"]).unwrap_or_default();
+    let user = get(&["db_user", "db_username", "postgres_user", "mysql_user"]).unwrap_or_default();
+    let pass = get(&["db_password", "postgres_password", "mysql_password"]).unwrap_or_default();
+    (host, port, database, user, pass)
+}
+
+/// 解析数据库连接 URL（`scheme://user:pass@host:port/db`）为
+/// `(db_type, user, password, host, port, database)`；解析不出 host 返回 None。
+fn parse_db_url(url: &str) -> Option<(&'static str, String, String, String, u16, String)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let db_type = match scheme.to_ascii_lowercase().as_str() {
+        "postgres" | "postgresql" => "postgres",
+        "mysql" | "mariadb" => "mysql",
+        "sqlite" => "sqlite",
+        _ => return None,
+    };
+    if db_type == "sqlite" {
+        // sqlite:path 或 sqlite://path —— 路径即 host。
+        let p = rest.trim_start_matches('/');
+        return Some((db_type, String::new(), String::new(), p.to_owned(), 0, String::new()));
+    }
+    let (creds, hostpart) = match rest.split_once('@') {
+        Some((c, h)) => (Some(c), h),
+        None => (None, rest),
+    };
+    let (user, pass) = creds
+        .map(|c| match c.split_once(':') {
+            Some((u, p)) => (u.to_owned(), p.to_owned()),
+            None => (c.to_owned(), String::new()),
+        })
+        .unwrap_or_default();
+    let (hostport, database) = match hostpart.split_once('/') {
+        Some((hp, db)) => (hp, db.to_owned()),
+        None => (hostpart, String::new()),
+    };
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((h, p)) => (h.to_owned(), p.parse::<u16>().unwrap_or(0)),
+        None => (hostport.to_owned(), 0),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((db_type, user, pass, host, port, database))
+}
+
+/// db_type → 展示类型名。
+fn kind_of(db_type: &str) -> &'static str {
+    match db_type {
+        "postgres" => "PostgreSQL",
+        "mysql" => "MySQL",
+        "sqlite" => "SQLite",
+        _ => "数据库",
+    }
+}
+
+/// Spring `jdbc:postgresql://host:port/db` 连接串 + 紧邻的 username/password。
+/// yml（`username: x`）与 properties（`spring.datasource.username=x`）都识别；
+/// username/password 归最近一条 jdbc url。
 fn scan_jdbc(path: &Path) -> Vec<Datasource> {
     let ls = lines(path);
     let mut found = Vec::new();
-    for l in &ls {
+    // (kind, url, user, pass) —— url 开新组，username/password 归最近组。
+    let mut current: Option<(&'static str, String, String, String)> = None;
+    let mut done: Vec<Datasource> = Vec::new();
+    for raw in &ls {
+        let lower = raw.to_ascii_lowercase();
+        let l = lower.as_str();
         if let Some(i) = l.find("jdbc:") {
+            // 上一组先落盘。
+            if let Some((kind, url, user, pass)) = current.take() {
+                done.push(build_jdbc_ds(kind, &url, &user, &pass));
+            }
             let rest = &l[i + 5..];
-            let (kind, client) = if rest.starts_with("postgresql") || rest.starts_with("postgis") {
-                ("PostgreSQL", "psql")
+            let kind = if rest.starts_with("postgresql") || rest.starts_with("postgis") {
+                Some("PostgreSQL")
             } else if rest.starts_with("mysql") || rest.starts_with("mariadb") {
-                ("MySQL", "mysql")
+                Some("MySQL")
             } else if rest.starts_with("sqlite") {
-                ("SQLite", "sqlite3")
+                Some("SQLite")
             } else if rest.starts_with("h2") {
-                ("H2", "Java 应用内嵌")
+                None // H2 是应用内嵌，不建档案
             } else {
-                continue;
+                None
             };
-            let url = rest.split_whitespace().next().unwrap_or(rest);
-            found.push(Datasource {
-                kind,
-                detail: format!("`jdbc:{}`", mask_password(url)),
-                hint: format!("用 {client} 连接（地址见连接串）"),
-            });
+            if let Some(kind) = kind {
+                let url = rest.split_whitespace().next().unwrap_or(rest).to_owned();
+                current = Some((kind, url, String::new(), String::new()));
+            }
+        } else if current.is_some() {
+            // 凭证值大小写敏感：从原始行提取（键匹配在 extract_kv 内小写化）。
+            let (user, pass): (Option<String>, Option<String>) = (
+                extract_kv(raw, &["username", "datasource.username", "user"]),
+                extract_kv(raw, &["password", "datasource.password"]),
+            );
+            if let Some((kind, url, u, p)) = current.as_mut() {
+                if let Some(x) = user {
+                    *u = x;
+                }
+                if let Some(x) = pass {
+                    *p = x;
+                }
+                let _ = (kind, url);
+            }
         }
     }
+    if let Some((kind, url, user, pass)) = current.take() {
+        done.push(build_jdbc_ds(kind, &url, &user, &pass));
+    }
+    found.extend(done);
     found
+}
+
+/// 由 jdbc url + 凭证构造 Datasource（能解析出 host 时带档案）。
+fn build_jdbc_ds(kind: &'static str, url: &str, user: &str, pass: &str) -> Datasource {
+    // jdbc:postgresql://host:port/db → 去掉 jdbc: 前缀后按标准 URL 解析。
+    let bare = url.strip_prefix("jdbc:").unwrap_or(url);
+    let config = parse_db_url(bare).map(|(db_type, u, p, host, port, database)| DatabaseServerConfig {
+        name: if database.is_empty() { host.clone() } else { database.clone() },
+        db_type: db_type.to_owned(),
+        host,
+        port,
+        database,
+        username: if user.is_empty() { u } else { user.to_owned() },
+        password: if pass.is_empty() { p } else { pass.to_owned() },
+        cli_path: String::new(),
+        description: "Spring 配置 jdbc 连接串提取".to_owned(),
+    });
+    let hint = if config.is_some() {
+        "已注册 db_query/db_dml 工具，直接用工具查询".to_owned()
+    } else {
+        "用命令行客户端连接（地址见连接串）".to_owned()
+    };
+    Datasource {
+        kind,
+        detail: format!("`jdbc:{}`", mask_password(url)),
+        hint,
+        config,
+    }
+}
+
+/// 从小写化配置行里提取 `key: value` 或 `key=value`（key 支持点路径后缀匹配）。
+fn extract_kv(line: &str, keys: &[&str]) -> Option<String> {
+    let (k, v) = if let Some((k, v)) = line.split_once(':') {
+        (k, v)
+    } else if let Some((k, v)) = line.split_once('=') {
+        (k, v)
+    } else {
+        return None;
+    };
+    let k = k.trim().to_ascii_lowercase();
+    if !keys.iter().any(|key| {
+        k == *key || k.ends_with(&format!(".{key}")) || k.ends_with(&format!("_{key}"))
+    }) {
+        return None;
+    }
+    let v = v.trim().trim_matches('"').trim_matches('\'');
+    if v.is_empty() {
+        None
+    } else {
+        Some(v.to_owned())
+    }
 }
 
 /// Prisma `datasource db { provider = "postgresql" ; url = ... }`。
@@ -260,7 +514,8 @@ fn scan_prisma(path: &Path) -> Vec<Datasource> {
     let ls = lines(path);
     let mut found = Vec::new();
     let mut provider: Option<&str> = None;
-    for l in &ls {
+    for raw in &ls {
+        let l = raw.to_ascii_lowercase();
         if l.contains("provider") {
             for (k, kind) in [
                 ("postgresql", "PostgreSQL"),
@@ -274,11 +529,12 @@ fn scan_prisma(path: &Path) -> Vec<Datasource> {
             }
         } else if l.contains("url") {
             if let Some(kind) = provider {
-                let url = l.split('=').nth(1).unwrap_or("").trim().trim_matches('"');
+                let url = raw.split('=').nth(1).unwrap_or("").trim().trim_matches('"');
                 found.push(Datasource {
                     kind,
                     detail: format!("prisma datasource `{}`", mask_password(url)),
                     hint: "按 provider 选命令行客户端".to_owned(),
+                    config: None,
                 });
                 provider = None;
             }
@@ -292,6 +548,7 @@ fn scan_django(path: &Path) -> Vec<Datasource> {
     let ls = lines(path);
     let mut found = Vec::new();
     for l in &ls {
+        let l = l.to_ascii_lowercase();
         for (k, kind) in [
             ("django.db.backends.postgresql", "PostgreSQL"),
             ("django.db.backends.mysql", "MySQL"),
@@ -302,6 +559,7 @@ fn scan_django(path: &Path) -> Vec<Datasource> {
                     kind,
                     detail: format!("Django `ENGINE={k}`"),
                     hint: "NAME/HOST 见 settings.py 的 DATABASES".to_owned(),
+                    config: None,
                 });
             }
         }
@@ -314,12 +572,14 @@ fn scan_rails(path: &Path) -> Vec<Datasource> {
     let ls = lines(path);
     let mut found = Vec::new();
     for l in &ls {
+        let l = l.to_ascii_lowercase();
         for (k, kind) in [("postgresql", "PostgreSQL"), ("mysql2", "MySQL"), ("sqlite3", "SQLite")] {
             if l.contains(&format!("adapter: {k}")) {
                 found.push(Datasource {
                     kind,
                     detail: format!("Rails `adapter: {k}`"),
                     hint: "连接参数见 database.yml 对应节".to_owned(),
+                    config: None,
                 });
             }
         }
@@ -369,6 +629,61 @@ mod tests {
         assert!(section.contains("PostgreSQL"));
         assert!(section.contains("alice:***"));
         assert!(!section.contains("s3cret"));
+        // 档案提取：完整连接信息（密码只进档案，不进提示词）。
+        let configs = probe_configs(&dir);
+        assert_eq!(configs.len(), 1, "DATABASE_URL 应提取出一个档案");
+        let cfg = &configs[0];
+        assert_eq!(cfg.db_type, "postgres");
+        assert_eq!(cfg.host, "localhost");
+        assert_eq!(cfg.port, 5432);
+        assert_eq!(cfg.database, "appdb");
+        assert_eq!(cfg.username, "alice");
+        assert_eq!(cfg.password, "s3cret");
+        assert_eq!(cfg.name, "appdb");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn spring_jdbc_yml_extracts_profile() {
+        let dir = std::env::temp_dir().join(format!("ds-probe-jdbc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("application.yml"),
+            "spring:\n  datasource:\n    url: jdbc:postgresql://10.0.0.8:5433/orders\n    username: svc\n    password: P@ss\n",
+        )
+        .unwrap();
+        let configs = probe_configs(&dir);
+        assert_eq!(configs.len(), 1);
+        let cfg = &configs[0];
+        assert_eq!(cfg.db_type, "postgres");
+        assert_eq!(cfg.host, "10.0.0.8");
+        assert_eq!(cfg.port, 5433);
+        assert_eq!(cfg.database, "orders");
+        assert_eq!(cfg.username, "svc");
+        assert_eq!(cfg.password, "P@ss");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sqlite_file_yields_profile_and_env_password_case_preserved() {
+        let dir = std::env::temp_dir().join(format!("ds-probe-sqlite-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("data.sqlite3"), "x").unwrap();
+        fs::write(
+            dir.join(".env"),
+            "DB_HOST=127.0.0.1\nDB_PORT=3306\nDB_NAME=shop\nDB_USER=root\nDB_PASSWORD=Mix3dCase\n",
+        )
+        .unwrap();
+        let configs = probe_configs(&dir);
+        // SQLite 文件档案 + .env 分离变量档案。
+        assert_eq!(configs.len(), 2);
+        let sqlite = configs.iter().find(|c| c.db_type == "sqlite").unwrap();
+        assert!(sqlite.host.ends_with("data.sqlite3"));
+        let mysql = configs.iter().find(|c| c.db_type == "mysql").unwrap();
+        assert_eq!(mysql.password, "Mix3dCase", "密码大小写必须保留");
+        assert_eq!(mysql.name, "shop");
         let _ = fs::remove_dir_all(&dir);
     }
 
