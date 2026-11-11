@@ -59,6 +59,17 @@ Install them from Settings › Plugins, or start your own with
 `oxidea-plugin new` — see [Writing OXidea plugins](plugins/README.md) and
 the [official plugins](plugins/official). The plugin API is still a preview.
 
+## The built-in agent
+
+OXidea ships with a built-in coding agent (OX Hareness). Its framework layer
+lives in this repository: `crates/agentscope-acp` adapts the agent to the
+[Agent Client Protocol](https://agentclientprotocol.com), and it builds directly
+on the framework crates of this repo — `agentscope-core`, `agentscope-harness`,
+`agentscope-browser`, `agentscope-db` and the six model-provider crates under
+[`crates/`](../crates). That framework is a Rust port of **AgentScope Java 2.0.4**
+([agentscope-ai/agentscope-java](https://github.com/agentscope-ai/agentscope-java));
+the module mapping is documented in [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
+
 ## Community
 
 - [Discord](https://discord.gg/2Zy4yn7gP) — questions, feedback and release news.

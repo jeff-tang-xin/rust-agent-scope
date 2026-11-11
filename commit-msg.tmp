@@ -1,5 +1,0 @@
-agent-studio：前端组件更新与 Tauri 命令层调整
-
-- SettingsPage / Conversation / api.ts / styles.css 前端改动
-- src-tauri commands.rs / factory.rs 命令层调整
-- package.json 依赖更新（含 lock 重算）
