@@ -185,15 +185,30 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         .filesystem()
         .cloned()
         .ok_or_else(|| "workspace has no filesystem layer".to_string())?;
+    // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.oxidea/agent`，跨 worktree 共享）。
+    // 提前获取：fs 层同名工具跳过注册需要它的工具名清单。
+    let host_ctx = crate::ox_context_for(Path::new(cwd));
     let mut toolkit = Toolkit::new();
+    // IDE 语义工具优先：与 IDE 工具同名的 fs 层工具跳过注册（当前只有
+    // `read_file`——IDE 版支持 jar/zip 内读取、依赖源码根与行号渲染，比
+    // fs 层沙箱版更强；Toolkit::register 是同名后者胜，靠注册顺序隐式
+    // 覆盖会让行为依赖注册次序，这里显式跳过保持工具面无重名）。
+    let ide_names: std::collections::HashSet<String> = host_ctx
+        .tools
+        .iter()
+        .map(|t| t.name().to_owned())
+        .collect();
     for tool in FilesystemToolSet::new(fs, None).all() {
+        if ide_names.contains(tool.name()) {
+            continue;
+        }
         toolkit.register(tool);
     }
     toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
         LocalShellBackend::new_anchored(PathBuf::from(cwd)),
     ))));
     // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.oxidea/agent`，跨 worktree 共享）。
-    let host_ctx = crate::ox_context_for(Path::new(cwd));
+    // host_ctx 已在上方提前获取（fs 层同名工具跳过注册需要它的工具名清单）。
     let ide_section = if host_ctx.tools.is_empty() {
         String::new()
     } else {
