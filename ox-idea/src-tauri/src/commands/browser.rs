@@ -51,8 +51,18 @@ pub async fn browser_panel_attach(on_frame: Channel<BrowserFrame>) -> IdeResult<
                 }
                 Ok(Err(_lagged)) => continue, // 消费慢丢帧，正常
                 Err(_) => {
-                    if !BrowserSession::shared().screencast_active() {
-                        break;
+                    if BrowserSession::shared().screencast_active() {
+                        continue;
+                    }
+                    // 断流自愈：screencast 已失效（浏览器被关闭后重建、监听
+                    // 任务退出时清 active）。面板还开着就重新拉起浏览器并
+                    // 重订阅帧流——agent 与面板共用同一实例，画面自动接上；
+                    // 浏览器起不来才退出转发，下次 attach 再走完整流程。
+                    match BrowserSession::shared().start_screencast().await {
+                        Ok(new_rx) => {
+                            rx = new_rx;
+                        }
+                        Err(_) => break,
                     }
                 }
             }

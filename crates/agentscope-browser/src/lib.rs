@@ -170,7 +170,12 @@ impl BrowserSession {
                 // 超时轮询 active：stop 后没有新帧来，靠超时退出任务。
                 let frame = match tokio::time::timeout(Duration::from_secs(1), events.next()).await {
                     Ok(Some(frame)) => frame,
-                    Ok(None) => break, // 页面/浏览器关闭，事件流结束
+                    Ok(None) => {
+                        // 页面/浏览器关闭，事件流结束：清 active，让面板的
+                        // 转发任务感知断流并走重建-重订阅路径（自愈）。
+                        cast.active.store(false, std::sync::atomic::Ordering::SeqCst);
+                        break;
+                    }
                     Err(_) => {
                         if !cast.active.load(Ordering::SeqCst) {
                             break;
@@ -349,6 +354,9 @@ impl BrowserSession {
                 return Ok(handle.page.clone());
             }
             *guard = None;
+            // 旧页面已死：screencast 监听任务随之退出（Ok(None) 分支也会
+            // 自行清 active），这里同步重置，保证状态一致。
+            self.cast.active.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         let exe = find_browser_executable().ok_or_else(|| {
             "未找到 Chromium 系浏览器。请安装 Microsoft Edge 或 Google Chrome（任一即可），\
@@ -686,10 +694,23 @@ impl Tool for BrowserNavigate {
             Err(e) => return Ok(ToolOutput::error(e)),
         };
         if let Err(e) = page.goto(&url).await {
-            self.ctx.session.invalidate().await;
-            return Ok(ToolOutput::error(format!(
-                "导航失败（浏览器可能已被关闭，下次调用将自动重启）: {e}"
-            )));
+            // 区分失败原因：浏览器死了才重建；页面加载失败（超时/DNS/内网
+            // 不可达）时浏览器还健康，误杀会让面板画面一起丢、下次调用再
+            // 白白重启一轮。
+            let browser_dead = page.evaluate("1").await.is_err();
+            if browser_dead {
+                self.ctx.session.invalidate().await;
+                return Ok(ToolOutput::error(format!(
+                    "导航失败（浏览器已被关闭，下次调用将自动重启）: {e}"
+                )));
+            }
+            let console = self.ctx.session.drain_console().await;
+            let mut msg = format!("页面加载失败（浏览器正常，可重试或换 URL）: {e}");
+            if !console.is_empty() {
+                msg.push_str("\n页面控制台:\n");
+                msg.push_str(&console.join("\n"));
+            }
+            return Ok(ToolOutput::error(msg));
         }
         // SPA 首帧渲染缓冲。
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;

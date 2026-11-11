@@ -95,6 +95,20 @@ pub fn tool_call_started(
     )
 }
 
+/// 工具参数补全（`ToolCallEnd` 时参数已完整）→ `tool_call_update`，携带
+/// 完整 `rawInput`——首帧 `tool_call` 发出时参数尚未流完，只能后补。
+pub fn tool_call_input(session_id: &str, tool_call_id: &str, raw_input: Value) -> Value {
+    update_frame(
+        session_id,
+        json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": tool_call_id,
+            "status": "in_progress",
+            "rawInput": raw_input,
+        }),
+    )
+}
+
 /// 工具进度（长任务 emitter 推送）→ `tool_call_update`，追加输出内容。
 pub fn tool_call_progress(session_id: &str, tool_call_id: &str, content_text: &str) -> Value {
     update_frame(

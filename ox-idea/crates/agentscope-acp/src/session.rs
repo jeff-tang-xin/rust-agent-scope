@@ -540,6 +540,11 @@ where
         let mut confirm_reply_id: Option<String> = None;
         let mut confirm_results: Vec<ConfirmResult> = Vec::new();
         let mut outcome: Option<PromptOutcome> = None;
+        // 工具参数/结果累积：core 的事件序列是 Start → Delta(完整 JSON) → End →
+        // 执行 → ResultStart → ResultTextDelta(完整文本) → ResultEnd(state)。
+        // Start/End 帧本身不带参数与结果文本，靠这两张表在 Delta 时攒、终态时取。
+        let mut pending_inputs: HashMap<String, String> = HashMap::new();
+        let mut pending_outputs: HashMap<String, String> = HashMap::new();
         // delta 微批 buffer：同块连续增量攒到 ~256 字节再发一帧，块切换或
         // 其它事件时先清空——把每 token 一帧 JSON 压成更少的帧流。
         let mut pending_text = String::new();
@@ -622,6 +627,26 @@ where
                     )
                     .await;
                 }
+                AgentEventKind::ToolCallDelta {
+                    tool_call_id,
+                    delta,
+                    ..
+                } => {
+                    // 参数分片（当前为一次完整 JSON）：攒到 End 时随 update 补发。
+                    pending_inputs.entry(tool_call_id).or_default().push_str(&delta);
+                }
+                AgentEventKind::ToolCallEnd { tool_call_id, .. } => {
+                    // 参数到位：补发 rawInput，前端卡片展开即可见完整参数。
+                    if let Some(input) = pending_inputs.remove(&tool_call_id) {
+                        let raw = serde_json::from_str::<Value>(&input)
+                            .unwrap_or(Value::String(input));
+                        conn.notify(
+                            "session/update",
+                            protocol::tool_call_input(session_id, &tool_call_id, raw),
+                        )
+                        .await;
+                    }
+                }
                 AgentEventKind::ToolProgress {
                     tool_call_id,
                     content,
@@ -633,6 +658,14 @@ where
                         protocol::tool_call_progress(session_id, &tool_call_id, &text),
                     )
                     .await;
+                }
+                AgentEventKind::ToolResultTextDelta {
+                    tool_call_id,
+                    delta,
+                    ..
+                } => {
+                    // 结果文本（当前为一次完整文本）：攒到 End 时随终态发出。
+                    pending_outputs.entry(tool_call_id).or_default().push_str(&delta);
                 }
                 AgentEventKind::ToolResultEnd {
                     tool_call_id,
@@ -649,9 +682,12 @@ where
                             ("failed", format!("工具处于异常终态: {state:?}"))
                         }
                     };
+                    // 结果文本优先用工具真实输出；没有输出时退回状态说明。
+                    let output = pending_outputs.remove(&tool_call_id).unwrap_or(note.clone());
+                    let output = if output.is_empty() { note } else { output };
                     conn.notify(
                         "session/update",
-                        protocol::tool_call_finished(session_id, &tool_call_id, status, &note),
+                        protocol::tool_call_finished(session_id, &tool_call_id, status, &output),
                     )
                     .await;
                 }
@@ -1086,6 +1122,17 @@ mod tests {
             .find(|u| u["sessionUpdate"] == "tool_call_update" && u["status"] == "completed")
             .expect("缺 tool_call 完成帧");
         assert_eq!(finished["toolCallId"], "call_1");
+        // 参数补全帧：ToolCallEnd 时 rawInput 已完整（前端卡片展开可见参数）。
+        let input_frame = updates
+            .iter()
+            .find(|u| u["sessionUpdate"] == "tool_call_update" && u.get("rawInput").is_some())
+            .expect("缺 rawInput 补全帧");
+        assert_eq!(input_frame["rawInput"], json!({ "text": "hi" }));
+        // 完成帧携带工具真实输出（不再是空的/纯状态说明）。
+        assert!(
+            finished["content"].as_array().map(|c| !c.is_empty()).unwrap_or(false),
+            "完成帧应携带工具输出: {finished}"
+        );
     }
 
     #[tokio::test]

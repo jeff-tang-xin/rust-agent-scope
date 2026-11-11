@@ -166,10 +166,14 @@ impl Timeline {
     }
 
     fn merge_tool(&mut self, index: usize, update: &Value) {
-        let AgentEntry::Tool { title, kind, status, locations: locs, output, diffs, .. } = &mut self.entries[index]
+        let AgentEntry::Tool { input, title, kind, status, locations: locs, output, diffs, .. } = &mut self.entries[index]
         else {
             return;
         };
+        // rawInput 可在首帧或后续 update 中到达（参数流完后补发）；后到覆盖。
+        if let Some(v) = update.get("rawInput") {
+            *input = Some(v.to_string());
+        }
         if let Some(t) = update.get("title").and_then(Value::as_str) {
             *title = t.to_owned();
         }
