@@ -91,6 +91,7 @@ dependencies = [
  "base64 0.23.1",
  "chromiumoxide",
  "futures",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -6949,6 +6950,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 name = "oxidea"
 version = "0.0.1"
 dependencies = [
+ "agentscope-browser",
  "base64 0.22.1",
  "blake3",
  "block2 0.6.2",

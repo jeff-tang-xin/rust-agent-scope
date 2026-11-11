@@ -16,9 +16,16 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chromiumoxide::Browser;
+use chromiumoxide::cdp::browser_protocol::page::{
+    EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
+    StopScreencastParams,
+};
+use futures::StreamExt as _;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use agentscope_core::error::Result;
@@ -57,6 +64,26 @@ pub struct BrowserSession {
     /// 页面控制台错误缓冲（console.error + 未捕获异常）：后台事件监听任务
     /// 写入，工具输出时 drain——Agent 能「看到」页面 JS 报错（白屏根因）。
     console: Arc<std::sync::Mutex<Vec<String>>>,
+    /// 直播（screencast）状态：帧广播 + 是否开启。面板与 Agent 工具共用。
+    cast: Arc<CastState>,
+}
+
+/// screencast 广播通道与开关：`tx` 常驻（订阅者随时 subscribe），监听任务
+/// 退出以 `active` 为准（stop 后任务在超时轮询里自行结束）。
+struct CastState {
+    tx: tokio::sync::broadcast::Sender<ScreencastFrame>,
+    active: AtomicBool,
+}
+
+/// 一帧直播画面：base64 JPEG + 视口尺寸（消费方按比例换算输入坐标）。
+#[derive(Clone, Debug, Serialize)]
+pub struct ScreencastFrame {
+    /// Base64 编码的 JPEG 图像。
+    pub data: String,
+    /// 视口宽（CSS 像素）——输入坐标按 `device_width / 显示宽` 换算。
+    pub device_width: f64,
+    /// 视口高（CSS 像素）。
+    pub device_height: f64,
 }
 
 /// 按工作区装配的浏览器工具上下文：全局共享一个浏览器会话，截图目录
@@ -75,9 +102,11 @@ fn push_console(buf: &std::sync::Mutex<Vec<String>>, msg: String) {
 
 impl BrowserSession {
     pub fn new() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(4);
         Self {
             inner: tokio::sync::Mutex::new(None),
             console: Arc::new(std::sync::Mutex::new(Vec::new())),
+            cast: Arc::new(CastState { tx, active: AtomicBool::new(false) }),
         }
     }
 
@@ -91,6 +120,224 @@ impl BrowserSession {
     pub async fn current_page(&self) -> Option<Arc<chromiumoxide::Page>> {
         let guard = self.inner.lock().await;
         guard.as_ref().map(|h| h.page.clone())
+    }
+
+    // ---------- 进程级共享会话（面板与 Agent 工具用同一浏览器实例） ----------
+
+    /// 进程级单例：ox-idea 的 agent 工具与浏览器直播面板都拿它，保证
+    /// 「agent 操作的页面 = 用户面板里看到的页面」。
+    pub fn shared() -> Arc<Self> {
+        static SHARED: std::sync::OnceLock<Arc<BrowserSession>> = std::sync::OnceLock::new();
+        SHARED.get_or_init(|| Arc::new(BrowserSession::new())).clone()
+    }
+
+    /// 主动拉起浏览器（懒启动的公开入口）：面板 attach 时调用；已在运行
+    /// 则直接返回现有页面。
+    pub async fn ensure_started(&self) -> std::result::Result<Arc<chromiumoxide::Page>, String> {
+        self.page().await
+    }
+
+    // ---------- 直播（screencast）：面板画面 ----------
+
+    /// 开启 screencast 帧流（幂等）：返回帧接收端（broadcast，容量 4，慢消费
+    /// 丢最旧帧）。每帧收到后立即向浏览器确认——不确认浏览器只发一帧。
+    pub async fn start_screencast(
+        &self,
+    ) -> std::result::Result<tokio::sync::broadcast::Receiver<ScreencastFrame>, String> {
+        let page = self.page().await?;
+        if self.cast.active.swap(true, Ordering::SeqCst) {
+            return Ok(self.cast.tx.subscribe());
+        }
+        page.execute(
+            StartScreencastParams::builder()
+                .format(StartScreencastFormat::Jpeg)
+                .quality(60)
+                .max_width(1680)
+                .max_height(1200)
+                .build(),
+        )
+        .await
+        .map_err(|e| format!("开启 screencast 失败: {e}"))?;
+        let mut events = page
+            .event_listener::<EventScreencastFrame>()
+            .await
+            .map_err(|e| format!("订阅 screencast 帧失败: {e}"))?;
+        let tx = self.cast.tx.clone();
+        let page_for_ack = page.clone();
+        let cast = Arc::clone(&self.cast);
+        tokio::spawn(async move {
+            loop {
+                // 超时轮询 active：stop 后没有新帧来，靠超时退出任务。
+                let frame = match tokio::time::timeout(Duration::from_secs(1), events.next()).await {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) => break, // 页面/浏览器关闭，事件流结束
+                    Err(_) => {
+                        if !cast.active.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        continue;
+                    }
+                };
+                // 必须确认，否则浏览器停止发帧。
+                let ack = ScreencastFrameAckParams::builder()
+                    .session_id(frame.session_id)
+                    .build()
+                    .map_err(|e| format!("ack 参数错误: {e}"));
+                if let Ok(ack) = ack {
+                    let _ = page_for_ack.execute(ack).await;
+                }
+                let meta = &frame.metadata;
+                let _ = tx.send(ScreencastFrame {
+                    data: String::from(frame.data.clone()),
+                    device_width: meta.device_width,
+                    device_height: meta.device_height,
+                });
+            }
+        });
+        Ok(self.cast.tx.subscribe())
+    }
+
+    /// 停止 screencast（幂等）：监听任务在超时轮询里自行退出。
+    pub async fn stop_screencast(&self) {
+        if !self.cast.active.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(page) = self.current_page().await {
+            let _ = page.execute(StopScreencastParams::default()).await;
+        }
+    }
+
+    /// screencast 是否开启（转发任务据此退出）。
+    pub fn screencast_active(&self) -> bool {
+        self.cast.active.load(Ordering::SeqCst)
+    }
+
+    // ---------- 输入回传：面板里的用户操作 → 页面 ----------
+
+    /// 鼠标事件：`event_type` ∈ pressed/released/moved/wheel；`button` ∈
+    /// left/middle/right（pressed/released 时传）；wheel 时传 delta。
+    pub async fn dispatch_mouse(
+        &self,
+        event_type: &str,
+        x: f64,
+        y: f64,
+        button: Option<&str>,
+        click_count: i64,
+        delta_x: f64,
+        delta_y: f64,
+    ) -> std::result::Result<(), String> {
+        let page = self.page().await?;
+        let ty = match event_type {
+            "pressed" => DispatchMouseEventType::MousePressed,
+            "released" => DispatchMouseEventType::MouseReleased,
+            "moved" => DispatchMouseEventType::MouseMoved,
+            "wheel" => DispatchMouseEventType::MouseWheel,
+            other => return Err(format!("未知鼠标事件类型: {other}")),
+        };
+        let mut params = DispatchMouseEventParams::builder().r#type(ty).x(x).y(y);
+        if let Some(btn) = button {
+            let b = match btn {
+                "left" => MouseButton::Left,
+                "middle" => MouseButton::Middle,
+                "right" => MouseButton::Right,
+                _ => MouseButton::None,
+            };
+            params = params.button(b);
+        }
+        if click_count > 0 {
+            params = params.click_count(click_count);
+        }
+        if event_type == "wheel" {
+            params = params.delta_x(delta_x).delta_y(delta_y);
+        }
+        page.execute(params.build().map_err(|e| format!("鼠标事件参数错误: {e}"))?)
+            .await
+            .map_err(|e| format!("派发鼠标事件失败: {e}"))?;
+        Ok(())
+    }
+
+    /// 键盘事件：`event_type` ∈ keydown/keyup/char；`modifiers` 为 CDP 位掩码
+    /// （Alt=1, Ctrl=2, Meta=4, Shift=8）；`text` 仅 char 事件需要；
+    /// `windows_vk` 为 Windows 虚拟键码（特殊键传，普通字符传 0）。
+    pub async fn dispatch_key(
+        &self,
+        event_type: &str,
+        key: &str,
+        code: &str,
+        text: Option<&str>,
+        modifiers: i64,
+        windows_vk: i64,
+    ) -> std::result::Result<(), String> {
+        let page = self.page().await?;
+        let ty = match event_type {
+            "keydown" => DispatchKeyEventType::KeyDown,
+            "keyup" => DispatchKeyEventType::KeyUp,
+            "char" => DispatchKeyEventType::Char,
+            other => return Err(format!("未知键盘事件类型: {other}")),
+        };
+        let mut params = DispatchKeyEventParams::builder()
+            .r#type(ty)
+            .key(key)
+            .code(code);
+        if modifiers != 0 {
+            params = params.modifiers(modifiers);
+        }
+        if let Some(t) = text {
+            params = params.text(t);
+        }
+        if windows_vk != 0 {
+            params = params.windows_virtual_key_code(windows_vk);
+        }
+        page.execute(params.build().map_err(|e| format!("键盘事件参数错误: {e}"))?)
+            .await
+            .map_err(|e| format!("派发键盘事件失败: {e}"))?;
+        Ok(())
+    }
+
+    /// 直接插入文本（输入法/粘贴场景：不经键盘事件，按字符插入）。
+    pub async fn insert_text(&self, text: &str) -> std::result::Result<(), String> {
+        let page = self.page().await?;
+        page.execute(InsertTextParams::new(text))
+            .await
+            .map_err(|e| format!("插入文本失败: {e}"))?;
+        Ok(())
+    }
+
+    // ---------- 面板导航 ----------
+
+    /// 导航到 `url`，返回页面最终 URL（重定向后）。
+    pub async fn navigate(&self, url: &str) -> std::result::Result<String, String> {
+        let page = self.page().await?;
+        page.goto(url).await.map_err(|e| format!("导航失败: {e}"))?;
+        self.current_url().await
+    }
+
+    /// 当前页面 URL（evaluate `location.href`，跨 CDP 版本稳定）。
+    pub async fn current_url(&self) -> std::result::Result<String, String> {
+        let page = self.page().await?;
+        let url = page
+            .evaluate("location.href")
+            .await
+            .map_err(|e| format!("读取 URL 失败: {e}"))?
+            .into_value::<String>()
+            .map_err(|e| format!("读取 URL 失败: {e}"))?;
+        Ok(url)
+    }
+
+    /// 历史导航：back/forward/reload（evaluate 实现，不依赖 chromiumoxide
+    /// 的历史 API 版本差异）。
+    pub async fn history_go(&self, action: &str) -> std::result::Result<(), String> {
+        let page = self.page().await?;
+        let js = match action {
+            "back" => "history.back()",
+            "forward" => "history.forward()",
+            "reload" => "location.reload()",
+            other => return Err(format!("未知导航动作: {other}")),
+        };
+        page.evaluate(js)
+            .await
+            .map_err(|e| format!("导航动作失败: {e}"))?;
+        Ok(())
     }
 
     /// 取活跃页面；无浏览器或已死亡时（重）启动。headless 静默运行。
@@ -209,8 +456,6 @@ impl BrowserSession {
         *self.inner.lock().await = None;
     }
 }
-
-use futures::StreamExt as _;
 
 // ---------- 页面快照（Agent「看」页面的眼睛） ----------
 

@@ -255,9 +255,11 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     }
     // 浏览器工具集（CDP 驱动本机 Chromium 系浏览器，headless）：与 studio 共用
     // 框架级 crate。全部 is_read_only=true → 自动进权限白名单免确认；截图存
-    // `.oxidea/screenshots/`。浏览器懒启动：首次工具调用才拉起进程。
+    // `.oxidea/screenshots/`。浏览器懒启动：首次工具调用或面板打开才拉起进程。
+    // 进程级共享会话：agent 工具与浏览器直播面板用同一实例——agent 操作的
+    // 页面就是用户面板里看到的页面。
     let browser_ctx = Arc::new(agentscope_browser::BrowserCtx {
-        session: Arc::new(agentscope_browser::BrowserSession::new()),
+        session: agentscope_browser::BrowserSession::shared(),
         screenshots_dir: Path::new(cwd).join(".oxidea/screenshots"),
     });
     macro_rules! register_browser {

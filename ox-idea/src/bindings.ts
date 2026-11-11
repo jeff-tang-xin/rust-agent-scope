@@ -7,6 +7,35 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
+	/**
+	 *  打开面板：拉起浏览器（如未运行）+ 开启 screencast，帧经 `on_frame` 推送。
+	 *  返回当前 URL。detach（或面板关闭）后转发任务自动退出。
+	 */
+	browserPanelAttach: (onFrame: Channel<BrowserFrame>) => typedError<BrowserPanelState, IdeError>(__TAURI_INVOKE("browser_panel_attach", { onFrame })),
+	/**
+	 *  关闭面板：停 screencast（转发任务随之退出）。浏览器进程保留——agent
+	 *  工具还在用，下次 attach 直接复用。
+	 */
+	browserPanelDetach: () => typedError<null, IdeError>(__TAURI_INVOKE("browser_panel_detach")),
+	/**  地址栏导航，返回最终 URL（重定向后）。 */
+	browserPanelNavigate: (url: string) => typedError<string, IdeError>(__TAURI_INVOKE("browser_panel_navigate", { url })),
+	/**  后退/前进/刷新（action ∈ back/forward/reload）。 */
+	browserPanelHistory: (action: string) => typedError<null, IdeError>(__TAURI_INVOKE("browser_panel_history", { action })),
+	/**  当前页面 URL（页面内部跳转后前端刷新地址栏用）。 */
+	browserPanelUrl: () => typedError<string, IdeError>(__TAURI_INVOKE("browser_panel_url")),
+	/**
+	 *  鼠标事件：event_type ∈ pressed/released/moved/wheel；坐标为页面 CSS 像素
+	 *  （前端按帧的 device_width 与显示宽换算）。
+	 */
+	browserPanelMouse: (eventType: string, x: number | null, y: number | null, button: string | null, clickCount: number, deltaX: number | null, deltaY: number | null) => typedError<null, IdeError>(__TAURI_INVOKE("browser_panel_mouse", { eventType, x, y, button, clickCount, deltaX, deltaY })),
+	/**
+	 *  键盘事件：event_type ∈ keydown/keyup/char；modifiers 为 CDP 位掩码
+	 *  （Alt=1, Ctrl=2, Meta=4, Shift=8）；text 仅 char 事件；windows_vk 为
+	 *  Windows 虚拟键码（特殊键传，普通字符传 0）。
+	 */
+	browserPanelKey: (eventType: string, key: string, code: string, text: string | null, modifiers: number, windowsVk: number) => typedError<null, IdeError>(__TAURI_INVOKE("browser_panel_key", { eventType, key, code, text, modifiers, windowsVk })),
+	/**  直接插入文本（输入法/粘贴）。 */
+	browserPanelInsertText: (text: string) => typedError<null, IdeError>(__TAURI_INVOKE("browser_panel_insert_text", { text })),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	mcpUiReady: (ready: boolean) => typedError<null, IdeError>(__TAURI_INVOKE("mcp_ui_ready", { ready })),
 	mcpRespond: (id: number, allow: boolean, error: string | null) => typedError<null, IdeError>(__TAURI_INVOKE("mcp_respond", { id, allow, error })),
@@ -2125,6 +2154,18 @@ export type Browser = {
 	/**  `chrome`, `firefox`, `safari`, `edge`, `brave`, `chromium`. */
 	id: string,
 	name: string,
+};
+
+/**  面板帧（`ScreencastFrame` 的 IPC 形态）：base64 JPEG + 视口尺寸。 */
+export type BrowserFrame = {
+	data: string,
+	device_width: number | null,
+	device_height: number | null,
+};
+
+/**  attach 返回：当前页面 URL（地址栏初值）。 */
+export type BrowserPanelState = {
+	url: string,
 };
 
 export type BuildEvent = 

@@ -10,6 +10,7 @@ pub mod agent;
 pub mod analysis;
 pub mod android;
 pub mod app;
+pub mod browser;
 pub mod build;
 pub mod bytes;
 pub mod caches;
@@ -65,6 +66,14 @@ pub(crate) fn sender<T: tauri::ipc::IpcResponse + Send + Sync + 'static>(
 
 pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(collect_commands![
+        browser::browser_panel_attach,
+        browser::browser_panel_detach,
+        browser::browser_panel_navigate,
+        browser::browser_panel_history,
+        browser::browser_panel_url,
+        browser::browser_panel_mouse,
+        browser::browser_panel_key,
+        browser::browser_panel_insert_text,
         app::app_info,
         mcp::mcp_ui_ready,
         mcp::mcp_respond,
