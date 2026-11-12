@@ -352,4 +352,89 @@ async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// mode configOption 声明与切换往返：session/new 带 Code/Plan 下拉；
+/// set_config_option 切 plan → config_option_update 通知 + 响应 currentValue=plan；
+/// 未知配置项/值报 invalid params。
+#[tokio::test]
+async fn mode_config_option_declared_and_switchable() {
+    let root = std::env::temp_dir().join(format!("ox-acp-mode-{}", std::process::id()));
+    let cwd = root.join("proj");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let (client, server) = duplex(64 * 1024);
+    let (client_read, mut client_write) = tokio::io::split(client);
+    let mut client_reader = tokio::io::BufReader::new(client_read);
+    let (server_read, server_write) = tokio::io::split(server);
+    let env = vec![("AGENTSCOPE_MODEL".to_owned(), "test-model".to_owned())];
+    let server_task = tokio::spawn(serve(server_read, server_write, env));
+
+    // initialize + session/new：响应声明 mode configOption（默认 code）
+    client_write
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+        .await
+        .unwrap();
+    let _ = read_frame(&mut client_reader).await;
+    let params = json!({ "cwd": cwd.display().to_string() });
+    client_write
+        .write_all(
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"session/new\",\"params\":{params}}}\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let frame = read_frame(&mut client_reader).await;
+    let session_id = frame["result"]["sessionId"].as_str().unwrap().to_owned();
+    let options = &frame["result"]["configOptions"];
+    assert_eq!(options[0]["id"], "mode");
+    assert_eq!(options[0]["category"], "mode");
+    assert_eq!(options[0]["currentValue"], "code");
+    let values: Vec<&str> = options[0]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["value"].as_str().unwrap())
+        .collect();
+    assert_eq!(values, ["code", "plan"]);
+
+    // 切到 plan：先收到 config_option_update 通知，再收到响应（currentValue=plan）
+    let set = json!({ "sessionId": session_id, "configId": "mode", "value": "plan", "type": "id" });
+    client_write
+        .write_all(
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"session/set_config_option\",\"params\":{set}}}\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut update_seen = None;
+    let response = loop {
+        let frame = read_frame(&mut client_reader).await;
+        if frame.get("method").and_then(|m| m.as_str()) == Some("session/update") {
+            if frame["params"]["update"]["sessionUpdate"] == "config_option_update" {
+                update_seen = Some(frame["params"]["update"]["configOptions"].clone());
+            }
+        } else {
+            break frame;
+        }
+    };
+    assert_eq!(response["id"], 3);
+    assert_eq!(response["result"]["configOptions"][0]["currentValue"], "plan");
+    let update = update_seen.expect("config_option_update notification missing");
+    assert_eq!(update[0]["currentValue"], "plan");
+
+    // 未知配置项 → invalid params
+    let bad = json!({ "sessionId": session_id, "configId": "model", "value": "m1" });
+    client_write
+        .write_all(
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"session/set_config_option\",\"params\":{bad}}}\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let frame = read_frame(&mut client_reader).await;
+    assert_eq!(frame["error"]["code"], -32602);
+
+    server_task.abort();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 use tokio::io::AsyncWriteExt;

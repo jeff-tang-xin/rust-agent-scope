@@ -52,6 +52,80 @@ pub fn new_session_result(session_id: &str) -> Value {
     })
 }
 
+/// mode configOption（category "mode"）：Code/Plan 两态下拉，前端 Composer
+/// 现成渲染（ide-agent `config.rs::parse_options` 只收 select 类型）。plan 态
+/// 由用户切换（`session/set_config_option`），agent 不自行进入——开关归用户，
+/// 计划内容由 plan_prompt 引导。
+pub fn mode_config_options(plan_active: bool) -> Value {
+    json!([{
+        "id": "mode",
+        "name": "Mode",
+        "category": "mode",
+        "type": "select",
+        "currentValue": if plan_active { "plan" } else { "code" },
+        "options": [
+            {
+                "value": "code",
+                "name": "Code",
+                "description": "完整执行：读写文件、跑命令、改代码",
+            },
+            {
+                "value": "plan",
+                "name": "Plan",
+                "description": "只读研究与设计：写操作被拦截，产出计划待批准",
+            },
+        ],
+    }])
+}
+
+/// `session/new` / `session/load` 响应（带 mode configOption，`plan_active`
+/// 反映恢复会话的真实 plan 态）。
+pub fn session_result(session_id: &str, plan_active: bool) -> Value {
+    let mut result = new_session_result(session_id);
+    result["configOptions"] = mode_config_options(plan_active);
+    result
+}
+
+/// 解析 `session/set_config_option`：只认 mode 选项（configId=="mode"，
+/// value ∈ code/plan）。ide-agent 转发时会补 `type: "id"` 标签，这里不校验。
+pub fn parse_set_config_option(params: &Value) -> Result<(String, String), RpcError> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| RpcError::invalid_params("sessionId 缺失"))?
+        .to_owned();
+    let config_id = params
+        .get("configId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if config_id != "mode" {
+        return Err(RpcError::invalid_params(format!(
+            "未知配置项: {config_id}（仅支持 mode）"
+        )));
+    }
+    let value = params
+        .get("value")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    if value != "code" && value != "plan" {
+        return Err(RpcError::invalid_params(format!(
+            "未知模式: {value}（code / plan）"
+        )));
+    }
+    Ok((session_id, value))
+}
+
+/// 模式变化通知（`config_option_update`）：agent 侧切换后推给 client，前端
+/// 下拉同步（ide-agent `lib.rs` 的 update 分发已处理该 sessionUpdate）。
+pub fn config_option_update(session_id: &str, options: &Value) -> Value {
+    update_frame(
+        session_id,
+        json!({ "sessionUpdate": "config_option_update", "configOptions": options }),
+    )
+}
+
 /// `session/update` 通知帧（外层）。
 fn update_frame(session_id: &str, update: Value) -> Value {
     json!({ "sessionId": session_id, "update": update })

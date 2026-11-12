@@ -88,7 +88,8 @@ impl AcpSessionHub {
                 cancel_tx,
             }),
         );
-        Ok(protocol::new_session_result(&session_id))
+        // 新会话固定 Code 态：plan 由用户切换，装配时不预设。
+        Ok(protocol::session_result(&session_id, false))
     }
 
     /// `session/load`：按 sessionId 重建 agent，Legacy state store 自动重放
@@ -121,13 +122,54 @@ impl AcpSessionHub {
         self.sessions.lock().unwrap().insert(
             session_id.clone(),
             Arc::new(AcpSession {
-                agent,
+                agent: Arc::clone(&agent),
                 cwd: PathBuf::from(&cwd),
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
             }),
         );
-        Ok(protocol::new_session_result(&session_id))
+        // 恢复会话的 plan 态随 AgentState 持久化（plan_mode_context），重建后
+        // 如实上报——前端下拉与真实拦截状态一致。
+        let plan_active = agent.is_plan_mode_active(None, &session_id);
+        Ok(protocol::session_result(&session_id, plan_active))
+    }
+
+    /// `session/set_config_option`：用户切换 Code/Plan 模式。plan 是用户手动
+    /// 开启的硬约束（写操作由 PlanModeMiddleware 确定性拦截），agent 不自行
+    /// 进入；切换幂等，响应带更新后的 configOptions 并推 config_option_update
+    /// 通知（前端下拉同步）。
+    pub async fn set_config_option<W>(
+        &self,
+        params: Value,
+        conn: &RpcConn<W>,
+    ) -> Result<Value, RpcError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let (session_id, value) = protocol::parse_set_config_option(&params)?;
+        let session = match self.sessions.lock().unwrap().get(&session_id).cloned() {
+            Some(session) => session,
+            None => {
+                return Err(RpcError::invalid_params(format!(
+                    "未知 sessionId: {session_id}"
+                )))
+            }
+        };
+        let switch = if value == "plan" {
+            session.agent.enter_plan_mode(None, &session_id).map(|_| ())
+        } else {
+            session.agent.exit_plan_mode(None, &session_id).map(|_| ())
+        };
+        match switch {
+            Ok(()) => {
+                let plan_active = value == "plan";
+                let options = protocol::mode_config_options(plan_active);
+                conn.notify("session/update", protocol::config_option_update(&session_id, &options))
+                    .await;
+                Ok(json!({ "configOptions": options }))
+            }
+            Err(error) => Err(RpcError::internal(error)),
+        }
     }
 
     /// `session/prompt`：驱动一轮完整 ReAct（含权限 HITL 往返），期间把
@@ -303,6 +345,15 @@ fn ide_section_text(names: &[String], brief: Option<&str>) -> String {
     )
 }
 
+/// plan 态场景提示词（用户手动开启 Plan 模式后由 PlanModeMiddleware 注入，
+/// 替换内置英文 banner）。复用 studio 已评审的 SOLO_PLAN_PROMPT 文案：死的是
+/// 节奏（只读研究 → plan_write → plan_exit 审批），活的是内容（计划按任务写）。
+const PLAN_PROMPT: &str = "PLAN MODE ACTIVE（用户已手动开启）：只做研究与设计，禁止执行任何修改。\n\
+     - 每个 ACT 步骤必须调用工具（读文件、搜索、plan_write），不要只叙述不动手。\n\
+     - 信息缺失就问用户，不要用猜测填补。\n\
+     - 用 plan_write 把完整计划写入计划文件，然后 plan_exit 请求用户批准。计划要可执行：目标、分步步骤（每步有可检验的完成标准）、涉及文件、验证方式、风险与回滚。\n\
+     - 计划文件是设计记录，本身不构成批准证据；批准通过后你将回到执行态，届时按计划逐步实施，不要跳步、不要顺手做计划外的事。";
+
 /// 装配一个面向 ACP 会话的 agent：文件工具 + 本地 shell 锚定 cwd，
 /// 系统提示词声明工作目录与能力边界。
 fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) -> Result<Arc<HarnessAgent>, String> {
@@ -457,7 +508,8 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          2. 外科手术：只改必须改的地方。不顺手重构、不调整无关风格、不引入没被要求的依赖与抽象。改动越小越易验证、越易回滚。\n\
          3. 自我闭环：用户说「编译一下」意味着执行→看输出→修问题→报结果，不是跑完命令就停。回合结束要么交付结果，要么说清卡在哪、需要什么决定。\n\
          4. 失败止损：同一手段连续两次不奏效就停下，说明卡在哪一步、报什么错、试过什么、你的判断——换着花样瞎试只会烧时间并留下半成品。\n\
-         5. 安全红线：不碰工作区外的路径；删除、覆盖、推送等不可逆动作先说明影响范围并征得同意；密钥与凭证绝不写进文件、不打印。\n\n\
+         5. 安全红线：不碰工作区外的路径；删除、覆盖、推送等不可逆动作先说明影响范围并征得同意；密钥与凭证绝不写进文件、不打印。\n\
+         6. 模式边界：Plan 模式只能由用户在界面开启，你不能自行进入或退出——复杂/高风险任务（大范围重构、依赖变更、不可逆操作）可在动手前建议用户切到 Plan 模式，由用户决定。\n\n\
          ## 2. 标准工作流（非平凡任务按此五阶段走，平凡问题直接答）\n\
          ### Phase 1 建立事实（禁止跳过）\n\
          1. blackboard_read 看已有结论（避免重复劳动与冲突）。\n\
@@ -544,6 +596,12 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         // ReAct 迭代上限（一轮 = 一次模型调用 + 工具执行）：`AGENTSCOPE_MAX_ITERS`
         // 可配（设置界面），缺省 100——真实工程任务 30 轮经常不够，跑到一半被截断。
         .max_iters(max_iters_from(env))
+        // plan 模式：用户经 Composer 模式下拉手动开启（session/set_config_option），
+        // agent 不自行进入。写操作由 PlanModeMiddleware 确定性拦截（白名单不放
+        // shell）；计划文件与记忆同域（`.oxidea/agent/plans/`，版本库外）。
+        .enable_plan_mode()
+        .plan_file_directory(".oxidea/agent/plans")
+        .plan_prompt(PLAN_PROMPT)
         .permission_context(permission);    if let Some(ws) = &memory_ws {
         builder = builder
             .with_memory_workspace(Arc::clone(ws))
@@ -1483,6 +1541,96 @@ mod tests {
         let hub = crate::AcpSessionHub::new(Vec::new());
         let params = json!({ "sessionId": "nope", "cwd": ".", "mcpServers": [] });
         assert!(hub.load_session(params).await.is_err());
+    }
+
+    /// set_config_option 切换 plan/code：plan 态由用户开启（enter_plan_mode），
+    /// 切换幂等；响应 configOptions 的 currentValue 如实反映，agent 侧
+    /// is_plan_mode_active 同步。
+    #[tokio::test]
+    async fn set_config_option_switches_plan_mode() {
+        let hub = crate::AcpSessionHub::new(Vec::new());
+        let model = MockModel::new(vec![]);
+        let agent = Arc::new(
+            HarnessAgentBuilder::new()
+                .name("test")
+                .sys_prompt("test")
+                .model(model.clone())
+                .max_iters(5)
+                .enable_plan_mode()
+                .build()
+                .expect("build agent"),
+        );
+        let (cancel_tx, _rx) = tokio::sync::watch::channel(false);
+        hub.sessions.lock().unwrap().insert(
+            "s1".to_string(),
+            Arc::new(AcpSession {
+                agent,
+                cwd: PathBuf::from("."),
+                busy: std::sync::atomic::AtomicBool::new(false),
+                cancel_tx,
+            }),
+        );
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let (_server_read, server_write) = tokio::io::split(server);
+        let conn = RpcConn::new(server_write);
+
+        // 切 plan：响应 currentValue=plan，agent 真实进入 plan 态
+        let params = json!({ "sessionId": "s1", "configId": "mode", "value": "plan" });
+        let result = hub.set_config_option(params, &conn).await.unwrap();
+        assert_eq!(result["configOptions"][0]["currentValue"], "plan");
+        assert!(hub.sessions.lock().unwrap()["s1"]
+            .agent
+            .is_plan_mode_active(None, "s1"));
+
+        // 切回 code：幂等退出
+        let params = json!({ "sessionId": "s1", "configId": "mode", "value": "code" });
+        let result = hub.set_config_option(params, &conn).await.unwrap();
+        assert_eq!(result["configOptions"][0]["currentValue"], "code");
+        assert!(!hub.sessions.lock().unwrap()["s1"]
+            .agent
+            .is_plan_mode_active(None, "s1"));
+
+        // 未知配置项 / 未知值 → invalid params
+        let params = json!({ "sessionId": "s1", "configId": "model", "value": "m1" });
+        assert!(hub.set_config_option(params, &conn).await.is_err());
+        let params = json!({ "sessionId": "s1", "configId": "mode", "value": "yolo" });
+        assert!(hub.set_config_option(params, &conn).await.is_err());
+        let params = json!({ "sessionId": "ghost", "configId": "mode", "value": "plan" });
+        assert!(hub.set_config_option(params, &conn).await.is_err());
+    }
+
+    /// plan 态随 AgentState 持久化：enter_plan_mode 落盘后，全新装配的 agent
+    /// （模拟 IDE 重启）同 sessionId 能读到 plan 态——session/load 的
+    /// configOptions 据此如实上报。
+    #[tokio::test]
+    async fn plan_mode_state_survives_reassembly() {
+        use crate::{set_ox_tool_provider, OxHostContext};
+        let root = std::env::temp_dir().join(format!("ox-acp-plan-{}", std::process::id()));
+        let cwd = root.join("proj");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let memory_root = root.join("memory-anchor");
+        set_ox_tool_provider(Arc::new(move |_| OxHostContext {
+            tools: Vec::new(),
+            memory_root: Some(memory_root.clone()),
+            project_brief: None,
+        }));
+        let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
+
+        let model1 = MockModel::new(vec![]);
+        let agent1 = assemble_agent(cwd.to_str().unwrap(), model1, &env).unwrap();
+        assert!(!agent1.is_plan_mode_active(None, "s-plan"));
+        agent1.enter_plan_mode(None, "s-plan").unwrap();
+        assert!(agent1.is_plan_mode_active(None, "s-plan"));
+
+        let model2 = MockModel::new(vec![]);
+        let agent2 = assemble_agent(cwd.to_str().unwrap(), model2, &env).unwrap();
+        assert!(
+            agent2.is_plan_mode_active(None, "s-plan"),
+            "plan 态应随 AgentState 持久化并在重建后恢复"
+        );
+        agent2.exit_plan_mode(None, "s-plan").unwrap();
+        assert!(!agent2.is_plan_mode_active(None, "s-plan"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// 会话持久化端到端：assemble_agent（宿主注入 memory_root）跑一轮后

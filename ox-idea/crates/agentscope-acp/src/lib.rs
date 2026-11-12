@@ -179,6 +179,9 @@ async fn handle_request(
         // 队列，ReAct 下一步开始前注入。
         "_oxidea/steer" => hub.steer(&params),
         "session/load" => hub.load_session(params).await,
+        // 用户切换 Code/Plan 模式（Composer 模式下拉）：plan 态由用户手动开启，
+        // agent 不自行进入；切换幂等，响应带更新后的 configOptions。
+        "session/set_config_option" => hub.set_config_option(params, conn).await,
         other => Err(RpcError::method_not_found(other)),
     }
 }
