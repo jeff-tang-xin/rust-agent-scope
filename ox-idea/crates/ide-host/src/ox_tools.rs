@@ -81,6 +81,8 @@ fn project_brief(root: &std::path::Path) -> Option<String> {
         "\n## 当前项目环境（IDE 检测）\n\
          - 启动/调试一律走 run 配置（get_run_configurations → execute_run_configuration），\n\
          不要用 shell 拼启动命令——IDE 负责进程簿记，shell 起的进程你停不掉。\n\
+         - 大型项目（Rust/Java/Go 多模块）首次构建常见 5-10 分钟：编译期持续输出属正常，\n\
+         耐心等待命令自然结束，不要中途判定卡死/超时而取消；增量构建通常秒级。\n\
          - 以下是自动检测到的配置；用户自定义配置用 get_run_configurations 现查。\n",
     );
     for config in configs.iter().take(20) {
