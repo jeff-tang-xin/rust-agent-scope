@@ -4,6 +4,7 @@ mod build;
 mod configs;
 mod output;
 mod process;
+mod processes;
 mod targets;
 
 use crate::mcp::tool::{Call, Tool};
@@ -11,7 +12,13 @@ use ide_core::IdeResult;
 use std::time::Duration;
 
 pub fn tools() -> Vec<Tool> {
-    vec![configs::get_run_configurations(), configs::execute_run_configuration(), build::build_project()]
+    vec![
+        configs::get_run_configurations(),
+        configs::execute_run_configuration(),
+        build::build_project(),
+        processes::get_running_processes(),
+        processes::stop_process(),
+    ]
 }
 
 /// The `timeout` argument: `default` when absent, at most `max` milliseconds. As in JetBrains

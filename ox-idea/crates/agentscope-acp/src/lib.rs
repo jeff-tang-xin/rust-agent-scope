@@ -37,6 +37,10 @@ pub struct OxHostContext {
     /// 记忆工作区锚点（`<项目根>/.oxidea/agent`，与 memory_save 工具同根，跨
     /// worktree 共享项目记忆）；`None` 时该会话不接记忆管线。
     pub memory_root: Option<std::path::PathBuf>,
+    /// 项目环境简报（宿主预计算：语言/构建系统/可跑配置清单），拼进系统提示词——
+    /// agent 开局即知「这是什么项目、有哪些牌可打」，不必拿目录树瞎摸。
+    /// `None` 时该节省略（独立 stdio 进程或未命中项目）。
+    pub project_brief: Option<String>,
 }
 
 /// IDE 语义工具与记忆锚点的提供者：按任务工作目录返回上下文。
@@ -56,7 +60,7 @@ pub(crate) fn ox_context_for(cwd: &Path) -> OxHostContext {
     OX_TOOLS
         .get()
         .map(|provider| provider(cwd))
-        .unwrap_or(OxHostContext { tools: Vec::new(), memory_root: None })
+        .unwrap_or(OxHostContext { tools: Vec::new(), memory_root: None, project_brief: None })
 }
 
 /// `env` 是模型配置（`AGENTSCOPE_*`），独立进程模式传进程环境，进程内模式由宿主注入。

@@ -214,6 +214,22 @@ fn sessions_root(cwd: &str) -> Option<PathBuf> {
         .map(|r| r.join("sessions"))
 }
 
+/// IDE 注入的系统提示词节：项目环境简报（宿主预计算，开局事实）+ 语义工具
+/// 使用引导。独立成纯函数便于测试断言简报确实进入提示词。
+fn ide_section_text(names: &[String], brief: Option<&str>) -> String {
+    let brief = brief.unwrap_or("");
+    format!(
+        "{brief}\n## IDE 语义工具\n\
+         - 你还有一组 IDE 语义工具（{}），它们理解项目索引、编辑器与构建系统，优先用它们而非裸 shell。\n\
+         - 找代码、理链路：语义搜索定位实现，引用查找追调用方，符号信息看类型与签名——评估改动影响面时先追链路再动手。\n\
+         - 改代码：优先用补丁/编辑工具（理解项目结构、能检查冲突），不要用 shell 重定向整文件覆盖。\n\
+         - 构建与检查：用构建与问题检查工具拿结构化结果，比解析裸命令输出更可靠。\n\
+         - 编辑器上下文：用户说「这个文件」「我选中的」时，先用 get_current_file / get_all_open_file_paths 确认所指，不要猜。\n\
+         - 每个工具的详细用途与参数见其工具定义（description），不确定就先读再调，不要猜参数。\n",
+        names.join(", ")
+    )
+}
+
 /// 装配一个面向 ACP 会话的 agent：文件工具 + 本地 shell 锚定 cwd，
 /// 系统提示词声明工作目录与能力边界。
 fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) -> Result<Arc<HarnessAgent>, String> {
@@ -264,15 +280,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         for tool in host_ctx.tools {
             toolkit.register(tool);
         }
-        format!(
-            "\n## IDE 语义工具\n\
-             - 你还有一组 IDE 语义工具（{}），它们理解项目索引、编辑器与构建系统，优先用它们而非裸 shell。\n\
-             - 找代码、理链路：语义搜索定位实现，引用查找追调用方，符号信息看类型与签名——评估改动影响面时先追链路再动手。\n\
-             - 改代码：优先用补丁/编辑工具（理解项目结构、能检查冲突），不要用 shell 重定向整文件覆盖。\n\
-             - 构建与检查：用构建与问题检查工具拿结构化结果，比解析裸命令输出更可靠。\n\
-             - 每个工具的详细用途与参数见其工具定义（description），不确定就先读再调，不要猜参数。\n",
-            names.join(", ")
-        )
+        ide_section_text(&names, host_ctx.project_brief.as_deref())
     };
     // 黑板报（与记忆同域锚定 `<项目根>/.oxidea/agent/blackboard.json`）：工作现场的
     // 信号流（发现/结论/风险/提醒），跨会话共享、只增不改——长任务上下文被压缩后
@@ -402,7 +410,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          改前：read_file 拿真实文本 + get_file_problems 记基线 → 改后：get_file_problems 对比 + 编译 + 定向测试。语义级重命名用 rename_refactoring（连带所有引用），格式化用 reformat_file。\n\
          ### 构建与运行\n\
          build_project 拿结构化错误，逐个修完再 build；跑应用用 get_run_configurations → execute_run_configuration；长命令输出重定向到日志文件再读日志（两步，不用 && 串联）。\n\
-         ### 数据库（面板连接已注册时才有 db 工具）\n\
+         ### 进程管理\n\n         长驻服务（dev server / Spring Boot 等）用 execute_run_configuration 的 waitForExit=true + 短 timeout 启动：拿到输出快照与 fullOutputPath 后进程转后台，后续 read_file 读该文件看新日志。get_running_processes 查运行清单，stop_process 停止（会请求确认）——不要用 shell 杀进程，那会绕过 IDE 进程簿记留下孤儿进程。\n\n         ### 数据库（面板连接已注册时才有 db 工具）\n\
          {datasource_section}\
          先 db_query 摸清 schema（只读免确认），再写 SQL——不要猜列名表名；变更数据/DDL 用 db_dml（会请求用户确认，这是设计不是故障）。\n\
          ### 浏览器（需要看真实页面时）\n\
@@ -908,6 +916,26 @@ mod tests {
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
 
+    /// 环境简报注入：宿主给的 project_brief 原样进入 IDE 节，置于工具引导之前；
+    /// 无简报时该节省略但工具引导仍在。
+    #[test]
+    fn ide_section_embeds_project_brief() {
+        let brief = "\n## 当前项目环境（IDE 检测）\n- [cargo] ox-idea — `cargo build`\n";
+        let section = ide_section_text(&["get_current_file".to_owned()], Some(brief));
+        assert!(section.contains("当前项目环境"), "brief missing: {section}");
+        assert!(section.contains("cargo build"));
+        assert!(section.contains("## IDE 语义工具"));
+        assert!(section.contains("get_current_file"));
+        // 简报在工具引导之前（开局事实优先）
+        let brief_pos = section.find("当前项目环境").unwrap();
+        let tools_pos = section.find("## IDE 语义工具").unwrap();
+        assert!(brief_pos < tools_pos);
+
+        let plain = ide_section_text(&["x".to_owned()], None);
+        assert!(!plain.contains("当前项目环境"));
+        assert!(plain.contains("## IDE 语义工具"));
+    }
+
     /// 预置响应序列的 Mock 模型（对齐 core 测试的形态）。
     struct MockModel {
         responses: Mutex<Vec<ChatResponse>>,
@@ -1390,6 +1418,7 @@ mod tests {
         set_ox_tool_provider(Arc::new(move |_| OxHostContext {
             tools: Vec::new(),
             memory_root: Some(memory_root.clone()),
+            project_brief: None,
         }));
         let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
 

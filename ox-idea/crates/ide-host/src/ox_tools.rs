@@ -68,12 +68,44 @@ fn project_for(host: &Host, cwd: &std::path::Path) -> Option<PathBuf> {
         .map(|p| p.root.clone())
 }
 
+/// 项目环境简报：复用 ide-run 的多语言检测（package.json scripts / Cargo.toml /
+/// pom.xml / build.gradle / go.mod / pyproject / Makefile / CMake 等），把可跑
+/// 配置清单拼成系统提示词节——agent 开局即知项目类型与可用运行配置，不必拿
+/// 目录树瞎摸，也不会用 shell 拼启动命令绕过 IDE 进程簿记。
+fn project_brief(root: &std::path::Path) -> Option<String> {
+    let configs = ide_run::detect(root);
+    if configs.is_empty() {
+        return None;
+    }
+    let mut brief = String::from(
+        "\n## 当前项目环境（IDE 检测）\n\
+         - 启动/调试一律走 run 配置（get_run_configurations → execute_run_configuration），\n\
+         不要用 shell 拼启动命令——IDE 负责进程簿记，shell 起的进程你停不掉。\n\
+         - 以下是自动检测到的配置；用户自定义配置用 get_run_configurations 现查。\n",
+    );
+    for config in configs.iter().take(20) {
+        let cwd = config.cwd.as_ref().map(|p| p.0.display().to_string()).unwrap_or_default();
+        brief.push_str(&format!(
+            "- [{}] {} — `{} {}`{}\n",
+            config.kind,
+            config.name,
+            config.command,
+            config.args.join(" "),
+            if cwd.is_empty() { String::new() } else { format!("（cwd: {cwd}）") }
+        ));
+    }
+    if configs.len() > 20 {
+        brief.push_str(&format!("- …等共 {} 个，其余用 get_run_configurations 现查\n", configs.len()));
+    }
+    Some(brief)
+}
+
 /// 构造工具提供者：未命中项目或项目不可用时返回空工具集与无记忆锚点
 /// （agent 优雅降级为文件 + shell）。
 pub fn ox_tool_provider(host: Arc<Host>) -> OxToolProvider {
     Arc::new(move |cwd| {
         let Some(project) = project_for(&host, cwd) else {
-            return OxHostContext { tools: Vec::new(), memory_root: None };
+            return OxHostContext { tools: Vec::new(), memory_root: None, project_brief: None };
         };
         let registry = Arc::new(Registry::new(host.clone()));
         let tools = match registry.tools(&project) {
@@ -98,7 +130,8 @@ pub fn ox_tool_provider(host: Arc<Host>) -> OxToolProvider {
         {
             tracing::warn!("could not update .oxidea/.gitignore: {e}");
         }
-        OxHostContext { tools, memory_root: Some(memory_root) }
+        let project_brief = project_brief(&project);
+        OxHostContext { tools, memory_root: Some(memory_root), project_brief }
     })
 }
 

@@ -111,6 +111,7 @@ async fn session_new_assembles_memory_pipeline_from_host_context() {
     set_ox_tool_provider(Arc::new(move |_| OxHostContext {
         tools: Vec::new(),
         memory_root: Some(memory_root.clone()),
+        project_brief: None,
     }));
 
     let (client, server) = duplex(64 * 1024);
