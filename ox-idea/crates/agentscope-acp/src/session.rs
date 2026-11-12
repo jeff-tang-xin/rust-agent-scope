@@ -206,6 +206,79 @@ fn max_iters_from(env: &[(String, String)]) -> usize {
         .unwrap_or(100)
 }
 
+/// prompt 是否为 `/compact` 命令：全部文本块拼接后 trim 等于命令名。
+/// 纯函数便于测试；带附件/图片的 prompt 不算命令（原样进模型）。
+fn is_compact_command(content: &[ContentBlock]) -> bool {
+    let text = content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    text.trim().eq_ignore_ascii_case("/compact")
+}
+
+/// 执行 `/compact`：强制压缩会话上下文，进度与结果以 `compaction_update` 帧
+/// 通知 client（ide-agent normalize 成「Compact conversation」工具卡片）。
+/// 不调模型——压缩摘要由 harness 的辅助压缩模型完成。
+async fn compact_command<W>(
+    session: &AcpSession,
+    session_id: &str,
+    conn: &RpcConn<W>,
+) -> PromptOutcome
+where
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    // 每次命令一个新 id：normalize 按 id 记录压缩状态，复用固定 id 会让
+    // 第二次 /compact 被当成旧卡片的更新而丢失。
+    let compaction_id = format!(
+        "manual-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    conn.notify(
+        "session/update",
+        protocol::compaction_update(session_id, &compaction_id, "in_progress", ""),
+    )
+    .await;
+    let outcome = match session.agent.compact_now(None, session_id).await {
+        Ok(Some(detail)) => {
+            conn.notify(
+                "session/update",
+                protocol::compaction_update(session_id, &compaction_id, "completed", &detail),
+            )
+            .await;
+            PromptOutcome::EndTurn
+        }
+        Ok(None) => {
+            conn.notify(
+                "session/update",
+                protocol::compaction_update(
+                    session_id,
+                    &compaction_id,
+                    "completed",
+                    "对话为空，无需压缩",
+                ),
+            )
+            .await;
+            PromptOutcome::EndTurn
+        }
+        Err(error) => {
+            conn.notify(
+                "session/update",
+                protocol::compaction_update(session_id, &compaction_id, "failed", &error),
+            )
+            .await;
+            PromptOutcome::EndTurn
+        }
+    };
+    outcome
+}
+
 /// 会话持久层根：`<memory_root>/sessions/`（与记忆/黑板同域锚定项目根，
 /// 跨 worktree 共享）。宿主未注入 memory_root 时返回 None（不持久化）。
 fn sessions_root(cwd: &str) -> Option<PathBuf> {
@@ -595,6 +668,13 @@ async fn drive_turn<W>(
 where
     W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    // `/compact` 命令：手动压缩上下文，不进模型。ide-agent 的命令列表只是
+    // composer 补全展示，发过来的是纯文本 prompt——在这里拦截执行，否则
+    // "/compact" 会被当成普通消息喂给 LLM，真正的压缩从不发生（前端也就
+    // 永远看不到压缩卡片）。
+    if is_compact_command(&content) {
+        return compact_command(session, session_id, conn).await;
+    }
     // 首条：用户消息（文本 + 可选图片，多模态模型直接看图）；权限往返后：
     // 确认答复消息（带 agentscope_confirm_results 元数据，agent 侧 apply 后续跑，
     // 不会重放成聊天内容）。
@@ -1539,6 +1619,32 @@ mod tests {
         assert_eq!(max_iters_from(&[]), 100);
         // 大小写不敏感（env 键约定大写，宿主注入路径不保证）。
         assert_eq!(max_iters_from(&[("agentscope_max_iters".to_owned(), "30".to_owned())]), 30);
+    }
+
+    #[test]
+    fn compact_command_matches_bare_slash_only() {
+        let text = |s: &str| vec![ContentBlock::Text { text: s.into() }];
+        assert!(is_compact_command(&text("/compact")));
+        // 前后空白容忍（composer 回车带空格）。
+        assert!(is_compact_command(&text(" /compact ")));
+        // 其他文本不是命令——原样进模型。
+        assert!(!is_compact_command(&text("/compact 压缩一下")));
+        assert!(!is_compact_command(&text("请帮我 /compact")));
+        assert!(!is_compact_command(&text("")));
+        // 带图片的 prompt 仍是命令：敲了 /compact 就是想压缩，图片块被忽略
+        // （压缩的是已有上下文，当前 prompt 不进模型）。
+        let with_image = vec![
+            ContentBlock::Text { text: "/compact".into() },
+            ContentBlock::Image {
+                source: agentscope_core::message::Source::Base64 {
+                    media_type: "image/png".into(),
+                    data: "aGk=".into(),
+                },
+                min_pixels: None,
+                max_pixels: None,
+            },
+        ];
+        assert!(is_compact_command(&with_image));
     }
 
     // AgentEvent 构造引用（防 import 漂移）。

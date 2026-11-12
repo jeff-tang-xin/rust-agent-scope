@@ -345,6 +345,16 @@ pub struct HarnessAgent {
     plan_mode_manager: Option<Arc<PlanModeManager>>,
     subagent_manager: Option<Arc<DefaultAgentManager>>,
     task_repository: Option<Arc<dyn TaskRepository>>,
+    /// 手动压缩（[`HarnessAgent::compact_now`]）所需的运行时：与迭代钩子共用
+    /// 同一 compactor/config/窗口（build 时一并构造；压缩禁用则为 None）。
+    compaction: Option<Arc<CompactionRuntime>>,
+}
+
+/// 压缩运行时：`build()` 里构造迭代钩子时顺带留存，供手动 `/compact` 复用。
+struct CompactionRuntime {
+    compactor: Arc<ConversationCompactor>,
+    config: CompactionConfig,
+    window: usize,
 }
 
 impl HarnessAgent {
@@ -466,6 +476,48 @@ impl HarnessAgent {
         self.delegate
             .clear_context_for(user_id, session_id)
             .map_err(|error| error.to_string())
+    }
+
+    /// 手动强制压缩某会话的对话上下文（`/compact` 命令入口）：以 forced=true
+    /// 跑一次与迭代钩子相同的压缩逻辑（摘要模型蒸馏旧消息为一条摘要），
+    /// 返回压缩说明（如「57 条消息合并为 1 条摘要」）。
+    ///
+    /// 与自动压缩的区别：无视触发阈值直接压（`/compact` 的语义就是「现在压」）；
+    /// 不发事件（调用方——ACP 层——自行向 client 发 `compaction_update` 帧）。
+    /// 无可压缩内容（对话为空 / 全为系统与合成消息）返回 `Ok(None)`。
+    pub async fn compact_now(
+        &self,
+        user_id: Option<&str>,
+        session_id: &str,
+    ) -> Result<Option<String>, String> {
+        let Some(compaction) = &self.compaction else {
+            return Err("上下文压缩未启用".into());
+        };
+        // 管理性访问拿状态克隆（Legacy 模式），压缩后写回——/compact 只在
+        // 空闲 turn 发出（ACP 层 busy 防重入），与运行中 call 无并发写。
+        let state = self
+            .delegate
+            .agent_state_for(user_id, session_id)
+            .map_err(|error| error.to_string())?;
+        let shared = Arc::new(std::sync::Mutex::new(state));
+        let rc = RuntimeContext::new().with_session_id(session_id.to_owned());
+        let detail = compact_in_state(
+            &rc,
+            &compaction.compactor,
+            &compaction.config,
+            &shared,
+            compaction.window,
+            true,
+            None,
+        )
+        .await;
+        if detail.is_some() {
+            let compacted = shared.lock().unwrap_or_else(|error| error.into_inner());
+            self.delegate
+                .save_agent_state_for(user_id, session_id, &compacted)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(detail)
     }
 
     /// 淘汰全部槽位缓存（持久层保留）。
@@ -893,7 +945,8 @@ impl HarnessAgentBuilder {
         // 压缩经 IterationHook 挂在每轮 ReAct 迭代边界（对齐 Java 每轮 onReasoning），
         // 闭包只捕获 compactor/config/window，不捕获 delegate（避免 Arc 循环引用）。
         let compaction_window = model.context_window_size();
-        let iteration_hook = match self.compaction_config {
+        let mut iteration_hook = None;
+        let compaction_runtime = match self.compaction_config {
             Some(config) => {
                 let flush = Arc::new(MemoryFlushManager::new(
                     Arc::clone(
@@ -904,6 +957,11 @@ impl HarnessAgentBuilder {
                     Arc::clone(&compaction_model),
                 ));
                 let compactor = Arc::new(ConversationCompactor::new(compaction_model, flush));
+                let runtime = Arc::new(CompactionRuntime {
+                    compactor: Arc::clone(&compactor),
+                    config: config.clone(),
+                    window: compaction_window,
+                });
                 let hook: IterationHook = {
                     let compactor = Arc::clone(&compactor);
                     let config = config.clone();
@@ -911,7 +969,8 @@ impl HarnessAgentBuilder {
                         let compactor = Arc::clone(&compactor);
                         let config = config.clone();
                         Box::pin(async move {
-                            compact_in_state(
+                            // 返回值（压缩说明）只对手动 /compact 有意义，钩子路径丢弃。
+                            let _ = compact_in_state(
                                 rc,
                                 &compactor,
                                 &config,
@@ -925,7 +984,8 @@ impl HarnessAgentBuilder {
                         })
                     })
                 };
-                Some(hook)
+                iteration_hook = Some(hook);
+                Some(runtime)
             }
             None => None,
         };
@@ -1003,6 +1063,7 @@ impl HarnessAgentBuilder {
             plan_mode_manager,
             subagent_manager,
             task_repository: Some(task_repository),
+            compaction: compaction_runtime,
         })
     }
 }
@@ -1216,6 +1277,59 @@ mod tests {
         // 计划模式未启用
         assert!(agent.plan_mode_manager().is_none());
         assert!(!agent.is_plan_mode_active(None, "s1"));
+        agent.close();
+        std::fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[tokio::test]
+    async fn compact_now_forces_compaction_and_persists() {
+        let workspace = temp_dir("compact-now");
+        let agent = HarnessAgentBuilder::new()
+            .model(MockModel::single("## SESSION INTENT\nSummary goal."))
+            .workspace(&workspace)
+            .compaction(CompactionConfig {
+                trigger_messages: 50, // 常规阈值远未达到，compact_now 仍强制压
+                flush_before_compact: false,
+                ..Default::default()
+            })
+            .build()
+            .unwrap();
+        // 空对话：无需压缩，摘要模型不被调用
+        assert!(agent.compact_now(None, "s1").await.unwrap().is_none());
+        // 预置 6 条对话（delegate 的状态管理 API；HarnessAgent 测试同模块可访问）
+        let mut state = agent.delegate.agent_state_for(None, "s1").unwrap();
+        state.context = (0..6)
+            .map(|i| Msg::user("user", &format!("message {i}")))
+            .collect();
+        agent
+            .delegate
+            .save_agent_state_for(None, "s1", &state)
+            .unwrap();
+        // 强制压缩：返回压缩说明，状态写回为 摘要 + 尾部 1 条
+        let detail = agent.compact_now(None, "s1").await.unwrap();
+        assert_eq!(detail.as_deref(), Some("5 条消息合并为 1 条摘要"));
+        let compacted = agent.delegate.agent_state_for(None, "s1").unwrap();
+        assert_eq!(compacted.context.len(), 2);
+        assert_eq!(
+            compacted.context[0].name,
+            crate::memory::COMPACTION_SUMMARY_MSG_NAME
+        );
+        assert_eq!(compacted.context[1].text(), "message 5");
+        agent.close();
+        std::fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[tokio::test]
+    async fn compact_now_errors_when_compaction_disabled() {
+        let workspace = temp_dir("compact-off");
+        let agent = HarnessAgentBuilder::new()
+            .model(MockModel::single("ok"))
+            .workspace(&workspace)
+            .disable_compaction()
+            .build()
+            .unwrap();
+        let error = agent.compact_now(None, "s1").await.unwrap_err();
+        assert!(error.contains("压缩未启用"));
         agent.close();
         std::fs::remove_dir_all(&workspace).ok();
     }

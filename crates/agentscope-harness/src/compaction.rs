@@ -839,6 +839,9 @@ fn filter_summary_messages(messages: &[Msg]) -> Vec<Msg> {
 /// `forced=true`（overflow 恢复，见
 /// [`agentscope_core::agent::is_context_overflow_error`]）时用最激进配置
 /// （trigger=1/keep=1/keepTokens=0，对齐 Java `overflowRecovery`）。
+///
+/// 返回压缩说明（如「57 条消息合并为 1 条摘要」）：`Some` = 本次发生了摘要
+/// 压缩（手动 `/compact` 入口据此给前端回执）；`None` = 未触发或降级。
 pub(crate) async fn compact_in_state(
     rc: &RuntimeContext,
     compactor: &ConversationCompactor,
@@ -847,14 +850,14 @@ pub(crate) async fn compact_in_state(
     window: usize,
     forced: bool,
     sink: Option<&agentscope_core::agent::EventSink>,
-) {
+) -> Option<String> {
     let snapshot: Vec<Msg> = state
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .context
         .clone();
     if snapshot.is_empty() {
-        return;
+        return None;
     }
     let (prefix, conversation): (Vec<Msg>, Vec<Msg>) = snapshot
         .iter()
@@ -882,6 +885,8 @@ pub(crate) async fn compact_in_state(
         .await
     {
         Ok(Some(compacted)) => {
+            // 摘要输入条数 = 对话条数 − 尾部保留条数（compacted = 摘要 1 条 + tail）。
+            let merged = conversation.len().saturating_sub(compacted.len().saturating_sub(1));
             let mut guard = state.lock().unwrap_or_else(|error| error.into_inner());
             // canCommit：仅当 context 未被并发改动（对齐 Java prepare 的 equals 检查）
             if guard.context == snapshot {
@@ -889,10 +894,12 @@ pub(crate) async fn compact_in_state(
                 next.extend(compacted);
                 guard.context = next;
             }
+            Some(format!("{merged} 条消息合并为 1 条摘要"))
         }
         _ => {
             // 未触发 / 摘要模型失败等：降级为本次不压缩（对齐 Java
             // prepareCandidate 的 onErrorResume → Optional.empty）。
+            None
         }
     }
 }
@@ -1349,11 +1356,13 @@ mod tests {
         };
         let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
         let rc = RuntimeContext::new();
-        compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
+        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
         let guard = state.lock().unwrap();
         assert_eq!(guard.context.len(), 2);
         assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
         assert_eq!(guard.context[1].text(), "message 5");
+        // 压缩说明回执：6 条对话，摘要 1 条 + 保留 1 条 → 5 条合并。
+        assert_eq!(detail.as_deref(), Some("5 条消息合并为 1 条摘要"));
     }
 
     #[tokio::test]
@@ -1370,12 +1379,13 @@ mod tests {
         };
         let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
         let rc = RuntimeContext::new();
-        compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None).await;
+        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None).await;
         let guard = state.lock().unwrap();
         assert_eq!(guard.context.len(), 2);
         assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
         assert!(guard.context[0].text().contains("Forced goal."));
         assert_eq!(guard.context[1].text(), "message 5");
+        assert!(detail.is_some());
     }
 
     #[tokio::test]
@@ -1389,8 +1399,9 @@ mod tests {
         };
         let state = state_with(vec![user_msg("a"), user_msg("b")]);
         let rc = RuntimeContext::new();
-        compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
+        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
         assert_eq!(state.lock().unwrap().context.len(), 2);
         assert!(model.requests().is_empty());
+        assert!(detail.is_none());
     }
 }

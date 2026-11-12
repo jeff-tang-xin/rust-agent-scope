@@ -269,4 +269,87 @@ async fn rpc_conn_delivers_notifications_in_order() {
     assert_eq!(second["params"]["n"], 2);
 }
 
+/// `/compact` prompt 端到端：不进模型，直接压缩并回 compaction_update 帧。
+/// 空对话场景（session/new 后立即 /compact）——不依赖真实模型可用性。
+#[tokio::test]
+async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
+    let root = std::env::temp_dir().join(format!("ox-acp-compact-{}", std::process::id()));
+    let cwd = root.join("proj");
+    std::fs::create_dir_all(&cwd).unwrap();
+
+    let (client, server) = duplex(64 * 1024);
+    let (client_read, mut client_write) = tokio::io::split(client);
+    let mut client_reader = tokio::io::BufReader::new(client_read);
+    let (server_read, server_write) = tokio::io::split(server);
+    let env = vec![("AGENTSCOPE_MODEL".to_owned(), "test-model".to_owned())];
+    let server_task = tokio::spawn(serve(server_read, server_write, env));
+
+    // initialize + session/new
+    client_write
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+        .await
+        .unwrap();
+    let _ = read_frame(&mut client_reader).await;
+    let params = json!({ "cwd": cwd.display().to_string() });
+    client_write
+        .write_all(
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"session/new\",\"params\":{params}}}\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let frame = read_frame(&mut client_reader).await;
+    let session_id = frame["result"]["sessionId"]
+        .as_str()
+        .expect("session/new failed")
+        .to_owned();
+
+    // /compact prompt（空对话 → completed「对话为空」）
+    let prompt = json!({
+        "sessionId": session_id,
+        "prompt": [{ "type": "text", "text": "/compact" }],
+    });
+    client_write
+        .write_all(
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"session/prompt\",\"params\":{prompt}}}\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    // 收集 compaction_update 通知，直到 prompt 响应到达
+    let mut updates = Vec::new();
+    let mut prompt_result = None;
+    for _ in 0..10 {
+        let frame = read_frame(&mut client_reader).await;
+        if frame.get("method").and_then(|m| m.as_str()) == Some("session/update") {
+            updates.push(frame["params"].clone());
+        } else if frame.get("id").is_some() {
+            prompt_result = Some(frame);
+            break;
+        }
+    }
+    assert_eq!(updates.len(), 2, "expected in_progress + completed, got {updates:?}");
+    assert_eq!(updates[0]["update"]["sessionUpdate"], "compaction_update");
+    assert_eq!(updates[0]["update"]["status"], "in_progress");
+    assert_eq!(updates[1]["update"]["status"], "completed");
+    // 同一 compactionId（Start/End 配对）
+    assert_eq!(
+        updates[0]["update"]["compactionId"],
+        updates[1]["update"]["compactionId"]
+    );
+    // 空对话：completed 带说明文本
+    assert_eq!(
+        updates[1]["update"]["summary"][0]["text"],
+        "对话为空，无需压缩"
+    );
+    // prompt 正常结束（命令不进模型，无 LLM 依赖）
+    let result = prompt_result.expect("prompt response missing");
+    assert_eq!(result["id"], 3);
+    assert_eq!(result["result"]["stopReason"], "end_turn");
+
+    server_task.abort();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 use tokio::io::AsyncWriteExt;
