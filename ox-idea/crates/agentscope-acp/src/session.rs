@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use agentscope_core::event::{AgentEventKind, ConfirmResult};
 use agentscope_core::message::{Role, ToolResultState};
+use agentscope_core::AgentStateStore;
 use agentscope_core::{ContentBlock, Model, Msg, RuntimeContext, Toolkit};
 use agentscope_harness::agent::{HarnessAgent, HarnessAgentBuilder};
 use agentscope_harness::blackboard::{BlackboardAppendTool, BlackboardReadTool, BlackboardStore};
@@ -76,6 +77,45 @@ impl AcpSessionHub {
         let cwd = protocol::parse_new_session(&params)?;
         let model = build_model(&self.env).map_err(RpcError::internal)?;
         let session_id = uuid::Uuid::new_v4().to_string();
+        let agent = assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
+        let (cancel_tx, _cancel_rx) = watch::channel(false);
+        self.sessions.lock().unwrap().insert(
+            session_id.clone(),
+            Arc::new(AcpSession {
+                agent,
+                cwd: PathBuf::from(&cwd),
+                busy: std::sync::atomic::AtomicBool::new(false),
+                cancel_tx,
+            }),
+        );
+        Ok(protocol::new_session_result(&session_id))
+    }
+
+    /// `session/load`：按 sessionId 重建 agent，Legacy state store 自动重放
+    /// 对话历史（模型上下文恢复；ide-agent 侧 timeline 自有持久化，历史
+    /// update 帧无需重放）。同进程还活着的会话幂等返回；持久层里没有的
+    /// 会话报错——client 收到错误会 fallback `session/new` 开新会话。
+    pub async fn load_session(&self, params: Value) -> Result<Value, RpcError> {
+        let (session_id, cwd) = protocol::parse_load_session(&params)?;
+        if self.sessions.lock().unwrap().contains_key(&session_id) {
+            return Ok(protocol::new_session_result(&session_id));
+        }
+        let root = sessions_root(&cwd).ok_or_else(|| {
+            RpcError::invalid_params(format!(
+                "会话 {session_id} 无持久层（宿主未注入记忆锚点），无法恢复"
+            ))
+        })?;
+        let store = agentscope_core::state::JsonFileAgentStateStore::new(root)
+            .map_err(|e| RpcError::internal(format!("打开会话存储失败: {e}")))?;
+        let known = store
+            .list_session_ids(None)
+            .map_err(|e| RpcError::internal(format!("读取会话列表失败: {e}")))?
+            .into_iter()
+            .any(|id| id == session_id);
+        if !known {
+            return Err(RpcError::invalid_params(format!("未知会话: {session_id}")));
+        }
+        let model = build_model(&self.env).map_err(RpcError::internal)?;
         let agent = assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
         let (cancel_tx, _cancel_rx) = watch::channel(false);
         self.sessions.lock().unwrap().insert(
@@ -166,6 +206,14 @@ fn max_iters_from(env: &[(String, String)]) -> usize {
         .unwrap_or(100)
 }
 
+/// 会话持久层根：`<memory_root>/sessions/`（与记忆/黑板同域锚定项目根，
+/// 跨 worktree 共享）。宿主未注入 memory_root 时返回 None（不持久化）。
+fn sessions_root(cwd: &str) -> Option<PathBuf> {
+    crate::ox_context_for(Path::new(cwd))
+        .memory_root
+        .map(|r| r.join("sessions"))
+}
+
 /// 装配一个面向 ACP 会话的 agent：文件工具 + 本地 shell 锚定 cwd，
 /// 系统提示词声明工作目录与能力边界。
 fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) -> Result<Arc<HarnessAgent>, String> {
@@ -241,10 +289,11 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     // MEMORY.md 的启动注入在 harness 层统一做（HarnessAgentBuilder::build）。
     let memory_ws = host_ctx
         .memory_root
+        .as_ref()
         .map(|root| {
             Arc::new(WorkspaceManager::with_filesystem(
                 root.clone(),
-                sandboxed(root),
+                sandboxed(root.clone()),
             ))
         });
     if let Some(ws) = &memory_ws {
@@ -389,6 +438,22 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     }) {
         permission = permission.with_mode(agentscope_core::permission::PermissionMode::Bypass);
     }
+    // 会话持久层（Legacy 模式）：`<memory_root>/sessions/` 下的
+    // JsonFileAgentStateStore，会话键 = ACP sessionId（drive_turn 的 runtime
+    // 携带，Legacy 有持久层时每次 run 自动重载）。IDE 重启后 session/load 按
+    // sessionId 重建 agent 即恢复对话历史；宿主未注入记忆锚点（独立 stdio
+    // 进程）时不持久化，session/load 会报错让 client fallback 新会话。
+    let state_store = host_ctx
+        .memory_root
+        .as_ref()
+        .map(|root| root.join("sessions"))
+        .map(|root| {
+            agentscope_core::state::JsonFileAgentStateStore::new(root).map(|s| {
+                Arc::new(s) as Arc<dyn agentscope_core::state::AgentStateStore>
+            })
+        })
+        .transpose()
+        .map_err(|e| format!("打开会话存储失败: {e}"))?;
     let mut builder = HarnessAgentBuilder::new()
         .name("ox-hareness")
         .sys_prompt(sys_prompt)
@@ -411,6 +476,9 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
                 Arc::clone(&model),
                 &MemoryConfig::default(),
             )));
+    }
+    if let Some(store) = &state_store {
+        builder = builder.state_store(Arc::clone(store));
     }
     let agent = builder.build().map_err(|e| format!("装配 agent 失败: {e}"))?;
     Ok(Arc::new(agent))
@@ -1277,6 +1345,71 @@ mod tests {
                 .iter()
                 .any(|u| u["sessionUpdate"] == "tool_call_update" && u["status"] == "completed"),
             "插队不应影响工具完成: {updates:?}"
+        );
+    }
+
+    /// session/load 幂等：同进程还活着的会话直接返回，不重建。
+    #[tokio::test]
+    async fn load_session_reuses_live_session() {
+        let hub = crate::AcpSessionHub::new(Vec::new());
+        let (agent, _model) = build_agent(vec![], false, false);
+        let (cancel_tx, _rx) = tokio::sync::watch::channel(false);
+        hub.sessions.lock().unwrap().insert(
+            "s1".to_string(),
+            Arc::new(AcpSession {
+                agent,
+                cwd: PathBuf::from("."),
+                busy: std::sync::atomic::AtomicBool::new(false),
+                cancel_tx,
+            }),
+        );
+        let params = json!({ "sessionId": "s1", "cwd": "/p", "mcpServers": [] });
+        let result = hub.load_session(params).await.unwrap();
+        assert_eq!(result["sessionId"], "s1");
+    }
+
+    /// session/load 拒绝未知会话（无持久层或 store 里没有）——client 收到
+    /// 错误会 fallback session/new。
+    #[tokio::test]
+    async fn load_session_rejects_unknown_session() {
+        let hub = crate::AcpSessionHub::new(Vec::new());
+        let params = json!({ "sessionId": "nope", "cwd": ".", "mcpServers": [] });
+        assert!(hub.load_session(params).await.is_err());
+    }
+
+    /// 会话持久化端到端：assemble_agent（宿主注入 memory_root）跑一轮后
+    /// 历史落盘；全新 agent（模拟 IDE 重启）同 sessionId 再跑一轮，模型
+    /// 输入应包含第一轮的问答历史。
+    #[tokio::test]
+    async fn assemble_agent_persists_and_reloads_history() {
+        use crate::{set_ox_tool_provider, OxHostContext};
+        let root = std::env::temp_dir().join(format!("ox-acp-load-{}", std::process::id()));
+        let cwd = root.join("proj");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let memory_root = root.join("memory-anchor");
+        set_ox_tool_provider(Arc::new(move |_| OxHostContext {
+            tools: Vec::new(),
+            memory_root: Some(memory_root.clone()),
+        }));
+        let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
+
+        let model1 = MockModel::new(vec![ChatResponse::from_text("第一轮回复")]);
+        let agent1 = assemble_agent(cwd.to_str().unwrap(), model1.clone(), &env).unwrap();
+        let (_n1, outcome1) = run_drive_turn(agent1, "第一轮提问", None, false, None).await;
+        assert_eq!(outcome1, PromptOutcome::EndTurn);
+
+        let model2 = MockModel::new(vec![ChatResponse::from_text("第二轮回复")]);
+        let agent2 = assemble_agent(cwd.to_str().unwrap(), model2.clone(), &env).unwrap();
+        let (_n2, outcome2) = run_drive_turn(agent2, "第二轮提问", None, false, None).await;
+        assert_eq!(outcome2, PromptOutcome::EndTurn);
+        let seen = model2.seen_texts(0);
+        assert!(
+            seen.iter().any(|t| t.contains("第一轮提问")),
+            "重载后模型输入应含第一轮用户消息: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|t| t.contains("第一轮回复")),
+            "重载后模型输入应含第一轮助手回复: {seen:?}"
         );
     }
 

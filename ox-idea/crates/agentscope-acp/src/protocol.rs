@@ -17,8 +17,13 @@ pub fn initialize_result() -> Value {
     json!({
         "protocolVersion": 1,
         "agentCapabilities": {
-            "loadSession": false,
-            "promptCapabilities": { "image": true },
+            // loadSession：会话恢复走 Legacy state store（`<memory_root>/sessions/`
+            // 下的 JsonFileAgentStateStore，会话键 = ACP sessionId）——session/load
+            // 按 sessionId 重建 agent，持久层自动重放对话历史。
+            "loadSession": true,
+            // embeddedContext：声明接受内嵌文件（ide-agent 据此把 @ 引用的
+            // ≤256KB 文本文件以 resource 块随 prompt 发来，而非只给链接）。
+            "promptCapabilities": { "image": true, "embeddedContext": true },
             // ide-agent 从 _meta 读扩展能力：steer=true 声明支持运行中插队
             // （_oxidea/steer 请求），false 时插队消息退回队列等 turn 结束。
             "_meta": { "/oxidea/steer": true },
@@ -34,13 +39,14 @@ pub fn initialize_result() -> Value {
 
 /// `session/new` 响应。
 pub fn new_session_result(session_id: &str) -> Value {
-    // promptCapabilities.image：声明接受图片输入（ide-agent 据此放行贴图，
-    // 否则 "This agent can't read images." 直接拒绝）。
+    // promptCapabilities：image 声明接受图片输入（ide-agent 据此放行贴图，
+    // 否则 "This agent can't read images." 直接拒绝）；embeddedContext 声明
+    // 接受内嵌文件（@ 引用的文件内容随 prompt 到达，见 content_blocks）。
     json!({
         "sessionId": session_id,
         "agentCapabilities": {
-            "loadSession": false,
-            "promptCapabilities": { "image": true },
+            "loadSession": true,
+            "promptCapabilities": { "image": true, "embeddedContext": true },
             "_meta": { "/oxidea/steer": true },
         },
     })
@@ -246,6 +252,41 @@ fn content_blocks(blocks: &[Value]) -> Result<Option<Vec<ContentBlock>>, RpcErro
                     max_pixels: None,
                 });
             }
+            Some("resource") => {
+                // ide-agent 内嵌的 @ 引用文件（embeddedContext 协商后 ≤256KB 的
+                // 文本文件）：带路径标注拼进文本，模型直接看到内容，无需再调
+                // read_file。缺 text 的 resource（如二进制引用）跳过。
+                let resource = block.get("resource");
+                let uri = resource
+                    .and_then(|r| r.get("uri"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let body = resource
+                    .and_then(|r| r.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !body.is_empty() {
+                    let path = file_uri_to_path(uri).unwrap_or_else(|| uri.to_owned());
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&format!("\n<file path=\"{path}\">\n{body}\n</file>"));
+                }
+            }
+            Some("resource_link") => {
+                // 过大未内嵌的 @ 引用文件：转成路径提及，模型需要时用 read_file
+                // 读取（read_file 吃文件系统路径，故把 file:// URI 解码回路径）。
+                let uri = block.get("uri").and_then(Value::as_str).unwrap_or("");
+                if !uri.is_empty() {
+                    let path = file_uri_to_path(uri).unwrap_or_else(|| uri.to_owned());
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&format!(
+                        "\n[引用文件（过大未内嵌，需要时用 read_file 读取）: {path}]"
+                    ));
+                }
+            }
             _ => {}
         }
     }
@@ -266,6 +307,19 @@ pub fn parse_new_session(params: &Value) -> Result<String, RpcError> {
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| RpcError::invalid_params("session/new 缺 cwd"))?;
     Ok(cwd.to_owned())
+}
+
+/// 从 `session/load` 参数取 (sessionId, cwd)。`mcpServers` 由 ide-agent 发送，
+/// 但 OX agent 的工具全部进程内注入，忽略。
+pub fn parse_load_session(params: &Value) -> Result<(String, String), RpcError> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| RpcError::invalid_params("session/load 缺 sessionId"))?
+        .to_owned();
+    let cwd = parse_new_session(params)?;
+    Ok((session_id, cwd))
 }
 
 /// 工具名 → ACP v1 kind：按名前缀粗分类（够 client 渲染图标用）。
@@ -292,5 +346,125 @@ pub fn tool_kind(name: &str) -> &'static str {
         "fetch"
     } else {
         "other"
+    }
+}
+
+/// `file://` URI → 文件系统路径（剥前缀 + percent-decode）；非 file URI 返回 None。
+/// Windows 盘符形态 `file:///C:/x` 剥掉多余的 `/`，Unix `file:///home/x` 保留首 `/`。
+fn file_uri_to_path(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    // `file:///C:/x` 剥前缀后是 "/C:/x"：index 0 为 '/'、index 2 为 ':'（盘符
+    // 在 1）即 Windows，剥掉多余的 '/'；Unix "/home/x" 原样保留。
+    let raw = if rest.len() >= 3 && rest.as_bytes()[0] == b'/' && rest.as_bytes()[2] == b':' {
+        rest.strip_prefix('/').unwrap_or(rest)
+    } else {
+        rest
+    };
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hi = (bytes[i + 1] as char).to_digit(16)?;
+                let lo = (bytes[i + 2] as char).to_digit(16)?;
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initialize_declares_embedded_context() {
+        let v = initialize_result();
+        assert_eq!(v["agentCapabilities"]["promptCapabilities"]["embeddedContext"], json!(true));
+    }
+
+    #[test]
+    fn new_session_declares_embedded_context() {
+        let v = new_session_result("s1");
+        assert_eq!(v["agentCapabilities"]["promptCapabilities"]["embeddedContext"], json!(true));
+    }
+
+    #[test]
+    fn resource_block_embeds_file_with_path_tag() {
+        let blocks = json!([
+            { "type": "text", "text": "看看这个" },
+            { "type": "resource", "resource": { "uri": "file:///C:/proj/src/a.rs", "text": "fn main() {}" } },
+        ]);
+        let content = content_blocks(blocks.as_array().unwrap()).unwrap().unwrap();
+        match &content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("看看这个"));
+                assert!(text.contains("<file path=\"C:/proj/src/a.rs\">"));
+                assert!(text.contains("fn main() {}"));
+            }
+            _ => panic!("expected text block, got {:?}", content[0]),
+        }
+    }
+
+    #[test]
+    fn resource_without_text_is_skipped() {
+        let blocks = json!([
+            { "type": "text", "text": "hi" },
+            { "type": "resource", "resource": { "uri": "file:///C:/bin.dat" } },
+        ]);
+        let content = content_blocks(blocks.as_array().unwrap()).unwrap().unwrap();
+        match &content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "hi"),
+            _ => panic!("expected text block"),
+        }
+    }
+
+    #[test]
+    fn resource_link_becomes_path_mention() {
+        let blocks = json!([
+            { "type": "text", "text": "看下" },
+            { "type": "resource_link", "uri": "file:///C:/proj/big.log", "name": "big.log" },
+        ]);
+        let content = content_blocks(blocks.as_array().unwrap()).unwrap().unwrap();
+        match &content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("C:/proj/big.log"));
+                assert!(text.contains("read_file"));
+            }
+            _ => panic!("expected text block"),
+        }
+    }
+
+    #[test]
+    fn file_uri_decodes_percent_and_windows_drive() {
+        assert_eq!(
+            file_uri_to_path("file:///C:/Users%20name/a%5Cb.rs").as_deref(),
+            Some("C:/Users name/a\\b.rs")
+        );
+        assert_eq!(file_uri_to_path("file:///home/x/y.rs").as_deref(), Some("/home/x/y.rs"));
+        assert_eq!(file_uri_to_path("http://x/y"), None);
+    }
+
+    #[test]
+    fn initialize_declares_load_session() {
+        let v = initialize_result();
+        assert_eq!(v["agentCapabilities"]["loadSession"], json!(true));
+    }
+
+    #[test]
+    fn parse_load_session_extracts_id_and_cwd() {
+        let (id, cwd) =
+            parse_load_session(&json!({ "sessionId": "s1", "cwd": "/p", "mcpServers": [] })).unwrap();
+        assert_eq!(id, "s1");
+        assert_eq!(cwd, "/p");
+        assert!(parse_load_session(&json!({ "cwd": "/p" })).is_err());
+        assert!(parse_load_session(&json!({ "sessionId": "s1" })).is_err());
     }
 }

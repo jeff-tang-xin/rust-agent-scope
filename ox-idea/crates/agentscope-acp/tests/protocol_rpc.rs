@@ -27,10 +27,10 @@ where
 }
 
 #[test]
-fn initialize_declares_v1_without_load_session() {
+fn initialize_declares_v1_with_load_session() {
     let result = protocol::initialize_result();
     assert_eq!(result["protocolVersion"], 1);
-    assert_eq!(result["agentCapabilities"]["loadSession"], false);
+    assert_eq!(result["agentCapabilities"]["loadSession"], true);
     assert_eq!(result["agentInfo"]["name"], "agentscope");
 }
 
@@ -169,13 +169,13 @@ async fn serve_answers_initialize_and_rejects_unknown_method() {    let (client,
     assert_eq!(frame["id"], 2);
     assert_eq!(frame["error"]["code"], -32601);
 
-    // session/load 未声明 → 报错
+    // session/load 缺参数 → invalid params（方法已支持，参数缺失报 -32602）
     client_write
         .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"session/load\",\"params\":{}}\n")
         .await
         .unwrap();
     let frame = read_frame(&mut client_reader).await;
-    assert_eq!(frame["error"]["code"], -32601);
+    assert_eq!(frame["error"]["code"], -32602);
 
     // 非法 JSON 行被丢弃，不影响后续请求
     client_write.write_all(b"not-json\n").await.unwrap();

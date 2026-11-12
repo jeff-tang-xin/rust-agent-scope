@@ -174,10 +174,7 @@ async fn handle_request(
         // 运行中插队（ide-agent 的 ⌘↵ / steer 能力）：消息进 agent 的 steer
         // 队列，ReAct 下一步开始前注入。
         "_oxidea/steer" => hub.steer(&params),
-        "session/load" => Err(RpcError::new(
-            -32601,
-            "session/load not supported (loadSession: false)",
-        )),
+        "session/load" => hub.load_session(params).await,
         other => Err(RpcError::method_not_found(other)),
     }
 }
