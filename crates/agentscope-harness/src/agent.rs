@@ -36,7 +36,7 @@ use crate::compaction::{compact_in_state, CompactionConfig, ConversationCompacto
 use agentscope_core::agent::IterationHook;
 use crate::memory::MemoryFlushManager;
 use crate::plan::{PlanModeManager, PlanModeMiddleware};
-use crate::tools::{PlanExitTool, PlanWriteTool};
+use crate::tools::{PlanExitTool, PlanWriteTool, UpdatePlanTool};
 use crate::subagent::{
     AgentSpecLoader, DefaultAgentManager, SubagentDeclaration, SubagentEntry,
     SubagentFactory, WorkspaceMode,
@@ -908,6 +908,11 @@ impl HarnessAgentBuilder {
             toolkit.register(Arc::new(AgentListTool::new(core)));
         }
         let mut plan_middleware: Option<Arc<PlanModeMiddleware>> = None;
+
+        // 5.4) 任务清单工具：会话内呈现（宿主层转 ACP plan_update 帧），不落盘、
+        //      无状态。is_read_only=true → 权限免确认 + plan 模式白名单自动放行
+        //      （plan 态下也可用它呈现研究/设计进度）。与 plan 模式无关，总是注册。
+        toolkit.register(Arc::new(UpdatePlanTool));
 
         // 5.5) 计划模式：plan 三工具 + PlanModeMiddleware（对齐 Java HarnessAgent
         //      2972-2992 的 enablePlanMode 装配）。必须在 delegate builder 之前——

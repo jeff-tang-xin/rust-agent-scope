@@ -101,7 +101,10 @@ fn parse_new_session_requires_cwd() {
 /// session/new 走 assemble_agent 全路径：宿主注入记忆锚点时，记忆管线
 /// （memory 工具 + flush/maintenance 中间件）装配成功，会话正常建立。
 /// 注意：set_ox_tool_provider 是进程级 OnceLock——本测试注册的上下文会被
-/// 同进程后续走 assemble_agent 的测试读到（当前仅此一个测试走 session/new）。
+/// 同进程其他走 assemble_agent 的测试（mode/compact 端到端）读到，因此
+/// 收尾【不能】删除 root：并行测试的 agent 可能仍持有 memory_anchor 下的
+/// state store，删除会让它们的保存路径 IO 失败（表现为偶发错误帧）。
+/// 目录留给系统 temp 清理。
 #[tokio::test]
 async fn session_new_assembles_memory_pipeline_from_host_context() {
     let root = std::env::temp_dir().join(format!("ox-acp-mem-{}", std::process::id()));
@@ -349,7 +352,7 @@ async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
     assert_eq!(result["result"]["stopReason"], "end_turn");
 
     server_task.abort();
-    let _ = std::fs::remove_dir_all(&root);
+    // 不删 root：进程级 provider 的 memory_anchor 被同进程并行测试共享（见上注释）。
 }
 
 /// mode configOption 声明与切换往返：session/new 带 Code/Plan 下拉；
@@ -416,8 +419,12 @@ async fn mode_config_option_declared_and_switchable() {
             break frame;
         }
     };
-    assert_eq!(response["id"], 3);
-    assert_eq!(response["result"]["configOptions"][0]["currentValue"], "plan");
+    assert_eq!(response["id"], 3, "实际响应: {response}");
+    assert_eq!(
+        response["result"]["configOptions"][0]["currentValue"],
+        "plan",
+        "实际响应: {response}"
+    );
     let update = update_seen.expect("config_option_update notification missing");
     assert_eq!(update[0]["currentValue"], "plan");
 

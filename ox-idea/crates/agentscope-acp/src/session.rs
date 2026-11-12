@@ -542,6 +542,10 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          browser_navigate → browser_snapshot 读 DOM 结构（比截图省且准）→ browser_click_at/browser_type_at 坐标操作；验证视觉效果才用 browser_screenshot。\n\
          ### Shell 纪律\n\
          只跑非交互、有界、能自行结束的命令；判定成功看 exit code 与 Tests run 计数等客观信号，不看输出「看起来正常」。\n\n\
+         ### 任务清单与 Bug 统计（update_plan）\n\
+         1. 非平凡任务开工时用 update_plan 建任务清单（多步计划从计划文件的步骤初始化），之后每完成一项（验证通过后）立即更新状态；工作期间保持恰好一项 in_progress。清单是会话内呈现，不落盘，每次传全量列表。\n\
+         2. 测试失败必记 .oxidea/agent/plans/bugs.json（JSON 数组，字段：id、description、related_test、status、fix_note；状态流转 open→fixing→fixed→closed）：定位修复并自测通过后置 fixed 并写清 fix_note（改了什么、根因、怎么修的）；回归通过才置 closed。没有自测过不要置 fixed——虚假的 fixed 会误导后续判断。\n\
+         3. 每次 update_plan 顺带在回复里播报 Bug 统计（open/fixing/fixed/closed 各多少），让用户随时掌握质量面。\n\n\
          ## 4. 记忆机制（你的工作必须可追溯）\n\
          {memory_section}{blackboard_section}\
          - blackboard（任务内共享）：开工先读；得出结论、发现风险随手记（不要攒到收尾）；收尾必写。\n\
@@ -759,6 +763,11 @@ where
         // Start/End 帧本身不带参数与结果文本，靠这两张表在 Delta 时攒、终态时取。
         let mut pending_inputs: HashMap<String, String> = HashMap::new();
         let mut pending_outputs: HashMap<String, String> = HashMap::new();
+        // 工具名表（Start 记、终态查）：update_plan 的 plan_update 帧要在
+        // ResultEnd(Success) 才发——End 时工具还没执行（校验可能失败），提前发
+        // 会让前端显示一份工具实际拒绝的清单。
+        let mut tool_names: HashMap<String, String> = HashMap::new();
+        let mut pending_plan_inputs: HashMap<String, Value> = HashMap::new();
         // delta 微批 buffer：同块连续增量攒到 ~256 字节再发一帧，块切换或
         // 其它事件时先清空——把每 token 一帧 JSON 压成更少的帧流。
         let mut pending_text = String::new();
@@ -829,6 +838,7 @@ where
                     tool_call_name,
                     ..
                 } => {
+                    tool_names.insert(tool_call_id.clone(), tool_call_name.clone());
                     conn.notify(
                         "session/update",
                         protocol::tool_call_started(
@@ -854,6 +864,11 @@ where
                     if let Some(input) = pending_inputs.remove(&tool_call_id) {
                         let raw = serde_json::from_str::<Value>(&input)
                             .unwrap_or(Value::String(input));
+                        // update_plan：留一份入参，ResultEnd(Success) 时转 plan_update 帧。
+                        if tool_names.get(&tool_call_id).map(String::as_str) == Some("update_plan")
+                        {
+                            pending_plan_inputs.insert(tool_call_id.clone(), raw.clone());
+                        }
                         conn.notify(
                             "session/update",
                             protocol::tool_call_input(session_id, &tool_call_id, raw),
@@ -899,6 +914,22 @@ where
                     // 结果文本优先用工具真实输出；没有输出时退回状态说明。
                     let output = pending_outputs.remove(&tool_call_id).unwrap_or(note.clone());
                     let output = if output.is_empty() { note } else { output };
+                    // update_plan 成功：把入参条目转 plan_update 帧推给前端
+                    // （失败/被拒不发——前端清单保持上一次成功状态）。解析失败
+                    // 只丢帧不报错：工具侧已校验过，这里兜底不该打断 turn。
+                    if tool_names.get(&tool_call_id).map(String::as_str) == Some("update_plan") {
+                        if let Some(raw) = pending_plan_inputs.remove(&tool_call_id) {
+                            if state == ToolResultState::Success
+                                && let Ok(entries) = protocol::parse_plan_entries(&raw)
+                            {
+                                conn.notify(
+                                    "session/update",
+                                    protocol::plan_update_frame(session_id, &entries),
+                                )
+                                .await;
+                            }
+                        }
+                    }
                     conn.notify(
                         "session/update",
                         protocol::tool_call_finished(session_id, &tool_call_id, status, &output),
@@ -1306,6 +1337,84 @@ mod tests {
         &frame["params"]["update"]
     }
 
+    /// update_plan 端到端：模型调用成功 → plan_update 帧（entries 规范化，
+    /// priority 缺省 medium）；调用失败（非法 status）→ 不发 plan_update 帧，
+    /// 前端清单保持上一次成功状态。
+    #[tokio::test]
+    async fn update_plan_tool_emits_plan_update_frames() {
+        let build = |responses: Vec<ChatResponse>| {
+            let mut toolkit = Toolkit::new();
+            toolkit.register(Arc::new(EchoTool));
+            toolkit.register(Arc::new(agentscope_harness::tools::UpdatePlanTool));
+            let model = MockModel::new(responses);
+            Arc::new(
+                HarnessAgentBuilder::new()
+                    .name("test")
+                    .sys_prompt("test")
+                    .model(model.clone())
+                    .toolkit(toolkit)
+                    .max_iters(5)
+                    .build()
+                    .expect("build agent"),
+            )
+        };
+        let tool_use = |id: &str, input: Value| ChatResponse {
+            content: vec![ContentBlock::ToolUse {
+                id: id.into(),
+                name: "update_plan".into(),
+                input,
+                state: None,
+                content: None,
+            }],
+            usage: None,
+            finish_reason: None,
+        };
+
+        // MockModel.pop() 从尾部弹出：执行顺序 call_ok（成功）→ call_bad（非法）
+        // → 文本收尾，故数组倒着放。
+        let agent = build(vec![
+            ChatResponse::from_text("完成"),
+            tool_use(
+                "call_bad",
+                json!({"entries": [{"content": "x", "status": "done"}]}),
+            ),
+            tool_use(
+                "call_ok",
+                json!({"entries": [
+                    {"content": "read code", "status": "completed"},
+                    {"content": "fix bug", "status": "in_progress"}
+                ]}),
+            ),
+        ]);
+        let (notifications, outcome) = run_drive_turn(agent, "更新任务清单", None, false, None).await;
+        assert_eq!(outcome, PromptOutcome::EndTurn);
+        let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
+        let plan_frames: Vec<&Value> = updates
+            .iter()
+            .filter(|u| u["sessionUpdate"] == "plan_update")
+            .copied()
+            .collect();
+        assert_eq!(plan_frames.len(), 1, "只应有一次成功的 plan_update: {updates:?}");
+        let plan = &plan_frames[0]["plan"];
+        assert_eq!(plan["type"], "items");
+        assert_eq!(plan["planId"], "tasks");
+        let entries = plan["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["content"], "read code");
+        assert_eq!(entries[0]["status"], "completed");
+        assert_eq!(entries[1]["priority"], "medium", "priority 缺省 medium");
+        // 失败调用（非法 status）：ToolOutput::error → Error 终态（failed 卡片），
+        // 不产生 plan_update——前端清单保持上一次成功状态。
+        assert!(
+            updates.iter().any(|u| {
+                u["sessionUpdate"] == "tool_call_update"
+                    && u["toolCallId"] == "call_bad"
+                    && u["status"] == "failed"
+            }),
+            "非法调用应有 failed 终态卡片，实际帧序列: {updates:?}"
+        );
+    }
+
     #[tokio::test]
     async fn plain_text_reply_streams_chunks_and_ends_turn() {
         let (agent, _model) = build_agent(vec![ChatResponse::from_text("你好，世界")], false, false);
@@ -1570,7 +1679,7 @@ mod tests {
                 cancel_tx,
             }),
         );
-        let (client, server) = tokio::io::duplex(64 * 1024);
+        let (_client, server) = tokio::io::duplex(64 * 1024);
         let (_server_read, server_write) = tokio::io::split(server);
         let conn = RpcConn::new(server_write);
 

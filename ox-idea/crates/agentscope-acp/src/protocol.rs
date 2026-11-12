@@ -126,6 +126,53 @@ pub fn config_option_update(session_id: &str, options: &Value) -> Value {
     )
 }
 
+/// 校验并规范化 `update_plan` 工具入参里的任务条目：content 必填非空、
+/// status ∈ pending/in_progress/completed、priority 缺省 medium（非法值报错，
+/// 与工具侧校验一致——双保险，工具先拦、这里兜底）。
+pub fn parse_plan_entries(raw: &Value) -> Result<Vec<Value>, String> {
+    let entries = raw
+        .get("entries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "entries (array) missing".to_owned())?;
+    let mut out = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let content = entry
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .ok_or_else(|| format!("entries[{index}].content missing"))?;
+        let status = entry.get("status").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(status, "pending" | "in_progress" | "completed") {
+            return Err(format!("entries[{index}].status invalid: {status}"));
+        }
+        let priority = match entry.get("priority").and_then(Value::as_str) {
+            Some(p @ ("high" | "medium" | "low")) => p,
+            Some(other) => return Err(format!("entries[{index}].priority invalid: {other}")),
+            None => "medium",
+        };
+        out.push(json!({
+            "content": content,
+            "priority": priority,
+            "status": status,
+        }));
+    }
+    Ok(out)
+}
+
+/// 任务清单通知（`plan_update`，type=items）：ide-agent `normalize.rs` 只转
+/// items 形态（markdown/file 不渲染），前端 `sessionUpdate: "plan"` 现成渲染，
+/// 前端零改动。planId 固定 "tasks"——单会话单清单，全量替换语义。
+pub fn plan_update_frame(session_id: &str, entries: &[Value]) -> Value {
+    update_frame(
+        session_id,
+        json!({
+            "sessionUpdate": "plan_update",
+            "plan": { "type": "items", "planId": "tasks", "entries": entries },
+        }),
+    )
+}
+
 /// `session/update` 通知帧（外层）。
 fn update_frame(session_id: &str, update: Value) -> Value {
     json!({ "sessionId": session_id, "update": update })

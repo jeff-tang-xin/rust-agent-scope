@@ -1369,6 +1369,103 @@ Do not call plan_enter (it does not exist). Present your plan directly in the re
     }
 }
 
+/// `update_plan` 工具：更新会话任务清单（pending / in_progress / completed）。
+/// 纯会话内呈现——工具只做校验与统计回显，条目由宿主层（acp drive_turn）从
+/// 工具入参提取并转成 ACP `plan_update` 帧给前端渲染；不落盘、无状态。
+/// `is_read_only = true`：不写任何用户文件，plan 模式白名单自动放行（plan 态
+/// 下也可用它呈现研究/设计进度），权限层免确认。
+pub struct UpdatePlanTool;
+
+#[async_trait::async_trait]
+impl Tool for UpdatePlanTool {
+    fn name(&self) -> &str {
+        "update_plan"
+    }
+
+    fn description(&self) -> &str {
+        "Update the session task list shown in the IDE plan panel. Pass the FULL list every \
+time (it replaces the previous one). Each entry: content (short imperative), status \
+(pending / in_progress / completed), optional priority (high / medium / low, default \
+medium). Keep exactly one entry in_progress while working; mark completed as soon as \
+a step is done and verified."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "description": "The full task list (replaces the previous one)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string", "description": "Short imperative step" },
+                            "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] },
+                            "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+                        },
+                        "required": ["content", "status"]
+                    }
+                }
+            },
+            "required": ["entries"]
+        })
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn call_with_context(&self, input: Value, _ctx: &ToolContext) -> agentscope_core::Result<ToolOutput> {
+        let Some(entries) = input.get("entries").and_then(Value::as_array) else {
+            return Ok(ToolOutput::error("entries (array) is required"));
+        };
+        if entries.is_empty() {
+            return Ok(ToolOutput::error("entries must not be empty"));
+        }
+        let mut stats = [0usize; 3]; // pending / in_progress / completed
+        for (index, entry) in entries.iter().enumerate() {
+            let Some(content) = entry.get("content").and_then(Value::as_str) else {
+                return Ok(ToolOutput::error(format!("entries[{index}].content is required")));
+            };
+            if content.trim().is_empty() {
+                return Ok(ToolOutput::error(format!("entries[{index}].content must not be empty")));
+            }
+            let status = entry.get("status").and_then(Value::as_str).unwrap_or_default();
+            let slot = match status {
+                "pending" => 0,
+                "in_progress" => 1,
+                "completed" => 2,
+                other => {
+                    return Ok(ToolOutput::error(format!(
+                        "entries[{index}].status \"{other}\" is invalid (pending / in_progress / completed)"
+                    )))
+                }
+            };
+            stats[slot] += 1;
+            if let Some(priority) = entry.get("priority").and_then(Value::as_str) {
+                if !matches!(priority, "high" | "medium" | "low") {
+                    return Ok(ToolOutput::error(format!(
+                        "entries[{index}].priority \"{priority}\" is invalid (high / medium / low)"
+                    )));
+                }
+            }
+        }
+        Ok(ToolOutput::ok(format!(
+            "Task list updated: {} entries ({} pending, {} in progress, {} completed).",
+            entries.len(),
+            stats[0],
+            stats[1],
+            stats[2]
+        )))
+    }
+
+    async fn call(&self, input: Value) -> agentscope_core::Result<ToolOutput> {
+        let ctx = ToolContext::new("update_plan", "update_plan");
+        self.call_with_context(input, &ctx).await
+    }
+}
+
 /// `plan_exit` 工具：退出计划模式（需要用户批准，对应 Java checkPermissions → ask）。
 pub struct PlanExitTool {
     manager: Arc<PlanModeManager>,
@@ -2507,6 +2604,60 @@ mod tests {
             .unwrap();
         assert_eq!(output.state, ToolResultState::Error);
         assert!(output.content.contains("Plan mode is OFF"));
+    }
+
+    /// update_plan：合法清单回显统计；非法 status/priority、空 content、
+    /// 缺 entries / 空数组报错；只读（plan 模式白名单放行 + 权限免确认）。
+    #[tokio::test]
+    async fn update_plan_validates_entries_and_is_read_only() {
+        let tool = UpdatePlanTool;
+        assert!(tool.is_read_only());
+
+        let ctx = tool_ctx("s1");
+        let output = tool
+            .call_with_context(
+                json!({"entries": [
+                    {"content": "read code", "status": "completed"},
+                    {"content": "fix bug", "status": "in_progress", "priority": "high"},
+                    {"content": "run tests", "status": "pending"}
+                ]}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.state, ToolResultState::Success);
+        assert!(output.content.contains("3 entries"));
+        assert!(output.content.contains("1 in progress"));
+
+        // 非法 status
+        let output = tool
+            .call_with_context(json!({"entries": [{"content": "x", "status": "done"}]}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(output.state, ToolResultState::Error);
+        assert!(output.content.contains("status"));
+
+        // 非法 priority
+        let output = tool
+            .call_with_context(
+                json!({"entries": [{"content": "x", "status": "pending", "priority": "urgent"}]}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.state, ToolResultState::Error);
+        assert!(output.content.contains("priority"));
+
+        // 空 content / 缺 content / 缺 entries / 空数组
+        for bad in [
+            json!({"entries": [{"content": "  ", "status": "pending"}]}),
+            json!({"entries": [{"status": "pending"}]}),
+            json!({}),
+            json!({"entries": []}),
+        ] {
+            let output = tool.call_with_context(bad, &ctx).await.unwrap();
+            assert_eq!(output.state, ToolResultState::Error);
+        }
     }
 
     #[tokio::test]
