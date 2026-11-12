@@ -727,7 +727,7 @@ mod tests {
                 }
             }
         }
-        let name = format!("Software\\ai.l0ng.oxidea.registry-read-test-{}", std::process::id());
+        let name = format!("Software\\xinl.tang.oxidea.registry-read-test-{}", std::process::id());
         let variable = format!("OXIDEA_TEST_REGVAR_{}", std::process::id());
         let long = "x".repeat(600);
         let mut key: HKEY = std::ptr::null_mut();

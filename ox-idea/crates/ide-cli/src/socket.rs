@@ -201,8 +201,8 @@ mod tests {
 
     #[test]
     fn socket_names_separate_identifiers_and_stay_short() {
-        let release = socket_path("ai.l0ng.oxidea").unwrap();
-        let dev = socket_path("ai.l0ng.oxidea.dev.w158e9c5954b7bf64").unwrap();
+        let release = socket_path("xinl.tang.oxidea").unwrap();
+        let dev = socket_path("xinl.tang.oxidea.dev.w158e9c5954b7bf64").unwrap();
         assert_ne!(release, dev);
         assert!(dev.as_os_str().len() < 100 || cfg!(unix));
     }

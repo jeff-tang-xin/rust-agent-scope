@@ -9,7 +9,7 @@ export function worktreeId(root: string): string {
   for (const byte of Buffer.from(root)) {
     hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
   }
-  return `ai.l0ng.oxidea.dev.w${hash.toString(16).padStart(16, "0")}`;
+  return `xinl.tang.oxidea.dev.w${hash.toString(16).padStart(16, "0")}`;
 }
 
 export interface DevSession {

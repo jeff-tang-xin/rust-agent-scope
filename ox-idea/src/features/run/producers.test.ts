@@ -28,7 +28,7 @@ const superItem: Omit<HierarchyItem, "name" | "path"> = {
   selectionRange: { start: { line: 0, col: 0 }, end: { line: 0, col: 1 } },
   fromRanges: [],
 };
-const SCRATCH = "/Users/me/Library/Application Support/ai.l0ng.oxidea/scratches";
+const SCRATCH = "/Users/me/Library/Application Support/xinl.tang.oxidea/scratches";
 
 const cfg = (over: Partial<RunConfig> & { id: string; kind: string }): RunConfig => ({
   name: over.id,

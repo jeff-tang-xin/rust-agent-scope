@@ -373,7 +373,7 @@ async fn script_debuggers() {
     let dir = dir.canonicalize().unwrap();
     let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).try_init();
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        adapter::set_tools_root(home.join("Library/Application Support/ai.l0ng.oxidea/tools"));
+        adapter::set_tools_root(home.join("Library/Application Support/xinl.tang.oxidea/tools"));
     }
     let only = std::env::var("OXIDEA_DAP_ONLY").ok();
     let mut failures = Vec::new();

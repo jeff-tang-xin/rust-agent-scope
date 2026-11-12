@@ -333,13 +333,13 @@ mod tests {
     #[test]
     fn windows_command_line() {
         // The reporter's layout: a managed install under %APPDATA%, JDK 25, a user name with a space and CJK.
-        let tools = r"C:\Users\张 三\AppData\Roaming\ai.l0ng.oxidea\tools\jdtls";
+        let tools = r"C:\Users\张 三\AppData\Roaming\xinl.tang.oxidea\tools\jdtls";
         let install = JdtlsInstall {
             launcher: PathBuf::from(format!(r"{tools}\plugins\org.eclipse.equinox.launcher_1.7.0.v20250424-1814.jar")),
             config: PathBuf::from(format!(r"{tools}\config_win")),
         };
-        let data = r"C:\Users\张 三\AppData\Roaming\ai.l0ng.oxidea\lsp\jdtls\0123456789abcdef";
-        let agent = r"C:\Users\张 三\AppData\Roaming\ai.l0ng.oxidea\tools\lombok\bin\lombok.jar";
+        let data = r"C:\Users\张 三\AppData\Roaming\xinl.tang.oxidea\lsp\jdtls\0123456789abcdef";
+        let agent = r"C:\Users\张 三\AppData\Roaming\xinl.tang.oxidea\tools\lombok\bin\lombok.jar";
         let args = java_args(&install, 25, &script_args(data, agent));
         assert_eq!(
             args,
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn windows_command_line_with_defaults() {
         // JDK 25 on Windows, "-Xmx3G" in the settings' JVM options.
-        let tools = r"C:\Users\张 三\AppData\Roaming\ai.l0ng.oxidea\tools\jdtls";
+        let tools = r"C:\Users\张 三\AppData\Roaming\xinl.tang.oxidea\tools\jdtls";
         let install = JdtlsInstall {
             launcher: PathBuf::from(format!(r"{tools}\plugins\org.eclipse.equinox.launcher_1.7.0.jar")),
             config: PathBuf::from(format!(r"{tools}\config_win")),
@@ -453,9 +453,9 @@ mod tests {
     fn unix_command_line() {
         let install = JdtlsInstall {
             launcher: PathBuf::from(
-                "/Users/me/Library/Application Support/ai.l0ng.oxidea/tools/jdtls/plugins/org.eclipse.equinox.launcher_1.7.0.jar",
+                "/Users/me/Library/Application Support/xinl.tang.oxidea/tools/jdtls/plugins/org.eclipse.equinox.launcher_1.7.0.jar",
             ),
-            config: PathBuf::from("/Users/me/Library/Application Support/ai.l0ng.oxidea/tools/jdtls/config_mac_arm"),
+            config: PathBuf::from("/Users/me/Library/Application Support/xinl.tang.oxidea/tools/jdtls/config_mac_arm"),
         };
         let args = java_args(
             &install,
@@ -463,14 +463,14 @@ mod tests {
             &strings(&["--jvm-arg", "-Dlog.level=ALL", "--no-validate-java-version", "-data", "/d", "--extra"]),
         );
         assert_eq!(args[0], "-Declipse.application=org.eclipse.jdt.ls.core.id1", "no JDK 24+ flags on 21");
-        assert!(args.contains(&"-Dosgi.sharedConfiguration.area=/Users/me/Library/Application Support/ai.l0ng.oxidea/tools/jdtls/config_mac_arm".to_owned()));
+        assert!(args.contains(&"-Dosgi.sharedConfiguration.area=/Users/me/Library/Application Support/xinl.tang.oxidea/tools/jdtls/config_mac_arm".to_owned()));
         assert_eq!(
             args[args.len() - 8..],
             strings(&[
                 "java.base/java.lang=ALL-UNNAMED",
                 "-Dlog.level=ALL",
                 "-jar",
-                "/Users/me/Library/Application Support/ai.l0ng.oxidea/tools/jdtls/plugins/org.eclipse.equinox.launcher_1.7.0.jar",
+                "/Users/me/Library/Application Support/xinl.tang.oxidea/tools/jdtls/plugins/org.eclipse.equinox.launcher_1.7.0.jar",
                 "-nosplash",
                 "-data",
                 "/d",

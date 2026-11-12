@@ -19,10 +19,10 @@
 name = "OXidea"
 command = { windows = "%LOCALAPPDATA%/OXidea/oxidea.exe", macos = "/Applications/OXidea.app/Contents/MacOS/oxidea", linux = "/usr/bin/oxidea" }
 install_dir = { windows = "%LOCALAPPDATA%/OXidea", macos = "/Applications/OXidea.app" }
-logs = { windows = "%LOCALAPPDATA%/ai.l0ng.oxidea/logs/oxidea*.log", macos = "~/Library/Logs/ai.l0ng.oxidea/oxidea*.log", linux = "~/.local/share/ai.l0ng.oxidea/logs/oxidea*.log" }
+logs = { windows = "%LOCALAPPDATA%/xinl.tang.oxidea/logs/oxidea*.log", macos = "~/Library/Logs/xinl.tang.oxidea/oxidea*.log", linux = "~/.local/share/xinl.tang.oxidea/logs/oxidea*.log" }
 # The index and build caches. jdtls keeps its own workspace under lsp/jdtls,
 # next to the jdtls install, so a cold Java run still reuses jdtls's build state.
-cache_dirs = { windows = ["%LOCALAPPDATA%/ai.l0ng.oxidea/index", "%LOCALAPPDATA%/ai.l0ng.oxidea/cache"], macos = ["~/Library/Application Support/ai.l0ng.oxidea/index", "~/Library/Application Support/ai.l0ng.oxidea/cache"], linux = ["~/.local/share/ai.l0ng.oxidea/index", "~/.local/share/ai.l0ng.oxidea/cache"] }
+cache_dirs = { windows = ["%LOCALAPPDATA%/xinl.tang.oxidea/index", "%LOCALAPPDATA%/xinl.tang.oxidea/cache"], macos = ["~/Library/Application Support/xinl.tang.oxidea/index", "~/Library/Application Support/xinl.tang.oxidea/cache"], linux = ["~/.local/share/xinl.tang.oxidea/index", "~/.local/share/xinl.tang.oxidea/cache"] }
 
 [apps.oxidea.markers]
 project_opened = 'opened .* in window'

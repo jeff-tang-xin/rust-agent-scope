@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { ipcPath } from "./paths";
 
 const raw = String.raw;
-const APPDATA = raw`C:\Users\me\AppData\Roaming\ai.l0ng.oxidea`;
+const APPDATA = raw`C:\Users\me\AppData\Roaming\xinl.tang.oxidea`;
 
 describe("ipcPath", () => {
   it("slashes Windows drive paths, plain or verbatim", () => {
-    expect(ipcPath(APPDATA)).toBe("C:/Users/me/AppData/Roaming/ai.l0ng.oxidea");
+    expect(ipcPath(APPDATA)).toBe("C:/Users/me/AppData/Roaming/xinl.tang.oxidea");
     expect(ipcPath(raw`\\?\C:\Users\me`)).toBe("C:/Users/me");
   });
 

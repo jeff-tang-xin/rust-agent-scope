@@ -76,7 +76,7 @@ plugin API and WASI and links against the IDE's: every function it imports
 exists with the same signature, and it exports the plugin world. It prints what the user will be asked to grant.
 
 `link` adds the folder to `links.json` in the IDE's plugins directory
-(`$OXIDEA_PLUGINS_DIR`, default `<app-data>/ai.l0ng.oxidea/plugins`). Linked
+(`$OXIDEA_PLUGINS_DIR`, default `<app-data>/xinl.tang.oxidea/plugins`). Linked
 plugins are read from the folder itself, so the edit loop is `build` then
 Settings › Plugins › _Reload_. `unlink` and `links` undo and list.
 

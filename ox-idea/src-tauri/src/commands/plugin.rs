@@ -745,7 +745,7 @@ pub fn plugin_set_secret(
     state.plugins.set_secret(&plugin_id, &name, value.as_deref())
 }
 
-/// Plugin secrets in the login keychain (service `ai.l0ng.oxidea.plugin.<id>`).
+/// Plugin secrets in the login keychain (service `xinl.tang.oxidea.plugin.<id>`).
 #[cfg(target_os = "macos")]
 struct KeychainSecrets;
 
@@ -773,7 +773,7 @@ impl ide_host::plugins::SecretStore for KeychainSecrets {
 #[cfg(target_os = "macos")]
 impl KeychainSecrets {
     fn service(plugin: &str) -> String {
-        format!("ai.l0ng.oxidea.plugin.{plugin}")
+        format!("xinl.tang.oxidea.plugin.{plugin}")
     }
 }
 
