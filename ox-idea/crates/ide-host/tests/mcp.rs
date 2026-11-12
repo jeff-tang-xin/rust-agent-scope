@@ -534,3 +534,84 @@ async fn start_debug_session_asks_for_confirmation() {
     assert!(error.contains("denied by the user"), "{error}");
     assert!(h.host.debugger.sessions(Some("main")).is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn git_commit_stages_files_and_commits_after_confirmation() {
+    let h = Harness::new();
+    h.trust().await;
+    h.host.mcp_requests.set_ready("main", true);
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git").current_dir(&h.root).args(args).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+    git(&["init"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    git(&["add", "."]);
+    git(&["commit", "-m", "Initial"]);
+    std::fs::write(h.root.join("src/a.txt"), "changed\n").unwrap();
+    std::fs::write(h.root.join("src/b.txt"), "new file\n").unwrap();
+
+    // Denial leaves the history untouched.
+    let error = h
+        .denied("git_commit", json!({"files":["src/a.txt","src/b.txt"], "message":"agent change"}))
+        .await;
+    assert!(error.contains("denied by the user"), "{error}");
+    assert_eq!(git(&["rev-list", "--count", "HEAD"]), "1");
+
+    // Approval stages the listed files and commits them.
+    let result = h
+        .confirmed("git_commit", json!({"files":["src/a.txt","src/b.txt"], "message":"agent change"}))
+        .await;
+    assert_eq!(result["branch"], git(&["rev-parse", "--abbrev-ref", "HEAD"]), "{result}");
+    assert!(!result["commit"].as_str().unwrap().is_empty());
+    assert_eq!(git(&["rev-list", "--count", "HEAD"]), "2");
+    let status = h.json("git_status", json!({"repositoryPathRelativeToProject":"."})).await;
+    assert_eq!(status["repositories"][0]["unstagedCount"], 0, "{status}");
+    assert_eq!(status["repositories"][0]["stagedCount"], 0);
+
+    // Without `files`, whatever is already staged is committed.
+    std::fs::write(h.root.join("src/c.txt"), "staged only\n").unwrap();
+    git(&["add", "src/c.txt"]);
+    let result = h.confirmed("git_commit", json!({"message":"staged batch"})).await;
+    assert_eq!(git(&["rev-list", "--count", "HEAD"]), "3");
+    assert!(git(&["show", "--stat", "--format="]).contains("src/c.txt"), "{result}");
+
+    // A missing message is rejected before any confirmation is raised.
+    let error = h.error("git_commit", json!({})).await;
+    assert!(error.contains("message"), "{error}");
+    assert_eq!(git(&["rev-list", "--count", "HEAD"]), "3");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn git_branch_creates_and_switches_with_confirmation() {
+    let h = Harness::new();
+    h.trust().await;
+    h.host.mcp_requests.set_ready("main", true);
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git").current_dir(&h.root).args(args).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+    git(&["init"]);
+    git(&["add", "."]);
+    git(&["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "Initial"]);
+    let default = git(&["rev-parse", "--abbrev-ref", "HEAD"]);
+
+    // A leading dash is rejected before any confirmation is raised.
+    let error = h.error("git_branch", json!({"name":"-evil", "create":true})).await;
+    assert!(error.contains("must not start with"), "{error}");
+
+    // Denial leaves the current branch alone.
+    let error = h.denied("git_branch", json!({"name":"feature", "create":true})).await;
+    assert!(error.contains("denied by the user"), "{error}");
+    assert_eq!(git(&["rev-parse", "--abbrev-ref", "HEAD"]), default);
+
+    // Approval creates and switches; switching back needs no `create`.
+    let result = h.confirmed("git_branch", json!({"name":"feature", "create":true})).await;
+    assert_eq!(result["branch"], "feature", "{result}");
+    assert_eq!(git(&["rev-parse", "--abbrev-ref", "HEAD"]), "feature");
+    let result = h.confirmed("git_branch", json!({"name":default})).await;
+    assert_eq!(result["branch"], default, "{result}");
+}
