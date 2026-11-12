@@ -12,7 +12,9 @@ use std::sync::Arc;
 use agentscope_core::tool::{Tool, ToolContext, ToolOutput};
 use serde_json::{json, Value};
 
-use crate::skill::{SkillSecurityScanner, SkillUtil, TrustLevel, WorkspaceSkillRepository};
+use crate::skill::{
+    SkillSecurityScanner, SkillUtil, TrustLevel, WorkspaceSkillRepository, SKILL_FILE,
+};
 use crate::tools_filesystem::{fuzzy_search, MatchLevel};
 
 // ---------------------------------------------------------------------------
@@ -970,6 +972,127 @@ impl Tool for ProposeSkillTool {
 }
 
 // ---------------------------------------------------------------------------
+// LoadSkillTool（渐进披露 L2/L3：按需读 SKILL.md 正文与附属文件）
+// ---------------------------------------------------------------------------
+
+/// 按名加载技能内容的只读工具：缺省返回 SKILL.md 全文（L2），传 `path` 读
+/// references/templates/scripts/assets 下的附属文件（L3）。
+///
+/// 持有多个仓库时按序检索（首个命中者胜）——典型装配：项目级（可写）在前、
+/// 用户级（只读）在后，与系统提示词里注入的技能清单顺序一致。
+pub struct LoadSkillTool {
+    repos: Vec<Arc<WorkspaceSkillRepository>>,
+}
+
+impl LoadSkillTool {
+    /// 工具名。
+    pub const NAME: &'static str = "load_skill";
+
+    /// 按优先级绑定仓库（顺序即检索顺序）。
+    pub fn new(repos: Vec<Arc<WorkspaceSkillRepository>>) -> Self {
+        Self { repos }
+    }
+
+    /// 附属文件相对路径校验：拒绝空、目录穿越、绝对路径与反斜杠。
+    fn validate_rel_path(path: &str) -> Result<(), String> {
+        if path.trim().is_empty() {
+            return Err("path must not be empty".into());
+        }
+        if path.starts_with('/') || path.starts_with('\\') || path.contains('\\') {
+            return Err(format!(
+                "path must be relative with '/' separators (got '{path}')"
+            ));
+        }
+        if path.split('/').any(|seg| seg == ".." || seg.is_empty()) {
+            return Err(format!(
+                "path must stay inside the skill directory (got '{path}')"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for LoadSkillTool {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn description(&self) -> &str {
+        "Load a skill's full content on demand (progressive disclosure). The system prompt \
+         lists available skills by name + description only; when the current task matches a \
+         skill's description, call this to read its SKILL.md body and follow it. Pass `path` \
+         to read a support file (references/, templates/, scripts/, assets/) when the skill \
+         body points you to one."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "skill": {
+                    "type": "string",
+                    "description": "Skill name as listed in the system prompt."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Optional file path relative to the skill root \
+                                    (e.g. references/api.md, scripts/run.py). Omit to load \
+                                    SKILL.md itself."
+                }
+            },
+            "required": ["skill"]
+        })
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn call(&self, input: Value) -> agentscope_core::Result<ToolOutput> {
+        let rc = agentscope_core::RuntimeContext::new();
+        let Some(skill) = optional_string(&input, "skill").filter(|s| !s.trim().is_empty())
+        else {
+            return Ok(ToolOutput::error("Missing required parameter: skill"));
+        };
+        let skill = skill.trim();
+        let rel_path = match optional_string(&input, "path").filter(|p| !p.trim().is_empty()) {
+            Some(p) => match Self::validate_rel_path(p.trim()) {
+                Ok(()) => p.trim().to_owned(),
+                Err(err) => return Ok(ToolOutput::error(err)),
+            },
+            None => SKILL_FILE.to_owned(),
+        };
+        let mut searched = Vec::new();
+        for repo in &self.repos {
+            searched.push(repo.source().to_owned());
+            if repo.get_skill(&rc, skill).await.is_none() {
+                continue;
+            }
+            let Some(content) = repo.read_skill_file(&rc, skill, &rel_path).await else {
+                return Ok(ToolOutput::error(format!(
+                    "Skill '{skill}' has no file '{rel_path}'. Support files live under \
+                     references/, templates/, scripts/, or assets/; omit `path` to load \
+                     SKILL.md itself."
+                )));
+            };
+            return Ok(ToolOutput::ok(format!(
+                "[skill: {skill} @ {}]\n\n{content}",
+                repo.source()
+            )));
+        }
+        Ok(ToolOutput::error(format!(
+            "Skill '{skill}' not found (searched: {}). Use skill_manage to create it first.",
+            if searched.is_empty() {
+                "no repository bound".to_owned()
+            } else {
+                searched.join(", ")
+            }
+        )))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HarnessPlatformTools（对应 Java `HarnessPlatformTools`）
 // ---------------------------------------------------------------------------
 
@@ -1488,5 +1611,130 @@ mod tests {
         assert!(!cfg.security_scan());
         assert_eq!(cfg.drafts_dir(), DEFAULT_DRAFTS_DIR, "空白目录名忽略");
         assert_eq!(cfg.main_dir(), "custom-skills");
+    }
+
+    // ---------- LoadSkillTool ----------
+
+    fn seeded_fs() -> StdArc<InMemoryFilesystem> {
+        StdArc::new(InMemoryFilesystem::with_files(vec![
+            (
+                "skills/pdf-report/SKILL.md".to_owned(),
+                SAMPLE.as_bytes().to_vec(),
+            ),
+            (
+                "skills/pdf-report/scripts/probe.sh".to_owned(),
+                b"echo hi\n".to_vec(),
+            ),
+            (
+                "user-skills/lint/SKILL.md".to_owned(),
+                b"---\nname: lint\ndescription: Lint the code.\n---\n# Lint\n".to_vec(),
+            ),
+        ]))
+    }
+
+    fn load_tool(
+        fs: StdArc<InMemoryFilesystem>,
+    ) -> (
+        LoadSkillTool,
+        StdArc<WorkspaceSkillRepository>,
+        StdArc<WorkspaceSkillRepository>,
+    ) {
+        let project =
+            StdArc::new(WorkspaceSkillRepository::writable(fs.clone(), "skills", Some("project")));
+        let user = StdArc::new(WorkspaceSkillRepository::read_only(fs.clone(), "user-skills"));
+        let repos = vec![Arc::clone(&project), Arc::clone(&user)];
+        (LoadSkillTool::new(repos), project, user)
+    }
+
+    async fn call_load(tool: &LoadSkillTool, skill: &str, path: Option<&str>) -> ToolOutput {
+        let mut input = json!({ "skill": skill });
+        if let Some(p) = path {
+            input["path"] = json!(p);
+        }
+        tool.call(input).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn load_skill_returns_skill_md_with_source() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = call_load(&tool, "pdf-report", None).await;
+        assert!(!out.is_error(), "{:?}", out.content);
+        let text = out.content;
+        assert!(text.starts_with("[skill: pdf-report @ project]"), "{text}");
+        assert!(text.contains("name: pdf-report"));
+        assert!(text.contains("# PDF Report"));
+    }
+
+    #[tokio::test]
+    async fn load_skill_reads_support_file() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = call_load(&tool, "pdf-report", Some("scripts/probe.sh")).await;
+        assert!(!out.is_error(), "{:?}", out.content);
+        assert!(out.content.contains("echo hi"));
+    }
+
+    #[tokio::test]
+    async fn load_skill_falls_back_to_later_repo() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = call_load(&tool, "lint", None).await;
+        assert!(!out.is_error(), "{:?}", out.content);
+        let text = out.content;
+        assert!(text.contains("[skill: lint @ workspace]"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn load_skill_missing_reports_searched_sources() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = call_load(&tool, "nope", None).await;
+        assert!(out.is_error());
+        assert!(out.content.contains("not found"), "{:?}", out.content);
+        assert!(out.content.contains("project"), "{:?}", out.content);
+    }
+
+    #[tokio::test]
+    async fn load_skill_missing_support_file_hints_convention() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = call_load(&tool, "pdf-report", Some("references/api.md")).await;
+        assert!(out.is_error());
+        assert!(out.content.contains("has no file"), "{:?}", out.content);
+    }
+
+    #[tokio::test]
+    async fn load_skill_rejects_bad_paths() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        for bad in ["../escape.md", "/abs.md", "a\\b.md", "a/../b.md"] {
+            let out = call_load(&tool, "pdf-report", Some(bad)).await;
+            assert!(out.is_error(), "path '{bad}' should be rejected");
+        }
+    }
+
+    #[tokio::test]
+    async fn load_skill_blank_path_means_default() {
+        // 空白 path 视为未传 → 加载 SKILL.md 本体。
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = call_load(&tool, "pdf-report", Some("   ")).await;
+        assert!(!out.is_error(), "{:?}", out.content);
+        assert!(out.content.contains("# PDF Report"));
+    }
+
+    #[tokio::test]
+    async fn load_skill_requires_skill_param() {
+        let (tool, _, _) = load_tool(seeded_fs());
+        let out = tool.call(json!({})).await.unwrap();
+        assert!(out.is_error());
+        assert!(out.content.contains("Missing required parameter: skill"));
+    }
+
+    #[tokio::test]
+    async fn load_skill_matches_repo_api_read() {
+        // 工具读到的内容与仓库 API 直读一致（SKILL_FILE 常量路径）。
+        let (tool, project, _) = load_tool(seeded_fs());
+        let rc = agentscope_core::RuntimeContext::new();
+        let direct = project
+            .read_skill_file(&rc, "pdf-report", SKILL_FILE)
+            .await
+            .unwrap();
+        let out = call_load(&tool, "pdf-report", None).await;
+        assert!(out.content.contains(&direct));
     }
 }

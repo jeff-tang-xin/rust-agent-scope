@@ -19,9 +19,10 @@ use agentscope_harness::blackboard::{BlackboardAppendTool, BlackboardReadTool, B
 use agentscope_harness::middleware_memory::{MemoryFlushMiddleware, MemoryMaintenanceMiddleware};
 use agentscope_harness::tools::{LocalShellBackend, ShellExecuteTool};
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
+use agentscope_harness::skill::{SkillUtil, WorkspaceSkillRepository};
 use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::WorkspaceManager;
-use agentscope_harness::MemoryConfig;
+use agentscope_harness::{LoadSkillTool, MemoryConfig, ProposeSkillTool, SkillManageConfig, SkillManageTool};
 use agentscope_harness::{Filesystem, LocalFilesystem, LocalFsMode, PathPolicy};
 use serde_json::{json, Value};
 use tokio::sync::watch;
@@ -386,7 +387,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         .iter()
         .map(|t| t.name().to_owned())
         .collect();
-    for tool in FilesystemToolSet::new(fs, None).all() {
+    for tool in FilesystemToolSet::new(Arc::clone(&fs), None).all() {
         if ide_names.contains(tool.name()) {
             continue;
         }
@@ -453,6 +454,45 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         BrowserClose, BrowserEvaluate, BrowserClickAt, BrowserTypeAt, BrowserHoverAt,
         BrowserScrollAt, BrowserDrag,
     );
+    // Skill 生态（对齐 Anthropic Agent Skills 通用原则）：项目级 `.claude/skills/`
+    // 可写（跟项目走、可提交版本库），用户级 `~/.claude/skills/` 只读（跨项目
+    // 复用；安装只落项目级——工作区红线不放宽）。skill_manage 自带静态安全扫描
+    // （危险内容拒绝落盘并归档），auto_promote 直写正式根（个人用途，安装即生效）。
+    let skill_main = Arc::new(WorkspaceSkillRepository::writable(
+        Arc::clone(&fs),
+        ".claude/skills",
+        Some("project"),
+    ));
+    let skill_drafts = Arc::new(WorkspaceSkillRepository::writable(
+        Arc::clone(&fs),
+        ".claude/skills/_drafts",
+        Some("project"),
+    ));
+    let skill_manage = Arc::new(SkillManageTool::new(
+        Arc::clone(&skill_main),
+        skill_drafts,
+        SkillManageConfig::defaults()
+            .with_main_dir(".claude/skills")
+            .with_drafts_dir(".claude/skills/_drafts")
+            .with_auto_promote(true),
+    ));
+    toolkit.register(Arc::new(ProposeSkillTool::new(Arc::clone(&skill_manage))));
+    toolkit.register(skill_manage);
+    let skill_home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .map(PathBuf::from);
+    let mut skill_repos: Vec<Arc<WorkspaceSkillRepository>> = vec![skill_main];
+    if let Some(home) = &skill_home {
+        skill_repos.push(Arc::new(WorkspaceSkillRepository::new(
+            sandboxed(home.clone()),
+            ".claude/skills",
+            Some("user"),
+            false,
+        )));
+    }
+    toolkit.register(Arc::new(LoadSkillTool::new(skill_repos)));
     let blackboard_section = if has_blackboard {
         "\n## 黑板报\n\
          - 黑板是工作现场的信号流（区别于记忆的沉淀知识）：发现（finding）、结论（conclusion）、风险（risk）、提醒（note），跨会话共享、只增不改。\n\
@@ -483,6 +523,32 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         String::new()
     } else {
         crate::datasource::render_section(&datasources)
+    };
+    // Skill 清单（L1 元数据，渐进披露第一层）：项目级在前、用户级在后，同名项目级
+    // 优先——与 load_skill 的仓库检索顺序一致。
+    let skill_summaries = collect_skill_summaries(Path::new(cwd), skill_home.as_deref());
+    let skill_section = if skill_summaries.is_empty() {
+        "\n### Skills（可复用流程说明书）\n\
+         \n当前没有已安装的 skill。沉淀出可复用的流程/方法论时，用 skill_manage 把它写成 \
+         skill（frontmatter 的 name + description 写清「做什么、何时用」，正文写步骤），\
+         下次会话自动可用。\n"
+            .to_owned()
+    } else {
+        let list: String = skill_summaries
+            .iter()
+            .map(|(n, d)| format!("  - {n}: {d}\n"))
+            .collect();
+        format!(
+            "\n### Skills（可复用流程说明书）\n\
+             \n已安装的 skill（name: description）：\n{list}\
+             - 渐进披露：上面只是元数据。当前任务与某 skill 的 description 匹配时，先 load_skill \
+             读全文再按其执行；正文指向附属文件（references/scripts 等）时用 load_skill 的 path 参数读。\n\
+             - 安装：用户给出 skill 地址（git 仓库/目录/zip）时，下载到系统临时目录 → 审查内容 → \
+             skill_manage create 写入（自动安全扫描，危险内容会被拒绝）→ 汇报安装位置与生效方式。\
+             安装只落项目级 .claude/skills/（跟项目走）；用户级 ~/.claude/skills 只读，仅供 load_skill 检索。\n\
+             - 创建：发现值得复用的流程时用 skill_manage/propose_skill 沉淀——description 决定未来 \
+             何时被触发，要写清「做什么 + 何时用」。\n"
+        )
     };
     if !db_configs.is_empty() {
         let catalog = Arc::new(agentscope_db::DbCatalog::new());
@@ -535,7 +601,9 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          改前：read_file 拿真实文本 + get_file_problems 记基线 → 改后：get_file_problems 对比 + 编译 + 定向测试。语义级重命名用 rename_refactoring（连带所有引用），格式化用 reformat_file。\n\
          ### 构建与运行\n\
          build_project 拿结构化错误，逐个修完再 build；跑应用用 get_run_configurations → execute_run_configuration；长命令输出重定向到日志文件再读日志（两步，不用 && 串联）。\n\
-         ### 进程管理\n\n         长驻服务（dev server / Spring Boot 等）用 execute_run_configuration 的 waitForExit=true + 短 timeout 启动：拿到输出快照与 fullOutputPath 后进程转后台，后续 read_file 读该文件看新日志。get_running_processes 查运行清单，stop_process 停止（会请求确认）——不要用 shell 杀进程，那会绕过 IDE 进程簿记留下孤儿进程。\n\n         ### 数据库（面板连接已注册时才有 db 工具）\n\
+         ### 进程管理\n\n         长驻服务（dev server / Spring Boot 等）用 execute_run_configuration 的 waitForExit=true + 短 timeout 启动：拿到输出快照与 fullOutputPath 后进程转后台，后续 read_file 读该文件看新日志。get_running_processes 查运行清单，stop_process 停止（会请求确认）——不要用 shell 杀进程，那会绕过 IDE 进程簿记留下孤儿进程。\n\n         ### Skills（已安装清单与 load_skill/skill_manage 用法见上）\n\
+         {skill_section}\
+         ### 数据库（面板连接已注册时才有 db 工具）\n\
          {datasource_section}\
          先 db_query 摸清 schema（只读免确认），再写 SQL——不要猜列名表名；变更数据/DDL 用 db_dml（会请求用户确认，这是设计不是故障）。\n\
          ### 浏览器（需要看真实页面时）\n\
@@ -625,6 +693,40 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     }
     let agent = builder.build().map_err(|e| format!("装配 agent 失败: {e}"))?;
     Ok(Arc::new(agent))
+}
+
+/// 同步扫描技能根（两层布局 `<root>/.claude/skills/<name>/SKILL.md`），返回
+/// `(name, description)` 清单——系统提示词注入的 L1 元数据（渐进披露第一层）。
+/// 项目级在前、用户级在后；同名项目级优先（与 `load_skill` 的仓库检索顺序一致）。
+/// 解析失败的 SKILL.md 跳过（与 `WorkspaceSkillRepository::get_all_skills` 同策略）。
+pub(crate) fn collect_skill_summaries(cwd: &Path, home: Option<&Path>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let roots = std::iter::once(cwd.join(".claude").join("skills"))
+        .chain(home.map(|h| h.join(".claude").join("skills")));
+    for root in roots {
+        let entries = match std::fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        let mut dirs: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+        dirs.sort();
+        for dir in dirs {
+            let Ok(content) = std::fs::read_to_string(dir.join("SKILL.md")) else {
+                continue;
+            };
+            let Ok(skill) = SkillUtil::create_from(&content, None, "workspace") else {
+                continue;
+            };
+            let Some(name) = skill.name().map(str::to_owned) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                out.push((name, skill.description().unwrap_or_default().to_owned()));
+            }
+        }
+    }
+    out
 }
 
 /// 从给定环境构建模型实例（对齐 studio factory 的分发模式）：
@@ -1908,5 +2010,117 @@ mod tests {
     #[allow(dead_code)]
     fn event_type_is_stable(event: &AgentEvent) -> &str {
         &event.id
+    }
+
+    // ---------- Skill 生态接线 ----------
+
+    /// 项目级 + 用户级技能根的扫描：项目级优先、同名去重、用户级补充。
+    #[test]
+    fn collect_skill_summaries_scans_project_and_user() {
+        let root = std::env::temp_dir().join(format!("ox-acp-skills-{}", std::process::id()));
+        let proj = root.join("proj");
+        let home = root.join("home");
+        for base in [&proj, &home] {
+            std::fs::create_dir_all(base.join(".claude").join("skills")).unwrap();
+        }
+        for d in [
+            proj.join(".claude").join("skills").join("demo"),
+            home.join(".claude").join("skills").join("demo"),
+            home.join(".claude").join("skills").join("lint"),
+        ] {
+            std::fs::create_dir_all(&d).unwrap();
+        }
+        std::fs::write(
+            proj.join(".claude").join("skills").join("demo").join("SKILL.md"),
+            "---\nname: demo\ndescription: Project demo skill\n---\n# Demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claude").join("skills").join("demo").join("SKILL.md"),
+            "---\nname: demo\ndescription: User demo skill\n---\n# Demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claude").join("skills").join("lint").join("SKILL.md"),
+            "---\nname: lint\ndescription: Lint the code\n---\n# Lint\n",
+        )
+        .unwrap();
+        let got = collect_skill_summaries(&proj, Some(&home));
+        assert_eq!(
+            got,
+            vec![
+                ("demo".to_owned(), "Project demo skill".to_owned()),
+                ("lint".to_owned(), "Lint the code".to_owned()),
+            ],
+            "项目级在前且同名优先，用户级补充"
+        );
+        // 无技能根 → 空清单。
+        let empty = collect_skill_summaries(&root.join("nope"), Some(&root.join("nohome")));
+        assert!(empty.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 端到端：assemble_agent 注册 skill 工具 + sys_prompt 注入 L1 清单 +
+    /// load_skill 真实执行（模型 tool_call → 工具结果回灌）。
+    #[tokio::test]
+    async fn assemble_agent_wires_skills_end_to_end() {
+        use crate::{set_ox_tool_provider, OxHostContext};
+        let root = std::env::temp_dir().join(format!("ox-acp-skill-e2e-{}", std::process::id()));
+        let cwd = root.join("proj");
+        std::fs::create_dir_all(cwd.join(".claude").join("skills").join("demo")).unwrap();
+        std::fs::write(
+            cwd.join(".claude").join("skills").join("demo").join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo skill for e2e\n---\n# Demo Body\nStep one.\n",
+        )
+        .unwrap();
+        set_ox_tool_provider(Arc::new(move |_| OxHostContext {
+            tools: Vec::new(),
+            memory_root: None,
+            project_brief: None,
+        }));
+        let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
+
+        let tool_use = ChatResponse {
+            content: vec![ContentBlock::ToolUse {
+                id: "call_load".into(),
+                name: "load_skill".into(),
+                input: json!({ "skill": "demo" }),
+                state: None,
+                content: None,
+            }],
+            usage: None,
+            finish_reason: None,
+        };
+        let model = MockModel::new(vec![ChatResponse::from_text("完成"), tool_use]);
+        let agent = assemble_agent(cwd.to_str().unwrap(), model.clone(), &env).unwrap();
+        let (notifications, outcome) =
+            run_drive_turn(agent, "用 demo skill", None, false, None).await;
+        assert_eq!(outcome, PromptOutcome::EndTurn);
+
+        // 第一轮输入：sys_prompt 含 L1 清单（name + description）。
+        let first = model.seen_texts(0).join("\n");
+        assert!(
+            first.contains("demo: Demo skill for e2e"),
+            "sys_prompt 应含 skill 清单: {first}"
+        );
+        // load_skill 真实执行：完成帧携带 SKILL.md 正文（工具结果回灌走
+        // ToolResult 块，不进 MockModel 的 seen 文本，故从事件帧断言）。
+        let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
+        let finished = updates
+            .iter()
+            .find(|u| {
+                u["sessionUpdate"] == "tool_call_update"
+                    && u["toolCallId"] == "call_load"
+                    && u["status"] == "completed"
+            })
+            .expect("load_skill 应完成");
+        let out_text = serde_json::to_string(&finished["content"]).unwrap();
+        assert!(
+            out_text.contains("Demo Body") && out_text.contains("Step one."),
+            "load_skill 输出应含 SKILL.md 正文: {out_text}"
+        );
+        // 模型确实被第二次调用（工具结果入历史后继续推理）。
+        assert!(!model.seen_texts(1).is_empty(), "模型应被第二次调用");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

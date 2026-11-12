@@ -84,10 +84,10 @@ pub use team::{
     TeamMemberSpec, TeamMessage, TeamTask, WakeHook,
 };
 pub use tools_skill::{
-    harness_platform_tools, manage_entry, ProposeSkillTool, SkillAuditEntry, SkillAuditLog,
-    SkillManageConfig, SkillManageTool, SkillUsageState, SkillUsageStore, ALLOWED_SUBDIRS,
-    DEFAULT_DRAFTS_DIR, DEFAULT_MAIN_DIR, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH,
-    MAX_SKILL_CONTENT_CHARS, MAX_SKILL_FILE_BYTES,
+    harness_platform_tools, manage_entry, LoadSkillTool, ProposeSkillTool, SkillAuditEntry,
+    SkillAuditLog, SkillManageConfig, SkillManageTool, SkillUsageState, SkillUsageStore,
+    ALLOWED_SUBDIRS, DEFAULT_DRAFTS_DIR, DEFAULT_MAIN_DIR, MAX_DESCRIPTION_LENGTH,
+    MAX_NAME_LENGTH, MAX_SKILL_CONTENT_CHARS, MAX_SKILL_FILE_BYTES,
 };
 pub use tools_team::{lead_context, team_action_tools, TeamActionTool, TeamTool};
 pub use tools_agent_spawn::{
