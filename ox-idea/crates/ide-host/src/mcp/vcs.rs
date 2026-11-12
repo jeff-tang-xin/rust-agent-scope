@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 const STATUS_DEFAULT_LIMIT: i64 = 1000;
 
 pub fn tools() -> Vec<Tool> {
-    vec![get_repositories(), git_status(), git_diff()]
+    vec![get_repositories(), git_status(), git_diff(), git_commit(), git_branch()]
 }
 
 /// `path` with symbolic links resolved (macOS `/var` is `/private/var`), as given when it
@@ -324,6 +324,150 @@ fn git_diff() -> Tool {
     .param(Param::optional("repositoryPathRelativeToProject", ParamType::String, "Select the containing repository"))
     .param(Param::optional("filePath", ParamType::String, "Optional project-relative file; omit for the working tree"))
     .param(Param::optional("staged", ParamType::Boolean, "Show staged changes"))
+}
+
+/// Write commands run the repository's own hooks (pre-commit is a legitimate mechanism the
+/// user configured) but never prompt and never trigger lazy fetches. Unlike `read_command`
+/// they do not disable hooks or external drivers.
+fn write_command(git: &str, root: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(git);
+    command
+        .current_dir(root)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    ide_core::process::prepare(&mut command);
+    command
+}
+
+/// Runs `git` in the repository, returning trimmed stdout on success or the stderr text.
+fn run_git(mut cmd: std::process::Command, what: &str) -> IdeResult<String> {
+    ide_core::process::prepare(&mut cmd);
+    let out = cmd.output().map_err(|e| IdeError::unavailable(format!("cannot run git: {e}")))?;
+    if !out.status.success() {
+        return Err(IdeError::unavailable(format!("{what}: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+fn git_commit() -> Tool {
+    Tool::new(
+        "git_commit",
+        "Stages the given files (when provided) and creates a commit in the repository. Without `files`, \
+commits what is already staged - check git_status first to see what that is. The user is asked for \
+confirmation first. Pushing is not supported by this tool.",
+        |call| async move {
+            let message = call.str("message")?;
+            let files = call.str_list("files")?;
+            let wanted = call.opt_str("repositoryPathRelativeToProject")?;
+            let path = wanted.as_deref().map(|p| call.resolve_inside(p)).transpose()?.unwrap_or_else(|| call.root().to_path_buf());
+            let root = find_git_root(call.root(), &path).ok_or_else(|| IdeError::not_found("No git repository found"))?;
+            let mut rel_files = Vec::new();
+            for f in &files {
+                let p = call.resolve_inside(f)?;
+                if !p.starts_with(&root) {
+                    return Err(IdeError::invalid(format!("file is outside the repository: {f}")));
+                }
+                rel_files.push(p.strip_prefix(&root).map_err(|e| IdeError::invalid(e.to_string()))?.to_string_lossy().replace('\\', "/"));
+            }
+            let git = git_executable(&call);
+            let branch = call
+                .host
+                .blocking({ let git = git.clone(); let root = root.clone(); move || Ok(read_branch(&git, &root)) })
+                .await?;
+            let staged_note =
+                if rel_files.is_empty() { "already staged (see git_status)".to_owned() } else { rel_files.join(", ") };
+            let detail = format!(
+                "Repository: {}\nBranch: {}\nFiles: {}\nMessage: {}",
+                relative_to_project(&call, &root),
+                branch.unwrap_or_else(|| "(detached HEAD)".to_owned()),
+                staged_note,
+                message,
+            );
+            call.confirm("git_commit", Some(detail)).await?;
+            let cancel = call.cancel.clone();
+            let (commit, branch_after) = call
+                .host
+                .blocking(move || {
+                    if !rel_files.is_empty() {
+                        let mut add = write_command(&git, &root);
+                        add.arg("add").arg("--");
+                        for f in &rel_files {
+                            add.arg(f);
+                        }
+                        run_git(add, "git add failed")?;
+                    }
+                    if cancel.is_cancelled() {
+                        return Err(IdeError::cancelled());
+                    }
+                    let mut commit = write_command(&git, &root);
+                    commit.args(["commit", "-m", &message]);
+                    run_git(commit, "git commit failed")?;
+                    let mut rev = write_command(&git, &root);
+                    rev.args(["rev-parse", "--short", "HEAD"]);
+                    let hash = run_git(rev, "git rev-parse failed")?;
+                    let mut br = write_command(&git, &root);
+                    br.args(["rev-parse", "--abbrev-ref", "HEAD"]);
+                    let branch = run_git(br, "git rev-parse failed")?;
+                    Ok((hash, branch))
+                })
+                .await?;
+            Output::json(json!({ "commit": commit, "branch": branch_after }))
+        },
+    )
+    .write()
+    .param(Param::required("message", ParamType::String, "Commit message"))
+    .param(Param::optional(
+        "files",
+        ParamType::StringList,
+        "Project-relative paths to stage before committing; omit to commit what is already staged",
+    ))
+    .param(Param::optional("repositoryPathRelativeToProject", ParamType::String, "Select the containing repository"))
+}
+
+fn git_branch() -> Tool {
+    Tool::new(
+        "git_branch",
+        "Creates a new branch and switches to it (create=true), or switches to an existing branch. \
+The user is asked for confirmation first.",
+        |call| async move {
+            let name = call.str("name")?;
+            if name.starts_with('-') {
+                return Err(IdeError::invalid("branch name must not start with '-'"));
+            }
+            let create = call.flag("create", false)?;
+            let wanted = call.opt_str("repositoryPathRelativeToProject")?;
+            let path = wanted.as_deref().map(|p| call.resolve_inside(p)).transpose()?.unwrap_or_else(|| call.root().to_path_buf());
+            let root = find_git_root(call.root(), &path).ok_or_else(|| IdeError::not_found("No git repository found"))?;
+            let git = git_executable(&call);
+            let action = if create { "Create and switch to branch" } else { "Switch to branch" };
+            call.confirm("git_branch", Some(format!("{action} `{name}`"))).await?;
+            let branch = call
+                .host
+                .blocking(move || {
+                    let mut cmd = write_command(&git, &root);
+                    if create {
+                        cmd.args(["switch", "-c"]);
+                    } else {
+                        cmd.arg("switch");
+                    }
+                    cmd.arg(&name);
+                    run_git(cmd, "git switch failed")?;
+                    let mut rev = write_command(&git, &root);
+                    rev.args(["rev-parse", "--abbrev-ref", "HEAD"]);
+                    run_git(rev, "git rev-parse failed")
+                })
+                .await?;
+            Output::json(json!({ "branch": branch }))
+        },
+    )
+    .write()
+    .param(Param::required("name", ParamType::String, "Branch name"))
+    .param(Param::optional(
+        "create",
+        ParamType::Boolean,
+        "true creates the branch and switches to it (default: switch to an existing branch)",
+    ))
+    .param(Param::optional("repositoryPathRelativeToProject", ParamType::String, "Select the containing repository"))
 }
 
 #[cfg(test)]
