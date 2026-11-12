@@ -5,6 +5,7 @@ mod requests;
 mod run;
 mod vcs;
 pub use requests::Requests;
+mod debug;
 mod files;
 mod reports;
 mod search;
@@ -34,6 +35,7 @@ fn tools() -> Vec<tool::Tool> {
     tools.push(symbols::find_references());
     tools.extend(edit::tools());
     tools.extend(run::tools());
+    tools.extend(debug::tools());
     tools.extend(vcs::tools());
     tools
 }

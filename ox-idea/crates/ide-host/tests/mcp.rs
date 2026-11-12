@@ -83,6 +83,28 @@ impl Harness {
     async fn json(&self, name: &str, args: Value) -> Value {
         serde_json::from_str(&self.call(name, args).await).unwrap()
     }
+    /// Calls a tool that asks for confirmation, approving the request.
+    async fn confirmed(&self, name: &str, args: Value) -> Value {
+        self.events.lock().unwrap().clear(); // stale requests would be answered instead
+        let call = self.json(name, args);
+        let allow = async {
+            let id = self.request().await;
+            self.host.mcp_requests.answer("main", id, true, None).unwrap();
+        };
+        let (result, ()) = tokio::join!(call, allow);
+        result
+    }
+    /// Calls a tool that asks for confirmation, denying the request.
+    async fn denied(&self, name: &str, args: Value) -> String {
+        self.events.lock().unwrap().clear();
+        let call = self.error(name, args);
+        let deny = async {
+            let id = self.request().await;
+            self.host.mcp_requests.answer("main", id, false, None).unwrap();
+        };
+        let (error, ()) = tokio::join!(call, deny);
+        error
+    }
 }
 impl Drop for Harness {
     fn drop(&mut self) {
@@ -415,4 +437,100 @@ async fn rust_references_and_rename_through_mcp() {
     assert_eq!(result["applied"], true, "{result}");
     assert!(project.documents.text_snapshot(doc.id).unwrap().text.contains("format_amount"));
     assert!(std::fs::read_to_string(h.root.join("src/main.rs")).unwrap().contains("format_amount"));
+}
+
+// ─── debug tools ─────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn debug_tools_are_listed_with_correct_read_only_flags() {
+    let h = Harness::new();
+    h.trust().await; // untrusted projects only list read-only tools
+    let tools = Registry::new(h.host.clone()).tools(&h.root).unwrap();
+    let write_tools = ["start_debug_session", "set_breakpoint", "remove_breakpoint", "debug_control", "stop_debug_session"];
+    let read_tools = ["get_debug_state", "evaluate_expression"];
+    for name in write_tools.iter().chain(read_tools.iter()) {
+        let tool = tools.iter().find(|t| t.name == *name).unwrap_or_else(|| panic!("{name} not listed"));
+        assert_eq!(tool.read_only, read_tools.contains(name), "{name} read_only flag");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_and_remove_breakpoints_without_a_session() {
+    let h = Harness::new();
+    h.trust().await;
+    h.host.mcp_requests.set_ready("main", true);
+
+    // Confirmation is required: deny first.
+    let error = h.denied("set_breakpoint", json!({"filePath":"src/a.txt", "line":2})).await;
+    assert!(error.contains("denied by the user"), "{error}");
+    assert!(h.host.debugger.stored_breakpoints(&h.root.join("src/a.txt")).is_empty());
+
+    // Allow: the breakpoint is stored (unverified — no adapter session yet).
+    let set = h.confirmed("set_breakpoint", json!({"filePath":"src/a.txt", "line":2})).await;
+    assert_eq!(set["breakpoints"][0]["line"], 2, "{set}");
+    assert_eq!(set["breakpoints"][0]["verified"], false);
+    assert_eq!(h.host.debugger.stored_breakpoints(&h.root.join("src/a.txt")).len(), 1);
+
+    // Setting the same line again updates it (condition), not duplicates.
+    let set = h.confirmed("set_breakpoint", json!({"filePath":"src/a.txt", "line":2, "condition":"x > 1"})).await;
+    assert_eq!(set["breakpoints"].as_array().unwrap().len(), 1);
+    let stored = h.host.debugger.stored_breakpoints(&h.root.join("src/a.txt"));
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].condition.as_deref(), Some("x > 1"));
+
+    // A second line, then remove one line, then clear the file.
+    h.confirmed("set_breakpoint", json!({"filePath":"src/a.txt", "line":1})).await;
+    let removed = h.confirmed("remove_breakpoint", json!({"filePath":"src/a.txt", "line":2})).await;
+    assert_eq!(removed["breakpoints"].as_array().unwrap().len(), 1);
+    assert_eq!(removed["breakpoints"][0]["line"], 1);
+    let cleared = h.confirmed("remove_breakpoint", json!({"filePath":"src/a.txt"})).await;
+    assert!(cleared["breakpoints"].as_array().unwrap().is_empty(), "{cleared}");
+    assert!(h.host.debugger.stored_breakpoints(&h.root.join("src/a.txt")).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn debug_tools_validate_arguments_and_report_missing_sessions() {
+    let h = Harness::new();
+    h.trust().await;
+    h.host.mcp_requests.set_ready("main", true);
+
+    assert!(h.error("start_debug_session", json!({})).await.contains("adapter"));
+    assert!(h.error("start_debug_session", json!({"adapter":"codelldb", "request":"replay"}))
+        .await
+        .contains("launch"));
+    assert!(h.error("start_debug_session", json!({"adapter":"codelldb", "extraJson":"not json"}))
+        .await
+        .contains("extraJson"));
+    let outside = h.error("set_breakpoint", json!({"filePath":"../../outside.txt", "line":1})).await;
+    assert!(outside.contains("outside"), "{outside}");
+    assert!(h.error("set_breakpoint", json!({"filePath":"src/a.txt", "line":0}))
+        .await
+        .contains("positive"));
+    assert!(h.error("debug_control", json!({"action":"teleport"})).await.contains("action"));
+    assert!(h.error("debug_control", json!({"action":"continue"}))
+        .await
+        .contains("no live debug session"));
+    assert!(h.error("evaluate_expression", json!({"expression":"x"}))
+        .await
+        .contains("no live debug session"));
+    assert!(h.error("stop_debug_session", json!({"sessionId":99}))
+        .await
+        .contains("not found"));
+
+    // Read-only polling works without a session and points at the next step.
+    let state = h.json("get_debug_state", json!({})).await;
+    assert!(state["sessions"].as_array().unwrap().is_empty(), "{state}");
+    assert!(state["hint"].as_str().unwrap().contains("start_debug_session"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn start_debug_session_asks_for_confirmation() {
+    let h = Harness::new();
+    h.trust().await;
+    h.host.mcp_requests.set_ready("main", true);
+    let error = h
+        .denied("start_debug_session", json!({"adapter":"codelldb", "program":"target/debug/app"}))
+        .await;
+    assert!(error.contains("denied by the user"), "{error}");
+    assert!(h.host.debugger.sessions(Some("main")).is_empty());
 }

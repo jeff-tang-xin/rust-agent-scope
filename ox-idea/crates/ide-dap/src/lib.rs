@@ -658,7 +658,9 @@ impl DebugManager {
         self.order.lock().iter().filter_map(|id| sessions.get(id).cloned()).collect()
     }
 
-    pub(crate) fn stored_breakpoints(&self, path: &Path) -> Vec<Breakpoint> {
+    /// Breakpoints stored for `path` (the source of truth for per-file editing;
+    /// live verification states are [`Self::breakpoint_states`]).
+    pub fn stored_breakpoints(&self, path: &Path) -> Vec<Breakpoint> {
         self.breakpoints.lock().get(path).cloned().unwrap_or_default()
     }
 
