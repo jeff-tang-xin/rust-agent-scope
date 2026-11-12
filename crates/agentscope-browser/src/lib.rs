@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chromiumoxide::Browser;
+use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::page::{
     EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
     StopScreencastParams,
@@ -411,6 +412,22 @@ impl BrowserSession {
                 .await
                 .map_err(|e| format!("打开标签页失败: {e}"))?,
         );
+        // 显式设定页面视口：window_size 只决定浏览器窗口，headless 新标签页
+        // 的页面视口仍是 Chromium 默认 800×600——页面按窄屏渲染（响应式布局
+        // 塌缩、面板画面浪费），与窗口 1680×1200 及 screencast 上限不一致。
+        // setDeviceMetricsOverride 让 CSS 视口 = 1680×1200，screencast 帧的
+        // device_width/height 随之对齐，面板坐标换算（device_width/显示宽）不变。
+        page.execute(
+            SetDeviceMetricsOverrideParams::builder()
+                .width(1680)
+                .height(1200)
+                .device_scale_factor(1.0)
+                .mobile(false)
+                .build()
+                .map_err(|e| format!("视口参数错误: {e}"))?,
+        )
+        .await
+        .map_err(|e| format!("设置页面视口失败: {e}"))?;
         // 新会话清空旧缓冲（旧页面的报错对新页面无意义）。
         self.console.lock().unwrap_or_else(|e| e.into_inner()).clear();
         // 后台监听 console.error 与未捕获异常 → 缓冲（Agent 测试页面时
