@@ -1488,8 +1488,10 @@ impl Tool for PlanExitTool {
     }
 
     fn description(&self) -> &str {
-        "Exit plan mode. Requires user approval. Call this only after the plan has been written \
-with plan_write and you are ready to start implementing."
+        "Exit plan mode. Requires user approval. Call this only while plan mode is ACTIVE and \
+the plan has been written with plan_write. If plan mode is already off, do NOT call this — \
+revise the plan file directly with file tools and keep executing, or ask the user to switch \
+to plan mode."
     }
 
     fn parameters(&self) -> Value {

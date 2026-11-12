@@ -219,9 +219,20 @@ impl AcpSessionHub {
         if !session.busy.load(std::sync::atomic::Ordering::Acquire) {
             return Err(RpcError::invalid_params("会话空闲，无需插队"));
         }
+        // 插队消息加引导块：模型看到裸的用户消息时容易把它当新指令处理完
+        // 就停（EndTurn），用户观感是「介入就结束」。引导它吸收反馈继续当前
+        // 工作；方向变更时先简要说明调整再继续，不要只回复确认就停下。
+        // 引导是消息首部的独立 Text 块，原始内容块（文本/图片）原样保留，
+        // UI 显示不受影响（ide-agent 的 User entry 用 prompt 原文）。
+        let mut guided = vec![ContentBlock::Text {
+            text: "[用户在任务执行中插入的消息]（运行中插队：吸收以下反馈并继续当前工作。\
+若它改变需求方向，先简要说明调整再继续执行；不要只回复确认就停下。）"
+                .to_owned(),
+        }];
+        guided.extend(content);
         session
             .agent
-            .push_steer(session_id.clone(), Msg::new(Role::User, "user", content));
+            .push_steer(session_id.clone(), Msg::new(Role::User, "user", guided));
         Ok(json!({}))
     }
 
@@ -1396,17 +1407,25 @@ mod tests {
                     if cancel_before_grant {
                         let _ = cancel_tx.send(true);
                     }
-                    // 模拟 _oxidea/steer：权限挂起（busy）窗口内插队，消息进
-                    // agent 的 steer 队列，续跑后应出现在下一轮模型输入里。
+                    // 模拟 _oxidea/steer：权限挂起（busy）窗口内插队。走真实
+                    // hub.steer() 路径（含引导块包装），消息进 agent 的 steer
+                    // 队列，续跑后应出现在下一轮模型输入里。
                     if let Some(steer) = steer_text {
-                        steer_agent.push_steer(
+                        let hub = crate::AcpSessionHub::new(Vec::new());
+                        hub.sessions.lock().unwrap().insert(
                             "sess-1".to_string(),
-                            Msg::new(
-                                Role::User,
-                                "user",
-                                vec![ContentBlock::Text { text: steer.to_string() }],
-                            ),
+                            Arc::new(AcpSession {
+                                agent: Arc::clone(&steer_agent),
+                                cwd: PathBuf::from("."),
+                                busy: std::sync::atomic::AtomicBool::new(true),
+                                cancel_tx: cancel_tx.clone(),
+                            }),
                         );
+                        hub.steer(&json!({
+                            "sessionId": "sess-1",
+                            "prompt": [{ "type": "text", "text": steer }]
+                        }))
+                        .unwrap();
                     }
                     let id = frame["id"].clone();
                     let option_id = grant_option.unwrap_or("reject_once");
@@ -1712,9 +1731,12 @@ mod tests {
                 .await;
         assert_eq!(outcome, PromptOutcome::EndTurn);
         let second_call = model.seen_texts(1);
+        // seen 只抽样每条消息的首个 Text 块：引导块随 steer 消息注入且位于
+        // 首块，它的出现即证明 steer 消息到达模型（原文块跟在引导块后，
+        // 模型输入是完整消息列表，不受 seen 抽样影响）。
         assert!(
-            second_call.iter().any(|t| t.contains("插队：改跑两次")),
-            "steer 消息应注入下一轮模型输入: {second_call:?}"
+            second_call.iter().any(|t| t.contains("运行中插队")),
+            "steer 消息应注入下一轮模型输入（引导块为到达标记）: {second_call:?}"
         );
         let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
         assert!(

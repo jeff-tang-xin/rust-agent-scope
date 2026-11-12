@@ -218,6 +218,49 @@ impl PlanModeMiddleware {
             .map(|(_, handle)| Arc::clone(handle))
     }
 
+    /// 非 plan 态下短路 `plan_exit` 调用。典型场景：计划批准后用户反馈修改
+    /// 意见，模型想「更新计划并重新提交批准」却已不在 plan 态（plan_write
+    /// 不可用），转而误调 plan_exit——而 PlanExitTool 的 check_permissions
+    /// 无条件 RequireApproval，每次误调都会弹批准骚扰用户。这里在执行前
+    /// 摘除调用并合成 Denied 结果（与 plan 态 denied 分支同模式，保持
+    /// tool_use/tool_result 配对），不执行、不触发权限确认，同时教育模型
+    /// 正确路径。`plan_status` 为 `Some` 蕴含 `state_for` 为 `Some`（同一
+    /// 句柄），摘除必然伴随写结果，不会留下悬空 tool_use。
+    fn short_circuit_plan_exit_off_mode(
+        &self,
+        ctx: &RuntimeContext,
+        input: ActingInput,
+    ) -> ActingInput {
+        if !input
+            .tool_calls
+            .iter()
+            .any(|call| call.name == super::tools::PlanExitTool::NAME)
+        {
+            return input;
+        }
+        let Some(handle) = self.state_for(ctx.reply_id()) else {
+            return input;
+        };
+        let (exits, rest): (Vec<_>, Vec<_>) = input
+            .tool_calls
+            .into_iter()
+            .partition(|call| call.name == super::tools::PlanExitTool::NAME);
+        let mut state = handle.lock().unwrap_or_else(|error| error.into_inner());
+        for call in exits {
+            state.context.push(Msg::tool_result(
+                "plan-mode",
+                call.id.clone(),
+                call.name.clone(),
+                "[plan mode] Not in plan mode; nothing to exit. To revise the plan, edit \
+the plan file directly with file tools and keep executing, or ask the user to \
+switch to plan mode."
+                    .to_owned(),
+                ToolResultState::Denied,
+            ));
+        }
+        ActingInput { tool_calls: rest }
+    }
+
     /// 当前计划状态：`(plan_active, current_plan_file)`。无状态句柄 → `None`
     /// （调用方透传——中间件不参与无状态调用）。
     fn plan_status(&self, reply_id: &str) -> Option<(bool, Option<String>)> {
@@ -249,7 +292,7 @@ impl Middleware for PlanModeMiddleware {
             return input;
         };
         if !active {
-            return input;
+            return self.short_circuit_plan_exit_off_mode(ctx, input);
         }
         let (allowed, denied): (Vec<_>, Vec<_>) = input.tool_calls.into_iter().partition(|call| {
             (self.is_read_only)(&call.name)
@@ -481,6 +524,52 @@ mod tests {
             ReasoningInput { messages: vec![], options: GenerateOptions::default() },
         );
         assert!(ri.messages.last().unwrap().text().contains("Plan mode: OFF"));
+    }
+
+    #[tokio::test]
+    async fn plan_middleware_short_circuits_plan_exit_when_off() {
+        // BUILD 态（计划已批准退出）下模型误调 plan_exit：摘除调用、合成
+        // Denied 结果（不执行、不触发 RequireApproval 弹批准），其余放行。
+        let state = Arc::new(Mutex::new(AgentState::default()));
+        let mw = middleware_with_state(&state, "r2");
+        let ctx = RuntimeContext::new().with_reply_id("r2");
+
+        let input = ActingInput {
+            tool_calls: vec![
+                ToolCallSpec { id: "1".into(), name: "read_file".into(), input: json!({}) },
+                ToolCallSpec { id: "2".into(), name: "plan_exit".into(), input: json!({}) },
+            ],
+        };
+        let out = mw.on_acting(&ctx, input);
+        assert_eq!(out.tool_calls.len(), 1, "plan_exit 应被摘除");
+        assert_eq!(out.tool_calls[0].name, "read_file");
+        {
+            let s = state.lock().unwrap();
+            assert_eq!(s.context.len(), 1, "误调应有合成的 Denied 结果");
+            match &s.context[0].content[0] {
+                ContentBlock::ToolResult { name, output, state, .. } => {
+                    assert_eq!(name, "plan_exit");
+                    assert!(matches!(state, ToolResultState::Denied));
+                    assert!(format!("{output:?}").contains("Not in plan mode"));
+                }
+                other => panic!("expected tool result block, got {other:?}"),
+            }
+        }
+
+        // 无 plan_exit 调用时透传，不产生合成结果。
+        let plain = ActingInput {
+            tool_calls: vec![ToolCallSpec {
+                id: "3".into(),
+                name: "read_file".into(),
+                input: json!({}),
+            }],
+        };
+        let out2 = mw.on_acting(&ctx, plain);
+        assert_eq!(out2.tool_calls.len(), 1);
+        {
+            let s = state.lock().unwrap();
+            assert_eq!(s.context.len(), 1, "无误调不应新增结果");
+        }
     }
 
     #[tokio::test]
