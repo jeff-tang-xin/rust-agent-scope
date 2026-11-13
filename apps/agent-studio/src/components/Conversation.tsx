@@ -19,7 +19,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type SessionBinding, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
+import { api, onAgentEvent, onTurnFinished, onTurnStarted, type AgentConfig, type AgentEventPayload, type ConfirmResultPayload, type SessionBinding, type SkillEntry, type WorkspaceConfig, type WorkspaceFileEntry } from "../api";
 import OpsWorkbench from "./OpsWorkbench";
 import TestWorkbench from "./TestWorkbench";
 import DatabasesPanel from "./DatabasesPanel";
@@ -568,6 +568,12 @@ export default function Conversation({
   const [expandedActorGroups, setExpandedActorGroups] = useState<Set<string>>(
     new Set(),
   );
+  // "/" skill 面板：输入以 "/" 开头时弹出，列出可用 skill（项目级/用户级/
+  // 内置，同名项目级优先）；↑/↓ 选择、Enter 选中、Esc 关闭。选中后把
+  // SKILL.md 全文注入用户消息（用户手动指定 skill 的入口，与模型自主
+  // load_skill 互补）。清单缓存一次，面板开关不重复 invoke。
+  const [skillMenu, setSkillMenu] = useState<{ items: SkillEntry[]; idx: number } | null>(null);
+  const skillsCacheRef = useRef<SkillEntry[] | null>(null);
   // 输入历史（↑ 召回）：仅记录成功发出的文本，会话内存态。
   const inputHistoryRef = useRef<string[]>([]);
   const historyIdxRef = useRef(-1);
@@ -1347,6 +1353,47 @@ export default function Conversation({
   // 权限裁决：对挂起的工具调用答复（批准/始终允许/拒绝）→ 确认消息恢复回合。
   // tool_call 原样回传事件里的 ToolUse 块（core 据此定位 ASKING 块）；
   // 「始终允许」附带 allow 规则，core 写进会话权限上下文后对后续调用生效。
+  // ---------- "/" skill 面板 ----------
+
+  // 打开面板（清单缓存；首次 invoke list_skills，失败静默关面板——skill
+  // 是增强能力，列表拉不到不应阻塞输入）。
+  const openSkillMenu = async () => {
+    if (skillsCacheRef.current) {
+      setSkillMenu({ items: skillsCacheRef.current, idx: 0 });
+      return;
+    }
+    try {
+      const items = await api.listSkills(workspace.id);
+      skillsCacheRef.current = items;
+      setSkillMenu({ items, idx: 0 });
+    } catch {
+      setSkillMenu(null);
+    }
+  };
+
+  // 按输入过滤："/" 后的文本对 name/description 做包含匹配（大小写不敏感）。
+  const filterSkills = (items: SkillEntry[], text: string): SkillEntry[] => {
+    const q = text.startsWith("/") ? text.slice(1).trim().toLowerCase() : "";
+    if (!q) return items;
+    return items.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+    );
+  };
+
+  // 选中 skill：取全文 → 组装消息（首行 /name 留痕 + 引导语 + 全文）→
+  // 复用 send（busy 检查/本地显示/steer 降级全继承）。
+  const pickSkill = async (entry: SkillEntry) => {
+    setSkillMenu(null);
+    try {
+      const detail = await api.readSkill(workspace.id, entry.name);
+      const text = `/${detail.name}\n请按以下 skill 的指引执行本轮任务。\n\n${detail.content}`;
+      setInput("");
+      await send(text);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const resolveConfirm = async (
     entryId: string,
     call: Record<string, unknown>,
@@ -2008,6 +2055,31 @@ export default function Conversation({
             </span>
           </div>
         )}
+                {skillMenu &&
+          (() => {
+            const filtered = filterSkills(skillMenu.items, input);
+            if (filtered.length === 0) return null;
+            return (
+              <div className="skill-menu">
+                {filtered.map((s, i) => (
+                  <div
+                    key={s.name}
+                    className={"skill-item" + (i === skillMenu.idx ? " active" : "")}
+                    onMouseDown={(e) => {
+                      // mousedown 而非 click：textarea blur 先于 click，mousedown
+                      // 在 blur 前触发，选中不丢。
+                      e.preventDefault();
+                      void pickSkill(s);
+                    }}
+                  >
+                    <span className="skill-name">/{s.name}</span>
+                    <span className={`skill-src src-${s.source}`}>{s.source}</span>
+                    <span className="skill-desc">{s.description}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         <div className="composer-row">
         {supportsPlan && (
           <button
@@ -2033,11 +2105,43 @@ export default function Conversation({
         </label>
         <textarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setInput(v);
+            // "/" 触发 skill 面板（仅输入以 "/" 开头时）；清掉 "/" 关面板。
+            if (v.startsWith("/")) void openSkillMenu();
+            else if (skillMenu) setSkillMenu(null);
+          }}
           onKeyDown={(e) => {
             // IME 组词期间（中文输入法确认候选词）的 Enter 不触发发送/插话：
             // 否则「确认组词的 Enter + 发送的 Enter」会把同一条消息提交两次。
             if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            // skill 面板开着时 ↑/↓/Enter/Esc 优先服务面板（在输入历史召回
+            // 之前拦截——面板态下方向键是选择，不是召回历史）。
+            if (skillMenu) {
+              const filtered = filterSkills(skillMenu.items, input);
+              if (e.key === "ArrowUp" && filtered.length > 0) {
+                e.preventDefault();
+                const idx = skillMenu.idx <= 0 ? filtered.length - 1 : skillMenu.idx - 1;
+                setSkillMenu({ items: skillMenu.items, idx });
+                return;
+              }
+              if (e.key === "ArrowDown" && filtered.length > 0) {
+                e.preventDefault();
+                setSkillMenu({ items: skillMenu.items, idx: (skillMenu.idx + 1) % filtered.length });
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setSkillMenu(null);
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey && filtered.length > 0) {
+                e.preventDefault();
+                void pickSkill(filtered[skillMenu.idx] ?? filtered[0]);
+                return;
+              }
+            }
             // ↑/↓ 召回输入历史：仅在输入框为空（↑）或正在浏览历史时生效，
             // 不干扰光标移动与多行编辑。
             if (e.key === "ArrowUp" && !e.shiftKey) {

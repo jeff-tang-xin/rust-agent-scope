@@ -10,6 +10,7 @@
 //!   安装策略。扫描器是编写期辅助，不是安全边界。
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use agentscope_core::RuntimeContext;
@@ -225,7 +226,7 @@ description: Spec 模式工作流（文档即状态）。进入 plan 模式、�
 
 ## 目录约定
 
-每个需求一个目录 `.oxidea/agent/specs/<NNN-短名>/`：序号看已有目录递增（001、002…），短名用英文连字符（如 `001-user-login`）。内含 spec.md 与 tasks.md。全部任务完成且验证通过后，用 shell 把整个需求目录移入 `.oxidea/agent/specs/archived/`，并在回复里说明归档位置。
+每个需求一个目录 `<spec 根>/<NNN-短名>/`：spec 根即 plan 模式配置的计划目录（宿主决定：OXidea 为 `.oxidea/agent/specs/`，Agent Studio 为 `.ox/plans/`）。序号看已有目录递增（001、002…），短名用英文连字符（如 `001-user-login`）。内含 spec.md 与 tasks.md。全部任务完成且验证通过后，用 shell 把整个需求目录移入 `.oxidea/agent/specs/archived/`，并在回复里说明归档位置。
 
 ## 工作循环与批准门
 
@@ -300,7 +301,7 @@ tasks.md 是唯一状态源，`update_plan` 是它的**投影**——文档给�
 
 - 需求/方案变更 → 立即用 `plan_write` 更新 spec.md 对应章节（带同一 feature 参数），再改 tasks.md——文档与实际永远一致。
 - tasks.md 下一步不明确 → 回读 spec.md 对应章节，不凭记忆。
-- 测试失败必记 .oxidea/agent/specs/bugs.json（JSON 数组，字段：id、description、related_test、status、fix_note；状态流转 open→fixing→fixed→closed）：自测通过才置 fixed 并写清 fix_note，回归通过才置 closed。
+- 测试失败必记 spec 根目录下的 bugs.json（JSON 数组，字段：id、description、related_test、status、fix_note；状态流转 open→fixing→fixed→closed）：自测通过才置 fixed 并写清 fix_note，回归通过才置 closed。
 
 ## 反模式（不要做）
 
@@ -423,6 +424,41 @@ pub fn skill_section_markdown(external: &[(String, String)]) -> String {
 
 /// 技能文件名。
 pub const SKILL_FILE: &str = "SKILL.md";
+
+/// 同步扫描技能根（两层布局 `<root>/.claude/skills/<name>/SKILL.md`），返回
+/// `(name, description)` 清单——系统提示词注入的 L1 元数据（渐进披露第一层）。
+/// 项目级在前、用户级在后；同名项目级优先（与 `load_skill` 的仓库检索顺序一致）。
+/// 解析失败的 SKILL.md 跳过（与 `WorkspaceSkillRepository::get_all_skills` 同策略）。
+/// 宿主（acp/studio）各自调用后把结果交给 [`skill_section_markdown`] 渲染。
+pub fn collect_skill_summaries(cwd: &Path, home: Option<&Path>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let roots = std::iter::once(cwd.join(".claude").join("skills"))
+        .chain(home.map(|h| h.join(".claude").join("skills")));
+    for root in roots {
+        let entries = match std::fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        let mut dirs: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+        dirs.sort();
+        for dir in dirs {
+            let Ok(content) = std::fs::read_to_string(dir.join("SKILL.md")) else {
+                continue;
+            };
+            let Ok(skill) = SkillUtil::create_from(&content, None, "workspace") else {
+                continue;
+            };
+            let Some(name) = skill.name().map(str::to_owned) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                out.push((name, skill.description().unwrap_or_default().to_owned()));
+            }
+        }
+    }
+    out
+}
 /// 归档目录前缀（非破坏删除的目标）。
 const ARCHIVE_PREFIX: &str = ".archive";
 /// 默认来源标识。

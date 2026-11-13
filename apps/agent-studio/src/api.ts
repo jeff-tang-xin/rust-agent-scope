@@ -165,6 +165,19 @@ export interface AttachmentInput {
   data_base64: string;
 }
 
+/** skill 清单条目（"/" 面板）：name + description + 来源徽标。 */
+export interface SkillEntry {
+  name: string;
+  description: string;
+  /** project（项目级，可写）/ user（用户级，只读）/ builtin（框架内置）。 */
+  source: string;
+}
+
+/** skill 详情（选中后注入会话）：清单字段 + SKILL.md 全文。 */
+export interface SkillDetail extends SkillEntry {
+  content: string;
+}
+
 export interface HistoryItem {
   role: string;
   text: string;
@@ -632,6 +645,11 @@ export const api = {
     invoke<void>("memory_save_file", { workspaceId, path, content }),
   memoryDeleteFile: (workspaceId: string, path: string) =>
     invoke<void>("memory_delete_file", { workspaceId, path }),
+
+  // ---------- Skill 生态（"/" 手动指定） ----------
+  listSkills: (workspaceId: string) => invoke<SkillEntry[]>("list_skills", { workspaceId }),
+  readSkill: (workspaceId: string, name: string) =>
+    invoke<SkillDetail>("read_skill", { workspaceId, name }),
 };
 
 // ---------- 事件订阅 ----------

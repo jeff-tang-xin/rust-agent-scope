@@ -37,6 +37,8 @@ use agentscope_harness::tools::{
 use agentscope_harness::tools_filesystem::FilesystemToolSet;
 use agentscope_harness::tools_memory::MemoryToolSet;
 use agentscope_harness::workspace::{LocalFilesystem, LocalFsMode, PathPolicy, WorkspaceManager};
+use agentscope_harness::{LoadSkillTool, ProposeSkillTool, SkillManageConfig, SkillManageTool};
+use agentscope_harness::skill::{WorkspaceSkillRepository, skill_section_markdown, collect_skill_summaries};
 use agentscope_model_anthropic::AnthropicChatModel;
 use agentscope_model_dashscope::DashScopeChatModel;
 use agentscope_model_gemini::GeminiChatModel;
@@ -243,6 +245,15 @@ fn build_workspace(root: &Path) -> Result<Arc<WorkspaceManager>, String> {
     Ok(Arc::new(WorkspaceManager::with_filesystem(root, fs)))
 }
 
+/// 用户主目录（跨平台）：USERPROFILE（Windows）优先，HOME 兜底。
+pub(crate) fn user_home_dir() -> Option<PathBuf> {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .map(PathBuf::from)
+}
+
 /// 基础工具面：filesystem 6 + memory 3（所有模式共有）。
 fn register_base_tools(
     toolkit: &mut Toolkit,
@@ -253,12 +264,12 @@ fn register_base_tools(
     // 被测系统源码（绑定协同后工作区根就是协同项目目录）。
     include_fs: bool,
 ) -> Result<(), String> {
+    let fs = workspace
+        .filesystem()
+        .cloned()
+        .ok_or_else(|| "workspace has no filesystem layer".to_string())?;
     if include_fs {
-        let fs = workspace
-            .filesystem()
-            .cloned()
-            .ok_or_else(|| "workspace has no filesystem layer".to_string())?;
-        for tool in FilesystemToolSet::new(fs, None).all() {
+        for tool in FilesystemToolSet::new(Arc::clone(&fs), None).all() {
             toolkit.register(tool);
         }
         // 本地 shell 执行（对齐 Java ShellExecuteTool）：锚定工作区根——
@@ -267,6 +278,63 @@ fn register_base_tools(
         toolkit.register(Arc::new(ShellExecuteTool::new(Arc::new(
             LocalShellBackend::new_anchored(workspace.root().to_path_buf()),
         ))));
+    }
+    // Skill 生态（对齐 Anthropic Agent Skills 开放标准）：项目级 .claude/skills/
+    // + 用户级 ~/.claude/skills/（只读，跨项目复用）——与 OXidea 同目录约定，
+    // 同一项目跨宿主共享 skill。身份驱动的用法引导见 BASE_PROMPT（开发找语言/
+    // 框架规范、测试找网页功能/接口测试、运维找服务器操作、数据库找数据库操作）。
+    // - include_fs=true（solo/team/ops/db）：三工具全装——skill_manage/propose_skill
+    //   可写项目级（skill_manage 自带静态安全扫描，危险内容拒绝落盘并归档；
+    //   auto_promote 直写正式根）。写 .claude/skills 触碰用户代码资产，默认 ask
+    //   授权（不进 DEVELOP_ALLOWLIST）。
+    // - include_fs=false（test）：只装 load_skill（只读）——测试身份要能加载
+    //   测试类 skill（网页功能/接口测试等），但安装 skill（写代码资产区）不是
+    //   测试职责。
+    let skill_main = if include_fs {
+        Arc::new(WorkspaceSkillRepository::writable(
+            Arc::clone(&fs),
+            ".claude/skills",
+            Some("project"),
+        ))
+    } else {
+        Arc::new(WorkspaceSkillRepository::new(
+            Arc::clone(&fs),
+            ".claude/skills",
+            Some("project"),
+            false,
+        ))
+    };
+    let mut skill_repos: Vec<Arc<WorkspaceSkillRepository>> = vec![Arc::clone(&skill_main)];
+    if let Some(home) = user_home_dir() {
+        let home_fs = Arc::new(LocalFilesystem::new(
+            &home,
+            LocalFsMode::Sandboxed,
+            PathPolicy::empty(),
+        ));
+        skill_repos.push(Arc::new(WorkspaceSkillRepository::new(
+            home_fs,
+            ".claude/skills",
+            Some("user"),
+            false,
+        )));
+    }
+    toolkit.register(Arc::new(LoadSkillTool::new(skill_repos)));
+    if include_fs {
+        let skill_drafts = Arc::new(WorkspaceSkillRepository::writable(
+            Arc::clone(&fs),
+            ".claude/skills/_drafts",
+            Some("project"),
+        ));
+        let skill_manage = Arc::new(SkillManageTool::new(
+            skill_main,
+            skill_drafts,
+            SkillManageConfig::defaults()
+                .with_main_dir(".claude/skills")
+                .with_drafts_dir(".claude/skills/_drafts")
+                .with_auto_promote(true),
+        ));
+        toolkit.register(Arc::new(ProposeSkillTool::new(Arc::clone(&skill_manage))));
+        toolkit.register(skill_manage);
     }
     // 记忆工具锚定独立的 .ox 记忆工作区（<项目>/.ox/）：MEMORY.md 与
     // memory/ 台账不落项目根，非业务产出与业务代码分离（.ox 数据规范）。
@@ -669,6 +737,15 @@ pub fn build_agent(
         .into_iter()
         .filter(|name| toolkit.get(name).is_some_and(|tool| tool.is_read_only()))
         .collect();
+    // Skill 清单（L1 元数据，渐进披露第一层）：项目级在前、用户级在后，同名
+    // 项目级优先——与 load_skill 的仓库检索顺序一致。内置分组与冲突裁决引导
+    // 都在 harness 的 skill_section_markdown 里统一渲染（框架行为）。
+    // 全模式注入（含 test——测试工作区装了只读 load_skill，清单引导它按身份
+    // 加载测试类 skill）。
+    let skill_section = {
+        let summaries = collect_skill_summaries(&workspace_root, user_home_dir().as_deref());
+        skill_section_markdown(&summaries)
+    };
     let mut builder = HarnessAgentBuilder::new()
         .name(&agent.name)
         .sys_prompt(sys_prompt_for(
@@ -676,6 +753,7 @@ pub fn build_agent(
             mode,
             matches!(mode, StudioMode::Solo | StudioMode::Team)
                 && has_test_bound_to(config, &ws.id),
+            &skill_section,
         ))
         .model(build_model(provider)?)
         .toolkit(toolkit)
@@ -962,13 +1040,24 @@ fn allowlist(bound: &[String]) -> Option<Vec<String>> {
 ///
 /// plan 场景层（[`default_prompt::SOLO_PLAN_PROMPT`]）不在此拼接——plan 由
 /// 用户手动开启，经 `PlanModeMiddleware` 在进入 plan 态时动态注入。
-fn sys_prompt_for(agent: &AgentConfig, mode: StudioMode, has_req_loop: bool) -> String {
+fn sys_prompt_for(
+    agent: &AgentConfig,
+    mode: StudioMode,
+    has_req_loop: bool,
+    skill_section: &str,
+) -> String {
     let mut prompt = String::new();
     if !agent.description.is_empty() {
         prompt.push_str(&agent.description);
         prompt.push_str("\n\n");
     }
     prompt.push_str(crate::default_prompt::BASE_PROMPT.trim());
+    // Skill 清单（L1 元数据，渐进披露第一层）：基座协议之后、用户人设之前——
+    // 与 OXidea 的装配顺序一致（能力总纲属于协议层，不属于任何场景人设）。
+    if !skill_section.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(skill_section);
+    }
     prompt.push_str("\n\n");
     prompt.push_str(agent.sys_prompt.trim());
     let role_note: String = match mode {
@@ -1016,6 +1105,72 @@ mod tests {
     }
 
     use super::*;
+
+    /// skill 生态装配：include_fs=true 注册三工具（load_skill / skill_manage /
+    /// propose_skill，项目级 .claude/skills 可写 + 用户级只读）；测试工作区
+    /// （include_fs=false）不装——测试只对需求负责，不碰代码资产区。
+    #[test]
+    fn skill_tools_follow_filesystem_inclusion() {
+        let root = std::env::temp_dir().join(format!("skill_tools_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let workspace = build_workspace(&root).unwrap();
+        let memory_ws = build_memory_workspace(&root).unwrap();
+
+        let mut toolkit = Toolkit::new();
+        register_base_tools(&mut toolkit, &workspace, memory_ws.clone(), true).unwrap();
+        for name in ["load_skill", "skill_manage", "propose_skill"] {
+            assert!(
+                toolkit.get(name).is_some(),
+                "{name} should be registered for fs-enabled workspace"
+            );
+        }
+
+        // 测试工作区（include_fs=false）：只装只读 load_skill（测试身份要加载
+        // 测试类 skill），不装安装管理工具（写代码资产区不是测试职责）。
+        let mut test_toolkit = Toolkit::new();
+        register_base_tools(&mut test_toolkit, &workspace, memory_ws, false).unwrap();
+        assert!(
+            test_toolkit.get("load_skill").is_some(),
+            "load_skill must be registered (read-only) for test workspace"
+        );
+        for name in ["skill_manage", "propose_skill"] {
+            assert!(
+                test_toolkit.get(name).is_none(),
+                "{name} must not be registered for test workspace"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// sys_prompt 的 skill 清单注入：非空段插在基座协议之后、用户人设之前
+    /// （能力总纲属于协议层，不属于任何场景人设）；空段（测试工作区）不注入。
+    #[test]
+    fn sys_prompt_injects_skill_section_between_base_and_persona() {
+        let agent: AgentConfig =
+            serde_json::from_str(r#"{"id":"a","name":"A","provider":"p1","sys_prompt":"你负责前端。"}"#)
+                .expect("minimal AgentConfig");
+        // 真实渲染链路：harness skill_section_markdown（空外置清单 + 内置表）
+        // ——内置 spec-workflow 始终全列，验证 studio 接线拿到的是框架渲染产物。
+        let section = skill_section_markdown(&[]);
+        assert!(
+            section.contains("spec-workflow [plan 模式]"),
+            "builtin skill must be listed: {section}"
+        );
+        let prompt = sys_prompt_for(&agent, StudioMode::Solo, false, &section);
+        let base = crate::default_prompt::BASE_PROMPT.trim();
+        let base_end = prompt.find(base).unwrap() + base.len();
+        let skill_at = prompt.find("## Skills").unwrap();
+        let persona_at = prompt.find("你负责前端。").unwrap();
+        assert!(
+            skill_at > base_end && skill_at < persona_at,
+            "skill section must sit between BASE_PROMPT and persona"
+        );
+
+        // 空段（测试工作区口径）不注入，也不留空标题。
+        let plain = sys_prompt_for(&agent, StudioMode::Test, false, "");
+        assert!(!plain.contains("## Skills"));
+    }
 
     /// 测试工作区绑定协同工作区的目录解析：跟随目标（目标有自定义 dir 用之，
     /// 空则用目标默认目录）；目标缺失（脏绑定）回落自己的目录；非 test 不受影响。

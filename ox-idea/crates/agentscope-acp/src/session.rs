@@ -545,7 +545,8 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     };
     // Skill 清单（L1 元数据，渐进披露第一层）：项目级在前、用户级在后，同名项目级
     // 优先——与 load_skill 的仓库检索顺序一致。
-    let skill_summaries = collect_skill_summaries(Path::new(cwd), skill_home.as_deref());
+    let skill_summaries =
+        agentscope_harness::skill::collect_skill_summaries(Path::new(cwd), skill_home.as_deref());
     // Skill 清单（L1 元数据，渐进披露第一层）：外置清单由上方扫描得出；
     // 内置分组、渐进披露与冲突裁决引导都在 harness 的 skill_section_markdown
     // 里统一渲染（框架行为，acp 只做产品化组装）。
@@ -696,40 +697,6 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     }
     let agent = builder.build().map_err(|e| format!("装配 agent 失败: {e}"))?;
     Ok(Arc::new(agent))
-}
-
-/// 同步扫描技能根（两层布局 `<root>/.claude/skills/<name>/SKILL.md`），返回
-/// `(name, description)` 清单——系统提示词注入的 L1 元数据（渐进披露第一层）。
-/// 项目级在前、用户级在后；同名项目级优先（与 `load_skill` 的仓库检索顺序一致）。
-/// 解析失败的 SKILL.md 跳过（与 `WorkspaceSkillRepository::get_all_skills` 同策略）。
-pub(crate) fn collect_skill_summaries(cwd: &Path, home: Option<&Path>) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let roots = std::iter::once(cwd.join(".claude").join("skills"))
-        .chain(home.map(|h| h.join(".claude").join("skills")));
-    for root in roots {
-        let entries = match std::fs::read_dir(&root) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        let mut dirs: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-        dirs.sort();
-        for dir in dirs {
-            let Ok(content) = std::fs::read_to_string(dir.join("SKILL.md")) else {
-                continue;
-            };
-            let Ok(skill) = SkillUtil::create_from(&content, None, "workspace") else {
-                continue;
-            };
-            let Some(name) = skill.name().map(str::to_owned) else {
-                continue;
-            };
-            if seen.insert(name.clone()) {
-                out.push((name, skill.description().unwrap_or_default().to_owned()));
-            }
-        }
-    }
-    out
 }
 
 /// 从给定环境构建模型实例（对齐 studio factory 的分发模式）：
@@ -2164,7 +2131,7 @@ mod tests {
             "---\nname: lint\ndescription: Lint the code\n---\n# Lint\n",
         )
         .unwrap();
-        let got = collect_skill_summaries(&proj, Some(&home));
+        let got = agentscope_harness::skill::collect_skill_summaries(&proj, Some(&home));
         assert_eq!(
             got,
             vec![
@@ -2174,7 +2141,7 @@ mod tests {
             "项目级在前且同名优先，用户级补充"
         );
         // 无技能根 → 空清单。
-        let empty = collect_skill_summaries(&root.join("nope"), Some(&root.join("nohome")));
+        let empty = agentscope_harness::skill::collect_skill_summaries(&root.join("nope"), Some(&root.join("nohome")));
         assert!(empty.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }

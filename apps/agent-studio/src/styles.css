@@ -529,6 +529,57 @@ body {
   background: var(--bg-raised);
   /* 小窗口下输入区不被压缩（消息流承担全部收缩） */
   flex-shrink: 0;
+  /* "/" skill 面板的定位锚点（面板 absolute 弹在输入行上方） */
+  position: relative;
+}
+
+/* "/" skill 面板：输入框上方弹出，列出项目级/用户级/内置 skill */
+.skill-menu {
+  position: absolute;
+  bottom: calc(100% - 10px);
+  left: 16px;
+  right: 16px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+  z-index: 30;
+}
+.skill-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.skill-item.active,
+.skill-item:hover {
+  background: var(--bg-hover);
+}
+.skill-name {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.skill-src {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.skill-src.src-project { color: var(--green); border-color: var(--green); }
+.skill-src.src-builtin { color: var(--accent); border-color: var(--accent); }
+.skill-desc {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
 
 /* 状态行：计划模式徽章等，独立于输入行，不抢 textarea 宽度 */

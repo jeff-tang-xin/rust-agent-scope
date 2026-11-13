@@ -113,6 +113,7 @@ dependencies = [
  "base64 0.23.1",
  "chromiumoxide",
  "futures",
+ "serde",
  "serde_json",
  "tokio",
 ]

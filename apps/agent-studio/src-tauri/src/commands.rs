@@ -3029,9 +3029,136 @@ pub fn run() {
             test_parse_xmind,
             test_build_report,
             test_build_bug_report,
+            list_skills,
+            read_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ---------- Skill 生态（用户手动指定） ----------
+
+/// skill 清单条目（"/" 面板用）：name + description + 来源徽标。
+#[derive(Debug, Serialize)]
+pub struct SkillEntry {
+    pub name: String,
+    pub description: String,
+    /// `project`（项目级 .claude/skills/，可写）/ `user`（用户级 ~/.claude/skills/，
+    /// 只读）/ `builtin`（框架内置，如 spec-workflow）。
+    pub source: String,
+}
+
+/// skill 详情（选中后注入会话用）：清单字段 + SKILL.md 全文。
+#[derive(Debug, Serialize)]
+pub struct SkillDetail {
+    pub name: String,
+    pub description: String,
+    pub source: String,
+    pub content: String,
+}
+
+/// 扫描一个 skill 根目录（两层布局 `<root>/<name>/SKILL.md`），解析成功的
+/// 且名字未重复的进清单——与 sys_prompt 的 L1 清单同策略（collect_skill_summaries），
+/// 保证用户在 "/" 面板看到的与模型看到的一致。
+fn collect_dir_skills(
+    root: &std::path::Path,
+    source: &str,
+    seen: &mut std::collections::HashSet<String>,
+    out: &mut Vec<SkillEntry>,
+) {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    let mut dirs: Vec<std::path::PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+    dirs.sort();
+    for dir in dirs {
+        let Ok(content) = std::fs::read_to_string(dir.join("SKILL.md")) else {
+            continue;
+        };
+        let Ok(skill) = agentscope_harness::skill::SkillUtil::create_from(&content, None, source)
+        else {
+            continue;
+        };
+        let Some(name) = skill.name().map(str::to_owned) else {
+            continue;
+        };
+        if seen.insert(name.clone()) {
+            out.push(SkillEntry {
+                name,
+                description: skill.description().unwrap_or_default().to_owned(),
+                source: source.to_owned(),
+            });
+        }
+    }
+}
+
+/// 可用 skill 清单（"/" 面板数据源）：项目级在前、用户级次之、内置兜底；
+/// 同名项目级优先（与 load_skill 的仓库检索顺序一致）。
+#[tauri::command]
+pub fn list_skills(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<SkillEntry>, String> {
+    let root = resolve_ws_root(&state, &workspace_id)?;
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    collect_dir_skills(&root.join(".claude").join("skills"), "project", &mut seen, &mut out);
+    if let Some(home) = crate::factory::user_home_dir() {
+        collect_dir_skills(&home.join(".claude").join("skills"), "user", &mut seen, &mut out);
+    }
+    for (name, description, _mode) in agentscope_harness::skill::builtin_skill_summaries() {
+        if seen.insert(name.clone()) {
+            out.push(SkillEntry { name, description, source: "builtin".to_owned() });
+        }
+    }
+    Ok(out)
+}
+
+/// 按名读 skill 全文（选中后前端把全文注入用户消息）：检索顺序项目级 →
+/// 用户级 → 内置，与 load_skill 一致；找不到报错（面板数据与实际可读一致）。
+#[tauri::command]
+pub fn read_skill(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    name: String,
+) -> Result<SkillDetail, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("skill name is empty".to_string());
+    }
+    let root = resolve_ws_root(&state, &workspace_id)?;
+    let mut dirs: Vec<(std::path::PathBuf, &str)> =
+        vec![(root.join(".claude").join("skills"), "project")];
+    if let Some(home) = crate::factory::user_home_dir() {
+        dirs.push((home.join(".claude").join("skills"), "user"));
+    }
+    for (dir, source) in dirs {
+        // 四层嵌套 if-let 拍平：任何一步失败/名字不符都继续找下一个来源。
+        let found = std::fs::read_to_string(dir.join(name).join("SKILL.md"))
+            .ok()
+            .and_then(|content| {
+                agentscope_harness::skill::SkillUtil::create_from(&content, None, source).ok()
+            })
+            .filter(|skill| skill.name() == Some(name));
+        if let Some(skill) = found {
+            return Ok(SkillDetail {
+                name: skill.name().unwrap_or(name).to_owned(),
+                description: skill.description().unwrap_or_default().to_owned(),
+                source: source.to_owned(),
+                content: skill.skill_content().to_owned(),
+            });
+        }
+    }
+    if let Some(skill) = agentscope_harness::skill::builtin_skill(name) {
+        return Ok(SkillDetail {
+            name: skill.name().unwrap_or(name).to_owned(),
+            description: skill.description().unwrap_or_default().to_owned(),
+            source: "builtin".to_owned(),
+            content: skill.skill_content().to_owned(),
+        });
+    }
+    Err(format!("skill not found: {name}"))
 }
 
 #[cfg(test)]
