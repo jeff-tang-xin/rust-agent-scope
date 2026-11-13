@@ -2510,7 +2510,12 @@ select:focus:not(:focus-visible) {
 .fb-ball:active { cursor: grabbing; }
 .fb-ball:hover { filter: drop-shadow(0 10px 20px rgba(15, 23, 42, 0.45)); }
 
-.fb-robot { width: 100%; height: 100%; display: block; }
+/* SVG 必须穿透点击：Tauri drag-region 只认 target 自身带 data-tauri-drag-region
+   的元素，子元素挡住会导致拖拽失效。 */
+.fb-robot { width: 100%; height: 100%; display: block; pointer-events: none; }
+
+/* 悬浮球窗口与主窗口共用本样式表，body 的 var(--bg) 背景会盖掉窗口透明——
+   由 FloatingBall 组件挂载时置 transparent（见 FloatingBall.tsx）。 */
 
 @keyframes fb-bob {
   0%, 100% { transform: translateY(0); }

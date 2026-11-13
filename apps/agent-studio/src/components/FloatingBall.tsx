@@ -59,6 +59,12 @@ export default function FloatingBallApp() {
     void api.ballMenuResize(menuOpen).catch(() => {});
   }, [menuOpen]);
 
+  // 全局样式给 body 设了 var(--bg) 背景，会盖掉窗口透明——悬浮球窗口置空。
+  useEffect(() => {
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+  }, []);
+
   // 点击菜单外 / Escape 关闭。
   useEffect(() => {
     if (!menuOpen) return;
