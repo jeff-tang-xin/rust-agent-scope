@@ -4,8 +4,9 @@
 //! StudioConfig.floating_ball_disabled，设置页「通用 → 界面」可重新打开。
 //!
 //! 窗口尺寸策略：平时 92×92 只容机器人（透明窗口的透明像素在 Windows 上
-//! 不穿透点击，窗口大了会挡住桌面）；右键菜单弹出时临时扩到 240×300 并
-//! 左移窗口保持机器人原位，菜单关闭缩回——扩缩都走 `ball_menu_resize`。
+//! 不穿透点击，窗口大了会挡住桌面）；右键菜单弹出时临时扩到 240×320 并
+//! 左移窗口保持机器人原位（菜单渲染在机器人下方），菜单关闭缩回——扩缩
+//! 都走 `ball_menu_resize`。菜单另在窗口失焦时由前端关闭（点窗口外空白）。
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -13,7 +14,7 @@ const BALL_LABEL: &str = "floating-ball";
 const SMALL_W: i32 = 92;
 const SMALL_H: i32 = 92;
 const BIG_W: i32 = 240;
-const BIG_H: i32 = 300;
+const BIG_H: i32 = 320;
 
 /// 创建悬浮球窗口（启动时 `floating_ball_disabled=false` 才调用）。
 /// 位置：主显示器右上角（对齐参考产品），不抢焦点。

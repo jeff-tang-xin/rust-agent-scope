@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "../api";
 
 type Appearance = "light" | "dark";
@@ -65,7 +66,7 @@ export default function FloatingBallApp() {
     document.body.style.background = "transparent";
   }, []);
 
-  // 点击菜单外 / Escape 关闭。
+  // 点击菜单外 / Escape / 窗口失焦（点窗口外的桌面空白）关闭。
   useEffect(() => {
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
@@ -76,9 +77,14 @@ export default function FloatingBallApp() {
     };
     window.addEventListener("mousedown", close);
     window.addEventListener("keydown", esc);
+    // 点窗口外（透明区域之外）收不到 mousedown——失焦兜底。
+    const unlisten = getCurrentWindow().onFocusChanged((focused) => {
+      if (!focused) setMenuOpen(false);
+    });
     return () => {
       window.removeEventListener("mousedown", close);
       window.removeEventListener("keydown", esc);
+      void unlisten.then((fn) => fn());
     };
   }, [menuOpen]);
 
