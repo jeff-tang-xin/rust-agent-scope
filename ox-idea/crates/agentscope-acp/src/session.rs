@@ -834,6 +834,12 @@ pub fn build_model(env: &[(String, String)]) -> Result<Arc<dyn Model>, String> {
 /// delta 微批的攒批阈值（字节）：同块连续增量攒到这个量再发一帧。
 const DELTA_FLUSH_BYTES: usize = 256;
 
+/// delta 微批的时间窗口（毫秒）：首个增量到达后最多等这么久就 flush——
+/// 只有字节阈值时，慢速输出（中文 256 字节 ≈ 85 字）要 2-8 秒才见一帧，
+/// 感知远慢于 studio 的 16ms 微批。50ms（20 帧/秒）在流式流畅与
+/// agentscope-acp → ide-agent → IDE 两跳 JSON-RPC 开销之间取平衡。
+const DELTA_FLUSH_MS: u64 = 50;
+
 /// flush 一块增量；写失败（消费者断开，如 ide-agent abort/kill）→ 置取消
 /// 终局并返回 false，drive_turn 据此终止而非对着断开的连接空转。
 async fn flush_chunk<W>(
@@ -916,6 +922,11 @@ where
         // 其它事件时先清空——把每 token 一帧 JSON 压成更少的帧流。
         let mut pending_text = String::new();
         let mut pending_thought = String::new();
+        // 攒批 deadline（绝对时间点）：首个 delta 到达时设定，flush 后清空。
+        // select 每轮重建 sleep_until(同一 Instant)——语义正确；None 时永挂
+        // 不参与竞争（studio 的 take() 坑：flush 后必须清干净，残留的过期
+        // deadline 会让下一条 delta 立即 flush，退化成逐条发帧）。
+        let mut flush_deadline: Option<tokio::time::Instant> = None;
         let mut cancel_rx = session.cancel_tx.subscribe();
         'events: while let Some(event) = tokio::select! {
             biased;
@@ -932,6 +943,23 @@ where
                 // 发送端没了（会话销毁）：按事件流关闭处理。
                 Err(_) => None,
             },
+            // 攒批时间窗口到期：强制 flush（字节阈值未到也发，保证慢速
+            // 输出的流式感知）。没有 pending 时永挂，不参与竞争。
+            _ = async {
+                match flush_deadline {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                if !flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome).await {
+                    break 'events;
+                }
+                if !flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome).await {
+                    break 'events;
+                }
+                flush_deadline = None;
+                continue 'events;
+            }
             event = rx.recv() => event,
         } {
             match event.kind {
@@ -943,11 +971,20 @@ where
                         break 'events;
                     }
                     pending_text.push_str(&delta);
+                    if flush_deadline.is_none() {
+                        flush_deadline = Some(
+                            tokio::time::Instant::now()
+                                + std::time::Duration::from_millis(DELTA_FLUSH_MS),
+                        );
+                    }
                     if pending_text.len() >= DELTA_FLUSH_BYTES
                         && !flush_chunk(conn, session_id, &mut pending_text, false, &mut outcome)
                             .await
                     {
                         break 'events;
+                    }
+                    if pending_text.is_empty() && pending_thought.is_empty() {
+                        flush_deadline = None;
                     }
                     continue;
                 }
@@ -959,11 +996,20 @@ where
                         break 'events;
                     }
                     pending_thought.push_str(&delta);
+                    if flush_deadline.is_none() {
+                        flush_deadline = Some(
+                            tokio::time::Instant::now()
+                                + std::time::Duration::from_millis(DELTA_FLUSH_MS),
+                        );
+                    }
                     if pending_thought.len() >= DELTA_FLUSH_BYTES
                         && !flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome)
                             .await
                     {
                         break 'events;
+                    }
+                    if pending_text.is_empty() && pending_thought.is_empty() {
+                        flush_deadline = None;
                     }
                     continue;
                 }
@@ -976,6 +1022,7 @@ where
             if !flush_chunk(conn, session_id, &mut pending_thought, true, &mut outcome).await {
                 break 'events;
             }
+            flush_deadline = None;
             match event.kind {
                 AgentEventKind::ToolCallStart {
                     tool_call_id,
