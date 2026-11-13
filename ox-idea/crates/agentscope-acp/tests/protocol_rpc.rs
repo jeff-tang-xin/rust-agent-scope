@@ -342,9 +342,9 @@ async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
         updates[0]["update"]["compactionId"],
         updates[1]["update"]["compactionId"]
     );
-    // 空对话：completed 带说明文本
+    // 空对话：completed 带说明文本（v2 content 包裹形态）
     assert_eq!(
-        updates[1]["update"]["summary"][0]["text"],
+        updates[1]["update"]["summary"][0]["content"]["text"],
         "对话为空，无需压缩"
     );
     // prompt 正常结束（命令不进模型，无 LLM 依赖）

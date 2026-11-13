@@ -1679,6 +1679,17 @@ mod tests {
             finished["content"].as_array().map(|c| !c.is_empty()).unwrap_or(false),
             "完成帧应携带工具输出: {finished}"
         );
+        // content 必须是 v2 包裹形态（外层 type:"content"）：ide-agent 的
+        // timeline.merge_tool 只认它，裸 {type:"text"} 会被丢弃、output 永远为空。
+        assert_eq!(
+            finished["content"][0]["type"], "content",
+            "content 须为 v2 包裹形态: {finished}"
+        );
+        assert_eq!(
+            finished["content"][0]["content"]["text"],
+            "echo: hi",
+            "工具输出文本须在内层 content.text: {finished}"
+        );
     }
 
     #[tokio::test]

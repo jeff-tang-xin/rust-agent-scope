@@ -257,7 +257,9 @@ pub fn tool_call_progress(session_id: &str, tool_call_id: &str, content_text: &s
             "sessionUpdate": "tool_call_update",
             "toolCallId": tool_call_id,
             "status": "in_progress",
-            "content": [{ "type": "text", "text": content_text }],
+            // ide-agent 的 timeline.merge_tool 只认 v2 形态（外层 type:"content"
+            // 包一层）——裸 {type:"text"} 会被丢弃，工具输出到不了前端卡片。
+            "content": [{ "type": "content", "content": { "type": "text", "text": content_text } }],
         }),
     )
 }
@@ -275,7 +277,8 @@ pub fn tool_call_finished(
         "status": status,
     });
     if !output_text.is_empty() {
-        update["content"] = json!([{ "type": "text", "text": output_text }]);
+        // 形态同 tool_call_progress：v2 content 包裹，timeline 才提取为 output。
+        update["content"] = json!([{ "type": "content", "content": { "type": "text", "text": output_text } }]);
     }
     json!({ "sessionId": session_id, "update": update })
 }
@@ -291,7 +294,8 @@ pub fn compaction_update(session_id: &str, compaction_id: &str, status: &str, su
         "status": status,
     });
     if !summary_text.is_empty() {
-        update["summary"] = json!([{ "type": "text", "text": summary_text }]);
+        // 形态同 tool_call content：v2 包裹（normalize.rs 的 summary 提取只认它）。
+        update["summary"] = json!([{ "type": "content", "content": { "type": "text", "text": summary_text } }]);
     }
     update_frame(session_id, update)
 }
