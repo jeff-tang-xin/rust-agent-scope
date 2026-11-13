@@ -40,5 +40,13 @@ pub fn spawn_floating_ball(app: &AppHandle) {
     let builder = builder.macos_private_api(true);
     if let Err(error) = builder.build() {
         tracing::error!("cannot create the floating ball window: {error}");
+        return;
+    }
+    // Windows 上 builder 的 transparent 只作用于窗口层；WebView2 自身的背景色
+    // 默认不透明白，必须显式设为全透明，否则 DOM 再透明也盖着一层白底。
+    if let Some(ball) = app.get_webview_window(BALL_LABEL) {
+        if let Err(error) = ball.set_background_color(Some(tauri::window::Color(0, 0, 0, 0))) {
+            tracing::error!("cannot make the floating ball background transparent: {error}");
+        }
     }
 }

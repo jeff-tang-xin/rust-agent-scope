@@ -1,5 +1,13 @@
 /* 桌面悬浮球（终端助手）：透明窗口里的机器人 + 右键菜单。 */
 
+/* 悬浮球窗口必须透：global.css 给 body 铺了 --bg-frame（白底），
+   会盖掉窗口透明——这里强制清掉（!important 压过样式表与传播机制）。 */
+html,
+body,
+#root {
+  background: transparent !important;
+}
+
 .fb-root {
   width: 100vw;
   height: 100vh;
