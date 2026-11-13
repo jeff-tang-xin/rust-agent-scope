@@ -136,7 +136,14 @@ impl Normalizer {
             }
             "plan_update" => {
                 let Some(plan) = update.get("plan") else { return Vec::new() };
-                // Markdown and file plans have no v1 form; the tool call that made them shows them.
+                // Markdown 形态（spec 模式 plan_write 的 spec 全文）转发为带
+                // markdown 字段的 plan——前端同一张卡片双形态渲染；file 形态
+                // 仍无 v1 形态，由发起它的工具调用卡片展示。
+                if plan.get("type").and_then(Value::as_str) == Some("markdown") {
+                    let markdown = str_of(plan, "markdown").unwrap_or_default();
+                    s.plan = str_of(plan, "planId").map(str::to_owned);
+                    return vec![json!({ "sessionUpdate": "plan", "markdown": markdown, "entries": [] })];
+                }
                 if plan.get("type").and_then(Value::as_str) != Some("items") {
                     return Vec::new();
                 }

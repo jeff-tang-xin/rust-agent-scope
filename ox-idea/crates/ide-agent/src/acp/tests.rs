@@ -330,11 +330,16 @@ fn item_plans_become_the_plan_and_others_are_left_to_their_tool_call() {
     let out = n.normalize("s", &items);
     assert_eq!(out, [json!({ "sessionUpdate": "plan", "entries": items["plan"]["entries"] })]);
     let md =
-        json!({ "sessionUpdate": "plan_update", "plan": { "type": "markdown", "planId": "p2", "content": "# Plan" } });
-    assert!(n.normalize("s", &md).is_empty());
-    assert!(n.normalize("s", &json!({ "sessionUpdate": "plan_removed", "planId": "p2" })).is_empty());
+        json!({ "sessionUpdate": "plan_update", "plan": { "type": "markdown", "planId": "p2", "markdown": "# Plan" } });
+    assert_eq!(
+        n.normalize("s", &md),
+        [json!({ "sessionUpdate": "plan", "markdown": "# Plan", "entries": [] })]
+    );
+    // s.plan 是单值：markdown plan 注册后覆盖 items plan 的 planId（同一张卡片双形态切换）。
     let out = n.normalize("s", &json!({ "sessionUpdate": "plan_removed", "planId": "plan" }));
-    assert_eq!(out, [json!({ "sessionUpdate": "plan", "entries": [] })]);
+    assert!(out.is_empty(), "planId 已被 markdown plan 覆盖，移除无效");
+    let out = n.normalize("s", &json!({ "sessionUpdate": "plan_removed", "planId": "p2" }));
+    assert_eq!(out, [json!({ "sessionUpdate": "plan", "entries": [] })], "markdown plan 移除应清空");
 }
 
 #[test]

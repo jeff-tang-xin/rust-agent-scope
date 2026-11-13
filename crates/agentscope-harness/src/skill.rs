@@ -202,6 +202,222 @@ fn archive_timestamp() -> String {
 }
 
 // ---------------------------------------------------------------------------
+// 内置技能（随框架分发，不落盘）
+// ---------------------------------------------------------------------------
+
+/// 内置 spec 工作流技能（Anthropic Agent Skills 标准：frontmatter
+/// `name`/`description` + 正文步骤）。spec 模式的模板与生命周期细节都在
+/// 这里——sys_prompt 只留宪法（不变式与契约），按模式引导模型加载本技能。
+pub const SPEC_WORKFLOW_SKILL: &str = r#"---
+name: spec-workflow
+description: Spec 模式工作流（文档即状态）。进入 plan 模式、需要生成实现方案（spec.md）或执行清单（tasks.md）、或执行期需求变更时使用——按需求分目录管理文档、模板与生命周期（生成 → 批准 → 执行维护 → 归档）。
+---
+
+# Spec 工作流：文档即状态
+
+你的状态在文档里，不在对话记忆里。每次开工先读文档恢复上下文，按循环工作：**理解 → 澄清 → 实施 → 维护**。
+
+## 何时用
+
+- 进入 plan 模式（spec 阶段）：为需求生成实现方案。
+- 执行期需求/方案变更：回写文档，保持 spec 与实际一致。
+- 新会话接手进行中的需求：先读目录恢复上下文，再继续。
+
+## 目录约定
+
+每个需求一个目录 `.oxidea/agent/specs/<NNN-短名>/`：序号看已有目录递增（001、002…），短名用英文连字符（如 `001-user-login`）。内含 spec.md 与 tasks.md。全部任务完成且验证通过后，用 shell 把整个需求目录移入 `.oxidea/agent/specs/archived/`，并在回复里说明归档位置。
+
+## 工作循环与批准门
+
+```
+理解 → 写 spec.md → plan_exit 请求批准 ──✓──→ 写 tasks.md → 逐任务执行 → 归档
+         ↑                                          │
+         └──── 需求/方案变更：回写 spec.md ←────────┘
+```
+
+- **两道门**：spec.md 经 plan_exit 批准后才写 tasks.md；tasks.md 写好后开工。不一次性生成全部文档。
+- **澄清纪律**：spec 有歧义 → 标 `[NEEDS CLARIFICATION: 问题]`，收集完所有问题**一次批量问**用户，绝不猜。有未澄清标记时不进入执行。
+
+## spec.md 模板（plan_write 写入，feature 参数带目录名）
+
+```markdown
+# <NNN-短名>：<需求名>
+
+## 为什么做
+<一两句：要解决的问题与价值>
+
+## 用户故事与验收场景
+### US-1：<故事名>（P1）
+**作为** <角色>，**我要** <能力>，**以便** <价值>。
+- WHEN <触发条件> THE SYSTEM SHALL <可观察响应>
+- WHEN <触发条件> THE SYSTEM SHALL <可观察响应>
+
+## 功能需求
+- FR-001: 系统 SHALL <行为>
+- FR-002: [NEEDS CLARIFICATION: <具体问题>]
+
+## 成功标准
+- <可测量：测试名 / 指标 / 可观察行为；不写「工作正常」这类空话>
+
+## 技术方案
+- 改动文件：<精确路径列表>
+- 结构与取舍：<关键决策及理由>
+```
+
+优先级：P1 = MVP 必须有；P2 = 重要但不阻塞；P3 = 锦上添花。场景用 EARS 格式（WHEN…SHALL…），每条都可转化为测试。
+
+## tasks.md 模板（批准后写，与 spec.md 同目录）
+
+```markdown
+# <NNN-短名>：执行清单
+
+## US-1 <故事名>（P1）
+- [ ] T001 <任务描述（含精确文件路径）>
+- [ ] T002 <任务描述>
+
+## 验证
+- [ ] T010 集成验证：跑 <命令>，确认 <成功标准对应项>
+```
+
+- 按用户故事分组、按优先级排序（P1 先行，MVP 可交付）；每任务 = 一个可验证单元，写清文件路径与验证方式。
+- 状态：完成勾 `[x]`、进行中改 `[~]`（**恰好一项** `[~]`）、未开始 `[ ]`。
+- 每完成一项（验证通过）立即勾选，并按「update_plan」小节同步卡片。
+- **Checkpoint**：每完成一个用户故事做一次集成验证（跑相关测试/构建），不只看单项任务。
+
+## update_plan：执行清单卡片
+
+tasks.md 是唯一状态源，`update_plan` 是它的**投影**——文档给自己看，卡片给用户看。两者必须始终一致。
+
+- **何时调**（三个时机）：
+  1. tasks.md 写好后**立即首次调用**——卡片出现，用户看到全貌；
+  2. 每完成一项（验证通过、勾选 `[x]`）后调用；
+  3. 开始下一项（改 `[~]`）时调用。
+- **读什么**：调用前回读 tasks.md 当前状态（或按刚完成的操作推演），items 必须与文档逐条一致——不凭记忆拼。
+- **传什么**：**全量列表**（不是增量）——每项 `{content, status: pending|in_progress|completed, priority}`，content 与 tasks.md 条目一一对应（含 T 编号更易对照）。
+- **交付什么**：用户在 Plan 卡片实时看到进度（x/y）与当前项高亮——卡片就是进度仪表盘，不需要用户翻文档。
+
+## 执行期维护
+
+- 需求/方案变更 → 立即用 `plan_write` 更新 spec.md 对应章节（带同一 feature 参数），再改 tasks.md——文档与实际永远一致。
+- tasks.md 下一步不明确 → 回读 spec.md 对应章节，不凭记忆。
+- 测试失败必记 .oxidea/agent/specs/bugs.json（JSON 数组，字段：id、description、related_test、status、fix_note；状态流转 open→fixing→fixed→closed）：自测通过才置 fixed 并写清 fix_note，回归通过才置 closed。
+
+## 反模式（不要做）
+
+- ✗ 在对话记忆里记需求状态——一切以文档为准。
+- ✗ 跳过澄清直接猜需求——`[NEEDS CLARIFICATION]` 是硬闸门。
+- ✗ 一次性生成 spec + tasks 再一起批——两道门分开。
+- ✗ 变更只改代码不回写 spec——下次会话就失真。
+- ✗ 任务描述不含文件路径或验证方式——不可验证的任务不是任务。
+"#;
+
+/// 全部内置技能：`(SKILL.md 全文, 适用模式)`——模式为空表示任意模式可加载，
+/// 否则 agent 进入对应模式时才加载（如 `plan`）。新增内置技能在此追加。
+pub const BUILTIN_SKILLS: &[(&str, &str)] = &[(SPEC_WORKFLOW_SKILL, "plan")];
+
+/// 按名取内置技能（`source` 标记为 `builtin`）。
+///
+/// 内置内容是编译期常量，解析失败只可能是常量本身写坏了——跳过并返回 `None`。
+pub fn builtin_skill(name: &str) -> Option<AgentSkill> {
+    BUILTIN_SKILLS.iter().find_map(|(md, _)| {
+        let skill = SkillUtil::create_from(md, None, "builtin").ok()?;
+        (skill.name() == Some(name)).then_some(skill)
+    })
+}
+
+/// 内置技能的 `(name, description, mode)` 清单（供 sys_prompt 的 L1 清单分组标注）。
+pub fn builtin_skill_summaries() -> Vec<(String, String, String)> {
+    BUILTIN_SKILLS
+        .iter()
+        .filter_map(|(md, mode)| {
+            let skill = SkillUtil::create_from(md, None, "builtin").ok()?;
+            Some((skill.name()?.to_string(), skill.description()?.to_string(), (*mode).to_string()))
+        })
+        .collect()
+}
+
+/// 生成 sys_prompt 的 skill 段（L1 元数据，渐进披露第一层）。
+///
+/// `external` 是宿主扫描到的外置技能 `(name, description)` 清单（项目级/用户级，
+/// 同名去重由调用方负责）；内置技能单独分组并标注适用模式——agent 进入对应
+/// 模式时加载，模式为空表示任意模式。同名时外置优先，与 `load_skill` 工具的
+/// 「仓库优先、内置兜底」检索顺序一致。
+///
+/// 宿主只需扫描自己的技能根并传入清单；渐进披露、冲突裁决、安装/创建引导
+/// 与内置分组都是框架统一行为。同名时外置优先，与 `load_skill` 工具的
+/// 「仓库优先、内置兜底」检索顺序一致。
+pub fn skill_section_markdown(external: &[(String, String)]) -> String {
+    let builtin_section = {
+        let builtins = builtin_skill_summaries();
+        if builtins.is_empty() {
+            String::new()
+        } else {
+            let list: String = builtins
+                .iter()
+                .map(|(n, d, m)| {
+                    if m.is_empty() {
+                        format!("  - {n}: {d}\n")
+                    } else {
+                        format!("  - {n} [{m} 模式]: {d}\n")
+                    }
+                })
+                .collect();
+            format!(
+                "\n内置 skill（随框架分发，进入对应模式时加载）：\n{list}\
+                 - 内置 skill 与各模式章节的引导对应（如 plan 模式 → spec-workflow）。\n"
+            )
+        }
+    };
+    if external.is_empty() {
+        return format!(
+            "\n### Skills（可复用流程说明书）\n\
+             \n当前没有已安装的 skill。沉淀出可复用的流程/方法论时，用 skill_manage 把它写成 \
+             skill（frontmatter 的 name + description 写清「做什么、何时用」，正文写步骤），\
+             下次会话自动可用。\n\
+             {builtin_section}"
+        );
+    }
+    // L1 清单容量护栏：skill 少时全列（name + description）最有效；超过阈值改紧凑
+    // 模式只列名字——名字即语义，description 由 load_skill 按需披露（渐进披露的
+    // L1 再分层），避免大量 skill 把 sys_prompt 撑爆。
+    const FULL_LIST_LIMIT: usize = 30;
+    let compact = external.len() > FULL_LIST_LIMIT;
+    let (list, list_note) = if compact {
+        (
+            external.iter().map(|(n, _)| format!("  - {n}\n")).collect::<String>(),
+            format!(
+                "已安装的 skill（{} 个，仅列名字——名字即语义；需要某类能力时按名 load_skill 试读，\
+                 或用 skill_manage list 查详情）：\n",
+                external.len()
+            ),
+        )
+    } else {
+        (
+            external.iter().map(|(n, d)| format!("  - {n}: {d}\n")).collect::<String>(),
+            "已安装的 skill（name: description）：\n".to_owned(),
+        )
+    };
+    let disclosure = if compact {
+        "- 渐进披露：上面只有名字。按名字判断相关性：匹配就 load_skill 读全文（含 description \
+         与正文）；正文指向附属文件（references/scripts 等）时用 load_skill 的 path 参数读。\n"
+    } else {
+        "- 渐进披露：上面只是元数据。当前任务与某 skill 的 description 匹配时，先 load_skill \
+         读全文再按其执行；正文指向附属文件（references/scripts 等）时用 load_skill 的 path 参数读。\n"
+    };
+    format!(
+        "\n### Skills（可复用流程说明书）\n\
+         \n{list_note}{list}\
+         {disclosure}\
+         - 安装：用户给出 skill 地址（git 仓库/目录/zip）时，下载到系统临时目录 → 审查内容 → \
+         skill_manage create 写入（自动安全扫描，危险内容会被拒绝）→ 汇报安装位置与生效方式。\
+         安装只落项目级 .claude/skills/（跟项目走）；用户级 ~/.claude/skills 只读，仅供 load_skill 检索。\n\
+         - 创建：发现值得复用的流程时用 skill_manage/propose_skill 沉淀——description 决定未来\
+         何时被触发，要写清「做什么 + 何时用」。\n\
+         {builtin_section}\n"
+    )
+}
+
+// ---------------------------------------------------------------------------
 // WorkspaceSkillRepository（对应 Java `WorkspaceSkillRepository`）
 // ---------------------------------------------------------------------------
 
@@ -935,6 +1151,65 @@ mod tests {
     }
 
     const SAMPLE: &str = "---\nname: pdf-report\ndescription: Generate PDF reports.\n---\n\n# PDF Report\n\nSteps here.\n";
+
+    // ---------- 内置技能 ----------
+
+    #[test]
+    fn builtin_spec_workflow_is_parseable_and_listed() {
+        let skill = builtin_skill("spec-workflow").expect("内置 spec-workflow 应可解析");
+        assert_eq!(skill.name(), Some("spec-workflow"));
+        assert!(
+            skill.description().unwrap_or_default().contains("Spec 模式"),
+            "description 应写清做什么/何时用: {}",
+            skill.description().unwrap_or_default()
+        );
+        let body = skill.skill_content();
+        assert!(body.contains("spec.md") && body.contains("tasks.md"), "正文应含模板约定");
+        assert!(body.contains("plan_write") && body.contains("plan_exit"), "正文应含工具引导");
+        assert!(skill.source() == "builtin");
+        // 清单与内置表一致（含模式标注）
+        let summaries = builtin_skill_summaries();
+        assert!(
+            summaries.iter().any(|(n, d, m)| n == "spec-workflow" && !d.is_empty() && m == "plan"),
+            "spec-workflow 应标注 plan 模式: {summaries:?}"
+        );
+        // 未知名返回 None
+        assert!(builtin_skill("nope").is_none());
+    }
+
+    // ---------- skill_section_markdown ----------
+
+    #[test]
+    fn skill_section_full_list_under_threshold() {
+        let external: Vec<(String, String)> =
+            (0..30).map(|i| (format!("skill-{i}"), format!("描述 {i}"))).collect();
+        let s = skill_section_markdown(&external);
+        assert!(s.contains("skill-0: 描述 0"), "阈值内应全列 description");
+        assert!(s.contains("name: description"));
+        assert!(s.contains("spec-workflow [plan 模式]"), "内置分组始终全列");
+    }
+
+    #[test]
+    fn skill_section_compact_over_threshold() {
+        let external: Vec<(String, String)> =
+            (0..31).map(|i| (format!("skill-{i}"), format!("描述{}{i}", "很长的内容。".repeat(6)))).collect();
+        let s = skill_section_markdown(&external);
+        // 紧凑模式：只列名字，description 不进清单
+        assert!(s.contains("  - skill-0\n"), "紧凑模式应只列名字");
+        assert!(!s.contains("skill-0: 一段很长的描述"), "description 不应进清单");
+        assert!(s.contains("仅列名字"), "应说明紧凑模式语义");
+        assert!(s.contains("31 个"), "应报总数");
+        // 内置分组不受影响
+        assert!(s.contains("spec-workflow [plan 模式]"));
+    }
+
+    #[test]
+    fn skill_section_empty_shows_create_guidance() {
+        let s = skill_section_markdown(&[]);
+        assert!(s.contains("当前没有已安装的 skill"));
+        assert!(s.contains("skill_manage"));
+    }
+
 
     // ---------- SkillUtil::create_from ----------
 

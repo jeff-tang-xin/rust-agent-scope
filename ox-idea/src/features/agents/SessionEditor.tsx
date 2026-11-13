@@ -1169,13 +1169,35 @@ const Entry = memo(function Entry({
     case "tool":
       return <ToolEntry task={task} entry={entry} />;
     case "plan":
-      return (
+      // 双形态：markdown（spec 全文，plan_write 实时上卡片）或 items（执行清单）。
+      return entry.markdown ? (
+        <div className={styles.plan}>
+          <div className={styles.planTitle}>
+            <T>Spec</T>
+          </div>
+          <div className={styles.planSpec}>
+            <Markdown text={entry.markdown} cwd={task.cwd} onDiagramDrawn={onDiagramDrawn} />
+          </div>
+        </div>
+      ) : (
         <div className={styles.plan}>
           <div className={styles.planTitle}>
             <T>Plan</T>
+            {entry.items.length > 0 && (
+              <span className={styles.planProgress}>
+                {entry.items.filter((item) => item.status === "completed").length}/{entry.items.length}
+              </span>
+            )}
           </div>
           {entry.items.map((item, i) => (
-            <div key={i} className={clsx(styles.planItem, item.status === "completed" && styles.planDone)}>
+            <div
+              key={i}
+              className={clsx(
+                styles.planItem,
+                item.status === "completed" && styles.planDone,
+                item.status === "in_progress" && styles.planActive,
+              )}
+            >
               <Icon
                 name={item.status === "completed" ? "check" : item.status === "in_progress" ? "run" : "minus"}
                 size={12}
@@ -1580,9 +1602,13 @@ const ToolEntry = memo(function ToolEntry({
   entry: Extract<AgentEntry, { type: "tool" }>;
 }) {
   const tx = useTx();
+  // plan_write / update_plan 的入参与 plan 卡片内容重复（spec 全文/全量清单
+  // 已在 plan 卡片实时展示）：只留一行摘要，不展开 JSON。
+  const planTool =
+    entry.title === "plan_write" ? tx("Write spec") : entry.title === "update_plan" ? tx("Update plan") : null;
   // rawInput 的 JSON 文本格式化后展示；解析失败原样显示。
   const prettyInput = (() => {
-    if (!entry.input) return null;
+    if (!entry.input || planTool) return null;
     try {
       return JSON.stringify(JSON.parse(entry.input), null, 2);
     } catch {
@@ -1593,7 +1619,7 @@ const ToolEntry = memo(function ToolEntry({
     <>
       <Icon name={TOOL_ICONS[entry.kind] ?? "run"} size={14} />
       <span className={styles.toolTitle} title={entry.title || entry.kind}>
-        {shortTitle(task, entry.title || entry.kind)}
+        {planTool ?? shortTitle(task, entry.title || entry.kind)}
       </span>
       {entry.diffs.map((d) => (
         <button

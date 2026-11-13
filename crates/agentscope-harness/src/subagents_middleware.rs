@@ -43,80 +43,15 @@ pub const MAX_DELIVERIES_PER_REMINDER: usize = 10;
 /// `{spawn}` / `{send}` / `{list}` 为工具名占位（默认模式 agent_spawn /
 /// agent_send / agent_list；session 模式为 sessions_*，本批未接线）。
 const SUBAGENT_SECTION_TEMPLATE: &str = r#"
-## Subagents
+## Subagents（委派执行）
 
-You have access to subagent tools for spawning and coordinating isolated subagents.
-Subagents are ephemeral — they live only for the duration of the task and return a single result.
-
-### Agent Tools
-
-**`{spawn}`** — Spawn an isolated subagent
-- `agent_id` (required): which subagent to instantiate
-- `task` (optional): initial prompt; omit to create a persistent session
-- `label` (optional): human-readable name for referencing via send
-- `timeout_seconds`: wait time; 0=fire-and-forget (returns task_id), default=30, max=600
-- Response always includes `agent_key:` (opaque handle) — save it for follow-up sends
-
-**`{send}`** — Send a follow-up message to an existing subagent
-- `agent_key`: copy the **full value** after `agent_key:` from spawn output (starts with `agent:`). This is NOT `agent_id`, NOT `session_id`, and NOT `task_id`
-- Or use `label` if you set one at spawn (mutually exclusive with agent_key)
-- `message` (required): content to send
-- `timeout_seconds`: 0=fire-and-forget, >0=wait for reply (default: 30)
-
-**`{list}`** — List active subagents
-
-### Task Tools (for async/background operations)
-
-**`task_output`** — Retrieve the result of a background task by task_id.
-- **You rarely need this.** Completed tasks are pushed back to you automatically as a `<system-reminder>` block before your next reasoning step.
-- Use `task_output(block=false)` when you need a specific task's latest status/result, the pushed summary was truncated, or you intentionally want to check progress while continuing other reasoning.
-- Use `task_output(block=true)` only for one specific task you are ready to wait for; for multiple tasks use `wait_async_results`.
-
-**`wait_async_results`** — Wait for background-task results when the next step depends on them.
-- Prefer `wait_async_results(task_ids=...)`: waits until those tasks are terminal and **returns their results in the tool output**.
-- Prefer `wait_async_results(wait_all=true)`: waits for the snapshot of currently non-terminal background tasks (tasks started later are not added) and **returns their results**.
-- Without `task_ids` and without `wait_all`: legacy **inbox-any** mode — returns when ANY inbox message arrives. This is NOT wait-all; use `task_ids` / `wait_all=true` when every task in a group must finish.
-
-**`task_cancel`** — Cancel a running background task by task_id. No effect on already-completed tasks.
-
-**`task_list`** — List all in-flight background tasks (durable, accurate across compaction and migration). Completed tasks fall off this list after they're pushed to you.
-
-### Background task flow
-1. Spawn with `timeout_seconds=0` to fire-and-forget; the response gives you a task_id.
-2. Continue with independent work. If you need fresh state, use `task_output(block=false)` for selected tasks.
-3. If a later step must wait for a known group, call `wait_async_results(task_ids=...)`; if it must wait for every current background task, call `wait_async_results(wait_all=true)`.
-4. If the agent has nothing useful to do, hand control back to the user — they'll prompt again when ready and the next reasoning round will surface any completions.
-
-### Timeout promotion
-When a sync spawn/send exceeds its timeout, the task is **not lost** — it is automatically promoted to a background task. You receive `status: timeout_promoted` with a `task_id`. Treat it like any async task: the result will be pushed back to you automatically as a `<system-reminder>`. Do NOT retry the same task — it is already running in the background.
-
-### When to use subagents
-- When a task is complex and multi-step, and can be fully delegated in isolation
-- When a task is independent of other tasks and can run in parallel
-- When a task requires focused reasoning or heavy context usage that would bloat the main thread
-- When sandboxing improves reliability (e.g. code analysis, structured searches, data formatting)
-- When you only care about the output, not the intermediate steps (e.g. research → synthesized report)
-
-### When NOT to use subagents
-- If the task is trivial (a few tool calls or simple lookup)
-- If you need to see intermediate reasoning or steps after completion
-- If delegating does not reduce token usage, complexity, or context switching
-- If splitting would add latency without benefit
-
-### Subagent lifecycle
-1. **Spawn** → Provide clear role, instructions, and expected output format
-2. **Run** → The subagent completes the task autonomously
-3. **Return** → The subagent provides a single structured result
-4. **Reconcile** → Incorporate or synthesize the result into the main thread
-
-### Usage patterns
-- **Parallel async execution**: Split work by independence/dependency. Launch independent, non-conflicting tasks with `timeout_seconds=0`; continue reasoning, then use `task_output(block=false)` for selective progress checks or `wait_async_results(task_ids=...)` / `wait_async_results(wait_all=true)` when a barrier is required
-- **Parallel sync delegation**: Multiple sync `agent_spawn` / `agent_send` calls in one turn run concurrently by default (Toolkit parallel=true); the parent waits for that batch of tool results before continuing. Pass a Toolkit with parallel=false to opt out.
-- **Mixed short/long work**: Wait for short prerequisite tasks first, continue reasoning with those results, and merge long-running async results later through `task_output` or `wait_async_results`
-- **Sync delegation**: Use default timeout for simple one-shot delegation when one result is needed before the next reasoning step
-- **Persistent session**: Spawn without a task, then use send for multi-turn interaction
-- **Cancel stale work**: Use task_cancel to stop background tasks that are no longer needed
-- Subagent results are NOT visible to the user — always summarize them in your response"#;
+除工具 / skill / MCP 外，你还可以把任务委派给 subagent——隔离上下文的执行者：它看不到你的对话历史，过程与结果用户也看不到，必须由你转述。
+- 何时委派：任务复杂且可独立交付、可并行、或需要隔离上下文（大量读取/研究）时；简单任务（几次工具调用就能完成）自己做，不为用而用。
+- 派发纪律：同一阶段的子任务在同一轮用 {spawn} 一次性全派（并发执行），全部返回后统一验收——派一个等一个会让并行退化成串行；label 必传且按「agentId-阶段号」命名（如 coder-s2），不传 label 的同名派发会被判定为同一实例；任务描述带齐上下文（相关路径、已确认事实、不用再查的部分）与可验证的交付物。追加指令用 {send}，在途实例用 {list} 查。
+- 返回异常（被截断、内容偏短、明显没做完）时，先查它落盘的中间产物再决定续派或重派，不原样重试；同一子代理最多 2 次，仍不达标自己接手。
+- 后台任务：timeout_seconds=0 转后台拿 task_id，完成后结果自动推送给你；task_list 查在途任务，task_cancel 取消。同步派发超时不会丢任务——自动转后台，不要重试同一任务。
+- 工具参数细节（agent_key 格式、等待语义、task_output 用法）见各工具描述。
+"#;
 
 /// 渲染 `## Subagents` 指引段（对应 Java `renderSubagentSection`）。
 ///
@@ -533,13 +468,15 @@ mod tests {
     fn render_subagent_section_uses_default_tool_names() {
         let section = render_subagent_section(false);
         assert!(section.starts_with("\n## Subagents"));
-        assert!(section.contains("**`agent_spawn`**"));
-        assert!(section.contains("**`agent_send`**"));
-        assert!(section.contains("**`agent_list`**"));
+        // 工具名占位渲染 + 方法论要点
+        assert!(section.contains("用 agent_spawn 一次性全派"));
+        assert!(section.contains("追加指令用 agent_send"));
+        assert!(section.contains("在途实例用 agent_list 查"));
+        assert!(section.contains("label 必传"));
         // session 模式换名
         let session = render_subagent_section(true);
         assert!(session.contains("sessions_spawn"));
-        assert!(!session.contains("**`agent_spawn`**"));
+        assert!(!session.contains("用 agent_spawn 一次性全派"));
     }
 
     #[test]

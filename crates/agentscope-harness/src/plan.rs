@@ -2,7 +2,7 @@
 //! 以及运行中拦截中间件（对应 Java `middleware.PlanModeMiddleware`）。
 //!
 //! 与 Java 一致：计划文件路径记录在 `AgentState.plan_mode_context.current_plan_file`
-//! （随会话状态持久化），默认 `{plan_dir}/PLAN.md`；`enter`/`exit` 只改状态标志
+//! （随会话状态持久化），默认 `{plan_dir}/spec.md`；`enter`/`exit` 只改状态标志
 //! （幂等），文件写入走 `write_plan`。计划模式是「只读设计阶段」——运行中的
 //! 写操作由 [`PlanModeMiddleware`] 在 `on_acting` 确定性拦截：只放行只读工具与
 //! 白名单，被拒调用合成 `Denied` 工具结果写进上下文（模型下一轮可见）。
@@ -102,8 +102,27 @@ impl PlanModeManager {
         Ok(path)
     }
 
+    /// 按需求分目录的 spec 路径（spec 模式）：`{plan_dir}/{feature}/spec.md`。
+    /// 每个需求一个目录，装该需求的完整文档集（spec.md + tasks.md），
+    /// 归档时整目录移入 archived/。
+    pub fn feature_plan_file(&self, feature: &str) -> String {
+        let feature = feature.trim();
+        if feature.is_empty() {
+            return self.default_plan_file();
+        }
+        // 防路径穿越：只保留路径分量字符，拒绝分隔符与 ..
+        let safe: String = feature
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            .collect();
+        if safe.is_empty() || safe.contains("..") {
+            return self.default_plan_file();
+        }
+        format!("{}/{}/spec.md", self.plan_dir.trim_end_matches('/'), safe)
+    }
+
     fn default_plan_file(&self) -> String {
-        format!("{}/PLAN.md", self.plan_dir.trim_end_matches('/'))
+        format!("{}/spec.md", self.plan_dir.trim_end_matches('/'))
     }
 }
 
@@ -397,21 +416,21 @@ mod tests {
 
         assert!(!plans.is_plan_active(Some(&state)));
         let path = plans.enter(&mut state);
-        assert_eq!(path, "plans/PLAN.md");
+        assert_eq!(path, "plans/spec.md");
         assert!(plans.is_plan_active(Some(&state)));
-        assert_eq!(plans.plan_file_path(Some(&state)), "plans/PLAN.md");
+        assert_eq!(plans.plan_file_path(Some(&state)), "plans/spec.md");
 
         // 幂等：再次 enter 不改路径
-        assert_eq!(plans.enter(&mut state), "plans/PLAN.md");
+        assert_eq!(plans.enter(&mut state), "plans/spec.md");
 
         // exit 只清标志，保留路径
         plans.exit(&mut state);
         assert!(!plans.is_plan_active(Some(&state)));
-        assert_eq!(plans.plan_file_path(Some(&state)), "plans/PLAN.md");
+        assert_eq!(plans.plan_file_path(Some(&state)), "plans/spec.md");
 
         // None 状态视为未进入
         assert!(!plans.is_plan_active(None));
-        assert_eq!(plans.plan_file_path(None), "plans/PLAN.md");
+        assert_eq!(plans.plan_file_path(None), "plans/spec.md");
     }
 
     #[test]
@@ -437,16 +456,16 @@ mod tests {
             .write_plan(&manager, &rc, &mut state, "# updated plan")
             .await
             .unwrap();
-        assert_eq!(path, "plans/PLAN.md");
+        assert_eq!(path, "plans/spec.md");
         assert_eq!(
             manager
-                .read_managed_workspace_file_utf8(&rc, "plans/PLAN.md")
+                .read_managed_workspace_file_utf8(&rc, "plans/spec.md")
                 .await,
             "# updated plan"
         );
         assert_eq!(
             state.plan_mode_context.current_plan_file.as_deref(),
-            Some("plans/PLAN.md")
+            Some("plans/spec.md")
         );
         std::fs::remove_dir_all(&root).ok();
     }

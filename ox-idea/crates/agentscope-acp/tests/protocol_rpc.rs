@@ -144,7 +144,8 @@ async fn session_new_assembles_memory_pipeline_from_host_context() {
     assert!(frame["result"]["sessionId"].is_string(), "session/new failed: {frame}");
 
     server_task.abort();
-    let _ = std::fs::remove_dir_all(&root);
+    // 收尾【不】删除 root（与文件头注释一致）：并行测试（mode/compact 端到端）
+    // 可能仍持有 memory_anchor 下的 state store，删除会让它们的保存路径 IO 失败。目录留给系统 temp 清理。
 }
 
 #[tokio::test]

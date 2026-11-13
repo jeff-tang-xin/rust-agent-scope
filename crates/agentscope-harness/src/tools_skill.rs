@@ -1081,6 +1081,15 @@ impl Tool for LoadSkillTool {
                 repo.source()
             )));
         }
+        // 仓库检索不到 → 内置技能回退（随框架分发、不落盘；无附属文件）。
+        if rel_path == SKILL_FILE {
+            if let Some(builtin) = crate::skill::builtin_skill(skill) {
+                return Ok(ToolOutput::ok(format!(
+                    "[skill: {skill} @ builtin]\n\n{}",
+                    builtin.skill_content()
+                )));
+            }
+        }
         Ok(ToolOutput::error(format!(
             "Skill '{skill}' not found (searched: {}). Use skill_manage to create it first.",
             if searched.is_empty() {
@@ -1717,7 +1726,24 @@ mod tests {
         assert!(out.content.contains("# PDF Report"));
     }
 
-    #[tokio::test]
+        #[tokio::test]
+    async fn load_skill_falls_back_to_builtin_skills() {
+        // 无仓库绑定：内置技能仍可加载（随框架分发、不落盘）。
+        let tool = LoadSkillTool::new(Vec::new());
+        let out = call_load(&tool, "spec-workflow", None).await;
+        assert!(!out.is_error(), "内置回退应成功: {}", out.content);
+        assert!(out.content.contains("[skill: spec-workflow @ builtin]"), "{}", out.content);
+        assert!(out.content.contains("tasks.md"), "应含 SKILL.md 正文");
+        // 内置技能无附属文件：path 请求报错并提示。
+        let out = call_load(&tool, "spec-workflow", Some("references/x.md")).await;
+        assert!(out.is_error());
+        // 未知名：报错（含 searched 提示）。
+        let out = call_load(&tool, "nope", None).await;
+        assert!(out.is_error());
+        assert!(out.content.contains("not found"), "{}", out.content);
+    }
+
+#[tokio::test]
     async fn load_skill_requires_skill_param() {
         let (tool, _, _) = load_tool(seeded_fs());
         let out = tool.call(json!({})).await.unwrap();

@@ -1322,6 +1322,12 @@ a short goal statement, the ordered implementation steps, and the verification s
         json!({
             "type": "object",
             "properties": {
+                "feature": {
+                    "type": "string",
+                    "description": "Feature directory name (spec mode): e.g. 001-user-login. \
+The spec is written to {plan_dir}/{feature}/spec.md; use the next sequential number \
+(check existing directories first). Omit to write the default plan file."
+                },
                 "content": {
                     "type": "string",
                     "description": "The full plan content (markdown)"
@@ -1335,30 +1341,45 @@ a short goal statement, the ordered implementation steps, and the verification s
         let Some(content) = optional_string(&input, "content") else {
             return Ok(ToolOutput::error("content is required"));
         };
+        let feature = optional_string(&input, "feature");
         let Some(state_handle) = &ctx.state else {
             return Ok(ToolOutput::error(
                 "plan_write requires an active agent state (call inside an agent run).",
             ));
         };
         // guard 限定在块内释放，不跨 await（std MutexGuard 非 Send）。
-        let path = {
-            let state = state_handle.lock().unwrap_or_else(|e| e.into_inner());
-            if !self.manager.is_plan_active(Some(&state)) {
-                return Ok(ToolOutput::error(
-                    "Plan mode is OFF — it is controlled by the user in the UI, not by tools. \
-Do not call plan_enter (it does not exist). Present your plan directly in the reply instead.",
-                ));
-            }
-            self.manager.plan_file_path(Some(&state))
+        // plan 态：写计划文件（批准载体）；非 plan 态：同一文件兼作活文档
+        // （spec 模式）——执行期需求变更时用它保持 spec 与实际一致，不再报错。
+        // feature 参数：按需求分目录（spec 模式），路径 {plan_dir}/{feature}/spec.md，
+        // 并记录为会话的计划文件（后续 plan_write/plan_exit/plan_status 都指向它）。
+        let (plan_active, path) = {
+            let mut state = state_handle.lock().unwrap_or_else(|e| e.into_inner());
+            let plan_active = self.manager.is_plan_active(Some(&state));
+            let path = match &feature {
+                Some(feature) => {
+                    let path = self.manager.feature_plan_file(feature);
+                    state.plan_mode_context.current_plan_file = Some(path.clone());
+                    path
+                }
+                None => self.manager.plan_file_path(Some(&state)),
+            };
+            (plan_active, path)
         };
         match self
             .workspace
             .write_utf8_workspace_relative(&RuntimeContext::new(), &path, &content)
             .await
         {
-            Ok(()) => Ok(ToolOutput::ok(format!(
-                "Plan written to {path}. Review it, then call plan_exit when ready to implement."
-            ))),
+            Ok(()) => Ok(ToolOutput::ok(if plan_active {
+                format!(
+                    "Plan written to {path}. Review it, then call plan_exit when ready to implement."
+                )
+            } else {
+                format!(
+                    "Spec updated at {path} (plan mode is off — the plan file doubles as the \
+living spec; keep it in sync when requirements change during implementation)."
+                )
+            })),
             Err(error) => Ok(ToolOutput::error(format!("failed to write plan: {error}"))),
         }
     }
@@ -2584,13 +2605,14 @@ mod tests {
         let output = exit.call_with_context(json!({}), &ctx).await.unwrap();
         assert!(output.content.contains("Exited plan mode"));
 
-        // 退出后 plan_write 报错。
+        // 退出后 plan_write 仍可写：plan 文件兼作活文档（spec 模式），
+        // 执行期需求变更时用它保持 spec 与实际一致。
         let output = write
             .call_with_context(json!({"content": "x"}), &ctx)
             .await
             .unwrap();
-        assert_eq!(output.state, ToolResultState::Error);
-        assert!(output.content.contains("Plan mode is OFF"));
+        assert_eq!(output.state, ToolResultState::Success);
+        assert!(output.content.contains("Spec updated"));
     }
 
     #[tokio::test]
@@ -2600,12 +2622,13 @@ mod tests {
         let state = Arc::new(Mutex::new(AgentState::default()));
         let ctx = state_ctx("s1", &state);
         let write = PlanWriteTool::new(manager, workspace);
+        // 非 plan 态不报错：写入成功并提示 spec 语义（活文档）。
         let output = write
             .call_with_context(json!({"content": "x"}), &ctx)
             .await
             .unwrap();
-        assert_eq!(output.state, ToolResultState::Error);
-        assert!(output.content.contains("Plan mode is OFF"));
+        assert_eq!(output.state, ToolResultState::Success);
+        assert!(output.content.contains("Spec updated"));
     }
 
     /// update_plan：合法清单回显统计；非法 status/priority、空 content、

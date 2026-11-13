@@ -277,6 +277,10 @@ pub struct AgentPlanItem {
     pub content: String,
     /// `pending`, `in_progress` or `completed`.
     pub status: String,
+    /// `high`, `medium` or `low` (ACP protocol carries it; spec mode uses P1/P2/P3).
+    #[serde(default)]
+    #[specta(optional)]
+    pub priority: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
@@ -357,6 +361,11 @@ pub enum AgentEntry {
     },
     Plan {
         items: Vec<AgentPlanItem>,
+        /// Markdown form (spec mode: the full spec text from `plan_write`);
+        /// `Some` while `items` is empty — one card, two renderings.
+        #[serde(default)]
+        #[specta(optional)]
+        markdown: Option<String>,
     },
     /// A subagent the agent started: its own session, whose entries are listed separately.
     Subagent {

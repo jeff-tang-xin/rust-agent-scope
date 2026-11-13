@@ -22,7 +22,7 @@ pub mod session;
 use agentscope_core::Tool;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 
 use crate::rpc::RpcConn;
@@ -48,17 +48,26 @@ pub struct OxHostContext {
 /// 装配 agent 时按 cwd 取用（worktree 目录会命中其所属项目）。
 pub type OxToolProvider = Arc<dyn Fn(&Path) -> OxHostContext + Send + Sync>;
 
-static OX_TOOLS: OnceLock<OxToolProvider> = OnceLock::new();
+static OX_TOOLS: RwLock<Option<OxToolProvider>> = RwLock::new(None);
 
-/// 宿主启动时注册 IDE 语义工具的来源。重复注册以第一次为准（进程内单例语义）。
+/// 宿主启动时注册 IDE 语义工具的来源。重复注册以最后一次为准——生产只注册
+/// 一次（行为等同单例）；测试并行各自注册，可覆盖避免 OnceLock「第一次赢」
+/// 导致的跨测试串味（历史写进别人的 memory_anchor）。
 pub fn set_ox_tool_provider(provider: OxToolProvider) {
-    let _ = OX_TOOLS.set(provider);
+    *OX_TOOLS.write().unwrap() = Some(provider);
 }
+
+/// 测试串行化守卫：provider 相关测试各自注册不同的 memory_anchor，必须
+/// 串行执行（set → assemble → 断言全程持锁），否则并行互相覆盖 provider，
+/// 历史会写进别人的目录导致重载断言偶现失败。
+pub static OX_PROVIDER_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 装配 agent 时取用：未注册或调用失败都返回空上下文，agent 优雅降级为文件 + shell 工具。
 pub(crate) fn ox_context_for(cwd: &Path) -> OxHostContext {
     OX_TOOLS
-        .get()
+        .read()
+        .unwrap()
+        .as_ref()
         .map(|provider| provider(cwd))
         .unwrap_or(OxHostContext { tools: Vec::new(), memory_root: None, project_brief: None })
 }

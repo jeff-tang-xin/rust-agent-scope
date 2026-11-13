@@ -98,16 +98,21 @@ impl Timeline {
                 out.changed.push(index);
             }
             "plan" => {
+                let markdown = str_field(update, "markdown");
                 let items = update
                     .get("entries")
                     .and_then(Value::as_array)
                     .map(|a| {
                         a.iter()
-                            .map(|e| AgentPlanItem { content: str_field(e, "content"), status: str_field(e, "status") })
+                            .map(|e| AgentPlanItem {
+                                content: str_field(e, "content"),
+                                status: str_field(e, "status"),
+                                priority: Some(str_field(e, "priority")).filter(|p| !p.is_empty()),
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
-                let entry = AgentEntry::Plan { items };
+                let entry = AgentEntry::Plan { items, markdown: Some(markdown).filter(|m| !m.is_empty()) };
                 let index = match self.plan {
                     Some(i) => {
                         self.entries[i] = entry;

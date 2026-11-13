@@ -1620,10 +1620,18 @@ doneMs?: number | null;
 steered?: boolean } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; id: string; title: string; 
 /**  ACP tool kind: `read`, `edit`, `execute`, `search`, `fetch`, `think`… */
 kind: string; status: AgentToolStatus; locations: IpcPath[]; 
-/**  The tool's JSON input (ACP `rawInput`), for the conversation's tool card; `None` in tasks saved before this was kept. */
+/**
+ *  The tool's JSON input (ACP `rawInput`), for the conversation's
+ *  tool card; `None` in tasks saved before this was kept.
+ */
 input?: string | null; 
 /**  Text the tool reported (command output…), truncated. */
-output: string | null; diffs: AgentToolDiff[] } | { type: "plan"; items: AgentPlanItem[] } | 
+output: string | null; diffs: AgentToolDiff[] } | { type: "plan"; items: AgentPlanItem[]; 
+/**
+ *  Markdown form (spec mode: the full spec text from `plan_write`);
+ *  `Some` while `items` is empty — one card, two renderings.
+ */
+markdown?: string | null } | 
 /**  A subagent the agent started: its own session, whose entries are listed separately. */
 { type: "subagent"; 
 /**  The subagent's session id. */
@@ -1696,6 +1704,8 @@ export type AgentPlanItem = {
 	content: string,
 	/**  `pending`, `in_progress` or `completed`. */
 	status: string,
+	/**  `high`, `medium` or `low` (ACP protocol carries it; spec mode uses P1/P2/P3). */
+	priority?: string | null,
 };
 
 /**

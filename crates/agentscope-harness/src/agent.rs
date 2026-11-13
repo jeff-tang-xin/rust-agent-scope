@@ -1380,13 +1380,13 @@ mod tests {
             .unwrap();
         // 未进入 → 非激活
         assert!(!agent.is_plan_mode_active(None, "sess-1"));
-        // 进入 → 激活 + 默认路径（design/PLAN.md）
+        // 进入 → 激活 + 默认路径（design/spec.md）
         let path = agent.enter_plan_mode(None, "sess-1").unwrap();
-        assert_eq!(path, "design/PLAN.md");
+        assert_eq!(path, "design/spec.md");
         assert!(agent.is_plan_mode_active(None, "sess-1"));
         assert_eq!(
             agent.plan_file_path(None, "sess-1").as_deref(),
-            Some("design/PLAN.md")
+            Some("design/spec.md")
         );
         // 状态已持久化（重新查询走状态库/槽位）
         assert!(agent.is_plan_mode_active(None, "sess-1"));
@@ -1395,7 +1395,7 @@ mod tests {
         assert!(!agent.is_plan_mode_active(None, "sess-1"));
         assert_eq!(
             agent.plan_file_path(None, "sess-1").as_deref(),
-            Some("design/PLAN.md")
+            Some("design/spec.md")
         );
         agent.close();
         std::fs::remove_dir_all(&workspace).ok();

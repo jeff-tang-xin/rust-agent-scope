@@ -156,6 +156,14 @@ impl AcpSessionHub {
                 )))
             }
         };
+        // 执行中拒绝切换：plan 标志立即生效，turn 中途切换会让模型下一步
+        // 突然被锁写/解锁，行为怪异。等当前回合结束再切。
+        if session.busy.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(RpcError::new(
+                -32000,
+                "会话正在执行中，请等当前回合结束再切换 Code/Plan 模式",
+            ));
+        }
         let switch = if value == "plan" {
             session.agent.enter_plan_mode(None, &session_id).map(|_| ())
         } else {
@@ -538,29 +546,11 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     // Skill 清单（L1 元数据，渐进披露第一层）：项目级在前、用户级在后，同名项目级
     // 优先——与 load_skill 的仓库检索顺序一致。
     let skill_summaries = collect_skill_summaries(Path::new(cwd), skill_home.as_deref());
-    let skill_section = if skill_summaries.is_empty() {
-        "\n### Skills（可复用流程说明书）\n\
-         \n当前没有已安装的 skill。沉淀出可复用的流程/方法论时，用 skill_manage 把它写成 \
-         skill（frontmatter 的 name + description 写清「做什么、何时用」，正文写步骤），\
-         下次会话自动可用。\n"
-            .to_owned()
-    } else {
-        let list: String = skill_summaries
-            .iter()
-            .map(|(n, d)| format!("  - {n}: {d}\n"))
-            .collect();
-        format!(
-            "\n### Skills（可复用流程说明书）\n\
-             \n已安装的 skill（name: description）：\n{list}\
-             - 渐进披露：上面只是元数据。当前任务与某 skill 的 description 匹配时，先 load_skill \
-             读全文再按其执行；正文指向附属文件（references/scripts 等）时用 load_skill 的 path 参数读。\n\
-             - 安装：用户给出 skill 地址（git 仓库/目录/zip）时，下载到系统临时目录 → 审查内容 → \
-             skill_manage create 写入（自动安全扫描，危险内容会被拒绝）→ 汇报安装位置与生效方式。\
-             安装只落项目级 .claude/skills/（跟项目走）；用户级 ~/.claude/skills 只读，仅供 load_skill 检索。\n\
-             - 创建：发现值得复用的流程时用 skill_manage/propose_skill 沉淀——description 决定未来 \
-             何时被触发，要写清「做什么 + 何时用」。\n"
-        )
-    };
+    // Skill 清单（L1 元数据，渐进披露第一层）：外置清单由上方扫描得出；
+    // 内置分组、渐进披露与冲突裁决引导都在 harness 的 skill_section_markdown
+    // 里统一渲染（框架行为，acp 只做产品化组装）。
+    let skill_section =
+        agentscope_harness::skill::skill_section_markdown(&skill_summaries);
     if !db_configs.is_empty() {
         let catalog = Arc::new(agentscope_db::DbCatalog::new());
         catalog.replace_all(&db_configs);
@@ -580,7 +570,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         "你是 OX Hareness，运行在用户 IDE（OXidea）中的资深全栈工程师智能体。\
          使命：以最小必要改动达成用户的真实意图；每一步可验证；交付如实。\
          当前工作目录：{cwd}——一切文件操作与命令限制在此，路径一律相对它。\n\n\
-         ## 1. 五条铁律（违反任何一条即为失败）\n\
+         ## 1. 六条铁律（违反任何一条即为失败）\n\
          1. 理解先于动作：改任何代码前先读它，理清调用链与副作用。读过代码得出的是事实，没验证过的是推断——表述永远区分两者，不确定就说不确定，编造比无知危害更大。\n\
          2. 外科手术：只改必须改的地方。不顺手重构、不调整无关风格、不引入没被要求的依赖与抽象。改动越小越易验证、越易回滚。\n\
          3. 自我闭环：用户说「编译一下」意味着执行→看输出→修问题→报结果，不是跑完命令就停。回合结束要么交付结果，要么说清卡在哪、需要什么决定。\n\
@@ -595,9 +585,9 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          4. 对目标符号 get_symbol_info 看签名与文档，find_references 看调用链，再 read_file 读实现——确认约束后才算理解。\n\
          产出：能一句话说清「问题在哪、涉及哪些文件、现有约定是什么」。说不清就继续 Phase 1，不许动手。\n\
          ### Phase 2 方案\n\
-         有取舍时列出选项与理由再选最优；无取舍直接说按什么做。方案含破坏性操作（删除/覆盖/推送）必须先征得同意。\n\
+         有取舍时列出选项与理由再选最优；无取舍直接说按什么做。\n\
          ### Phase 3 实施\n\
-         edit_file 精确替换，old_string 从真实文件内容取（不凭记忆拼）；每处修改都能回答「为什么改它」；沿用项目既有命名与分层，一致性比个人偏好重要。\n\
+         edit_file 精确替换，old_string 从真实文件内容取（不凭记忆拼）；语义级重命名用 rename_refactoring（连带所有引用），格式化用 reformat_file；沿用项目既有命名与分层，一致性比个人偏好重要。\n\
          ### Phase 4 验证（没验证不算完成）\n\
          1. 编译：build_project 或 shell 构建，以 BUILD SUCCESS 等客观信号为准，不看「应该没问题」。\n\
          2. 问题检查：get_file_problems 对改动文件——改前先记基线，改后对比，新问题就是你引入的，修掉。\n\
@@ -608,32 +598,33 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
          3. 汇报（格式见第 5 节）。\n\n\
          {ide_section}\
          ## 3. 工具使用规程（按场景查表执行，不要凭直觉乱试）\n\
-         ### 改代码的完整闭环\n\
-         改前：read_file 拿真实文本 + get_file_problems 记基线 → 改后：get_file_problems 对比 + 编译 + 定向测试。语义级重命名用 rename_refactoring（连带所有引用），格式化用 reformat_file。\n\
+         \n\
+         ### 能力总纲：工具 / skill / MCP\n\
+         \n\
+         你的每一步动作都由三类外部能力承载，先认清它们是什么，再决定怎么用：\n\
+         - **工具（tool）= 原子动作**：一次调用一个明确效果（读文件、改代码、跑命令），结果直接回给你。考量：选最小够用的——有专用工具（如语义检索）就不用 shell 兜底；破坏性动作（删除/覆盖/推送）按铁律 5 征得同意。\n\
+         - **skill = 战术手册**：某类任务的领域知识包（流程、模板、坑），按需加载不占常驻上下文。考量：任务与某 skill 的 description 匹配时，先 load_skill 读全文再动手——方法论来自 skill，动作交给工具；skill 细化本提示词——与本提示词冲突时以本提示词为准，与工具描述冲突时以 skill 为准。\n\
+         - **MCP = 外部服务**：宿主接入的外部系统（数据库、远程运维、第三方 API），工具面由服务端定义。考量：调用前读工具描述确认副作用与必填参数；外部返回是事实来源，不臆测；凭证与敏感数据不进参数、不落盘。\n\
+         决策顺序：想清楚要达成什么 → 有匹配 skill 先加载（怎么做）→ 选最小够用的工具/MCP 工具（去做）→ 结果异常先读报错再重试，同一手段两次失败就止损（铁律 4）。\n\
+         \n\
          ### 构建与运行\n\
-         build_project 拿结构化错误，逐个修完再 build；跑应用用 get_run_configurations → execute_run_configuration；长命令输出重定向到日志文件再读日志（两步，不用 && 串联）。\n\
-         ### 进程管理\n\n         长驻服务（dev server / Spring Boot 等）用 execute_run_configuration 的 waitForExit=true + 短 timeout 启动：拿到输出快照与 fullOutputPath 后进程转后台，后续 read_file 读该文件看新日志。get_running_processes 查运行清单，stop_process 停止（会请求确认）——不要用 shell 杀进程，那会绕过 IDE 进程簿记留下孤儿进程。\n\n         ### Skills（已安装清单与 load_skill/skill_manage 用法见上）\n\
+         跑应用用 get_run_configurations → execute_run_configuration；长驻服务用 waitForExit=true + 短 timeout 启动拿输出快照，进程转后台后 read_file 该日志文件看新输出。\n\
          {skill_section}\
          ### 数据库（面板连接已注册时才有 db 工具）\n\
          {datasource_section}\
-         先 db_query 摸清 schema（只读免确认），再写 SQL——不要猜列名表名；变更数据/DDL 用 db_dml（会请求用户确认，这是设计不是故障）。\n\
-         ### 浏览器（需要看真实页面时）\n\
-         browser_navigate → browser_snapshot 读 DOM 结构（比截图省且准）→ browser_click_at/browser_type_at 坐标操作；验证视觉效果才用 browser_screenshot。\n\
+         用法见工具描述；纪律：变更数据/DDL 走 db_dml 的用户确认（这是设计不是故障），不要用 shell 直连数据库绕过它。\n\
          ### Shell 纪律\n\
-         只跑非交互、有界、能自行结束的命令；判定成功看 exit code 与 Tests run 计数等客观信号，不看输出「看起来正常」。\n\n\
-         ### 任务清单与 Bug 统计（update_plan）\n\
-         1. 非平凡任务开工时用 update_plan 建任务清单（多步计划从计划文件的步骤初始化），之后每完成一项（验证通过后）立即更新状态；工作期间保持恰好一项 in_progress。清单是会话内呈现，不落盘，每次传全量列表。\n\
-         2. 测试失败必记 .oxidea/agent/plans/bugs.json（JSON 数组，字段：id、description、related_test、status、fix_note；状态流转 open→fixing→fixed→closed）：定位修复并自测通过后置 fixed 并写清 fix_note（改了什么、根因、怎么修的）；回归通过才置 closed。没有自测过不要置 fixed——虚假的 fixed 会误导后续判断。\n\
-         3. 每次 update_plan 顺带在回复里播报 Bug 统计（open/fixing/fixed/closed 各多少），让用户随时掌握质量面。\n\n\
+         只跑非交互、有界、能自行结束的命令；长命令输出重定向到日志文件再读日志（两步，不用 && 串联）；不要用 shell 杀进程或直连数据库——那会绕过 IDE 进程簿记与 db_dml 的用户确认；判定成功看 exit code 与 Tests run 计数等客观信号，不看输出「看起来正常」。\n\
+         ### Spec 模式：文档即状态\n\
+         你的状态在文档里，不在对话记忆里。每次开工先读文档恢复上下文，按循环工作：理解 → 澄清 → 实施 → 维护。\n\
+         - 进入 plan 模式（spec 阶段）先加载 spec-workflow skill 按其执行——目录约定、spec.md/tasks.md 模板与生命周期都在其中；执行期需求/方案变更同样按它维护文档。\n\
+         - 测试失败必记 .oxidea/agent/specs/bugs.json 并维护状态流转（字段与流转契约见 spec-workflow skill）：自测通过才置 fixed，回归通过才置 closed。每次 update_plan 顺带播报 Bug 统计（open/fixing/fixed/closed 各多少）。\n\
          ## 4. 记忆机制（你的工作必须可追溯）\n\
          {memory_section}{blackboard_section}\
-         - blackboard（任务内共享）：开工先读；得出结论、发现风险随手记（不要攒到收尾）；收尾必写。\n\
-         - memory（跨会话）：新任务先 memory_search；用户偏好、项目约定、踩坑记录用 memory_save 沉淀——记住自己做过什么、没做什么，避免重复踩坑。\n\
-         - 数据边界：写记忆只能 memory_save；禁止用文件工具直接改记忆与黑板文件。\n\n\
+         - blackboard 是任务内共享记录本（时机见 Phase 1/5），memory 是跨会话沉淀——两者只经专用工具读写；禁止用文件工具直接改记忆与黑板文件。\n\
          ## 5. 输出规范\n\
          - Markdown，简洁直接，与用户同语言；代码给完整可运行片段。\n\
-         - 汇报固定四段：做了什么 / 关键改动 / 如何验证 / 遗留风险；部分完成时明确说明哪些完成、哪些没有、当前处于什么中间态。\n\
-         - {report_items}。"
+         - 汇报固定段落：{report_items}；部分完成时明确说明哪些完成、哪些没有、当前处于什么中间态。"
     );
     // 权限上下文：只读工具免确认（按 is_read_only 动态收集，新只读工具无需改这里），
     // 写工具（write/edit/execute 类）走 HITL 往返；`AGENTSCOPE_PERMISSION_MODE=bypass`
@@ -681,9 +672,10 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         .max_iters(max_iters_from(env))
         // plan 模式：用户经 Composer 模式下拉手动开启（session/set_config_option），
         // agent 不自行进入。写操作由 PlanModeMiddleware 确定性拦截（白名单不放
-        // shell）；计划文件与记忆同域（`.oxidea/agent/plans/`，版本库外）。
+        // shell）。spec 模式：按需求分目录（`.oxidea/agent/specs/<NNN-短名>/`，
+        // 内含 spec.md + tasks.md），完成整目录归档 archived/；记忆同域（版本库外）。
         .enable_plan_mode()
-        .plan_file_directory(".oxidea/agent/plans")
+        .plan_file_directory(".oxidea/agent/specs")
         .plan_prompt(PLAN_PROMPT)
         .permission_context(permission);    if let Some(ws) = &memory_ws {
         builder = builder
@@ -977,9 +969,12 @@ where
                     if let Some(input) = pending_inputs.remove(&tool_call_id) {
                         let raw = serde_json::from_str::<Value>(&input)
                             .unwrap_or(Value::String(input));
-                        // update_plan：留一份入参，ResultEnd(Success) 时转 plan_update 帧。
-                        if tool_names.get(&tool_call_id).map(String::as_str) == Some("update_plan")
-                        {
+                        // update_plan / plan_write：各留一份入参，ResultEnd(Success)
+                        // 时分别转 items / markdown 形态的 plan_update 帧。
+                        if matches!(
+                            tool_names.get(&tool_call_id).map(String::as_str),
+                            Some("update_plan") | Some("plan_write")
+                        ) {
                             pending_plan_inputs.insert(tool_call_id.clone(), raw.clone());
                         }
                         conn.notify(
@@ -1030,14 +1025,27 @@ where
                     // update_plan 成功：把入参条目转 plan_update 帧推给前端
                     // （失败/被拒不发——前端清单保持上一次成功状态）。解析失败
                     // 只丢帧不报错：工具侧已校验过，这里兜底不该打断 turn。
-                    if tool_names.get(&tool_call_id).map(String::as_str) == Some("update_plan") {
-                        if let Some(raw) = pending_plan_inputs.remove(&tool_call_id) {
-                            if state == ToolResultState::Success
+                    // plan_write 成功：spec 全文转 markdown 形态帧——卡片实时
+                    // 展示实现方案；随后 update_plan 的 items 帧全量替换为
+                    // 执行清单（一张卡片贯穿 spec → plan → 归档）。
+                    if let Some(raw) = pending_plan_inputs.remove(&tool_call_id) {
+                        let name = tool_names.get(&tool_call_id).map(String::as_str);
+                        if state == ToolResultState::Success {
+                            if name == Some("update_plan")
                                 && let Ok(entries) = protocol::parse_plan_entries(&raw)
                             {
                                 conn.notify(
                                     "session/update",
                                     protocol::plan_update_frame(session_id, &entries),
+                                )
+                                .await;
+                            }
+                            if name == Some("plan_write")
+                                && let Some(markdown) = raw.get("content").and_then(Value::as_str)
+                            {
+                                conn.notify(
+                                    "session/update",
+                                    protocol::plan_update_markdown_frame(session_id, markdown),
                                 )
                                 .await;
                             }
@@ -1536,6 +1544,75 @@ mod tests {
         );
     }
 
+    /// plan_write 端到端：写入成功 → markdown 形态 plan_update 帧（spec 全文
+    /// 实时上卡片）；feature 参数按需求分目录落盘（spec 模式）。
+    #[tokio::test]
+    async fn plan_write_emits_markdown_plan_frame() {
+        let tmp = std::env::temp_dir().join(format!("oxidea-acp-planwrite-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let build = |responses: Vec<ChatResponse>| {
+            let manager = Arc::new(agentscope_harness::PlanModeManager::with_dir(
+                ".oxidea/agent/specs",
+            ));
+            let fs = Arc::new(LocalFilesystem::new(
+                tmp.clone(),
+                LocalFsMode::Sandboxed,
+                PathPolicy::empty(),
+            )) as Arc<dyn Filesystem>;
+            let workspace = Arc::new(WorkspaceManager::with_filesystem(tmp.clone(), fs));
+            let mut toolkit = Toolkit::new();
+            toolkit.register(Arc::new(
+                agentscope_harness::tools::PlanWriteTool::new(manager, workspace),
+            ));
+            let model = MockModel::new(responses);
+            Arc::new(
+                HarnessAgentBuilder::new()
+                    .name("test")
+                    .sys_prompt("test")
+                    .model(model.clone())
+                    .toolkit(toolkit)
+                    .max_iters(5)
+                    .build()
+                    .expect("build agent"),
+            )
+        };
+        let tool_use = |id: &str, input: Value| ChatResponse {
+            content: vec![ContentBlock::ToolUse {
+                id: id.into(),
+                name: "plan_write".into(),
+                input,
+                state: None,
+                content: None,
+            }],
+            usage: None,
+            finish_reason: None,
+        };
+        let agent = build(vec![
+            ChatResponse::from_text("已写入"),
+            tool_use("call_ok", json!({"feature": "001-login", "content": "# 登录方案"})),
+        ]);
+        let (notifications, outcome) = run_drive_turn(agent, "写 spec", None, false, None).await;
+        assert_eq!(outcome, PromptOutcome::EndTurn);
+        let updates: Vec<&Value> = notifications.iter().map(update_of).collect();
+        let frames: Vec<&Value> = updates
+            .iter()
+            .filter(|u| u["sessionUpdate"] == "plan_update")
+            .copied()
+            .collect();
+        assert_eq!(frames.len(), 1, "plan_write 成功应发一个 plan_update 帧: {updates:?}");
+        let plan = &frames[0]["plan"];
+        assert_eq!(plan["type"], "markdown");
+        assert_eq!(plan["planId"], "tasks");
+        assert_eq!(plan["markdown"], "# 登录方案");
+        // feature 分目录落盘（spec 模式：每个需求一个目录）
+        assert!(
+            tmp.join(".oxidea/agent/specs/001-login/spec.md").exists(),
+            "feature 目录应落盘"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[tokio::test]
     async fn plain_text_reply_streams_chunks_and_ends_turn() {
         let (agent, _model) = build_agent(vec![ChatResponse::from_text("你好，世界")], false, false);
@@ -1823,6 +1900,18 @@ mod tests {
             .agent
             .is_plan_mode_active(None, "s1"));
 
+        // busy（执行中）拒绝切换：plan 标志立即生效，turn 中途切换会让模型
+        // 下一步突然被锁写/解锁——等当前回合结束再切。
+        hub.sessions.lock().unwrap()["s1"]
+            .busy
+            .store(true, std::sync::atomic::Ordering::Release);
+        let params = json!({ "sessionId": "s1", "configId": "mode", "value": "plan" });
+        let error = hub.set_config_option(params, &conn).await.unwrap_err();
+        assert!(error.message.contains("执行中"), "busy 拒绝: {}", error.message);
+        hub.sessions.lock().unwrap()["s1"]
+            .busy
+            .store(false, std::sync::atomic::Ordering::Release);
+
         // 未知配置项 / 未知值 → invalid params
         let params = json!({ "sessionId": "s1", "configId": "model", "value": "m1" });
         assert!(hub.set_config_option(params, &conn).await.is_err());
@@ -1836,8 +1925,12 @@ mod tests {
     /// （模拟 IDE 重启）同 sessionId 能读到 plan 态——session/load 的
     /// configOptions 据此如实上报。
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn plan_mode_state_survives_reassembly() {
         use crate::{set_ox_tool_provider, OxHostContext};
+        // 有意持锁跨 await：串行化对全局 provider 的切换，防止并行测试互扰
+        //（lint 报告点在 await 处，allow 标注在测试函数上）。
+        let _guard = crate::OX_PROVIDER_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("ox-acp-plan-{}", std::process::id()));
         let cwd = root.join("proj");
         std::fs::create_dir_all(&cwd).unwrap();
@@ -1870,8 +1963,12 @@ mod tests {
     /// 历史落盘；全新 agent（模拟 IDE 重启）同 sessionId 再跑一轮，模型
     /// 输入应包含第一轮的问答历史。
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn assemble_agent_persists_and_reloads_history() {
         use crate::{set_ox_tool_provider, OxHostContext};
+        // 有意持锁跨 await：串行化对全局 provider 的切换，防止并行测试互扰
+        //（lint 报告点在 await 处，allow 标注在测试函数上）。
+        let _guard = crate::OX_PROVIDER_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("ox-acp-load-{}", std::process::id()));
         let cwd = root.join("proj");
         std::fs::create_dir_all(&cwd).unwrap();
@@ -2085,8 +2182,12 @@ mod tests {
     /// 端到端：assemble_agent 注册 skill 工具 + sys_prompt 注入 L1 清单 +
     /// load_skill 真实执行（模型 tool_call → 工具结果回灌）。
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn assemble_agent_wires_skills_end_to_end() {
         use crate::{set_ox_tool_provider, OxHostContext};
+        // 有意持锁跨 await：串行化对全局 provider 的切换，防止并行测试互扰
+        //（lint 报告点在 await 处，allow 标注在测试函数上）。
+        let _guard = crate::OX_PROVIDER_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("ox-acp-skill-e2e-{}", std::process::id()));
         let cwd = root.join("proj");
         std::fs::create_dir_all(cwd.join(".claude").join("skills").join("demo")).unwrap();
@@ -2124,6 +2225,16 @@ mod tests {
         assert!(
             first.contains("demo: Demo skill for e2e"),
             "sys_prompt 应含 skill 清单: {first}"
+        );
+        // 内置 skill 单独分组并标注适用模式（分模式加载）。
+        assert!(
+            first.contains("spec-workflow [plan 模式]"),
+            "sys_prompt 应含内置 skill 分组: {first}"
+        );
+        // 能力总纲：三类外部能力的定义与决策顺序。
+        assert!(
+            first.contains("能力总纲") && first.contains("MCP = 外部服务"),
+            "sys_prompt 应含能力总纲: {first}"
         );
         // load_skill 真实执行：完成帧携带 SKILL.md 正文（工具结果回灌走
         // ToolResult 块，不进 MockModel 的 seen 文本，故从事件帧断言）。

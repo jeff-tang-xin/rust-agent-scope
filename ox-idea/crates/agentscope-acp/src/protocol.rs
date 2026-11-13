@@ -173,6 +173,19 @@ pub fn plan_update_frame(session_id: &str, entries: &[Value]) -> Value {
     )
 }
 
+/// 实现方案通知（`plan_update`，type=markdown）：plan_write 写入 spec.md
+/// 成功后推 spec 全文，前端卡片实时展示方案内容；执行期 update_plan 的
+/// items 帧全量替换为执行清单。planId 同为 "tasks"——单会话单卡片。
+pub fn plan_update_markdown_frame(session_id: &str, markdown: &str) -> Value {
+    update_frame(
+        session_id,
+        json!({
+            "sessionUpdate": "plan_update",
+            "plan": { "type": "markdown", "planId": "tasks", "markdown": markdown },
+        }),
+    )
+}
+
 /// `session/update` 通知帧（外层）。
 fn update_frame(session_id: &str, update: Value) -> Value {
     json!({ "sessionId": session_id, "update": update })

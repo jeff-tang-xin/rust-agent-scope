@@ -733,6 +733,23 @@
   text-decoration: line-through;
 }
 
+.planActive {
+  color: var(--fg-strong);
+  font-weight: 500;
+}
+
+.planProgress {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.planSpec {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  font-size: 13px;
+}
+
 .permissionLine {
   box-sizing: border-box;
   display: flex;
