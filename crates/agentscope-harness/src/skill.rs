@@ -314,6 +314,8 @@ tasks.md 是唯一状态源，`update_plan` 是它的**投影**——文档给�
 
 /// 全部内置技能：`(SKILL.md 全文, 适用模式)`——模式为空表示任意模式可加载，
 /// 否则 agent 进入对应模式时才加载（如 `plan`）。新增内置技能在此追加。
+/// 注意：这里只放**框架级**通用技能（如 spec-workflow，studio/oxidea 共用）；
+/// 宿主专属技能（如 OXidea 使用说明）由宿主侧注入，不进框架。
 pub const BUILTIN_SKILLS: &[(&str, &str)] = &[(SPEC_WORKFLOW_SKILL, "plan")];
 
 /// 按名取内置技能（`source` 标记为 `builtin`）。

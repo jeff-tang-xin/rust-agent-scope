@@ -15,6 +15,7 @@
 //! state store 自管，进程重启后靠 agentscope 侧恢复，不走 ACP 重放。
 
 pub mod datasource;
+pub mod oxidea_skill;
 pub mod protocol;
 pub mod rpc;
 pub mod session;
@@ -63,13 +64,29 @@ pub fn set_ox_tool_provider(provider: OxToolProvider) {
 pub static OX_PROVIDER_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 装配 agent 时取用：未注册或调用失败都返回空上下文，agent 优雅降级为文件 + shell 工具。
+///
+/// 记忆锚点兜底：宿主未注册 provider（独立 stdio 进程）或 provider 未命中项目时，
+/// 自推导 `<cwd>/.oxidea/agent`——与 IDE 宿主注入的锚点同路径。记忆/黑板/会话
+/// 持久化是 agent 的标准能力，不随宿主接线方式降级：丢了它们，agent 无状态
+/// （重启即失忆）、无沉淀（黑板报/记忆工具消失、提示词记忆段为空）。
 pub(crate) fn ox_context_for(cwd: &Path) -> OxHostContext {
+    let fallback_root = cwd.join(".oxidea").join("agent");
     OX_TOOLS
         .read()
         .unwrap()
         .as_ref()
-        .map(|provider| provider(cwd))
-        .unwrap_or(OxHostContext { tools: Vec::new(), memory_root: None, project_brief: None })
+        .map(|provider| {
+            let mut ctx = provider(cwd);
+            if ctx.memory_root.is_none() {
+                ctx.memory_root = Some(fallback_root.clone());
+            }
+            ctx
+        })
+        .unwrap_or(OxHostContext {
+            tools: Vec::new(),
+            memory_root: Some(fallback_root),
+            project_brief: None,
+        })
 }
 
 /// `env` 是模型配置（`AGENTSCOPE_*`），独立进程模式传进程环境，进程内模式由宿主注入。

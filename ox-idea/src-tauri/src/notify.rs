@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ide_agent::{AgentEvent, AgentStatus, AgentTask};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 
 /// 同键重复抑制窗口：多窗口转发同一事件几乎同时到达（间隔远小于 1s），
@@ -48,6 +48,31 @@ pub fn register_app_id(_identifier: &str, _name: &str) {}
 fn notified() -> &'static Mutex<HashMap<(String, &'static str), Instant>> {
     static NOTIFIED: OnceLock<Mutex<HashMap<(String, &'static str), Instant>>> = OnceLock::new();
     NOTIFIED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 悬浮球状态广播：agent 任务的每次状态变化全局 emit（`app.emit` 所有窗口
+/// 都收到，floating-ball 据此驱动天线灯与提醒徽标）。与系统通知（`agent_event`）
+/// 同源但职责不同：通知只挑需要关注的状态且去重；这里全量广播——运行/空闲
+/// 驱动状态灯，完成/审批/失败/限额驱动徽标，前端按 task_id 幂等聚合。
+pub fn agent_attention(app: &AppHandle, window: &str, event: &AgentEvent) {
+    let AgentEvent::Task { task } = event else { return };
+    let status = match task.status {
+        AgentStatus::Starting | AgentStatus::Running => "running",
+        AgentStatus::Ready => "ready",
+        AgentStatus::NeedsInput => "needs_input",
+        AgentStatus::Failed => "failed",
+        AgentStatus::Limited => "limited",
+        AgentStatus::Archived => return,
+    };
+    let _ = app.emit(
+        "oxidea://agent-attention",
+        serde_json::json!({
+            "task_id": task.id,
+            "status": status,
+            "title": task.title,
+            "window": window,
+        }),
+    );
 }
 
 /// Agent 事件 → 系统通知（需要用户关注的状态；同一任务的同一状态只发一次）。

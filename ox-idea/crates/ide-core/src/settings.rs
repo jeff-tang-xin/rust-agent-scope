@@ -403,6 +403,8 @@ pub struct AppearanceSettings {
     pub status_bar_widgets: BTreeMap<String, bool>,
     /// Customize Main Toolbar; `None` = the default toolbar.
     pub main_toolbar: Option<MainToolbarSettings>,
+    /// Desktop floating ball (assistant launcher): `false` hides it until re-enabled.
+    pub floating_ball: bool,
 }
 
 /// Main toolbar entries per side, in order: title widget ids (`project`,
@@ -472,6 +474,7 @@ impl Default for AppearanceSettings {
             show_status_bar: true,
             status_bar_widgets: BTreeMap::new(),
             main_toolbar: None,
+            floating_ball: true,
         }
     }
 }

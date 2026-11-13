@@ -693,8 +693,26 @@ impl ReActAgent {
             return Ok(());
         };
         let user_id = state.user_id.as_deref();
-        let current = store.get_versioned::<AgentState>(user_id, &state.session_id, LEGACY_STATE_KEY)?;
-        store.save_if_version(user_id, &state.session_id, LEGACY_STATE_KEY, state, current.version)?;
+        // CAS 冲突重试：并发写者（被 abort 的残留 task 与新 turn）交错时，
+        // JsonFile 后端冲突即返回 UNVERSIONED 静默丢弃——整份最新历史（含
+        // steer 介入消息）不落盘，下次重载回退，表现为「介入后失忆」。
+        // 重读-重存循环几次；耗尽后强制覆盖：状态是单写者语义，覆盖者持有
+        // 更新的快照，历史完整性优先于严格 CAS。
+        for _ in 0..3 {
+            let current =
+                store.get_versioned::<AgentState>(user_id, &state.session_id, LEGACY_STATE_KEY)?;
+            let version = store.save_if_version(
+                user_id,
+                &state.session_id,
+                LEGACY_STATE_KEY,
+                state,
+                current.version,
+            )?;
+            if version != crate::state::UNVERSIONED {
+                return Ok(());
+            }
+        }
+        store.save(user_id, &state.session_id, LEGACY_STATE_KEY, state)?;
         Ok(())
     }
 
@@ -1195,6 +1213,14 @@ impl ReActAgent {
             for msg in self.take_steers_for(ctx.runtime.session_id()) {
                 ctx.push(msg);
                 ctx.capture("steer_injected")?;
+            }
+            // 每步边界落盘（Legacy）：cancel/abort 直接杀 future，turn 末尾的
+            // persist_state 不会执行——只在调用结束保存的话，被中断轮次的全部
+            // 产物（含 steer 介入消息）会随下次重载回退丢失，表现为「介入后
+            // 失忆」。每步保存一次，中断最多丢当前步。失败不终止任务（turn
+            // 结束还有一次保存兜底）。
+            if self.history_mode == SessionHistoryMode::Legacy {
+                let _ = self.persist_state(&ctx.snapshot());
             }
             // 迭代边界异步钩子（对应 Java 每轮 onReasoning 的检查点，如压缩）：
             // 在 reasoning 之前执行；失败即终止调用（钩子自行决定是否降级）。

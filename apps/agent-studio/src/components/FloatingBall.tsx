@@ -1,22 +1,27 @@
 /**
- * 桌面悬浮球（floating-ball 窗口，index.html?view=ball）：
- * 可拖拽的小机器人——左键按住拖拽（data-tauri-drag-region），右键弹菜单
- * （打开主窗 / 切换外观 / 本次隐藏 / 停用）。机器人常驻动画：上下漂浮 +
- * 眨眼（纯 CSS，见 styles.css 的 fb- 段）。
+ * 桌面悬浮球（floating-ball 窗口，index.html?view=ball）——工作台管家：
+ * 单击即开主窗（最常用动作零成本），按住拖拽移动（位移 >5px 才算拖拽，
+ * 与单击自然区分），右键弹菜单。天线灯状态感知：监听全局 turn 事件，
+ * 绿灯呼吸=空闲、橙灯快闪=有 turn 在跑。
  *
  * 窗口尺寸由后端 ball.rs 管理：平时 92×92，菜单弹出时 invoke
- * ball_menu_resize(true) 扩到 240×300（机器人锚定右上角不动），关闭缩回。
+ * ball_menu_resize(true) 扩到 240×320（机器人锚定右上角不动），关闭缩回。
+ * 位置记忆：拖拽结束存 localStorage，启动时恢复（前端 setPosition）。
  */
 
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 
 type Appearance = "light" | "dark";
 const APPEARANCE_KEY = "studio-ball-appearance";
+const POSITION_KEY = "studio-ball-pos";
+/** 位移超过该像素数判定为拖拽（否则单击）。 */
+const DRAG_THRESHOLD = 5;
 
 /** 机器人本体：白色方块头 + 黑脸屏 + 白菱形眼 + 身体 + 绿色电路板。 */
-function Robot({ dark }: { dark: boolean }) {
+function Robot({ dark, working }: { dark: boolean; working: boolean }) {
   const shell = dark ? "#334155" : "#f8fafc";
   const shellStroke = dark ? "#475569" : "#e2e8f0";
   const body = dark ? "#1e293b" : "#f1f5f9";
@@ -24,9 +29,15 @@ function Robot({ dark }: { dark: boolean }) {
   const eye = dark ? "#0f172a" : "#ffffff";
   return (
     <svg className="fb-robot" viewBox="0 0 96 96" aria-hidden>
-      {/* 天线 */}
+      {/* 天线灯：空闲绿呼吸 / 工作中橙快闪（动画类由 working 切换） */}
       <line x1="48" y1="9" x2="48" y2="17" stroke={shellStroke} strokeWidth="3" strokeLinecap="round" />
-      <circle cx="48" cy="7" r="3.5" fill="#4ade80" className="fb-antenna" />
+      <circle
+        cx="48"
+        cy="7"
+        r="3.5"
+        fill={working ? "#fb923c" : "#4ade80"}
+        className={working ? "fb-antenna fb-antenna--working" : "fb-antenna"}
+      />
       {/* 头 */}
       <rect x="18" y="17" width="60" height="44" rx="10" fill={shell} stroke={shellStroke} strokeWidth="1.5" />
       {/* 脸屏 */}
@@ -53,7 +64,65 @@ export default function FloatingBallApp() {
     () => (localStorage.getItem(APPEARANCE_KEY) as Appearance) || "light",
   );
   const [menuOpen, setMenuOpen] = useState(false);
+  const [working, setWorking] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // ---- 状态灯：全局 turn 事件（app.emit 广播到所有窗口，悬浮球也收到）----
+  useEffect(() => {
+    const unlisteners = [
+      listen("turn-started", () => setWorking(true)),
+      listen("turn-finished", () => setWorking(false)),
+    ];
+    return () => {
+      void Promise.all(unlisteners).then((fns) => fns.forEach((fn) => fn()));
+    };
+  }, []);
+
+  // ---- 启动时恢复上次拖拽到的位置（localStorage 记忆）----
+  useEffect(() => {
+    const raw = localStorage.getItem(POSITION_KEY);
+    if (!raw) return;
+    try {
+      const { x, y } = JSON.parse(raw) as { x: number; y: number };
+      void getCurrentWindow().setPosition(new LogicalPosition(x, y)).catch(() => {});
+    } catch {
+      localStorage.removeItem(POSITION_KEY);
+    }
+  }, []);
+
+  // ---- 单击开主窗 / 按住拖拽（位移阈值区分），拖拽结束记忆位置 ----
+  const dragRef = useRef<{ startX: number; startY: number; dragging: boolean; poll?: number } | null>(null);
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, dragging: false };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d || d.dragging) return;
+    if (Math.abs(e.clientX - d.startX) < DRAG_THRESHOLD && Math.abs(e.clientY - d.startY) < DRAG_THRESHOLD) return;
+    d.dragging = true;
+    // 系统拖拽循环可能吞掉后续 pointer 事件——轮询窗口位置兜底记忆。
+    const win = getCurrentWindow();
+    d.poll = window.setInterval(() => {
+      void win
+        .outerPosition()
+        .then((pos) => {
+          const scale = window.devicePixelRatio || 1;
+          localStorage.setItem(POSITION_KEY, JSON.stringify({ x: pos.x / scale, y: pos.y / scale }));
+        })
+        .catch(() => {});
+    }, 400);
+    void win.startDragging().catch(() => {});
+  };
+  const onPointerUp = () => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (d?.poll) window.clearInterval(d.poll);
+    if (d && !d.dragging) {
+      // 单击：打开主窗（工作台管家最常用动作，零成本直达）。
+      void api.ballShowMain().catch(() => {});
+    }
+  };
 
   // 菜单开合 → 后端扩缩窗口（机器人锚定右上角不动）。
   useEffect(() => {
@@ -101,13 +170,15 @@ export default function FloatingBallApp() {
     <div className={`fb-root ${appearance}`}>
       <div
         className="fb-ball"
-        data-tauri-drag-region
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         onContextMenu={(e) => {
           e.preventDefault();
           setMenuOpen(true);
         }}
       >
-        <Robot dark={appearance === "dark"} />
+        <Robot dark={appearance === "dark"} working={working} />
       </div>
       {menuOpen && (
         <div className="fb-menu" ref={menuRef}>

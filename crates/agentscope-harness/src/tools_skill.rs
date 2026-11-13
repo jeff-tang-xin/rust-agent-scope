@@ -13,7 +13,7 @@ use agentscope_core::tool::{Tool, ToolContext, ToolOutput};
 use serde_json::{json, Value};
 
 use crate::skill::{
-    SkillSecurityScanner, SkillUtil, TrustLevel, WorkspaceSkillRepository, SKILL_FILE,
+    AgentSkill, SkillSecurityScanner, SkillUtil, TrustLevel, WorkspaceSkillRepository, SKILL_FILE,
 };
 use crate::tools_filesystem::{fuzzy_search, MatchLevel};
 
@@ -982,6 +982,10 @@ impl Tool for ProposeSkillTool {
 /// 用户级（只读）在后，与系统提示词里注入的技能清单顺序一致。
 pub struct LoadSkillTool {
     repos: Vec<Arc<WorkspaceSkillRepository>>,
+    /// 宿主注入的额外内置技能（如 OXidea 的使用说明）：仓库检索不到时兜底，
+    /// 与框架级 `BUILTIN_SKILLS` 同语义（不落盘、无附属文件），但内容归宿主——
+    /// 框架保持通用，产品专属技能不进 `BUILTIN_SKILLS`。
+    extra_builtins: Vec<AgentSkill>,
 }
 
 impl LoadSkillTool {
@@ -990,7 +994,13 @@ impl LoadSkillTool {
 
     /// 按优先级绑定仓库（顺序即检索顺序）。
     pub fn new(repos: Vec<Arc<WorkspaceSkillRepository>>) -> Self {
-        Self { repos }
+        Self { repos, extra_builtins: Vec::new() }
+    }
+
+    /// 注入宿主专属的内置技能（检索兜底，优先级低于框架级内置）。
+    pub fn with_extra_builtins(mut self, extra: Vec<AgentSkill>) -> Self {
+        self.extra_builtins = extra;
+        self
     }
 
     /// 附属文件相对路径校验：拒绝空、目录穿越、绝对路径与反斜杠。
@@ -1081,12 +1091,23 @@ impl Tool for LoadSkillTool {
                 repo.source()
             )));
         }
-        // 仓库检索不到 → 内置技能回退（随框架分发、不落盘；无附属文件）。
+        // 仓库检索不到 → 内置技能回退（随框架分发、不落盘；无附属文件）：
+        // 先框架级 BUILTIN_SKILLS，再宿主注入的 extra_builtins。
         if rel_path == SKILL_FILE {
             if let Some(builtin) = crate::skill::builtin_skill(skill) {
                 return Ok(ToolOutput::ok(format!(
                     "[skill: {skill} @ builtin]\n\n{}",
                     builtin.skill_content()
+                )));
+            }
+            if let Some(extra) = self
+                .extra_builtins
+                .iter()
+                .find(|s| s.name() == Some(skill))
+            {
+                return Ok(ToolOutput::ok(format!(
+                    "[skill: {skill} @ builtin]\n\n{}",
+                    extra.skill_content()
                 )));
             }
         }

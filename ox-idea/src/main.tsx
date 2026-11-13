@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles/global.css";
 import { Workbench } from "./workbench/Workbench";
 import { activateSecondaryWindow, activateWorkbench } from "./workbench/activate";
@@ -10,6 +11,7 @@ import {
   activateSettingsWindowFeatures,
   ComparisonWindow,
   DeploymentWindow,
+  FloatingBallApp,
   SettingsWindow,
 } from "./features";
 import { auxiliaryWindow } from "./platform/auxWindow";
@@ -32,6 +34,18 @@ if (import.meta.env.DEV && isTauri()) {
   (window as unknown as { __TAURI__?: unknown }).__TAURI__ ??= { core: { invoke }, event: { emit } };
 }
 
+// Desktop floating ball (label `floating-ball`, created by src-tauri/src/ball.rs):
+// a standalone terminal-assistant widget — no workbench, no feature activation.
+function ballWindow(): boolean {
+  if (!isTauri()) return false;
+  try {
+    return getCurrentWindow().label === "floating-ball";
+  } catch {
+    return false;
+  }
+}
+const isBall = ballWindow();
+
 installRepeatedDoubleClick();
 // WebKit only (bug 219670). In Chromium (the e2e browser) a scripted double-click stamps its
 // second press like the release before it, which the shim would take for a reordered tap and
@@ -46,7 +60,9 @@ installPageSwipeTracking(window);
 // Deployed `deployment-<parent>`) load this page too.
 const aux = auxiliaryWindow();
 
-if (aux?.kind === "settings") {
+if (isBall) {
+  // Floating ball: render the widget only — no workbench activation, no key dispatchers.
+} else if (aux?.kind === "settings") {
   activateSecondaryWindow();
   activateSettingsWindowFeatures(aux.parent);
 } else if (aux?.kind === "comparison") {
@@ -78,9 +94,11 @@ function App() {
   useEffect(() => {
     hideSplash();
     // Views split out of the start-up bundle load in the background once the UI is up.
-    if (!aux) return prefetchLazyComponents();
+    if (!aux && !isBall) return prefetchLazyComponents();
   }, []);
-  return aux?.kind === "settings" ? (
+  return isBall ? (
+    <FloatingBallApp />
+  ) : aux?.kind === "settings" ? (
     <SettingsWindow />
   ) : aux?.kind === "comparison" ? (
     <ComparisonWindow />

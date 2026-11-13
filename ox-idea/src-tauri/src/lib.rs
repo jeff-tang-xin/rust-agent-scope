@@ -4,6 +4,7 @@
 //! adapter from IPC to a backend crate; no domain logic lives here.
 
 mod application_focus;
+mod ball;
 mod cli;
 mod commands;
 #[cfg(debug_assertions)]
@@ -217,6 +218,10 @@ pub fn run() {
         }
         app.on_menu_event(on_menu_event);
         windows::create_main_window(app.handle())?;
+        // Desktop floating ball (assistant launcher), unless disabled in settings.
+        if app.state::<AppState>().global_settings.effective().appearance.floating_ball {
+            ball::spawn_floating_ball(app.handle());
+        }
         jump_list::refresh(app.handle(), app.state::<AppState>().recent.list());
         Ok(())
     })
