@@ -347,7 +347,10 @@ pub fn builtin_skill_summaries() -> Vec<(String, String, String)> {
 /// 宿主只需扫描自己的技能根并传入清单；渐进披露、冲突裁决、安装/创建引导
 /// 与内置分组都是框架统一行为。同名时外置优先，与 `load_skill` 工具的
 /// 「仓库优先、内置兜底」检索顺序一致。
-pub fn skill_section_markdown(external: &[(String, String)]) -> String {
+pub fn skill_section_markdown(
+    external: &[(String, String)],
+    manage_available: bool,
+) -> String {
     let builtin_section = {
         let builtins = builtin_skill_summaries();
         if builtins.is_empty() {
@@ -370,11 +373,17 @@ pub fn skill_section_markdown(external: &[(String, String)]) -> String {
         }
     };
     if external.is_empty() {
+        // manage_available=false（如 studio 测试工作区只装只读 load_skill）时，
+        // 安装引导替换为退路指引——协议不引导模型调不存在的工具。
+        let create_note = if manage_available {
+            "沉淀出可复用的流程/方法论时，用 skill_manage 把它写成 skill（frontmatter 的 \
+            name + description 写清「做什么、何时用」，正文写步骤），下次会话自动可用。"
+        } else {
+            "本工作区未开放 skill 安装工具——发现值得沉淀的流程时，在汇报里建议用户安装。"
+        };
         return format!(
             "\n### Skills（可复用流程说明书）\n\
-             \n当前没有已安装的 skill。沉淀出可复用的流程/方法论时，用 skill_manage 把它写成 \
-             skill（frontmatter 的 name + description 写清「做什么、何时用」，正文写步骤），\
-             下次会话自动可用。\n\
+             \n当前没有已安装的 skill。{create_note}\
              {builtin_section}"
         );
     }
@@ -405,15 +414,22 @@ pub fn skill_section_markdown(external: &[(String, String)]) -> String {
         "- 渐进披露：上面只是元数据。当前任务与某 skill 的 description 匹配时，先 load_skill \
          读全文再按其执行；正文指向附属文件（references/scripts 等）时用 load_skill 的 path 参数读。\n"
     };
+    // 安装/沉淀引导：仅在工具面提供 skill_manage/propose_skill 时渲染；否则给退路。
+    let manage_section = if manage_available {
+        "- 安装：用户给出 skill 地址（git 仓库/目录/zip）时，下载到系统临时目录 → 审查内容 → \
+        skill_manage create 写入（自动安全扫描，危险内容会被拒绝）→ 汇报安装位置与生效方式。\
+        安装只落项目级 .claude/skills/（跟项目走）；用户级 ~/.claude/skills 只读，仅供 load_skill 检索。\n\
+        - 创建：发现值得复用的流程时用 skill_manage/propose_skill 沉淀——description 决定未来\
+        何时被触发，要写清「做什么 + 何时用」。\n"
+    } else {
+        "- 安装/沉淀：本工作区未开放 skill 安装工具（skill_manage/propose_skill）——需要新 skill \
+        或发现值得沉淀的流程时，在汇报里建议用户安装；不要调用未提供的工具。\n"
+    };
     format!(
         "\n### Skills（可复用流程说明书）\n\
          \n{list_note}{list}\
          {disclosure}\
-         - 安装：用户给出 skill 地址（git 仓库/目录/zip）时，下载到系统临时目录 → 审查内容 → \
-         skill_manage create 写入（自动安全扫描，危险内容会被拒绝）→ 汇报安装位置与生效方式。\
-         安装只落项目级 .claude/skills/（跟项目走）；用户级 ~/.claude/skills 只读，仅供 load_skill 检索。\n\
-         - 创建：发现值得复用的流程时用 skill_manage/propose_skill 沉淀——description 决定未来\
-         何时被触发，要写清「做什么 + 何时用」。\n\
+         {manage_section}\
          {builtin_section}\n"
     )
 }
@@ -1219,7 +1235,7 @@ mod tests {
     fn skill_section_full_list_under_threshold() {
         let external: Vec<(String, String)> =
             (0..30).map(|i| (format!("skill-{i}"), format!("描述 {i}"))).collect();
-        let s = skill_section_markdown(&external);
+        let s = skill_section_markdown(&external, true);
         assert!(s.contains("skill-0: 描述 0"), "阈值内应全列 description");
         assert!(s.contains("name: description"));
         assert!(s.contains("spec-workflow [plan 模式]"), "内置分组始终全列");
@@ -1229,7 +1245,7 @@ mod tests {
     fn skill_section_compact_over_threshold() {
         let external: Vec<(String, String)> =
             (0..31).map(|i| (format!("skill-{i}"), format!("描述{}{i}", "很长的内容。".repeat(6)))).collect();
-        let s = skill_section_markdown(&external);
+        let s = skill_section_markdown(&external, true);
         // 紧凑模式：只列名字，description 不进清单
         assert!(s.contains("  - skill-0\n"), "紧凑模式应只列名字");
         assert!(!s.contains("skill-0: 一段很长的描述"), "description 不应进清单");
@@ -1241,9 +1257,13 @@ mod tests {
 
     #[test]
     fn skill_section_empty_shows_create_guidance() {
-        let s = skill_section_markdown(&[]);
+        let s = skill_section_markdown(&[], true);
         assert!(s.contains("当前没有已安装的 skill"));
         assert!(s.contains("skill_manage"));
+        // manage_available=false（如 studio 测试工作区）：安装引导替换为退路指引。
+        let ro = skill_section_markdown(&[], false);
+        assert!(ro.contains("未开放 skill 安装工具"));
+        assert!(!ro.contains("用 skill_manage 把它写成"));
     }
 
 

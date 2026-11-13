@@ -744,7 +744,7 @@ pub fn build_agent(
     // 加载测试类 skill）。
     let skill_section = {
         let summaries = collect_skill_summaries(&workspace_root, user_home_dir().as_deref());
-        skill_section_markdown(&summaries)
+        skill_section_markdown(&summaries, mode != StudioMode::Test)
     };
     let mut builder = HarnessAgentBuilder::new()
         .name(&agent.name)
@@ -1152,7 +1152,7 @@ mod tests {
                 .expect("minimal AgentConfig");
         // 真实渲染链路：harness skill_section_markdown（空外置清单 + 内置表）
         // ——内置 spec-workflow 始终全列，验证 studio 接线拿到的是框架渲染产物。
-        let section = skill_section_markdown(&[]);
+        let section = skill_section_markdown(&[], true);
         assert!(
             section.contains("spec-workflow [plan 模式]"),
             "builtin skill must be listed: {section}"

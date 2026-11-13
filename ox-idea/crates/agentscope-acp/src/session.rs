@@ -551,7 +551,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     // 内置分组、渐进披露与冲突裁决引导都在 harness 的 skill_section_markdown
     // 里统一渲染（框架行为，acp 只做产品化组装）。
     let skill_section =
-        agentscope_harness::skill::skill_section_markdown(&skill_summaries);
+        agentscope_harness::skill::skill_section_markdown(&skill_summaries, true);
     if !db_configs.is_empty() {
         let catalog = Arc::new(agentscope_db::DbCatalog::new());
         catalog.replace_all(&db_configs);

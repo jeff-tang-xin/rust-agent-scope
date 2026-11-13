@@ -3057,42 +3057,6 @@ pub struct SkillDetail {
     pub content: String,
 }
 
-/// 扫描一个 skill 根目录（两层布局 `<root>/<name>/SKILL.md`），解析成功的
-/// 且名字未重复的进清单——与 sys_prompt 的 L1 清单同策略（collect_skill_summaries），
-/// 保证用户在 "/" 面板看到的与模型看到的一致。
-fn collect_dir_skills(
-    root: &std::path::Path,
-    source: &str,
-    seen: &mut std::collections::HashSet<String>,
-    out: &mut Vec<SkillEntry>,
-) {
-    let entries = match std::fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    let mut dirs: Vec<std::path::PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-    dirs.sort();
-    for dir in dirs {
-        let Ok(content) = std::fs::read_to_string(dir.join("SKILL.md")) else {
-            continue;
-        };
-        let Ok(skill) = agentscope_harness::skill::SkillUtil::create_from(&content, None, source)
-        else {
-            continue;
-        };
-        let Some(name) = skill.name().map(str::to_owned) else {
-            continue;
-        };
-        if seen.insert(name.clone()) {
-            out.push(SkillEntry {
-                name,
-                description: skill.description().unwrap_or_default().to_owned(),
-                source: source.to_owned(),
-            });
-        }
-    }
-}
-
 /// 可用 skill 清单（"/" 面板数据源）：项目级在前、用户级次之、内置兜底；
 /// 同名项目级优先（与 load_skill 的仓库检索顺序一致）。
 #[tauri::command]
@@ -3101,11 +3065,21 @@ pub fn list_skills(
     workspace_id: String,
 ) -> Result<Vec<SkillEntry>, String> {
     let root = resolve_ws_root(&state, &workspace_id)?;
+    // 扫描复用 harness collect_skill_summaries（与 load_skill/sys_prompt 同一份
+    // 两层布局解析逻辑，避免双实现漂移）；按来源分两次扫以标记 project/user。
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    collect_dir_skills(&root.join(".claude").join("skills"), "project", &mut seen, &mut out);
+    for (name, description) in agentscope_harness::skill::collect_skill_summaries(&root, None) {
+        if seen.insert(name.clone()) {
+            out.push(SkillEntry { name, description, source: "project".to_owned() });
+        }
+    }
     if let Some(home) = crate::factory::user_home_dir() {
-        collect_dir_skills(&home.join(".claude").join("skills"), "user", &mut seen, &mut out);
+        for (name, description) in agentscope_harness::skill::collect_skill_summaries(&home, None) {
+            if seen.insert(name.clone()) {
+                out.push(SkillEntry { name, description, source: "user".to_owned() });
+            }
+        }
     }
     for (name, description, _mode) in agentscope_harness::skill::builtin_skill_summaries() {
         if seen.insert(name.clone()) {
