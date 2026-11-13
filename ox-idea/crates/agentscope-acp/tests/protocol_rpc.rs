@@ -331,7 +331,7 @@ async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
         .await
         .unwrap();
 
-    // 收集 compaction_update 通知，直到 prompt 响应到达
+    // 收集压缩通知（v1 工具卡片形态），直到 prompt 响应到达
     let mut updates = Vec::new();
     let mut prompt_result = None;
     for _ in 0..10 {
@@ -343,18 +343,26 @@ async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
             break;
         }
     }
-    assert_eq!(updates.len(), 2, "expected in_progress + completed, got {updates:?}");
-    assert_eq!(updates[0]["update"]["sessionUpdate"], "compaction_update");
+    assert_eq!(updates.len(), 2, "expected tool_call + tool_call_update, got {updates:?}");
+    // 首帧：tool_call「Compact conversation」卡片，in_progress
+    assert_eq!(updates[0]["update"]["sessionUpdate"], "tool_call");
+    assert_eq!(updates[0]["update"]["title"], "Compact conversation");
     assert_eq!(updates[0]["update"]["status"], "in_progress");
+    // 收尾帧：completed + 摘要文本（v2 content 包裹形态）
+    assert_eq!(updates[1]["update"]["sessionUpdate"], "tool_call_update");
     assert_eq!(updates[1]["update"]["status"], "completed");
-    // 同一 compactionId（Start/End 配对）
+    // 同一 toolCallId（Start/End 配对，compaction: 前缀与真实工具隔离）
     assert_eq!(
-        updates[0]["update"]["compactionId"],
-        updates[1]["update"]["compactionId"]
+        updates[0]["update"]["toolCallId"],
+        updates[1]["update"]["toolCallId"]
     );
+    assert!(updates[0]["update"]["toolCallId"]
+        .as_str()
+        .unwrap_or("")
+        .starts_with("compaction:"));
     // 空对话：completed 带说明文本（v2 content 包裹形态）
     assert_eq!(
-        updates[1]["update"]["summary"][0]["content"]["text"],
+        updates[1]["update"]["content"][0]["content"]["text"],
         "对话为空，无需压缩"
     );
     // prompt 正常结束（命令不进模型，无 LLM 依赖）

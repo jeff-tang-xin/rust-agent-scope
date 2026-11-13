@@ -297,9 +297,9 @@ fn is_compact_command(content: &[ContentBlock]) -> bool {
     text.trim().eq_ignore_ascii_case("/compact")
 }
 
-/// 执行 `/compact`：强制压缩会话上下文，进度与结果以 `compaction_update` 帧
-/// 通知 client（ide-agent normalize 成「Compact conversation」工具卡片）。
-/// 不调模型——压缩摘要由 harness 的辅助压缩模型完成。
+/// 执行 `/compact`：强制压缩会话上下文，进度与结果以 v1 工具卡片帧
+/// （「Compact conversation」）通知 client。不调模型——压缩摘要由
+/// harness 的辅助压缩模型完成。
 async fn compact_command<W>(
     session: &AcpSession,
     session_id: &str,
@@ -308,7 +308,7 @@ async fn compact_command<W>(
 where
     W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    // 每次命令一个新 id：normalize 按 id 记录压缩状态，复用固定 id 会让
+    // 每次命令一个新 id：client 按 toolCallId 记录卡片状态，复用固定 id 会让
     // 第二次 /compact 被当成旧卡片的更新而丢失。
     let compaction_id = format!(
         "manual-{}",
@@ -319,14 +319,14 @@ where
     );
     conn.notify(
         "session/update",
-        protocol::compaction_update(session_id, &compaction_id, "in_progress", ""),
+        protocol::compaction_tool_call(session_id, &compaction_id),
     )
     .await;
     let outcome = match session.agent.compact_now(None, session_id).await {
         Ok(Some(detail)) => {
             conn.notify(
                 "session/update",
-                protocol::compaction_update(session_id, &compaction_id, "completed", &detail),
+                protocol::compaction_tool_result(session_id, &compaction_id, "completed", &detail),
             )
             .await;
             PromptOutcome::EndTurn
@@ -334,7 +334,7 @@ where
         Ok(None) => {
             conn.notify(
                 "session/update",
-                protocol::compaction_update(
+                protocol::compaction_tool_result(
                     session_id,
                     &compaction_id,
                     "completed",
@@ -347,7 +347,7 @@ where
         Err(error) => {
             conn.notify(
                 "session/update",
-                protocol::compaction_update(session_id, &compaction_id, "failed", &error),
+                protocol::compaction_tool_result(session_id, &compaction_id, "failed", &error),
             )
             .await;
             PromptOutcome::EndTurn
@@ -1098,10 +1098,11 @@ where
                 }
                 AgentEventKind::ContextCompactionStart { reply_id } => {
                     // 压缩开始：摘要由模型生成，可能耗时数秒——先给前端
-                    // 「压缩中」状态，避免误判为卡死。
+                    // 「压缩中」状态，避免误判为卡死。v1 形态（工具卡片），
+                    // compaction_update 是 v2 类型、v1 通知不走 normalizer。
                     conn.notify(
                         "session/update",
-                        protocol::compaction_update(session_id, &reply_id, "in_progress", ""),
+                        protocol::compaction_tool_call(session_id, &reply_id),
                     )
                     .await;
                 }
@@ -1111,7 +1112,7 @@ where
                     // 由后续轮次的新事件覆盖。
                     conn.notify(
                         "session/update",
-                        protocol::compaction_update(
+                        protocol::compaction_tool_result(
                             session_id,
                             &reply_id,
                             "completed",

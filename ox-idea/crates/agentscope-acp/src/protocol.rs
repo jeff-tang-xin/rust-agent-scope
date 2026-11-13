@@ -291,19 +291,44 @@ pub fn tool_call_finished(
     json!({ "sessionId": session_id, "update": update })
 }
 
-/// 上下文压缩状态（`compaction_update`）：Start → in_progress，End →
-/// completed（`detail` 作为摘要文本）。同一轮压缩的 Start/End 用同一个
-/// compactionId（取 reply_id），client 侧据此把「压缩中」卡片更新为完成。
-/// ide-agent 的 normalize.rs 已支持渲染该 sessionUpdate。
-pub fn compaction_update(session_id: &str, compaction_id: &str, status: &str, summary_text: &str) -> Value {
+/// 上下文压缩开始（v1 形态）：「Compact conversation」工具卡片首帧，
+/// in_progress——摘要由模型生成可能耗时数秒，先给前端「压缩中」状态。
+///
+/// agentscope-acp 是 v1 agent（protocolVersion: 1），ide-agent 对 v1 通知
+/// **不走 normalizer**，`compaction_update`（v2 sessionUpdate 类型）到达
+/// timeline 后被静默丢弃——压缩必须按 v1 的表达方式报告：一个工具调用
+/// （与 normalize.rs 对 v2 agent 的降级映射一致）。同一轮压缩的
+/// Start/End 用同一个 compactionId（取 reply_id），toolCallId 加
+/// `compaction:` 前缀与真实工具调用隔离。
+pub fn compaction_tool_call(session_id: &str, compaction_id: &str) -> Value {
+    update_frame(
+        session_id,
+        json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": format!("compaction:{compaction_id}"),
+            "title": "Compact conversation",
+            "kind": "other",
+            "status": "in_progress",
+        }),
+    )
+}
+
+/// 上下文压缩结束（v1 形态）：`tool_call_update` 收尾——completed/failed
+/// 加摘要文本（`detail`，如「57 条消息合并为 1 条摘要」）。
+pub fn compaction_tool_result(
+    session_id: &str,
+    compaction_id: &str,
+    status: &str,
+    summary_text: &str,
+) -> Value {
     let mut update = json!({
-        "sessionUpdate": "compaction_update",
-        "compactionId": compaction_id,
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": format!("compaction:{compaction_id}"),
         "status": status,
     });
     if !summary_text.is_empty() {
-        // 形态同 tool_call content：v2 包裹（normalize.rs 的 summary 提取只认它）。
-        update["summary"] = json!([{ "type": "content", "content": { "type": "text", "text": summary_text } }]);
+        // 形态同 tool_call content：v2 包裹（timeline 的 output 提取只认它）。
+        update["content"] = json!([{ "type": "content", "content": { "type": "text", "text": summary_text } }]);
     }
     update_frame(session_id, update)
 }
