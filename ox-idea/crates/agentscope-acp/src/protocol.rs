@@ -38,18 +38,26 @@ pub fn initialize_result() -> Value {
 }
 
 /// `session/new` 响应。
-pub fn new_session_result(session_id: &str) -> Value {
+///
+/// `commands` 是可斜杠调用的 skill 清单（availableCommands 条目，source=skill）：
+/// ide-agent 的 on_setup 把它转成 `available_commands_update`，前端 `/` 面板
+/// 的 Skills 分组才有数据——磁盘扫描 + 宿主专属内置，由装配方算好传入。
+pub fn new_session_result(session_id: &str, commands: &[Value]) -> Value {
     // promptCapabilities：image 声明接受图片输入（ide-agent 据此放行贴图，
     // 否则 "This agent can't read images." 直接拒绝）；embeddedContext 声明
     // 接受内嵌文件（@ 引用的文件内容随 prompt 到达，见 content_blocks）。
-    json!({
+    let mut result = json!({
         "sessionId": session_id,
         "agentCapabilities": {
             "loadSession": true,
             "promptCapabilities": { "image": true, "embeddedContext": true },
             "_meta": { "/oxidea/steer": true },
         },
-    })
+    });
+    if !commands.is_empty() {
+        result["availableCommands"] = Value::Array(commands.to_vec());
+    }
+    result
 }
 
 /// mode configOption（category "mode"）：Code/Plan 两态下拉，前端 Composer
@@ -79,9 +87,9 @@ pub fn mode_config_options(plan_active: bool) -> Value {
 }
 
 /// `session/new` / `session/load` 响应（带 mode configOption，`plan_active`
-/// 反映恢复会话的真实 plan 态）。
-pub fn session_result(session_id: &str, plan_active: bool) -> Value {
-    let mut result = new_session_result(session_id);
+/// 反映恢复会话的真实 plan 态；`commands` 见 [`new_session_result`]）。
+pub fn session_result(session_id: &str, plan_active: bool, commands: &[Value]) -> Value {
+    let mut result = new_session_result(session_id, commands);
     result["configOptions"] = mode_config_options(plan_active);
     result
 }
@@ -530,8 +538,23 @@ mod tests {
 
     #[test]
     fn new_session_declares_embedded_context() {
-        let v = new_session_result("s1");
+        let v = new_session_result("s1", &[]);
         assert_eq!(v["agentCapabilities"]["promptCapabilities"]["embeddedContext"], json!(true));
+    }
+
+    #[test]
+    fn new_session_declares_skill_commands() {
+        let commands = vec![
+            json!({ "name": "oxidea-usage", "description": "OXidea 操作指南", "source": "skill" }),
+            json!({ "name": "spec-workflow", "description": "spec 文档生命周期", "source": "skill" }),
+        ];
+        let v = new_session_result("s1", &commands);
+        let listed = v["availableCommands"].as_array().expect("availableCommands 缺失");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0]["name"], "oxidea-usage");
+        assert_eq!(listed[0]["source"], "skill");
+        // 空清单不声明该字段（ide-agent on_setup 对缺失字段直接跳过）。
+        assert!(new_session_result("s2", &[]).get("availableCommands").is_none());
     }
 
     #[test]

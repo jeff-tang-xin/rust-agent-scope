@@ -142,6 +142,16 @@ async fn session_new_assembles_memory_pipeline_from_host_context() {
     let frame = read_frame(&mut client_reader).await;
     assert_eq!(frame["id"], 2);
     assert!(frame["result"]["sessionId"].is_string(), "session/new failed: {frame}");
+    // `/` 面板的 skill 声明：宿主专属内置（oxidea-usage）+ 框架内置
+    // （spec-workflow）随 session/new 声明（磁盘无 .claude/skills 也有内置可调）。
+    let listed = frame["result"]["availableCommands"].as_array().expect("availableCommands 缺失");
+    let names: Vec<&str> = listed.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert!(names.contains(&"oxidea-usage"), "内置 oxidea-usage 应声明: {names:?}");
+    assert!(names.contains(&"spec-workflow"), "框架内置 spec-workflow 应声明: {names:?}");
+    assert!(
+        listed.iter().all(|c| c["source"] == "skill"),
+        "skill 声明的 source 应为 skill: {listed:?}"
+    );
 
     server_task.abort();
     // 收尾【不】删除 root（与文件头注释一致）：并行测试（mode/compact 端到端）

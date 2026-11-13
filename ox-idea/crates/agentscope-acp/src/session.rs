@@ -55,6 +55,9 @@ struct AcpSession {
     /// 取消信号：`session/cancel` 置 true，drive_turn 的 select 竞争感知。
     /// watch 保留最新值——通知到达时 drive_turn 即使还没进入等待也不会丢。
     cancel_tx: watch::Sender<bool>,
+    /// `/` 面板的 skill 声明（availableCommands 条目）：装配时算好，
+    /// session/new 与 session/load 幂等返回共用一份。
+    skill_commands: SkillCommands,
 }
 
 /// 会话表：sessionId → 会话。
@@ -64,6 +67,10 @@ pub struct AcpSessionHub {
     /// 独立进程模式下来自进程环境。
     env: Vec<(String, String)>,
 }
+
+/// `/` 面板的 skill 声明条目（availableCommands，装配时算好随会话存取，
+/// session/new 与 session/load 幂等返回共用一份）。
+type SkillCommands = Vec<Value>;
 
 impl AcpSessionHub {
     pub fn new(env: Vec<(String, String)>) -> Self {
@@ -78,7 +85,8 @@ impl AcpSessionHub {
         let cwd = protocol::parse_new_session(&params)?;
         let model = build_model(&self.env).map_err(RpcError::internal)?;
         let session_id = uuid::Uuid::new_v4().to_string();
-        let agent = assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
+        let (agent, skill_commands) =
+            assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
         let (cancel_tx, _cancel_rx) = watch::channel(false);
         self.sessions.lock().unwrap().insert(
             session_id.clone(),
@@ -87,10 +95,11 @@ impl AcpSessionHub {
                 cwd: PathBuf::from(&cwd),
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
+                skill_commands: skill_commands.clone(),
             }),
         );
         // 新会话固定 Code 态：plan 由用户切换，装配时不预设。
-        Ok(protocol::session_result(&session_id, false))
+        Ok(protocol::session_result(&session_id, false, &skill_commands))
     }
 
     /// `session/load`：按 sessionId 重建 agent，Legacy state store 自动重放
@@ -99,8 +108,12 @@ impl AcpSessionHub {
     /// 会话报错——client 收到错误会 fallback `session/new` 开新会话。
     pub async fn load_session(&self, params: Value) -> Result<Value, RpcError> {
         let (session_id, cwd) = protocol::parse_load_session(&params)?;
-        if self.sessions.lock().unwrap().contains_key(&session_id) {
-            return Ok(protocol::new_session_result(&session_id));
+        if let Some(existing) = self.sessions.lock().unwrap().get(&session_id) {
+            return Ok(protocol::session_result(
+                &session_id,
+                false,
+                &existing.skill_commands,
+            ));
         }
         let root = sessions_root(&cwd).ok_or_else(|| {
             RpcError::invalid_params(format!(
@@ -118,7 +131,8 @@ impl AcpSessionHub {
             return Err(RpcError::invalid_params(format!("未知会话: {session_id}")));
         }
         let model = build_model(&self.env).map_err(RpcError::internal)?;
-        let agent = assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
+        let (agent, skill_commands) =
+            assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
         let (cancel_tx, _cancel_rx) = watch::channel(false);
         self.sessions.lock().unwrap().insert(
             session_id.clone(),
@@ -127,12 +141,13 @@ impl AcpSessionHub {
                 cwd: PathBuf::from(&cwd),
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
+                skill_commands: skill_commands.clone(),
             }),
         );
         // 恢复会话的 plan 态随 AgentState 持久化（plan_mode_context），重建后
         // 如实上报——前端下拉与真实拦截状态一致。
         let plan_active = agent.is_plan_mode_active(None, &session_id);
-        Ok(protocol::session_result(&session_id, plan_active))
+        Ok(protocol::session_result(&session_id, plan_active, &skill_commands))
     }
 
     /// `session/set_config_option`：用户切换 Code/Plan 模式。plan 是用户手动
@@ -376,7 +391,11 @@ const PLAN_PROMPT: &str = "PLAN MODE ACTIVE（用户已手动开启）：只做�
 
 /// 装配一个面向 ACP 会话的 agent：文件工具 + 本地 shell 锚定 cwd，
 /// 系统提示词声明工作目录与能力边界。
-fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) -> Result<Arc<HarnessAgent>, String> {
+fn assemble_agent(
+    cwd: &str,
+    model: Arc<dyn Model>,
+    env: &[(String, String)],
+) -> Result<(Arc<HarnessAgent>, Vec<Value>), String> {
     // 本地磁盘文件系统层（Sandboxed：文件工具的绝对路径一律拒绝，锚定 cwd）。
     let sandboxed = |root: PathBuf| {
         Arc::new(LocalFilesystem::new(
@@ -562,6 +581,21 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
     // 里统一渲染（框架行为，acp 只做产品化组装）。
     let skill_section =
         agentscope_harness::skill::skill_section_markdown(&skill_summaries, true);
+    // `/` 面板的 skill 声明（availableCommands，source=skill）：与 sys_prompt
+    // 的 L1 清单同源——磁盘扫描 + 宿主专属内置；框架内置（spec-workflow 等）
+    // 同名时外置优先（与 load_skill 的仓库优先检索一致）。ide-agent 的
+    // on_setup 把它转成 available_commands_update，前端 Skills 分组才有数据。
+    let mut skill_commands: Vec<Value> = skill_summaries
+        .iter()
+        .map(|(name, desc)| {
+            json!({ "name": name, "description": desc, "source": "skill" })
+        })
+        .collect();
+    for (name, desc, _mode) in agentscope_harness::skill::builtin_skill_summaries() {
+        if !skill_summaries.iter().any(|(n, _)| *n == name) {
+            skill_commands.push(json!({ "name": name, "description": desc, "source": "skill" }));
+        }
+    }
     if !db_configs.is_empty() {
         let catalog = Arc::new(agentscope_db::DbCatalog::new());
         catalog.replace_all(&db_configs);
@@ -734,7 +768,7 @@ fn assemble_agent(cwd: &str, model: Arc<dyn Model>, env: &[(String, String)]) ->
         builder = builder.state_store(Arc::clone(store));
     }
     let agent = builder.build().map_err(|e| format!("装配 agent 失败: {e}"))?;
-    Ok(Arc::new(agent))
+    Ok((Arc::new(agent), skill_commands))
 }
 
 /// 从给定环境构建模型实例（对齐 studio factory 的分发模式）：
@@ -1360,6 +1394,7 @@ mod tests {
             cwd: PathBuf::from("."),
             busy: std::sync::atomic::AtomicBool::new(false),
             cancel_tx,
+            skill_commands: Vec::new(),
         };
 
         // 读循环：消费 server 端入站帧（client 回的响应），配对给等待者。
@@ -1432,6 +1467,7 @@ mod tests {
                                 cwd: PathBuf::from("."),
                                 busy: std::sync::atomic::AtomicBool::new(true),
                                 cancel_tx: cancel_tx.clone(),
+                                skill_commands: Vec::new(),
                             }),
                         );
                         hub.steer(&json!({
@@ -1853,6 +1889,7 @@ mod tests {
                 cwd: PathBuf::from("."),
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
+                skill_commands: Vec::new(),
             }),
         );
         let params = json!({ "sessionId": "s1", "cwd": "/p", "mcpServers": [] });
@@ -1894,6 +1931,7 @@ mod tests {
                 cwd: PathBuf::from("."),
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
+                skill_commands: Vec::new(),
             }),
         );
         let (_client, server) = tokio::io::duplex(64 * 1024);
@@ -1959,13 +1997,13 @@ mod tests {
         let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
 
         let model1 = MockModel::new(vec![]);
-        let agent1 = assemble_agent(cwd.to_str().unwrap(), model1, &env).unwrap();
+        let agent1 = assemble_agent(cwd.to_str().unwrap(), model1, &env).unwrap().0;
         assert!(!agent1.is_plan_mode_active(None, "s-plan"));
         agent1.enter_plan_mode(None, "s-plan").unwrap();
         assert!(agent1.is_plan_mode_active(None, "s-plan"));
 
         let model2 = MockModel::new(vec![]);
-        let agent2 = assemble_agent(cwd.to_str().unwrap(), model2, &env).unwrap();
+        let agent2 = assemble_agent(cwd.to_str().unwrap(), model2, &env).unwrap().0;
         assert!(
             agent2.is_plan_mode_active(None, "s-plan"),
             "plan 态应随 AgentState 持久化并在重建后恢复"
@@ -1997,12 +2035,12 @@ mod tests {
         let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
 
         let model1 = MockModel::new(vec![ChatResponse::from_text("第一轮回复")]);
-        let agent1 = assemble_agent(cwd.to_str().unwrap(), model1.clone(), &env).unwrap();
+        let agent1 = assemble_agent(cwd.to_str().unwrap(), model1.clone(), &env).unwrap().0;
         let (_n1, outcome1) = run_drive_turn(agent1, "第一轮提问", None, false, None).await;
         assert_eq!(outcome1, PromptOutcome::EndTurn);
 
         let model2 = MockModel::new(vec![ChatResponse::from_text("第二轮回复")]);
-        let agent2 = assemble_agent(cwd.to_str().unwrap(), model2.clone(), &env).unwrap();
+        let agent2 = assemble_agent(cwd.to_str().unwrap(), model2.clone(), &env).unwrap().0;
         let (_n2, outcome2) = run_drive_turn(agent2, "第二轮提问", None, false, None).await;
         assert_eq!(outcome2, PromptOutcome::EndTurn);
         let seen = model2.seen_texts(0);
@@ -2028,6 +2066,7 @@ mod tests {
                 cwd: PathBuf::from("."),
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
+                skill_commands: Vec::new(),
             }),
         );
         let params = json!({
@@ -2231,7 +2270,7 @@ mod tests {
             finish_reason: None,
         };
         let model = MockModel::new(vec![ChatResponse::from_text("完成"), tool_use]);
-        let agent = assemble_agent(cwd.to_str().unwrap(), model.clone(), &env).unwrap();
+        let agent = assemble_agent(cwd.to_str().unwrap(), model.clone(), &env).unwrap().0;
         let (notifications, outcome) =
             run_drive_turn(agent, "用 demo skill", None, false, None).await;
         assert_eq!(outcome, PromptOutcome::EndTurn);
