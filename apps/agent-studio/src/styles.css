@@ -2542,6 +2542,79 @@ select:focus:not(:focus-visible) {
 /* 工作中：橙灯快闪（turn-started → turn-finished 之间）。 */
 .fb-antenna--working { animation: fb-glow 0.7s ease-in-out infinite; }
 
+/* 身体动画作用在 g 上（transform-box 让原点相对元素自身）。 */
+.fb-body {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* 运行中=疯狂工作：身体高频微抖。 */
+.fb-body--working {
+  animation: fb-work-shake 0.18s linear infinite;
+}
+
+@keyframes fb-work-shake {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(-0.6px);
+  }
+  75% {
+    transform: translateY(0.6px);
+  }
+}
+
+/* 空闲=发呆：身体缓慢轻摇。 */
+.fb-body--idle {
+  animation: fb-idle-sway 3.2s ease-in-out infinite;
+}
+
+@keyframes fb-idle-sway {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(1.6deg);
+  }
+  75% {
+    transform: rotate(-1.6deg);
+  }
+}
+
+/* 电路板：运行中狂闪（焊接中）。 */
+.fb-board--flash {
+  animation: fb-board-flash 0.5s steps(2, jump-none) infinite;
+}
+
+@keyframes fb-board-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* 提醒徽标：弹出小跳。 */
+.fb-badge {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fb-badge-pop 0.25s ease-out;
+}
+
+@keyframes fb-badge-pop {
+  from {
+    transform: scale(0.4);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 /* 右键菜单：窗口扩到 240×320 后渲染在机器人下方（机器人锚定右上 92×92，
    下方可用宽 224px / 高 220px，菜单项不再被窗口边缘裁剪）。 */
 .fb-menu {

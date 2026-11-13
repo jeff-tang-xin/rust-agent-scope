@@ -1533,6 +1533,17 @@ async fn turn_chain(
         {
             Ok((rx, task)) => {
                 session.track(task).await;
+                // 悬浮球状态灯：正常 turn 启动也广播（此前只有 steer 场景发
+                // turn-started，球永远进不了工作态）。
+                let _ = app.emit(
+                    "turn-started",
+                    TurnStarted {
+                        workspace_id: workspace_id.clone(),
+                        session_id: session_id.clone(),
+                        turn_id: turn_id.clone(),
+                        reason: "new",
+                    },
+                );
                 rx
             }
             Err(e) => {
@@ -1991,6 +2002,16 @@ fn notify_if_background(
 ) {
     use tauri::Manager;
     use tauri_plugin_notification::NotificationExt;
+    // 悬浮球徽标：完成/等授权总是全局广播（球上显示提醒，点击回主窗处理）；
+    // 系统通知仍只在主窗非聚焦时发（聚焦时用户就在看，不打扰）。
+    let attention = match kind {
+        agentscope_core::event::AgentEventKind::AgentEnd { .. } => Some("ready"),
+        agentscope_core::event::AgentEventKind::RequireUserConfirm { .. } => Some("needs_input"),
+        _ => None,
+    };
+    if let Some(attention) = attention {
+        let _ = app.emit("agent-attention", serde_json::json!({ "kind": attention }));
+    }
     let focused = app
         .get_webview_window("main")
         .and_then(|w| w.is_focused().ok())
