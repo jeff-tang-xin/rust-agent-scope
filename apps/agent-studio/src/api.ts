@@ -650,6 +650,13 @@ export const api = {
   listSkills: (workspaceId: string) => invoke<SkillEntry[]>("list_skills", { workspaceId }),
   readSkill: (workspaceId: string, name: string) =>
     invoke<SkillDetail>("read_skill", { workspaceId, name }),
+
+  // ---------- 桌面悬浮球（floating-ball 窗口，见 src-tauri/src/ball.rs） ----------
+  ballMenuResize: (expanded: boolean) => invoke<void>("ball_menu_resize", { expanded }),
+  ballShowMain: () => invoke<void>("ball_show_main"),
+  ballHide: () => invoke<void>("ball_hide"),
+  ballGetDisabled: () => invoke<boolean>("ball_get_disabled"),
+  ballSetDisabled: (disabled: boolean) => invoke<void>("ball_set_disabled", { disabled }),
 };
 
 // ---------- 事件订阅 ----------

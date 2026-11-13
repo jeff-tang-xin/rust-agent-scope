@@ -173,6 +173,10 @@ pub struct StudioConfig {
     /// SSH 服务器档案（ops 工作区资源）。
     #[serde(default)]
     pub servers: Vec<ServerConfig>,
+    /// 桌面悬浮球开关（启动时是否显示可拖拽机器人）：Disable 写 false，
+    /// 设置页「通用 → 界面」可重新打开。后端启动时要读——必须进配置文件。
+    #[serde(default)]
+    pub floating_ball_disabled: bool,
 }
 
 impl StudioConfig {

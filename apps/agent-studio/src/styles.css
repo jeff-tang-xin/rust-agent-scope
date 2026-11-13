@@ -2482,3 +2482,98 @@ select:focus:not(:focus-visible) {
 }
 
 
+
+
+/* ===================== 桌面悬浮球（floating-ball 窗口） ===================== */
+/* 窗口本体透明；机器人常驻动画：漂浮 + 眨眼 + 天线呼吸灯。 */
+
+.fb-root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.fb-ball {
+  width: 92px;
+  height: 92px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: fb-bob 3.2s ease-in-out infinite;
+  filter: drop-shadow(0 6px 14px rgba(15, 23, 42, 0.35));
+  transition: filter 0.2s ease;
+}
+.fb-ball:active { cursor: grabbing; }
+.fb-ball:hover { filter: drop-shadow(0 10px 20px rgba(15, 23, 42, 0.45)); }
+
+.fb-robot { width: 100%; height: 100%; display: block; }
+
+@keyframes fb-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* 眨眼：绝大多数时间睁眼，尾部快速闭合一次。 */
+.fb-eyes {
+  transform-origin: 48px 36px;
+  animation: fb-blink 4.6s ease-in-out infinite;
+}
+@keyframes fb-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.08); }
+  97% { transform: scaleY(1); }
+}
+
+/* 天线呼吸灯。 */
+.fb-antenna { animation: fb-glow 2.4s ease-in-out infinite; }
+@keyframes fb-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* 右键菜单：窗口扩到 240×300 后渲染在机器人左下。 */
+.fb-menu {
+  position: fixed;
+  right: 100px;
+  top: 8px;
+  min-width: 190px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  animation: fb-menu-in 0.14s ease-out;
+  transform-origin: top right;
+}
+@keyframes fb-menu-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+.fb-menu-item {
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: #0f172a;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fb-menu-item:hover { background: #f1f5f9; }
+.fb-menu-sep { height: 1px; background: #e2e8f0; margin: 5px 8px; }
+
+/* 深色外观的菜单（跟随机器人外观切换）。 */
+.fb-root.dark .fb-menu {
+  background: #1e293b;
+  border-color: #334155;
+}
+.fb-root.dark .fb-menu-item { color: #e2e8f0; }
+.fb-root.dark .fb-menu-item:hover { background: #334155; }
+.fb-root.dark .fb-menu-sep { background: #334155; }

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "floating-ball",
+  "description": "Capability for the floating ball window (drag region + self hide)",
+  "windows": ["floating-ball"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-hide"
+  ]
+}

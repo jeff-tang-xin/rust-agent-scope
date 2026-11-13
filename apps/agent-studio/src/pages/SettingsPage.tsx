@@ -114,6 +114,14 @@ export default function SettingsPage({
 
   // 导航显隐开关的重渲染触发器（值本身在 localStorage，UI 只需刷新）。
   const [navTick, setNavTick] = useState(0);
+  // 桌面悬浮球开关（后端配置持久化；启动时后端按它决定是否显示）。
+  const [ballDisabled, setBallDisabled] = useState<boolean>(false);
+  useEffect(() => {
+    void api
+      .ballGetDisabled()
+      .then(setBallDisabled)
+      .catch(() => {});
+  }, []);
 
   return (
     <>
@@ -194,6 +202,24 @@ export default function SettingsPage({
                   {label}
                 </label>
               ))}
+            </div>
+            <div className="desc" style={{ marginTop: 12 }}>
+              桌面悬浮球——启动时在屏幕右上角显示可拖拽的小机器人（右键菜单可
+              打开主窗/切换外观/停用；停用跨启动持久）
+            </div>
+            <div style={{ display: "flex", gap: 16 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={!ballDisabled}
+                  onChange={(e) => {
+                    const disabled = !e.target.checked;
+                    setBallDisabled(disabled);
+                    void api.ballSetDisabled(disabled).catch(() => setBallDisabled(!disabled));
+                  }}
+                />
+                显示悬浮球
+              </label>
             </div>
             <div className="desc" style={{ marginTop: 12 }}>
               运行日志——后端运行记录（turn 启停/中断/清空/panic），排查问题用；

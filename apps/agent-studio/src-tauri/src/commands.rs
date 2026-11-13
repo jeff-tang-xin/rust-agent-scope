@@ -12,6 +12,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+// 悬浮球命令（ball.rs）：generate_handler 按名引用函数本体。
+use crate::ball::{ball_get_disabled, ball_hide, ball_menu_resize, ball_set_disabled, ball_show_main};
+
 use agentscope_core::message::{ContentBlock, Role, Source};
 use agentscope_core::{Msg, RuntimeContext};
 use serde::{Deserialize, Serialize};
@@ -228,7 +231,7 @@ impl AppState {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn persist(&self, config: &StudioConfig) -> Result<(), String> {
+    pub(crate) fn persist(&self, config: &StudioConfig) -> Result<(), String> {
         *self.config.lock().unwrap_or_else(|e| e.into_inner()) = config.clone();
         self.config_store.save(config)
     }
@@ -2940,6 +2943,11 @@ pub fn run() {
                 browser_session: Arc::new(crate::browser_tool::BrowserSession::new()),
                 test_runs: Arc::new(Mutex::new(HashMap::new())),
             });
+            // 桌面悬浮球：未停用则启动即显示（可拖拽小机器人，见 ball.rs）。
+            // config 已 move 进 AppState，从 state 读开关。
+            if !app.state::<AppState>().snapshot().floating_ball_disabled {
+                crate::ball::spawn_floating_ball(app.app_handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3031,6 +3039,11 @@ pub fn run() {
             test_build_bug_report,
             list_skills,
             read_skill,
+            ball_menu_resize,
+            ball_show_main,
+            ball_hide,
+            ball_get_disabled,
+            ball_set_disabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

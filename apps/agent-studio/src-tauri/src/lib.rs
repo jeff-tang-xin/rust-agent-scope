@@ -6,6 +6,10 @@ use agentscope_browser as browser_tool;
 // 进入后续模块作用域——必须声明在 mod commands 之前（macro_rules 按源码顺序可见）。
 #[macro_use]
 mod testing;
+// ball 的 #[tauri::command] 隐藏宏（__cmd__ball_*）同样经 #[macro_use] 进入
+// commands.rs 作用域（generate_handler 引用）——必须声明在 mod commands 之前。
+#[macro_use]
+mod ball;
 mod commands;
 mod config;
 mod db_exec;
