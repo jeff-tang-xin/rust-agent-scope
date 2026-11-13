@@ -333,6 +333,24 @@ pub fn compaction_tool_result(
     update_frame(session_id, update)
 }
 
+/// v1 agent 的命令声明通知（`available_commands_update`）：session/new 与
+/// session/load 响应之后主动发。
+///
+/// ide-agent 对 v1 agent 的 setup 响应**不走 on_setup**（那是 v2 路径，
+/// `Dialect::request` 只在 `v2()` 时进 `request_v2`）——响应里声明的
+/// availableCommands 会被直接忽略；v1 agent 的命令只能靠这个通知到达
+/// （ide-agent 的 session 状态处理把它写进 task.commands，前端 `/` 面板
+/// 的 Skills 分组才有数据）。
+pub fn available_commands_update(session_id: &str, commands: &[Value]) -> Value {
+    update_frame(
+        session_id,
+        json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": commands,
+        }),
+    )
+}
+
 /// `session/request_permission` 请求参数：单个工具调用的授权询问。
 /// options 对齐 v1 的 kind 枚举（allow_once / allow_always / reject_once）。
 pub fn request_permission_params(

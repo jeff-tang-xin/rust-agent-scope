@@ -152,6 +152,16 @@ async fn session_new_assembles_memory_pipeline_from_host_context() {
         listed.iter().all(|c| c["source"] == "skill"),
         "skill 声明的 source 应为 skill: {listed:?}"
     );
+    // v1 agent 的命令声明通知：响应之后 client 还应收到一条
+    // available_commands_update（ide-agent 对 v1 setup 响应不走 on_setup，
+    // 命令只能靠通知到达——见 protocol::available_commands_update）。
+    let frame = read_frame(&mut client_reader).await;
+    assert_eq!(frame["method"], "session/update", "session/new 后应紧跟命令通知");
+    let update = &frame["params"]["update"];
+    assert_eq!(update["sessionUpdate"], "available_commands_update");
+    let notified = update["availableCommands"].as_array().expect("通知应带命令清单");
+    let notified_names: Vec<&str> = notified.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert!(notified_names.contains(&"oxidea-usage"), "{notified_names:?}");
 
     server_task.abort();
     // 收尾【不】删除 root（与文件头注释一致）：并行测试（mode/compact 端到端）
@@ -331,12 +341,16 @@ async fn compact_prompt_emits_compaction_updates_and_ends_turn() {
         .await
         .unwrap();
 
-    // 收集压缩通知（v1 工具卡片形态），直到 prompt 响应到达
+    // 收集压缩通知（v1 工具卡片形态），直到 prompt 响应到达。
+    // session/new 后的 available_commands_update 命令声明通知与压缩无关，跳过。
     let mut updates = Vec::new();
     let mut prompt_result = None;
     for _ in 0..10 {
         let frame = read_frame(&mut client_reader).await;
         if frame.get("method").and_then(|m| m.as_str()) == Some("session/update") {
+            if frame["params"]["update"]["sessionUpdate"] == "available_commands_update" {
+                continue;
+            }
             updates.push(frame["params"].clone());
         } else if frame.get("id").is_some() {
             prompt_result = Some(frame);

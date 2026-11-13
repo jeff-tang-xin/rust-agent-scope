@@ -134,7 +134,33 @@ where
                     });
                 } else {
                     match handle_request(&hub, &conn, &method, params).await {
-                        Ok(result) => conn.respond(id, result).await,
+                        Ok(result) => {
+                            conn.respond(id, result.clone()).await;
+                            // v1 agent 的命令声明：session/new|load 响应里的
+                            // availableCommands 随后以通知重发——ide-agent 对
+                            // v1 agent 的 setup 响应不走 on_setup（那是 v2
+                            // 路径），命令只能靠 available_commands_update
+                            // 通知到达（见 protocol::available_commands_update）。
+                            if matches!(method.as_str(), "session/new" | "session/load") {
+                                if let Some(commands) =
+                                    result.get("availableCommands").filter(|c| c.is_array())
+                                {
+                                    let session = result
+                                        .get("sessionId")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or_default()
+                                        .to_owned();
+                                    conn.notify(
+                                        "session/update",
+                                        protocol::available_commands_update(
+                                            &session,
+                                            commands.as_array().unwrap(),
+                                        ),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
                         Err(error) => conn.respond_error(id, error.code, &error.message).await,
                     }
                 }
