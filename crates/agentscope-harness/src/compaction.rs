@@ -454,6 +454,9 @@ pub struct ConversationCompactor {
 struct EffectiveConfig<'a> {
     trigger_tokens: usize,
     keep_tokens: usize,
+    /// keep 预算是否为动态派生（`keep_tokens: None` → min/max/ratio）。
+    /// 用户显式配置 `Some(n)` 时为 false——条数触发也尊重其 token 预算。
+    keep_tokens_dynamic: bool,
     base: &'a CompactionConfig,
 }
 
@@ -496,13 +499,20 @@ impl ConversationCompactor {
             budget.max(1)
         };
         let dynamic_keep = (budget as f64 * config.keep_tokens_ratio) as usize;
-        let keep = config
-            .keep_tokens
-            .unwrap_or_else(|| config.keep_tokens_max.min(dynamic_keep.max(config.keep_tokens_min)))
-            .min(budget / 2);
+        let (keep, keep_dynamic) = match config.keep_tokens {
+            Some(v) => (v.min(budget / 2), false),
+            None => (
+                config
+                    .keep_tokens_max
+                    .min(dynamic_keep.max(config.keep_tokens_min))
+                    .min(budget / 2),
+                true,
+            ),
+        };
         let effective = EffectiveConfig {
             trigger_tokens: trigger,
             keep_tokens: keep,
+            keep_tokens_dynamic: keep_dynamic,
             base: config,
         };
 
@@ -518,12 +528,13 @@ impl ConversationCompactor {
         let lightweight = working != conversation;
 
         let total_tokens = estimate_tokens(&working);
-        if !should_compact(&working, total_tokens, &effective) {
+        let reason = trigger_reason(&working, total_tokens, &effective);
+        if matches!(reason, TriggerReason::None) {
             // 未触发摘要：裁剪有改动则提交裁剪结果（对齐 Java lightweight result）
             return Ok(lightweight.then_some(working));
         }
 
-        let cutoff = determine_cutoff_index(&working, total_tokens, &effective);
+        let cutoff = determine_cutoff_index(&working, total_tokens, &effective, reason);
         if cutoff == 0 {
             return Ok(lightweight.then_some(working));
         }
@@ -604,25 +615,51 @@ impl ConversationCompactor {
     }
 }
 
-/// 触发判断（对齐 Java `shouldCompact`）。
-fn should_compact(messages: &[Msg], total_tokens: usize, config: &EffectiveConfig) -> bool {
+/// 压缩触发原因：决定切分方式。
+enum TriggerReason {
+    /// 未触发。
+    None,
+    /// 消息数 ≥ `trigger_messages`。
+    Messages,
+    /// 估算 token ≥ 阈值。
+    Tokens,
+}
+
+/// 触发判断（对齐 Java `shouldCompact`），返回原因供切分选择。
+fn trigger_reason(messages: &[Msg], total_tokens: usize, config: &EffectiveConfig) -> TriggerReason {
     if config.base.trigger_messages > 0 && messages.len() >= config.base.trigger_messages {
-        return true;
+        return TriggerReason::Messages;
     }
     if config.trigger_tokens > 0 && total_tokens >= config.trigger_tokens {
-        return true;
+        return TriggerReason::Tokens;
     }
-    false
+    TriggerReason::None
 }
 
 /// 切分点：prefix（待摘要）与 tail（逐字保留）的边界（对齐 Java `determineCutoffIndex`）。
-fn determine_cutoff_index(messages: &[Msg], total_tokens: usize, config: &EffectiveConfig) -> usize {
-    // keep_tokens 已在 compact_if_needed 里解析（显式值或动态 min/max/ratio），
-    // > 0 走 token 预算切分，否则按条数（对齐 Java withEffective + determineCutoffIndex）。
-    let raw = if config.keep_tokens > 0 {
-        find_token_based_cutoff(messages, total_tokens, config.keep_tokens)
-    } else {
-        find_message_based_cutoff(messages, config.base.keep_messages)
+///
+/// 切分方式随触发原因走：
+/// - **条数触发 + 动态 keep 预算** → 按条数切（`keep_messages`），一次压到阈值
+///   以内。动态 keep（8k 级）对短消息会话装得下大部分历史，token 切分每轮只
+///   压掉一两条，条数永远降不到阈值以下——会话卡在震荡区，每轮都出压缩卡片。
+/// - **条数触发 + 用户显式 `keep_tokens`** → 仍按 token 预算切：显式配置是
+///   用户意图（如 `Some(15)` 强制小尾巴），不擅自改按条数。
+/// - **token 触发** → 按 token 预算切（对齐 Java）。
+/// - **forced（overflow 恢复）**：`keep_tokens = Some(0)` 非动态 → 落到
+///   token 切分但 keep=0 会全压；保持原语义走条数切（`keep_messages=1`）。
+fn determine_cutoff_index(
+    messages: &[Msg],
+    total_tokens: usize,
+    config: &EffectiveConfig,
+    reason: TriggerReason,
+) -> usize {
+    let raw = match reason {
+        TriggerReason::Messages
+            if config.keep_tokens_dynamic || config.keep_tokens == 0 =>
+        {
+            find_message_based_cutoff(messages, config.base.keep_messages)
+        }
+        _ => find_token_based_cutoff(messages, total_tokens, config.keep_tokens),
     };
     find_safe_cutoff_point(messages, raw)
 }
@@ -1141,6 +1178,36 @@ mod tests {
             .unwrap();
         assert!(result.is_none());
         assert!(model.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn message_trigger_compacts_to_threshold_in_one_pass() {
+        // 震荡场景回归：消息数触发（600 条短消息 ≥ 200）且 token 贴着动态
+        // keep 预算（~9.6k > 8k）——修复前按 token 切分每轮只压掉一两条，
+        // 条数永远降不到阈值以下，会话卡在震荡区、每轮都出压缩卡片；修复后
+        // 条数触发按条数切，一次压到 keep_messages（20）以内。
+        let model = MockModel::new(vec![ChatResponse::from_text(
+            "## SESSION INTENT\nTest goal.",
+        )]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            flush_before_compact: false,
+            ..Default::default()
+        };
+        let conversation: Vec<Msg> = (0..600).map(|i| user_msg(&format!("message {i}"))).collect();
+        let rc = RuntimeContext::new();
+        let compacted = compactor
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
+            .await
+            .unwrap()
+            .expect("message threshold reached, should compact");
+        // 一次压到位：摘要 1 条 + keep_messages(20) 条 tail，条数降到阈值以下。
+        assert_eq!(compacted.len(), 21);
+        assert_eq!(compacted[0].name, COMPACTION_SUMMARY_MSG_NAME);
+        assert_eq!(compacted[1].text(), "message 580");
+        assert_eq!(compacted[20].text(), "message 599");
+        // 只调一次摘要模型。
+        assert_eq!(model.requests().len(), 1);
     }
 
     #[tokio::test]
