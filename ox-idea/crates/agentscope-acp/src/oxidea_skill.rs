@@ -42,10 +42,60 @@ description: OXidea IDE 操作指南，覆盖三类工作场景的具体做法�
 标准顺序：
 
 1. **找配置**：`get_run_configurations` 看可用的运行/调试配置（IDE 自动检测 + 用户自定义）。
-2. **启动**：`execute_run_configuration`（`waitForExit=true` + 短 timeout 拿输出快照）；长驻服务转后台后 `read_file` 日志文件看新输出。
+2. **启动**：`execute_run_configuration`（`waitForExit=true` + 短 timeout 拿输出快照）；长驻服务转后台后 `read_file` 日志文件看新输出。Java/agent 类项目优先走运行配置——没有配置时按第四节用 mvn 启动，不要手拼 classpath。
 3. **确认在跑**：`get_running_processes` 现查进程状态，不要猜。
 4. **断点调试**：走 IDE 的调试配置（以工具列表实际提供的 debug 工具为准）——断点、变量、调用栈在界面里可见；不要用 shell 起进程再 print 硬凑，那是纯黑盒。
 5. **定位循环**：拿到报错文本 → `search_text` 定位 → `find_references` 追链路 → 读实现 → 修复 → 回到第 2 步重新验证。
+
+## 四、Java agent 启动与进程管理
+
+Java 类 agent（mvn 工程）启动失败，绝大多数是 **classpath 问题，不是代码问题**。`ClassNotFoundException` 几乎总是「手拼 classpath 漏了依赖」，不是「类不存在」。
+
+### 启动：用构建工具，禁止手拼 classpath
+
+**错误**（经典错误——漏掉所有依赖 jar，必报 ClassNotFoundException）：
+
+```bash
+java -cp target/classes com.example.AgentMain     # ❌ ClassNotFoundException
+```
+
+**正确**，按优先级：
+
+1. **`mvn exec:java`**——Maven 自动构建完整运行时 classpath：
+
+   ```bash
+   mvn -q compile exec:java -Dexec.mainClass=com.example.AgentMain
+   # 传参：-Dexec.args="--port 8080"
+   ```
+
+2. **Spring Boot 项目**：`mvn -q spring-boot:run`。
+
+3. **长驻/生产式启动**——先打包再带依赖 classpath 运行：
+
+   ```bash
+   mvn -q package dependency:copy-dependencies -DoutputDirectory=target/dependency
+   java -cp "target/classes;target/dependency/*" com.example.AgentMain   # Windows（分隔符 ; ，通配符必须加引号）
+   java -cp "target/classes:target/dependency/*" com.example.AgentMain   # macOS/Linux（分隔符 : ）
+   ```
+
+纪律：
+
+- 多模块工程先在聚合根 `mvn -q install -DskipTests` 一次——单模块的 `target/classes` 缺兄弟模块产物。
+- 不要 `cd` 进 `target/` 里运行——相对资源路径会断。
+- 首次启动失败先看 `mvn -v` 的 `Java version:` 行——JDK 版本不符（如默认 JDK 8 编译 Java 17 工程）会报出与真实原因无关的错。
+
+### 排查：三种报错，三种根因
+
+- `ClassNotFoundException: com.example.X`（启动即报）→ 运行时 classpath 缺类。用上面的 exec:java 或 copy-dependencies 修，不要拷 jar 补丁。
+- `NoClassDefFoundError: com/example/X`（斜杠形式，运行期报）→ 编译期有、运行期缺，或静态初始化失败。先 `mvn -q compile` 确认改过代码后重新编译了；再查依赖是否 `scope=provided`。
+- `NoSuchMethodError` / `AbstractMethodError` → **同一依赖的两个版本同时在场**。用 `mvn dependency:tree -Dincludes=groupId:artifactId` 定位冲突并 exclude 旧版本——不要靠调整 `-cp` 顺序碰运气。
+- 想确认运行时 classpath 到底有什么：`mvn dependency:build-classpath -Dmdep.outputFile=cp.txt`，然后读 `cp.txt`。
+
+### 停止：干净收尾，不留孤儿
+
+- `mvn exec:java` 启动的 JVM 跑在 Maven 进程里，杀 mvn 即杀 agent。优先 Ctrl-C / SIGINT 让 shutdown hook 跑完（释放端口、落盘文件）。
+- `taskkill /PID <pid> /F`（Windows）/ `kill -9`（macOS/Linux）跳过 shutdown hook——只在 JVM 卡死时用；强杀后确认端口已释放：`netstat -ano | findstr :<port>`（Windows）/ `lsof -i :<port>`（macOS/Linux）。
+- **任务收尾时停止你启动的长驻进程**（JVM/node）——不要留后台进程占着端口和锁，下一个任务或下一次启动会被它卡住（残留进程还会占住应用的单实例锁，导致应用「点了图标打不开」）。
 
 ## 工具边界（为什么这样分工）
 

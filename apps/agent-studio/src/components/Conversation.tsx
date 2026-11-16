@@ -1290,18 +1290,36 @@ export default function Conversation({
     setAttachments(atts);
   };
 
+  // `/name 需求` → load_skill 指示组装：用户从面板选 skill 后继续输入需求，
+  // 发送时把「skill 名 + 用户需求」包装成明确指示（先 load_skill 加载该 skill，
+  // 再按其指引处理需求），不依赖模型对裸 `/name` 文本的遵循度。只包装清单里
+  // 声明过的 skill（面板打开过即有缓存）；`/name` 后无需求时原样返回。
+  const skillInvocationText = (raw: string): string => {
+    const rest = raw.startsWith("/") ? raw.slice(1) : "";
+    if (!rest) return raw;
+    const names = (skillsCacheRef.current ?? [])
+      .map((s) => s.name)
+      .sort((a, b) => b.length - a.length);
+    const hit = names.find((n) => rest.startsWith(n));
+    if (!hit) return raw;
+    const demand = rest.slice(hit.length).trim();
+    if (!demand) return raw;
+    return `用户通过斜杠命令调用了 skill「${hit}」。请先调用 load_skill 工具加载该 skill，然后严格按照 skill 的指引处理下面的需求。\n\n${demand}`;
+  };
+
   const send = async (override?: string) => {
-    const text = (override ?? input).trim();
+    const raw = (override ?? input).trim();
+    const text = skillInvocationText(raw);
     // busy 检查走同步 ref：state 在同一渲染周期内不更新，双击/回车+点击
     // 会连发两条（见 busyRef 注释）。
-    if ((!text && attachments.length === 0) || busyRef.current) return;
+    if ((!raw && attachments.length === 0) || busyRef.current) return;
     setError("");
     setInput("");
-    inputHistoryRef.current.push(text);
+    inputHistoryRef.current.push(raw);
     historyIdxRef.current = -1;
-    // 本地立即显示：文本 + 附件（图片缩略 / 文件 chip）。
+    // 本地立即显示：用户原文（不是组装后的指示）+ 附件（图片缩略 / 文件 chip）。
     const local: Entry[] = [];
-    if (text) local.push({ kind: "msg", role: "user", text, id: nextId() });
+    if (raw) local.push({ kind: "msg", role: "user", text: raw, id: nextId() });
     for (const a of attachments) {
       local.push(
         a.preview
@@ -1337,7 +1355,7 @@ export default function Conversation({
             return;
           } catch (e2) {
             setBusySafe(false);
-            restoreDraft(text, attachments);
+            restoreDraft(raw, attachments);
             setError(String(e2));
           }
         }
@@ -1345,7 +1363,8 @@ export default function Conversation({
       }
       setBusySafe(false);
       // 发送失败：恢复输入与附件（否则用户重打一遍），错误给可读文案。
-      restoreDraft(text, attachments);
+      // 恢复用户原文（raw），不是组装后的 load_skill 指示。
+      restoreDraft(raw, attachments);
       setError(humanizeError(msg));
     }
   };
@@ -1380,18 +1399,12 @@ export default function Conversation({
     );
   };
 
-  // 选中 skill：取全文 → 组装消息（首行 /name 留痕 + 引导语 + 全文）→
-  // 复用 send（busy 检查/本地显示/steer 降级全继承）。
-  const pickSkill = async (entry: SkillEntry) => {
+  // 选中 skill：`/name` 留在输入框（用户继续输入需求），不立即发送、不取
+  // 全文——发送时由 send 组装成 load_skill 指示（见 skillInvocationText）。
+  const pickSkill = (entry: SkillEntry) => {
     setSkillMenu(null);
-    try {
-      const detail = await api.readSkill(workspace.id, entry.name);
-      const text = `/${detail.name}\n请按以下 skill 的指引执行本轮任务。\n\n${detail.content}`;
-      setInput("");
-      await send(text);
-    } catch (e) {
-      setError(String(e));
-    }
+    const glue = input && !/\s$/.test(input) ? " " : "";
+    setInput(`${input}${glue}/${entry.name} `);
   };
 
   const resolveConfirm = async (
@@ -1476,12 +1489,13 @@ export default function Conversation({
   // 自动续轮）——因此先调后端、成功才落本地条目；被拒且 turn 已结束时
   // 自动转正常发送，消息不丢。
   const steer = async () => {
-    const text = input.trim();
-    if ((!text && attachments.length === 0) || !busyRef.current) return;
+    const raw = input.trim();
+    const text = skillInvocationText(raw);
+    if ((!raw && attachments.length === 0) || !busyRef.current) return;
     setError("");
-    // 本地立即显示：文本 + 附件（图片缩略 / 文件 chip），与 send 同构。
+    // 本地立即显示：用户原文 + 附件（图片缩略 / 文件 chip），与 send 同构。
     const local: Entry[] = [];
-    if (text) local.push({ kind: "msg", role: "user", text, id: nextId() });
+    if (raw) local.push({ kind: "msg", role: "user", text: raw, id: nextId() });
     for (const a of attachments) {
       local.push(
         a.preview

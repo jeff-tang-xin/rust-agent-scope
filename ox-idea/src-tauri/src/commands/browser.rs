@@ -39,10 +39,21 @@ pub async fn browser_panel_attach(on_frame: Channel<BrowserFrame>) -> IdeResult<
     let mut rx = session.start_screencast().await.map_err(err)?;
     let url = session.current_url().await.map_err(err)?;
     tokio::spawn(async move {
+        let mut last_sent = std::time::Instant::now() - std::time::Duration::from_secs(1);
         loop {
             // 超时轮询 screencast 开关：detach 后转发任务在 1s 内退出。
             match tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await {
                 Ok(Ok(frame)) => {
+                    // 帧率节流（100ms ≈ 10fps 上限）：页面有动画/光标闪烁时
+                    // CDP 会以 30-60fps 发帧，每帧 400KB base64 过 IPC + 前端
+                    // img 解码渲染，是 IDE 面板被拖卡的主因。直播看的是页面
+                    // 状态不是视频，10fps 足够；被丢的帧不推 IPC，Chrome 侧
+                    // 编码开销仍在但可忽略（几 ms/帧）。
+                    let now = std::time::Instant::now();
+                    if now.duration_since(last_sent) < std::time::Duration::from_millis(100) {
+                        continue;
+                    }
+                    last_sent = now;
                     let _ = on_frame.send(BrowserFrame {
                         data: frame.data,
                         device_width: frame.device_width,

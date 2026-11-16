@@ -287,6 +287,9 @@ pub fn run() {
                 state.host.clear_workspace_edit_history_on_exit();
                 state.host.shutdown_notebooks_on_exit();
             }
+            // 浏览器是 OnceLock 进程级单例（agentscope-browser），静态变量退出
+            // 时不析构——不显式 shutdown，Chrome 进程随应用退出成为孤儿。
+            tauri::async_runtime::block_on(agentscope_browser::BrowserSession::shared().shutdown());
             // Cleanup must finish before update/restart replaces this process.
             if app.try_state::<WindowsState>().is_some_and(|w| w.restart_requested()) {
                 #[cfg(target_os = "macos")]

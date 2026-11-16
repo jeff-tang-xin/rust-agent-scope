@@ -3066,8 +3066,15 @@ pub fn run() {
             ball_get_disabled,
             ball_set_disabled,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // 浏览器是 OnceLock 进程级单例（agentscope-browser），静态变量退出
+            // 时不析构——不显式 shutdown，Chrome 进程随应用退出成为孤儿。
+            if let tauri::RunEvent::Exit = event {
+                tauri::async_runtime::block_on(crate::browser_tool::BrowserSession::shared().shutdown());
+            }
+        });
 }
 
 // ---------- Skill 生态（用户手动指定） ----------

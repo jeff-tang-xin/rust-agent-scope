@@ -402,6 +402,14 @@ impl Host {
         self.debugger.kill_all_on_exit();
         self.processes.kill_all();
         self.terminals.kill_all();
+        // Agents (ACP robot processes, e.g. an mvn-launched JVM) were only cleaned
+        // by the async `shutdown()`, which the desktop-exit path never runs — a quit
+        // from the Dock, the app menu or a logout left every robot process alive.
+        // Orphaned robots also hold the single-instance lock, so the next launch
+        // "opens" into a dead instance and the app never shows a window.
+        for project in self.projects() {
+            project.agents.shutdown();
+        }
     }
 
     /// Called before desktop exit, which may bypass document destructors.
