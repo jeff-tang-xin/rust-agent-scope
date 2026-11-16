@@ -20,13 +20,16 @@
 //!   以 forced 配置（trigger=1/keep=1/keepTokens=0）强制压缩并同轮重试一次
 //!   （对齐 Java `overflowRecovery`，溢出判定见
 //!   [`agentscope_core::agent::is_context_overflow_error`]）；
-//! - 轻量裁剪：摘要前先做非 LLM 的 `truncate_args`（旧消息超大工具参数截断）与
-//!   `prune_tool_results`（旧 tool-result 首尾预览替换），裁剪后未触发摘要也
-//!   会提交裁剪结果（对齐 Java `compactStandard` 的 Step 1a/1b 与 lightweight
-//!   result）。
+//! - 轻量裁剪：摘要前先做非 LLM 的 `truncate_args`（旧消息超大工具参数截断）、
+//!   `evict_large_results`（超大 tool-result 完整落盘为文件引用，可 read_file
+//!   读回——对齐 Java `ToolResultEvictionMiddleware`，Rust 版经 IterationHook
+//!   直接读写活状态实现）、`prune_tool_results`（旧 tool-result 首尾预览替换）
+//!   与 `unload_images`（历史 Image 块换占位文本，只留最近一张——多模态视觉
+//!   token 不随截图次数线性膨胀），裁剪后未触发摘要也会提交裁剪结果（对齐
+//!   Java `compactStandard` 的 Step 1a/1b 与 lightweight result）。
 //!
 //! 与 Java 的有意差异（lib.rs 差异声明同步维护）：
-//! - `ToolResultEvictionMiddleware`（超大 tool-result 落盘为文件引用）未复刻；
+//! - 自定义 `ConversationCompactionStrategy` 未复刻（Java 侧也是可选扩展）。
 //! - 自定义 `ConversationCompactionStrategy` 未复刻（Java 侧也是可选扩展）。
 
 use std::sync::Arc;
@@ -175,8 +178,17 @@ pub struct CompactionConfig {
     pub flush_before_compact: bool,
     /// 摘要前的工具参数截断（Step 1a，对齐 Java `TruncateArgsConfig`；None = 关闭）。
     pub truncate_args: Option<TruncateArgsConfig>,
-    /// 摘要前的 tool-result 剪枝（Step 1b，对齐 Java `PruneConfig`；None = 关闭）。
+    /// 超大工具结果卸载（Step 1b，对齐 Java `ToolResultEvictionMiddleware`；
+    /// None = 关闭）：完整内容落盘为文件引用，上下文留可读回的地址。
+    /// **必须先于 prune 执行**——prune 是有损截断，evict 先把真正巨大的块
+    /// 无损落盘，prune 就不会对它们截断。
+    pub evict_large_results: Option<EvictLargeResultsConfig>,
+    /// 摘要前的 tool-result 剪枝（Step 1c，对齐 Java `PruneConfig`；None = 关闭）。
     pub prune: Option<PruneConfig>,
+    /// 历史图片卸载（Step 1d；None = 关闭）：历史 Image 块换成占位文本，
+    /// 只留最近 keep_recent 张——截图当轮可见、下轮卸载，多模态视觉 token
+    /// 不随截图次数线性膨胀。
+    pub unload_images: Option<UnloadImagesConfig>,
 }
 
 impl Default for CompactionConfig {
@@ -197,7 +209,9 @@ impl Default for CompactionConfig {
             summary_prompt: DEFAULT_SUMMARY_PROMPT.to_string(),
             flush_before_compact: true,
             truncate_args: Some(TruncateArgsConfig::default()),
+            evict_large_results: Some(EvictLargeResultsConfig::default()),
             prune: Some(PruneConfig::default()),
+            unload_images: Some(UnloadImagesConfig::default()),
         }
     }
 }
@@ -281,6 +295,49 @@ impl Default for PruneConfig {
                 "session_search".to_string(),
             ],
         }
+    }
+}
+
+/// 超大工具结果卸载（Step 1b，对齐 Java `ToolResultEvictionMiddleware` 的
+/// 「落盘为文件引用」思想——Rust 版：完整内容落盘，上下文留可读回的地址）。
+///
+/// 与 prune（Step 1c）的分工：evict 处理**真正巨大的块**（无损，可 read_file
+/// 读回），prune 处理中等长度的块（有损截断，中间内容丢弃）。evict 必须先于
+/// prune 执行，否则 prune 先截断、evict 就拿不到完整内容了。
+#[derive(Debug, Clone)]
+pub struct EvictLargeResultsConfig {
+    /// 单个 Text 块超过该字符数才卸载（低于此值交给 prune 截断即可）。
+    pub max_chars: usize,
+    /// 从尾保留的工具结果条数：当轮刚产生的结果不卸载（模型正在用它决策）。
+    pub keep_recent: usize,
+    /// 落盘目录（绝对路径）。`None` 时由 builder 用主工作区根解析为
+    /// `<workspace>/.ox/evicted/`；仍为 None（无工作区）则关闭卸载。
+    pub dir: Option<std::path::PathBuf>,
+}
+
+impl Default for EvictLargeResultsConfig {
+    fn default() -> Self {
+        // 20k 字符 ≈ 8k token：prune 的 maxOutputChars=2000 之上的一个量级，
+        // 只有真正巨大的输出（大文件读取、长命令输出）才值得落盘。
+        Self {
+            max_chars: 20_000,
+            keep_recent: 1,
+            dir: None,
+        }
+    }
+}
+
+/// 历史图片卸载（Step 1d）配置：历史截图不再随上下文发送。
+#[derive(Debug, Clone)]
+pub struct UnloadImagesConfig {
+    /// 从尾保留的图片张数：当轮刚产生的可见，更早的卸载成占位文本。
+    pub keep_recent: usize,
+}
+
+impl Default for UnloadImagesConfig {
+    fn default() -> Self {
+        // 只留最近 1 张：模型当轮看过画面做决策，历史画面无需每轮重发。
+        Self { keep_recent: 1 }
     }
 }
 
@@ -425,8 +482,219 @@ pub fn prune_tool_results(messages: &[Msg], config: &PruneConfig) -> Vec<Msg> {
     result
 }
 
-/// 首尾各半的剪枝预览（对齐 Java `buildPrunePreview`——注意与摘要渲染用的
-/// [`prune_preview`]（2/3 + 1/3）是两个不同用途的实现）。
+/// 历史图片卸载后的占位文本（截图文件已由工具落盘，同结果文本块含路径）。
+const UNLOADED_IMAGE_PLACEHOLDER: &str = "[图片已卸载：历史截图不再随上下文发送——文件已存工作区 screenshots/ 目录（同结果的文本块含路径），需要看当前画面时重新调 browser_screenshot]";
+
+/// Step 1d 图片卸载：把 conversation 里较老的 Image 块替换成文本占位。
+///
+/// 截图当轮随结果回传（模型看得到画面做决策），下一轮迭代边界起从上下文
+/// 移除——多模态视觉 token 随截图次数线性膨胀，历史画面模型已看过，无需
+/// 每轮重发。截图文件本身已由工具落盘（`.ox*/screenshots/`），同结果的
+/// 文本块含路径；需要看画面时重新调 browser_screenshot。从尾保留
+/// `keep_recent` 张（当轮刚产生的可见），更早的按序卸载。
+fn unload_images(messages: &[Msg], config: &UnloadImagesConfig) -> Vec<Msg> {
+    let total = messages
+        .iter()
+        .flat_map(|m| m.content.iter())
+        .map(|b| match b {
+            ContentBlock::ToolResult { output, .. } => output
+                .iter()
+                .filter(|b| matches!(b, ContentBlock::Image { .. }))
+                .count(),
+            _ => 0,
+        })
+        .sum::<usize>();
+    if total <= config.keep_recent {
+        return messages.to_vec();
+    }
+    let mut to_unload = total - config.keep_recent;
+    let mut result = Vec::with_capacity(messages.len());
+    for msg in messages {
+        if to_unload == 0 {
+            result.push(msg.clone());
+            continue;
+        }
+        let mut changed = false;
+        let mut content = Vec::with_capacity(msg.content.len());
+        for block in &msg.content {
+            match block {
+                ContentBlock::ToolResult {
+                    id,
+                    name,
+                    output,
+                    state,
+                    execution_details,
+                } => {
+                    let mut new_output = Vec::with_capacity(output.len());
+                    let mut block_changed = false;
+                    for b in output {
+                        if matches!(b, ContentBlock::Image { .. }) && to_unload > 0 {
+                            to_unload -= 1;
+                            changed = true;
+                            block_changed = true;
+                            new_output.push(ContentBlock::Text {
+                                text: UNLOADED_IMAGE_PLACEHOLDER.to_string(),
+                            });
+                        } else {
+                            new_output.push(b.clone());
+                        }
+                    }
+                    if block_changed {
+                        content.push(ContentBlock::ToolResult {
+                            id: id.clone(),
+                            name: name.clone(),
+                            output: new_output,
+                            state: state.clone(),
+                            execution_details: execution_details.clone(),
+                        });
+                    } else {
+                        content.push(block.clone());
+                    }
+                }
+                other => content.push(other.clone()),
+            }
+        }
+        if changed {
+            result.push(Msg {
+                id: msg.id.clone(),
+                name: msg.name.clone(),
+                role: msg.role.clone(),
+                content,
+                metadata: msg.metadata.clone(),
+                timestamp: msg.timestamp.clone(),
+                usage: msg.usage.clone(),
+                generate_reason: msg.generate_reason.clone(),
+            });
+        } else {
+            result.push(msg.clone());
+        }
+    }
+    result
+}
+
+/// Step 1b 超大工具结果卸载：把 conversation 里较老的、超过 `max_chars` 的
+/// ToolResult Text 块**完整落盘**，上下文里替换成含文件地址的占位——模型
+/// 需要完整内容时用 read_file 读回（无损，对齐 Java
+/// `ToolResultEvictionMiddleware` 的「落盘为文件引用」）。
+///
+/// 从尾保留 `keep_recent` 条工具结果（当轮刚产生的不卸载）；`dir` 未解析
+/// （无工作区）时整体关闭、原样返回。落盘失败（目录不可写等）降级为该块
+/// 不卸载——卸载是优化，绝不因它丢内容或阻断压缩。
+fn evict_large_results(messages: &[Msg], config: &EvictLargeResultsConfig) -> Vec<Msg> {
+    let Some(dir) = &config.dir else {
+        return messages.to_vec();
+    };
+    // keep_recent 按工具结果条数保护（一条消息一个 ToolResult，等价按消息数）。
+    let total = messages
+        .iter()
+        .filter(|m| {
+            m.content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+        })
+        .count();
+    if total <= config.keep_recent {
+        return messages.to_vec();
+    }
+    let mut to_evict = total - config.keep_recent;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let mut result = Vec::with_capacity(messages.len());
+    for msg in messages {
+        if to_evict == 0 {
+            result.push(msg.clone());
+            continue;
+        }
+        let mut changed = false;
+        let mut content = Vec::with_capacity(msg.content.len());
+        for block in &msg.content {
+            match block {
+                ContentBlock::ToolResult {
+                    id,
+                    name,
+                    output,
+                    state,
+                    execution_details,
+                } => {
+                    let mut new_output = Vec::with_capacity(output.len());
+                    let mut block_changed = false;
+                    for b in output {
+                        match b {
+                            ContentBlock::Text { text }
+                                if text.chars().count() > config.max_chars && to_evict > 0 =>
+                            {
+                                to_evict -= 1;
+                                // 落盘：{stamp}-{序号}-{工具名}.txt；冲突递增序号。
+                                let tool = name
+                                    .chars()
+                                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                                    .collect::<String>();
+                                let mut seq = 1u32;
+                                let mut path =
+                                    dir.join(format!("{stamp}-{seq}-{tool}.txt"));
+                                while path.exists() {
+                                    seq += 1;
+                                    path = dir.join(format!("{stamp}-{seq}-{tool}.txt"));
+                                }
+                                let evicted = match std::fs::create_dir_all(dir)
+                                    .and_then(|_| std::fs::write(&path, text))
+                                {
+                                    Ok(()) => {
+                                        changed = true;
+                                        block_changed = true;
+                                        Some(format!(
+                                            "[工具结果已卸载：原约 {} 字符的输出已存 {}——需要完整内容时用 read_file 读取该文件]",
+                                            text.chars().count(),
+                                            path.display()
+                                        ))
+                                    }
+                                    // 落盘失败：降级为不卸载（保留原块，绝不丢内容）。
+                                    Err(_) => None,
+                                };
+                                match evicted {
+                                    Some(placeholder) => {
+                                        new_output.push(ContentBlock::Text { text: placeholder })
+                                    }
+                                    None => new_output.push(b.clone()),
+                                }
+                            }
+                            other => new_output.push(other.clone()),
+                        }
+                    }
+                    if block_changed {
+                        content.push(ContentBlock::ToolResult {
+                            id: id.clone(),
+                            name: name.clone(),
+                            output: new_output,
+                            state: state.clone(),
+                            execution_details: execution_details.clone(),
+                        });
+                    } else {
+                        content.push(block.clone());
+                    }
+                }
+                other => content.push(other.clone()),
+            }
+        }
+        if changed {
+            result.push(Msg {
+                id: msg.id.clone(),
+                name: msg.name.clone(),
+                role: msg.role.clone(),
+                content,
+                metadata: msg.metadata.clone(),
+                timestamp: msg.timestamp.clone(),
+                usage: msg.usage.clone(),
+                generate_reason: msg.generate_reason.clone(),
+            });
+        } else {
+            result.push(msg.clone());
+        }
+    }
+    result
+}
 fn prune_preview_half(text: &str, max_chars: usize) -> String {
     let count = text.chars().count();
     if count <= max_chars {
@@ -516,14 +784,22 @@ impl ConversationCompactor {
             base: config,
         };
 
-        // Step 1a/1b：非 LLM 轻量裁剪（对齐 Java `compactStandard` 开头的
-        // pruneToolResults(truncateArgs(...))）；裁剪结果参与后续触发判断与切分。
+        // Step 1a-1d：非 LLM 轻量裁剪（对齐 Java `compactStandard` 开头的
+        // pruneToolResults(truncateArgs(...))，并扩展 Eviction 与图片卸载）；
+        // 裁剪结果参与后续触发判断与切分。顺序敏感：evict（无损落盘）必须在
+        // prune（有损截断）之前，否则 prune 先截断、evict 拿不到完整内容。
         let mut working: Vec<Msg> = conversation.to_vec();
         if let Some(cfg) = &config.truncate_args {
             working = truncate_args(&working, cfg);
         }
+        if let Some(cfg) = &config.evict_large_results {
+            working = evict_large_results(&working, cfg);
+        }
         if let Some(cfg) = &config.prune {
             working = prune_tool_results(&working, cfg);
+        }
+        if let Some(cfg) = &config.unload_images {
+            working = unload_images(&working, cfg);
         }
         let lightweight = working != conversation;
 
@@ -984,6 +1260,177 @@ mod tests {
             timestamp: None,
             usage: None,
             generate_reason: None,
+        }
+    }
+
+    /// 带截图（文本路径 + Image 块）的工具结果消息。
+    fn screenshot_msg(id: &str, tag: &str) -> Msg {
+        Msg {
+            id: format!("t-{id}"),
+            name: "browser_screenshot".into(),
+            role: Role::Tool,
+            content: vec![ContentBlock::ToolResult {
+                id: id.into(),
+                name: "browser_screenshot".into(),
+                output: vec![
+                    ContentBlock::Text {
+                        text: format!("视口截图已保存: .ox/screenshots/{tag}.png"),
+                    },
+                    ContentBlock::Image {
+                        source: agentscope_core::message::Source::Base64 {
+                            media_type: "image/png".into(),
+                            data: format!("ZGF0YS17{tag}"),
+                        },
+                        min_pixels: None,
+                        max_pixels: None,
+                    },
+                ],
+                state: agentscope_core::message::ToolResultState::Success,
+                execution_details: None,
+            }],
+            metadata: None,
+            timestamp: None,
+            usage: None,
+            generate_reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn unload_images_keeps_recent_and_placeholders_older() {
+        // 3 张截图 + keep_recent=1：前 2 张卸载成占位，最后 1 张保留——
+        // 当轮可见、历史卸载；纯轻量卸载不调摘要模型。
+        let model = MockModel::new(vec![]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            flush_before_compact: false,
+            ..Default::default()
+        };
+        let conversation = vec![screenshot_msg("1", "a"), screenshot_msg("2", "b"), screenshot_msg("3", "c")];
+        let rc = RuntimeContext::new();
+        let out = compactor
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
+            .await
+            .unwrap()
+            .expect("unload changes conversation, lightweight submit");
+        assert_eq!(out.len(), 3, "卸载不删消息");
+        for (i, msg) in out.iter().enumerate() {
+            let blocks = match &msg.content[0] {
+                ContentBlock::ToolResult { output, .. } => output,
+                other => panic!("unexpected block {other:?}"),
+            };
+            let has_image = blocks
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Image { .. }));
+            let has_placeholder = blocks.iter().any(|b| {
+                matches!(b, ContentBlock::Text { text } if text.contains("图片已卸载"))
+            });
+            if i < 2 {
+                assert!(has_placeholder, "msg {i} 应被卸载");
+                assert!(!has_image, "msg {i} 不应再带图");
+            } else {
+                assert!(has_image, "最后一张（当轮）应保留");
+                assert!(!has_placeholder);
+            }
+        }
+        assert!(model.requests().is_empty(), "纯轻量卸载不调摘要模型");
+    }
+
+    #[tokio::test]
+    async fn evict_large_results_writes_file_and_replaces_with_reference() {
+        // 3 条工具结果：第 1 条超大（落盘卸载）、第 2 条中等（不动，留给 prune）、
+        // 第 3 条最近（keep_recent=1 保护）——卸载后上下文留可读回的文件地址。
+        let dir = std::env::temp_dir().join(format!("evict-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let model = MockModel::new(vec![]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            flush_before_compact: false,
+            evict_large_results: Some(EvictLargeResultsConfig {
+                max_chars: 100,
+                keep_recent: 1,
+                dir: Some(dir.clone()),
+            }),
+            prune: None,
+            unload_images: None,
+            ..Default::default()
+        };
+        let big = "x".repeat(500);
+        let mut conversation = vec![
+            user_msg("go"),
+            tool_result("1"),
+            tool_result("2"),
+            tool_result("3"),
+        ];
+        // 把第 1 条的输出换成超大文本。
+        if let ContentBlock::ToolResult { output, .. } = &mut conversation[1].content[0] {
+            output[0] = ContentBlock::Text { text: big.clone() };
+        }
+        if let ContentBlock::ToolResult { output, .. } = &mut conversation[2].content[0] {
+            output[0] = ContentBlock::Text { text: "y".repeat(50) };
+        }
+        let rc = RuntimeContext::new();
+        let out = compactor
+            .compact_if_needed(&rc, &conversation, &config, 100_000, None)
+            .await
+            .unwrap()
+            .expect("evict changes conversation, lightweight submit");
+        // 第 1 条（超大）→ 占位含文件地址；第 2 条（中等）不动；第 3 条（最近）不动。
+        let first = match &out[1].content[0] {
+            ContentBlock::ToolResult { output, .. } => match &output[0] {
+                ContentBlock::Text { text } => text.clone(),
+                other => panic!("unexpected {other:?}"),
+            },
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(first.contains("工具结果已卸载"), "占位文本: {first}");
+        let file_path = first
+            .split("已存 ")
+            .nth(1)
+            .and_then(|s| s.split("——").next())
+            .expect("占位含路径");
+        let written = std::fs::read_to_string(file_path).expect("落盘文件可读");
+        assert_eq!(written, big, "落盘内容完整无损");
+        let second = match &out[2].content[0] {
+            ContentBlock::ToolResult { output, .. } => match &output[0] {
+                ContentBlock::Text { text } => text.chars().count(),
+                other => panic!("unexpected {other:?}"),
+            },
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(second, 50, "低于 max_chars 的块不卸载（留给 prune）");
+        let third = match &out[3].content[0] {
+            ContentBlock::ToolResult { output, .. } => &output[0],
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(
+            matches!(third, ContentBlock::Text { text } if text == "ok"),
+            "最近一条受 keep_recent 保护"
+        );
+        assert!(model.requests().is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn evict_without_dir_is_noop() {
+        // dir 未解析（无工作区）→ 整体关闭，超大块原样保留。
+        let big = "x".repeat(500);
+        let config = EvictLargeResultsConfig {
+            max_chars: 100,
+            keep_recent: 1,
+            dir: None,
+        };
+        let mut conversation = vec![user_msg("go"), tool_result("1"), tool_result("2")];
+        if let ContentBlock::ToolResult { output, .. } = &mut conversation[1].content[0] {
+            output[0] = ContentBlock::Text { text: big.clone() };
+        }
+        let out = evict_large_results(&conversation, &config);
+        assert_eq!(out.len(), 3);
+        match &out[1].content[0] {
+            ContentBlock::ToolResult { output, .. } => match &output[0] {
+                ContentBlock::Text { text } => assert_eq!(*text, big),
+                other => panic!("unexpected {other:?}"),
+            },
+            other => panic!("unexpected {other:?}"),
         }
     }
 

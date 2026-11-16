@@ -14,7 +14,10 @@
 //! - 上下文压缩经 `IterationHook` 挂在每轮 ReAct 迭代边界（对齐 Java 每轮
 //!   `onReasoning`），overflow 恢复（强制压缩 + 同轮重试）与压缩前轻量裁剪
 //!   （truncateArgs/pruneToolResults）已复刻；`ToolResultEvictionMiddleware`
-//!   与自定义 CompactionStrategy 未复刻（详见 compaction 模块文档）。
+//!   以 Rust 方式复刻（`evict_large_results`：超大 tool-result 完整落盘为
+//!   文件引用，经 IterationHook 读写活状态——Java 是 durable+视图两层改写，
+//!   Rust 只改活状态上下文，落盘文件是完整副本）；自定义 CompactionStrategy
+//!   未复刻（详见 compaction 模块文档）。
 
 pub mod agent;
 pub mod base_store;

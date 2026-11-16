@@ -951,7 +951,18 @@ impl HarnessAgentBuilder {
         // 闭包只捕获 compactor/config/window，不捕获 delegate（避免 Arc 循环引用）。
         let compaction_window = model.context_window_size();
         let mut iteration_hook = None;
-        let compaction_runtime = match self.compaction_config {
+        // Eviction 落盘目录解析：配置未显式给 dir 时锚到主工作区 `<root>/.ox/evicted/`
+        // （模型 read_file 的根就是工作区，占位里的地址可读回）。app 可显式传
+        // dir 对齐自己的隐藏目录域（如 ox-idea 的 `.oxidea/`）。
+        let mut compaction_config = self.compaction_config;
+        if let Some(config) = &mut compaction_config {
+            if let Some(evict) = &mut config.evict_large_results {
+                if evict.dir.is_none() {
+                    evict.dir = Some(workspace_manager.root().join(".ox").join("evicted"));
+                }
+            }
+        }
+        let compaction_runtime = match compaction_config {
             Some(config) => {
                 let flush = Arc::new(MemoryFlushManager::new(
                     Arc::clone(

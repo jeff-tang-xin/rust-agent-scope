@@ -15,6 +15,7 @@ use agentscope_core::message::{Role, ToolResultState};
 use agentscope_core::AgentStateStore;
 use agentscope_core::{ContentBlock, Model, Msg, RuntimeContext, Toolkit};
 use agentscope_harness::agent::{HarnessAgent, HarnessAgentBuilder};
+use agentscope_harness::compaction::{CompactionConfig, EvictLargeResultsConfig};
 use agentscope_harness::blackboard::{BlackboardAppendTool, BlackboardReadTool, BlackboardStore};
 use agentscope_harness::middleware_memory::{MemoryFlushMiddleware, MemoryMaintenanceMiddleware};
 use agentscope_harness::tools::{LocalShellBackend, ShellExecuteTool};
@@ -791,7 +792,16 @@ fn assemble_agent(
         .enable_plan_mode()
         .plan_file_directory(".oxidea/agent/specs")
         .plan_prompt(PLAN_PROMPT)
-        .permission_context(permission);    if let Some(ws) = &memory_ws {
+        .permission_context(permission)
+        // 超大工具结果卸载：落盘目录与截图同域（`.oxidea/`）——不显式给的话
+        // harness 默认锚 `<workspace>/.ox/evicted/`，ox-idea 的隐藏目录域是 .oxidea。
+        .compaction(CompactionConfig {
+            evict_large_results: Some(EvictLargeResultsConfig {
+                dir: Some(PathBuf::from(cwd).join(".oxidea/evicted")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });    if let Some(ws) = &memory_ws {
         builder = builder
             .with_memory_workspace(Arc::clone(ws))
             .middleware(Arc::new(MemoryFlushMiddleware::new(
