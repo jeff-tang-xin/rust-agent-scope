@@ -533,8 +533,7 @@ fn assemble_agent(
     register_browser!(
         BrowserNavigate, BrowserSnapshot, BrowserClick, BrowserType, BrowserScreenshot,
         BrowserClose, BrowserEvaluate, BrowserHover, BrowserScrollAt, BrowserDrag,
-    );
-    // Skill 生态（对齐 Anthropic Agent Skills 通用原则）：项目级 `.claude/skills/`
+    );    // Skill 生态（对齐 Anthropic Agent Skills 通用原则）：项目级 `.claude/skills/`
     // 可写（跟项目走、可提交版本库），用户级 `~/.claude/skills/` 只读（跨项目
     // 复用；安装只落项目级——工作区红线不放宽）。skill_manage 自带静态安全扫描
     // （危险内容拒绝落盘并归档），auto_promote 直写正式根（个人用途，安装即生效）。

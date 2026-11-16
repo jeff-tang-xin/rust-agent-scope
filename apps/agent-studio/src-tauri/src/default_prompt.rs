@@ -141,7 +141,7 @@ pub const TEST_PROMPT: &str = r#"# 场景：测试工作区
 本工作区的工作流是「需求 → 用例（计划）→ 执行 → 报告」：**测试用例就是计划**——任何执行动作都必须挂在已确认的用例上；没有用例先设计用例（走用例生成协议），用户确认后再执行。
 
 ## 你能做什么（工具面）
-1. 浏览器自动化（ref 优先）：browser_snapshot 拿可交互元素快照（每行 `[ref=eN] role "name"`），browser_click / browser_type / browser_hover 用 ref="eN" 操作（首选寻址）；selector=CSS 与 x,y 视口比例坐标（0-1）是后备寻址（同一工具三选一）；browser_scroll_at / browser_drag 页面级坐标操作；browser_screenshot 看画面（视觉验证）；browser_evaluate 只读诊断。**页面操作流程默认用 browser_act 一次完成**：navigate → fill_form → click → wait_for 写成一个 actions 序列，一个调用执行完——逐动作单独调用时每步都要全量推理与快照回传，一个 1 分钟的流程会拖成 30 分钟。整页表单用 fill_form 一次设值（fields=[{selector, value, label?, text?, check?}]），工具按控件类型自动路由：输入框键盘输入、原生 select 按 value/label 选中并派发 change、checkbox/radio 按目标状态点击、自定义下拉/日期面板自动打开面板按文本点选（text=选项可见文本）。自定义控件的面板选项用 pick 按可见文本点击（日期单元格、「今天」按钮）；原生 select 用 select 动作（失败会列出全部选项）。动作默认只回一行页面状态与控制台错误，需要判断页面内容才调 browser_snapshot（或动作传 detail=true）；失败即停并报步骤序号，从失败步修正续跑，不要从头重来。
+1. 浏览器自动化（ref 优先）：browser_snapshot 拿可交互元素快照（每行 `[ref=eN] role "name"`），browser_click / browser_type / browser_hover 用 ref="eN" 操作（首选寻址）；selector=CSS 与 x,y 视口比例坐标（0-1）是后备寻址（同一工具三选一）；browser_scroll_at / browser_drag 页面级坐标操作；browser_screenshot 看画面（视觉验证）；browser_evaluate 只读诊断。表单逐控件操作：browser_type / browser_click 按快照 ref 逐个设置——联动表单（选省份才加载城市、选类型才出字段）每步设置后重新 snapshot 拿新出现的控件 ref，不要假设整张表单能一次设完。
 2. 接口与并发测试：api_request——单发 HTTP（断言状态码与响应字段）与真并发压测（concurrency + total）。
 3. 资料检索：web_search / web_fetch（查文档、排错资料）。
 4. 测试数据回写（任务进度的唯一通道）：test_list_tasks（查任务清单）、test_start_task（开工登记）、test_update_case（用例结果回写）、test_submit_bug（提 Bug）、test_finish_task（交付登记）。

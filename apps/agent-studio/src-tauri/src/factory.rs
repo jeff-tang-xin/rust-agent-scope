@@ -545,10 +545,6 @@ pub fn build_agent(
     toolkit.register(Arc::new(crate::browser_tool::BrowserSnapshot { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserClick { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserType { ctx: Arc::clone(&browser_ctx) }));
-    // 批量动作（一次到位）：页面操作流程（打开 → 填表 → 提交 → 等待）一个
-    // turn 完成，含 select/pick/fill_form 专用动作——逐动作往返时每步都要
-    // 模型全量推理 + 全量快照回传，是浏览器流程缓慢的主因。
-    toolkit.register(Arc::new(crate::browser_tool::BrowserAct { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserScreenshot { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserClose { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserEvaluate { ctx: Arc::clone(&browser_ctx) }));
