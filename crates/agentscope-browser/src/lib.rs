@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chromiumoxide::Browser;
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::page::{
     EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
@@ -55,9 +54,15 @@ pub fn find_browser_executable() -> Option<PathBuf> {
 // ---------- 浏览器会话（懒启动 + 复用 + 死亡自愈） ----------
 
 struct BrowserHandle {
-    /// 保活：drop 即结束浏览器进程。
-    _browser: Browser,
+    /// 保活：drop 即结束浏览器进程。brother::Browser 底层即 chromiumoxide
+    /// （同 0.9 版本），launch/connect 语义一致；快照与 ref 解析走 brother。
+    _browser: brother::Browser,
+    /// chromiumoxide 视角的页面（brother::Page::inner() 取回）——既有工具
+    /// 代码（CDP 原语、screencast、console 监听）全部继续用它。
     page: Arc<chromiumoxide::Page>,
+    /// brother 视角的页面：AX 快照（nth 消歧）与 ref 统一寻址（ref/CSS，
+    /// stale 时按 role+name 兜底重定位）。
+    bpage: Arc<brother::Page>,
 }
 
 pub struct BrowserSession {
@@ -136,6 +141,18 @@ impl BrowserSession {
     /// 则直接返回现有页面。
     pub async fn ensure_started(&self) -> std::result::Result<Arc<chromiumoxide::Page>, String> {
         self.page().await
+    }
+
+    /// 显式关闭浏览器进程。宿主应用退出时必须调用：会话是 `OnceLock` 进程级
+    /// 单例，静态变量在进程退出时不析构，`BrowserHandle` 永不 drop，Chrome
+    /// 依赖的 kill_on_drop 就永远不会触发——浏览器进程成为孤儿（吃内存、
+    /// 占 CDP 端口）。take 出 handle 后 drop 即触发 kill_on_drop 杀进程树。
+    pub async fn shutdown(&self) {
+        let mut guard = self.inner.lock().await;
+        if let Some(handle) = guard.take() {
+            drop(handle);
+        }
+        self.cast.active.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     // ---------- 直播（screencast）：面板画面 ----------
@@ -384,13 +401,37 @@ impl BrowserSession {
                 .map(|d| d.as_millis())
                 .unwrap_or(0)
         ));
-        let config = chromiumoxide::BrowserConfig::builder()
-            .chrome_executable(exe)
-            .user_data_dir(&user_data_dir)
-            .window_size(1680, 1200)
-            .build()
-            .map_err(|e| format!("浏览器配置失败: {e}"))?;
-        let (browser, mut handler) = Browser::launch(config)
+        // brother::BrowserConfig 底层转成 chromiumoxide::BrowserConfig，默认已带
+        // --headless=new / --no-first-run / --disable-extensions / --disable-sync /
+        // --disable-translate / --disable-background-networking / --disable-component-update，
+        // 此处只补我们独有的优化 flags。
+        let mut config = brother::BrowserConfig {
+            headless: true,
+            viewport_width: 1680,
+            viewport_height: 1200,
+            executable: Some(exe),
+            user_data_dir: Some(user_data_dir),
+            disable_gpu: true,
+            ..Default::default()
+        };
+        config.args = vec![
+            // 后台节流三件套：headless 下页面被判定「不可见」后定时器/渲染
+            // 会被节流，表现为工具操作莫名变慢、wait_for 超时——全关。
+            "--disable-background-timer-throttling".into(),
+            "--disable-backgrounding-occluded-windows".into(),
+            "--disable-renderer-backgrounding".into(),
+            "--no-default-browser-check".into(),
+            "--metrics-recording-only".into(),
+            "--mute-audio".into(),
+            // 进程数收敛：默认每站点一个 renderer 进程（每个 100-300MB），
+            // 测试场景通常单页面——process-per-site 合并同站点进程，
+            // renderer-process-limit 兜底上限。低配机器（16G）上 IDEA/studio
+            // 与 Chrome 同跑，进程数直接决定内存与调度压力。
+            "--process-per-site".into(),
+            "--renderer-process-limit=2".into(),
+            "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,InterestFeedContentSuggestions".into(),
+        ];
+        let (browser, mut handler) = brother::Browser::launch(config)
             .await
             .map_err(|e| {
                 format!(
@@ -406,12 +447,13 @@ impl BrowserSession {
                 }
             }
         });
-        let page = Arc::new(
+        let bpage = Arc::new(
             browser
                 .new_page("about:blank")
                 .await
                 .map_err(|e| format!("打开标签页失败: {e}"))?,
         );
+        let page = Arc::new(bpage.inner().clone());
         // 显式设定页面视口：window_size 只决定浏览器窗口，headless 新标签页
         // 的页面视口仍是 Chromium 默认 800×600——页面按窄屏渲染（响应式布局
         // 塌缩、面板画面浪费），与窗口 1680×1200 及 screencast 上限不一致。
@@ -473,8 +515,20 @@ impl BrowserSession {
         *guard = Some(BrowserHandle {
             _browser: browser,
             page: page.clone(),
+            bpage,
         });
         Ok(page)
+    }
+
+    /// 取 brother::Page（AX 快照与 ref 解析用）。复用 page() 的存活探测
+    /// 与重建逻辑，确保返回时浏览器一定活着。
+    async fn bpage(&self) -> std::result::Result<Arc<brother::Page>, String> {
+        self.page().await?;
+        let guard = self.inner.lock().await;
+        guard
+            .as_ref()
+            .map(|h| h.bpage.clone())
+            .ok_or_else(|| "浏览器会话不可用".to_string())
     }
 
     async fn invalidate(&self) {
@@ -604,6 +658,59 @@ fn render_snapshot(info: &Value) -> String {
     out
 }
 
+// ---------- browser_act 的专用动作 JS ----------
+
+/// 原生 `<select>` 选中：按 value 或可见文本匹配选项，设值后派发
+/// input/change（受控框架靠事件同步）；失败时回传前 20 个选项供修正。
+const SELECT_JS: &str = r#"((selector, value, label) => {
+  const el = document.querySelector(selector);
+  if (!el) return { ok: false, error: "元素不存在: " + selector };
+  if (el.tagName !== "SELECT") return { ok: false, error: "不是 <select>（自定义下拉用 pick 按文本点击）" };
+  const opt = [...el.options].find(
+    (o) => (value && o.value === value) || (label && o.textContent.trim() === label),
+  );
+  if (!opt) {
+    return {
+      ok: false,
+      error: "没有匹配的选项",
+      options: [...el.options].slice(0, 20).map((o) => ({ value: o.value, label: o.textContent.trim() })),
+    };
+  }
+  el.value = opt.value;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, value: opt.value, label: opt.textContent.trim() };
+})("__SELECTOR__", "__VALUE__", "__LABEL__")"#;
+
+/// 按可见文本点击：textContent 匹配（exact/contains）的最内层可见元素，
+/// 派发 mousedown/mouseup/click 完整序列（React/Vue 事件委托与 mousedown
+/// 触发的面板都认）。跳过不可见与纯容器节点（textContent 相同的父层）。
+const PICK_JS: &str = r#"((text, mode) => {
+  const visible = (el) => {
+    const s = getComputedStyle(el);
+    if (s.display === "none" || s.visibility === "hidden" || s.opacity === "0") return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const hit = (el) =>
+    mode === "contains" ? el.textContent.includes(text) : el.textContent.trim() === text;
+  const all = [...document.querySelectorAll("body *")].filter(
+    (el) =>
+      !["SCRIPT", "STYLE", "NOSCRIPT"].includes(el.tagName) &&
+      visible(el) &&
+      hit(el) &&
+      ![...el.children].some((c) => hit(c)),
+  );
+  if (!all.length) return { ok: false, error: "无匹配元素" };
+  const el = all[0];
+  const fire = (type) =>
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+  fire("mousedown");
+  fire("mouseup");
+  fire("click");
+  return { ok: true, tag: el.tagName.toLowerCase(), text: el.textContent.trim().slice(0, 80) };
+})("__TEXT__", "__MODE__")"#;
+
 /// 轮询等待元素出现（替代固定 sleep；SPA 慢加载时 Agent 传 wait_for）。
 async fn wait_for_selector(
     page: &chromiumoxide::Page,
@@ -646,6 +753,28 @@ async fn render_with_console(session: &BrowserSession, info: &Value) -> String {
     out
 }
 
+/// 动作后的迷你回传：只报 title + URL 一行——动作类工具默认不再回全量页面
+/// 快照。全量快照每步几千 token（可见文本 + 最多 200 个交互元素），模型每步
+/// 读完整个页面再推理下一步，是浏览器流程缓慢的主因；动作本身不需要看页面，
+/// 模型需要判断时主动调 browser_snapshot（或动作参数 detail=true）。
+async fn mini_state(page: &chromiumoxide::Page) -> String {
+    let fallback = "页面状态读取失败（页面可能正在跳转）".to_owned();
+    match page
+        .evaluate("(() => ({ title: document.title, url: location.href }))()")
+        .await
+    {
+        Ok(result) => match result.into_value::<Value>() {
+            Ok(v) => format!(
+                "页面: {} | URL: {}",
+                v["title"].as_str().unwrap_or("(无标题)"),
+                v["url"].as_str().unwrap_or("(未知)")
+            ),
+            Err(_) => fallback,
+        },
+        Err(_) => fallback,
+    }
+}
+
 fn input_str(input: &Value, key: &str) -> std::result::Result<String, ToolOutput> {
     input
         .get(key)
@@ -661,6 +790,428 @@ fn url_scheme_allowed(url: &str) -> bool {
         || url.starts_with("https://")
         || url == "about:blank"
         || url.starts_with("file://")
+}
+
+// ---------- 工具：browser_act（批量动作，一次到位） ----------
+
+/// 一次调用按序执行一串页面动作（navigate/click/type/wait_for/evaluate），
+/// 任何一步失败立即停止并报告步骤序号与原因。页面操作类流程（打开 → 填表 →
+/// 提交 → 等待跳转）一个 turn 完成——逐动作往返时每步都要模型全量推理 +
+/// 全量快照回传，是浏览器流程缓慢的主因。
+pub struct BrowserAct {
+    pub ctx: Arc<BrowserCtx>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BrowserAct {
+    /// 浏览器工具默认免确认（headless 沙箱内操作，用户已确认永久授权）。
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "browser_act"
+    }
+
+    fn description(&self) -> &str {
+        "Run a SEQUENCE of page actions in ONE call — the preferred way to perform a page \
+         workflow (open → fill form → submit → wait): one call instead of one call per action. \
+         actions=[{action: navigate|click|type|wait_for|evaluate|select|pick|fill_form, ...}]:\n\
+         - navigate {url}; click {selector}; type {selector, value, submit?}; wait_for {selector, timeout_ms?};\n\
+         - evaluate {js} (IIFE returning JSON);\n\
+         - select {selector, value|label}: native <select>, dispatches change; lists options on failure;\n\
+         - pick {text, match?}: click by VISIBLE TEXT — custom dropdown options, date-panel cells, \
+           \"Today\" buttons (dynamic widgets without stable selectors);\n\
+         - fill_form {fields: [{selector, value?, label?, text?, check?, submit?}]}: set ALL form \
+           controls in one step — inputs/textarea by typing, <select> by value/label, checkbox/radio \
+           by target state, custom dropdowns/date-pickers by opening the panel and picking the text.\n\
+         Stops at the first failure with the step index. Returns a per-step log, the one-line page \
+         state and console errors; pass detail=true for the full snapshot (selectors come from \
+         browser_snapshot)."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "description": "Actions in execution order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "enum": ["navigate", "click", "type", "wait_for", "evaluate", "select", "pick", "fill_form"],
+                                "description": "navigate: {url}; click: {selector}; type: {selector, value, submit?}; wait_for: {selector, timeout_ms?}; evaluate: {js}; select: {selector, value|label}; pick: {text, match?}; fill_form: {fields}."},
+                            "url": {"type": "string"},
+                            "selector": {"type": "string"},
+                            "value": {"type": "string"},
+                            "label": {"type": "string", "description": "select: match option by visible text."},
+                            "text": {"type": "string", "description": "pick / fill_form custom widgets: visible text of the option/cell to click."},
+                            "match": {"type": "string", "enum": ["exact", "contains"], "description": "pick only, default exact."},
+                            "check": {"type": "boolean", "description": "fill_form checkbox/radio: target state."},
+                            "submit": {"type": "boolean", "description": "type/fill_form: press Enter after typing."},
+                            "timeout_ms": {"type": "integer", "description": "wait_for only, default 5000."},
+                            "js": {"type": "string", "description": "evaluate only: JavaScript IIFE."},
+                            "fields": {"type": "array", "description": "fill_form only: [{selector, value?, label?, text?, check?, submit?}]."}
+                        },
+                        "required": ["action"]
+                    }
+                },
+                "detail": {"type": "boolean", "description": "Return the full page snapshot instead of the one-line state."}
+            },
+            "required": ["actions"]
+        })
+    }
+
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let Some(actions) = input.get("actions").and_then(|v| v.as_array()) else {
+            return Ok(ToolOutput::error("缺少必填参数 `actions`"));
+        };
+        if actions.is_empty() {
+            return Ok(ToolOutput::error("`actions` 不能为空"));
+        }
+        let page = match self.ctx.session.page().await {
+            Ok(p) => p,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let mut log: Vec<String> = Vec::new();
+        for (index, step) in actions.iter().enumerate() {
+            let what = step.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            match run_act_step(&page, step).await {
+                Ok(line) => log.push(format!("{}. ✓ {what}{line}", index + 1)),
+                Err(error) => {
+                    // 失败即停：已完成步骤 + 失败原因 + 当前页面状态——模型可
+                    // 从失败步续接（修正参数重跑剩余序列），不用从头再来。
+                    let console = self.ctx.session.drain_console().await;
+                    let mut out = format!(
+                        "第 {} 步（{what}）失败: {error}\n已完成 {} / {} 步:\n{}\n{}",
+                        index + 1,
+                        index,
+                        actions.len(),
+                        log.join("\n"),
+                        mini_state(&page).await
+                    );
+                    if !console.is_empty() {
+                        out.push_str("\n[页面控制台错误]\n");
+                        for line in console {
+                            out.push_str(&format!("- {line}\n"));
+                        }
+                    }
+                    return Ok(ToolOutput::error(out));
+                }
+            }
+            // 动作间渲染缓冲（DOM 稳定），wait_for 自带轮询无需额外等待。
+            if !matches!(what, "wait_for") {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
+        }
+        let detail = input.get("detail").and_then(|v| v.as_bool()).unwrap_or(false);
+        let console = self.ctx.session.drain_console().await;
+        let mut out = log.join("\n");
+        if detail {
+            match snapshot(&page).await {
+                Ok(info) => out.push_str(&format!("\n\n{}", render_with_console(&self.ctx.session, &info).await)),
+                Err(e) => out.push_str(&format!("\n\n⚠ 全量快照失败: {e}")),
+            }
+        } else {
+            out.push_str(&format!("\n{}", mini_state(&page).await));
+            if !console.is_empty() {
+                out.push_str("\n[页面控制台错误]\n");
+                for line in console {
+                    out.push_str(&format!("- {line}\n"));
+                }
+            }
+            out.push_str("\n（需要页面详情时调 browser_snapshot，或本工具传 detail=true）");
+        }
+        Ok(ToolOutput::ok(out))
+    }
+}
+
+/// 执行单步动作，返回一行结果摘要；失败返回原因。
+async fn run_act_step(page: &chromiumoxide::Page, step: &Value) -> std::result::Result<String, String> {
+    let what = step.get("action").and_then(|v| v.as_str()).unwrap_or("");
+    match what {
+        "navigate" => {
+            let url = step
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or("navigate 需要 {url}")?;
+            if !url_scheme_allowed(url) {
+                return Err("仅支持 http/https/file URL".to_owned());
+            }
+            page.goto(url).await.map_err(|e| format!("导航失败: {e}"))?;
+            Ok(format!(" → {url}"))
+        }
+        "click" => {
+            let selector = step
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("click 需要 {selector}")?;
+            let element = page
+                .find_element(selector)
+                .await
+                .map_err(|_| format!("未找到元素: {selector}"))?;
+            highlight(&element).await;
+            element.click().await.map_err(|e| format!("点击失败: {e}"))?;
+            Ok(format!(" `{selector}`"))
+        }
+        "type" => {
+            let selector = step
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("type 需要 {selector}")?;
+            let value = step
+                .get("value")
+                .and_then(|v| v.as_str())
+                .ok_or("type 需要 {value}")?;
+            let element = page
+                .find_element(selector)
+                .await
+                .map_err(|_| format!("未找到元素: {selector}"))?;
+            // 清空已有内容再输入（replace 语义，与 browser_type 一致）。
+            let _ = element.call_js_fn("function() { this.focus(); this.value = ''; }", false).await;
+            highlight(&element).await;
+            element
+                .type_str(value)
+                .await
+                .map_err(|e| format!("输入失败: {e}"))?;
+            let mut line = format!(" `{selector}` ← {value:?}");
+            if step.get("submit").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let _ = element.press_key("Enter").await;
+                line.push_str(" + Enter");
+            }
+            Ok(line)
+        }
+        "wait_for" => {
+            let selector = step
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("wait_for 需要 {selector}")?;
+            let timeout = step
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5000)
+                .min(30_000);
+            wait_for_selector(page, selector, timeout).await?;
+            Ok(format!(" `{selector}` 出现"))
+        }
+        "evaluate" => {
+            let js = step.get("js").and_then(|v| v.as_str()).ok_or("evaluate 需要 {js}")?;
+            let result = page.evaluate(js).await.map_err(|e| format!("执行失败: {e}"))?;
+            let value: Value = result.into_value().map_err(|e| format!("解析结果失败: {e}"))?;
+            let rendered = serde_json::to_string(&value).unwrap_or_else(|_| "(不可序列化)".to_owned());
+            // 结果截断：批量序列里 evaluate 多为探针（取状态/断言），长文本
+            // 会把回传撑爆——需要完整结果就单独调 browser_evaluate。
+            let mut line = format!(" → {}", &rendered[..rendered.len().min(300)]);
+            if rendered.len() > 300 {
+                line.push_str("…（截断，完整结果单独调 browser_evaluate）");
+            }
+            Ok(line)
+        }
+        // 原生 <select>：按 value 或可见文本选中 + 派发 input/change（React/Vue
+        // 受控组件靠事件同步状态，只设 value 不派发事件框架不认）。找不到选项
+        // 时回传前 20 个选项——模型下一轮直接修正，不用再 snapshot。
+        "select" => {
+            let selector = step
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or("select 需要 {selector}")?;
+            let value = step.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            let label = step.get("label").and_then(|v| v.as_str()).unwrap_or("");
+            if value.is_empty() && label.is_empty() {
+                return Err("select 需要 {value} 或 {label}（二选一）".to_owned());
+            }
+            let js = SELECT_JS
+                .replace("__SELECTOR__", selector)
+                .replace("__VALUE__", value)
+                .replace("__LABEL__", label);
+            let result = page.evaluate(js).await.map_err(|e| format!("执行失败: {e}"))?;
+            let value: Value = result.into_value().map_err(|e| format!("解析结果失败: {e}"))?;
+            if value["ok"].as_bool() != Some(true) {
+                let options = value["options"].as_array();
+                let listed = options
+                    .map(|opts| {
+                        opts.iter()
+                            .filter_map(|o| {
+                                Some(format!(
+                                    "  - value={:?} label={:?}",
+                                    o["value"].as_str()?,
+                                    o["label"].as_str()?
+                                ))
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                return Err(format!(
+                    "选中失败: {}{}",
+                    value["error"].as_str().unwrap_or("未知"),
+                    if listed.is_empty() { String::new() } else { format!("\n可选选项:\n{listed}") }
+                ));
+            }
+            Ok(format!(
+                " `{selector}` → {:?}",
+                value["label"].as_str().unwrap_or("")
+            ))
+        }
+        // 按可见文本点击：自定义下拉选项、日期面板单元格、「今天」按钮这类
+        // 动态挂载、无稳定 selector 的控件——找 textContent 匹配的最内层可见
+        // 元素，派发完整鼠标事件序列（mousedown/mouseup/click，事件委托框架
+        // 全都认）。match=contains 用于文本含动态后缀的场景（默认 exact）。
+        "pick" => {
+            let text = step
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("pick 需要 {text}")?;
+            let contains = step.get("match").and_then(|v| v.as_str()) == Some("contains");
+            let js = PICK_JS
+                .replace("__TEXT__", text)
+                .replace("__MODE__", if contains { "contains" } else { "exact" });
+            let result = page.evaluate(js).await.map_err(|e| format!("执行失败: {e}"))?;
+            let value: Value = result.into_value().map_err(|e| format!("解析结果失败: {e}"))?;
+            if value["ok"].as_bool() != Some(true) {
+                return Err(format!(
+                    "未找到可点击的文本元素: {text:?}（{}）——先 browser_snapshot/evaluate 确认面板已打开、文本准确",
+                    value["error"].as_str().unwrap_or("无匹配")
+                ));
+            }
+            Ok(format!(" {text:?}（<{tag}>）", tag = value["tag"].as_str().unwrap_or("?")))
+        }
+        // 一次性表单设置：fields=[{selector, value?, label?, text?, check?, submit?}, ...]
+        // 按控件类型自动路由设置策略——input/textarea 清空后键盘输入；原生
+        // <select> 按 value/label 选中并派发 change；checkbox/radio 状态不符才
+        // 点击；其余（div 模拟的自定义下拉/日期面板）click 打开后按文本点选。
+        // 模型一次给出整页控件值，一个 turn 全部设置到位。
+        "fill_form" => {
+            let fields = step
+                .get("fields")
+                .and_then(|v| v.as_array())
+                .ok_or("fill_form 需要 {fields: [{selector, value?...}, ...]}")?;
+            if fields.is_empty() {
+                return Err("`fields` 不能为空".to_owned());
+            }
+            let mut lines: Vec<String> = Vec::new();
+            for (i, field) in fields.iter().enumerate() {
+                let fail = |msg: String| format!("fields[{i}]: {msg}");
+                let selector = field
+                    .get("selector")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| fail("缺少 `selector`".to_owned()))?;
+                let element = page
+                    .find_element(selector)
+                    .await
+                    .map_err(|_| fail(format!("未找到元素: {selector}")))?;
+                // 探测控件类型（tag/type/checked 一次拿齐），路由设置策略。
+                let probe_js = format!(
+                    r#"(() => {{ const el = document.querySelector({selector:?}); return el ? {{ tag: el.tagName, type: el.type || '', checked: !!el.checked }} : null; }})()"#
+                );
+                let probe = page
+                    .evaluate(probe_js)
+                    .await
+                    .map_err(|e| fail(format!("探测失败: {e}")))?;
+                let probe: Value = probe.into_value().map_err(|e| fail(format!("探测解析失败: {e}")))?;
+                if probe.is_null() {
+                    return Err(fail(format!("元素不存在: {selector}")));
+                }
+                let tag = probe["tag"].as_str().unwrap_or("").to_uppercase();
+                let input_type = probe["type"].as_str().unwrap_or("").to_lowercase();
+                let line = match (tag.as_str(), input_type.as_str()) {
+                    ("SELECT", _) => {
+                        let value = field.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                        let label = field.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                        if value.is_empty() && label.is_empty() {
+                            return Err(fail("select 需要 {value} 或 {label}".to_owned()));
+                        }
+                        let js = SELECT_JS
+                            .replace("__SELECTOR__", selector)
+                            .replace("__VALUE__", value)
+                            .replace("__LABEL__", label);
+                        let result = page.evaluate(js).await.map_err(|e| fail(format!("执行失败: {e}")))?;
+                        let value: Value = result.into_value().map_err(|e| fail(format!("解析失败: {e}")))?;
+                        if value["ok"].as_bool() != Some(true) {
+                            let options = value["options"].as_array();
+                            let listed = options
+                                .map(|opts| {
+                                    opts.iter()
+                                        .filter_map(|o| {
+                                            Some(format!(
+                                                "  - value={:?} label={:?}",
+                                                o["value"].as_str()?,
+                                                o["label"].as_str()?
+                                            ))
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                })
+                                .unwrap_or_default();
+                            return Err(fail(format!(
+                                "选中失败: {}{}",
+                                value["error"].as_str().unwrap_or("未知"),
+                                if listed.is_empty() { String::new() } else { format!("\n可选选项:\n{listed}") }
+                            )));
+                        }
+                        format!("✓ {selector} → select {:?}", value["label"].as_str().unwrap_or(""))
+                    }
+                    ("INPUT", "checkbox") | ("INPUT", "radio") => {
+                        let target = field.get("check").and_then(|v| v.as_bool()).ok_or_else(|| {
+                            fail("checkbox/radio 需要 {check: true|false}（目标状态）".to_owned())
+                        })?;
+                        let current = probe["checked"].as_bool().unwrap_or(false);
+                        if current != target {
+                            highlight(&element).await;
+                            element.click().await.map_err(|e| fail(format!("点击失败: {e}")))?;
+                        }
+                        format!("✓ {selector} → {}（{}）", if target { "勾选" } else { "取消" },
+                            if current != target { "已点击" } else { "状态已正确，跳过" })
+                    }
+                    ("INPUT", _) | ("TEXTAREA", _) => {
+                        let value = field
+                            .get("value")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| fail("输入框需要 {value}".to_owned()))?;
+                        let _ = element.call_js_fn("function() { this.focus(); this.value = ''; }", false).await;
+                        highlight(&element).await;
+                        element.type_str(value).await.map_err(|e| fail(format!("输入失败: {e}")))?;
+                        let mut line = format!("✓ {selector} ← {value:?}");
+                        if field.get("submit").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            let _ = element.press_key("Enter").await;
+                            line.push_str(" + Enter");
+                        }
+                        line
+                    }
+                    // 自定义控件（div/span 模拟的下拉、日期面板）：click 打开
+                    // 面板 → 按文本点选选项。text 优先，缺省用 value。
+                    _ => {
+                        let text = field
+                            .get("text")
+                            .or_else(|| field.get("value"))
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| fail("自定义控件需要 {text}（面板选项的可见文本）".to_owned()))?;
+                        highlight(&element).await;
+                        element.click().await.map_err(|e| fail(format!("打开面板失败: {e}")))?;
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                        let js = PICK_JS.replace("__TEXT__", text).replace("__MODE__", "exact");
+                        let result = page.evaluate(js).await.map_err(|e| fail(format!("执行失败: {e}")))?;
+                        let value: Value = result.into_value().map_err(|e| fail(format!("解析失败: {e}")))?;
+                        if value["ok"].as_bool() != Some(true) {
+                            return Err(fail(format!(
+                                "面板选项未找到: {text:?}——面板可能没打开或文本不符，单独 browser_snapshot 确认"
+                            )));
+                        }
+                        format!(
+                            "✓ {selector} → pick {text:?}（<{tag}>）",
+                            tag = value["tag"].as_str().unwrap_or("?")
+                        )
+                    }
+                };
+                lines.push(format!("  {}. {line}", i + 1));
+                // 字段间渲染缓冲（自定义控件的面板动画）。
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+            Ok(format!("\n{}", lines.join("\n")))
+        }
+        other => Err(format!("未知动作: {other}（支持 navigate/click/type/wait_for/evaluate/select/pick/fill_form）")),
+    }
 }
 
 // ---------- 工具：browser_navigate ----------
@@ -692,7 +1243,8 @@ impl Tool for BrowserNavigate {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "Absolute URL (http/https/file)."},
-                "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) before reading the page - use for SPAs."}
+                "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) before reading the page - use for SPAs."},
+                "detail": {"type": "boolean", "description": "Also include title/URL/visible text with CSS selectors. Default false."}
             },
             "required": ["url"]
         })
@@ -737,14 +1289,36 @@ impl Tool for BrowserNavigate {
                 note = format!("\n⚠ {e}");
             }
         }
-        match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(format!(
-                "{}{}",
-                render_with_console(&self.ctx.session, &info).await,
-                note
-            ))),
-            Err(e) => Ok(ToolOutput::error(e)),
+        // 导航后直接给 AX 快照（ref 句柄）——模型拿到即可 click(ref="eN")，
+        // 不必再单独 snapshot；DOM 摘要（selector 路径）按需附加。
+        let detail_requested = input.get("detail").and_then(|v| v.as_bool()).unwrap_or(false);
+        let mut out = match self.ctx.session.bpage().await {
+            Ok(b) => match brother_snapshot_text(&b).await {
+                Ok(ax) => format!(
+                    "可交互元素（ref 句柄，点击/输入用 browser_click / browser_type 的 ref 参数）:\n{ax}"
+                ),
+                Err(e) => format!("（AX 快照失败: {e}——可调 browser_snapshot 重试）"),
+            },
+            Err(e) => format!("（AX 快照失败: {e}）"),
+        };
+        if detail_requested {
+            match snapshot(&page).await {
+                Ok(info) => {
+                    out.push_str(&format!("\n\n{}", render_with_console(&self.ctx.session, &info).await));
+                }
+                Err(e) => out.push_str(&format!("\n\n（DOM 摘要失败: {e}）")),
+            }
+        } else {
+            let console = self.ctx.session.drain_console().await;
+            if !console.is_empty() {
+                out.push_str("\n[页面控制台错误]");
+                for line in console {
+                    out.push_str(&format!("\n- {line}"));
+                }
+            }
         }
+        out.push_str(&note);
+        Ok(ToolOutput::ok(out))
     }
 }
 
@@ -766,26 +1340,56 @@ impl Tool for BrowserSnapshot {
     }
 
     fn description(&self) -> &str {
-        "Read the current browser page: title, visible text and interactive elements \
-         with CSS selectors. Use after navigation or actions to verify page state."
+        "Get a compact accessibility-tree snapshot of the current page: one line per \
+         interactive element like `[ref=e5] button \"提交\" [disabled]`. This is the \
+         PRIMARY perception channel — click/type via ref handles (browser_click / \
+         browser_type with ref=\"e5\"), NOT pixel coordinates. Re-snapshot after \
+         navigation or when an action returns stale_ref; refs are short-lived \
+         handles re-assigned on every snapshot. Set detail=true to also get \
+         title/URL/visible text with CSS selectors."
     }
 
     fn parameters(&self) -> Value {
-        json!({"type": "object", "properties": {}})
+        json!({
+            "type": "object",
+            "properties": {
+                "detail": {"type": "boolean", "description": "Also include title/URL/visible text with CSS selectors. Default false."}
+            }
+        })
     }
 
-    async fn call(&self, _input: Value) -> Result<ToolOutput> {
+    async fn call(&self, input: Value) -> Result<ToolOutput> {
+        let detail = input.get("detail").and_then(|v| v.as_bool()).unwrap_or(false);
         let page = match self.ctx.session.page().await {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
-        match snapshot(&page).await {
-            Ok(info) => {
-                let out = render_with_console(&self.ctx.session, &info).await;
-                Ok(ToolOutput::ok(out))
+        let bpage = match self.ctx.session.bpage().await {
+            Ok(b) => b,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let ax = match brother_snapshot_text(&bpage).await {
+            Ok(t) => t,
+            Err(e) => return Ok(ToolOutput::error(e)),
+        };
+        let mut out = format!("可交互元素（ref 句柄，点击/输入用 browser_click / browser_type 的 ref 参数）:\n{ax}");
+        if detail {
+            match snapshot(&page).await {
+                Ok(info) => {
+                    out.push_str(&format!("\n\n{}", render_with_console(&self.ctx.session, &info).await));
+                }
+                Err(e) => out.push_str(&format!("\n\n（DOM 摘要失败: {e}）")),
             }
-            Err(e) => Ok(ToolOutput::error(e)),
+        } else {
+            let console = self.ctx.session.drain_console().await;
+            if !console.is_empty() {
+                out.push_str("\n[页面控制台错误]");
+                for line in console {
+                    out.push_str(&format!("\n- {line}"));
+                }
+            }
         }
+        Ok(ToolOutput::ok(out))
     }
 }
 
@@ -807,57 +1411,115 @@ impl Tool for BrowserClick {
     }
 
     fn description(&self) -> &str {
-        "Click an element on the current browser page by CSS selector (from \
-         browser_navigate / browser_snapshot output). Returns the page state after \
-         the click."
+        "Click an element — THREE addressing modes, pick ONE per call: ref=\"e5\" \
+         from browser_snapshot's accessibility tree (PREFERRED — copy the ref from \
+         `[ref=e5] button \"提交\"`), selector=CSS (fallback when you have a selector \
+         but no snapshot), or x,y viewport RATIO 0-1 (last resort for canvas content \
+         with no accessibility node). All modes resolve coordinates in REAL TIME at \
+         click time (never cached), auto-scroll the element into view, click with \
+         real mouse events, and VERIFY via DOM fingerprint + pixel receipt: success \
+         returns a one-line event with NO screenshot; stale_ref means the ref could \
+         not be resolved (re-snapshot); dead_click auto-retries once then returns a \
+         small cropped diagnostic image."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "selector": {"type": "string", "description": "CSS selector of the element to click."},
+                "ref": {"type": "string", "description": "Element ref from browser_snapshot, e.g. \"e5\" (from [ref=e5]). PREFERRED."},
+                "selector": {"type": "string", "description": "CSS selector (fallback when no snapshot ref)."},
+                "x": {"type": "number", "description": "Viewport X as RATIO 0-1 (canvas fallback; requires y)."},
+                "y": {"type": "number", "description": "Viewport Y as RATIO 0-1 (canvas fallback; requires x)."},
                 "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) after the click."}
-            },
-            "required": ["selector"]
+            }
         })
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let selector = match input_str(&input, "selector") {
-            Ok(v) => v,
-            Err(e) => return Ok(e),
-        };
         let page = match self.ctx.session.page().await {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
-        let element = match page.find_element(&selector).await {
-            Ok(el) => el,
-            Err(_) => {
-                return Ok(ToolOutput::error(format!(
-                    "未找到元素: {selector}（先 browser_snapshot 获取可用 selector）"
-                )))
+        // 寻址三选一：ref > selector > 比例坐标。ref/selector 统一交给
+        // brother 的 resolve_target_center（ref 优先、CSS 兜底，stale 时按
+        // role+name 自动重定位），走同一条「实时解析 → 抖动点击 → 验证」管线。
+        let target: Option<String> = if let Some(r) = input.get("ref").and_then(|v| v.as_str()) {
+            Some(r.to_string())
+        } else if let Some(r) = input.get("ref").and_then(|v| v.as_i64()) {
+            Some(format!("e{r}"))
+        } else if let Ok(sel) = input_str(&input, "selector") {
+            Some(sel)
+        } else {
+            None
+        };
+        if let Some(t) = target {
+            let bpage = match self.ctx.session.bpage().await {
+                Ok(b) => b,
+                Err(e) => return Ok(ToolOutput::error(e)),
+            };
+            let out = match click_ref_verified(&self.ctx, &page, &bpage, &t).await {
+                Ok(out) => out,
+                Err(stale) => return Ok(ToolOutput::error(stale)),
+            };
+            // wait_for 附加等待（SPA 场景）。
+            let mut content = out.content;
+            if let Some(sel) = input.get("wait_for").and_then(|v| v.as_str()) {
+                if let Err(e) = wait_for_selector(&page, sel, 5000).await {
+                    content.push_str(&format!("\n⚠ {e}"));
+                }
+            }
+            return Ok(ToolOutput { content, ..out });
+        }
+        // 比例坐标兜底（canvas）。
+        let (rx, ry) = match (coord(&input, "x"), coord(&input, "y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            (Ok(_), Err(_)) | (Err(_), Ok(_)) | (Err(_), Err(_)) => {
+                return Ok(ToolOutput::error(
+                    "寻址三选一：ref=N（首选，来自 browser_snapshot）/ selector=CSS / x,y=视口比例 0-1（canvas 兜底）"
+                ))
             }
         };
-        highlight(&element).await;
-        if let Err(e) = element.click().await {
+        if !(0.0..=1.0).contains(&rx) || !(0.0..=1.0).contains(&ry) {
+            return Ok(ToolOutput::error(format!(
+                "x/y 必须是 0-1 的视口比例坐标（收到 {rx}, {ry}）——例如 0.5 表示视口中部"
+            )));
+        }
+        let (x, y, vw, vh) = ratio_to_css(&page, rx, ry).await;
+        let before_fp = capture_fingerprint(&page).await;
+        let before_img = capture_region_jpeg(&page, x, y, 96.0).await;
+        if let Err(e) = mouse_click(&page, x, y).await {
             return Ok(ToolOutput::error(format!("点击失败: {e}")));
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let mut note = String::new();
-        if let Some(selector) = input.get("wait_for").and_then(|v| v.as_str()) {
-            if let Err(e) = wait_for_selector(&page, selector, 5000).await {
-                note = format!("\n⚠ {e}");
+        let note = |why: &str| {
+            format!(
+                "✓ 已在比例 ({rx:.3}, {ry:.3}) → 像素 ({x:.0}, {y:.0})/视口 {vw:.0}×{vh:.0} 点击——{why}"
+            )
+        };
+        match verify_action_at(&page, x, y, &before_fp, &before_img).await {
+            ActionVerify::Hit(why) => {
+                let console = self.ctx.session.drain_console().await;
+                let mut out = note(&why);
+                if !console.is_empty() {
+                    out.push_str("\n[页面控制台错误]");
+                    for line in console {
+                        out.push_str(&format!("\n- {line}"));
+                    }
+                }
+                out.push_str(&format!("\n{}", mini_state(&page).await));
+                Ok(ToolOutput::ok(out))
             }
-        }
-        match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(format!(
-                "{}{}",
-                render_with_console(&self.ctx.session, &info).await,
-                note
-            ))),
-            Err(e) => Ok(ToolOutput::error(e)),
+            ActionVerify::Dead => {
+                let _ = mouse_click(&page, x, y).await;
+                match verify_action_at(&page, x, y, &before_fp, &before_img).await {
+                    ActionVerify::Hit(why) => {
+                        Ok(ToolOutput::ok(format!("{}（首次点击无效果，重试后生效）", note(&why))))
+                    }
+                    ActionVerify::Dead => {
+                        Ok(dead_click_diagnostic(&self.ctx, &page, x, y, "点击无效果（DOM 与像素均无变化）").await)
+                    }
+                }
+            }
         }
     }
 }
@@ -880,69 +1542,90 @@ impl Tool for BrowserType {
     }
 
     fn description(&self) -> &str {
-        "Clear an input/textarea (CSS selector) and type text into it. Set submit=true \
-         to press Enter afterwards (form submit / search). Returns the page state."
+        "Type text into an input — THREE addressing modes, pick ONE per call: \
+         ref=\"e5\" from browser_snapshot (PREFERRED), selector=CSS, or x,y viewport \
+         RATIO 0-1 (canvas fallback). Clicks the element to focus, inserts text via \
+         IME (CJK safe — Chinese input works), optionally presses Enter \
+         (submit=true). Set clear=true to empty the field first (replace semantics; \
+         default appends). VERIFIED like browser_click: one-line event on success, \
+         stale_ref / dead_click feedback otherwise."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "selector": {"type": "string", "description": "CSS selector of the input element."},
-                "text": {"type": "string", "description": "Text to type (replaces existing content)."},
-                "submit": {"type": "boolean", "description": "Optional. Press Enter after typing."},
+                "ref": {"type": "string", "description": "Input element ref from browser_snapshot, e.g. \"e5\". PREFERRED."},
+                "selector": {"type": "string", "description": "CSS selector (fallback when no snapshot ref)."},
+                "x": {"type": "number", "description": "Viewport X as RATIO 0-1 (canvas fallback; requires y)."},
+                "y": {"type": "number", "description": "Viewport Y as RATIO 0-1 (canvas fallback; requires x)."},
+                "text": {"type": "string", "description": "Text to type."},
+                "submit": {"type": "boolean", "description": "Press Enter after typing. Default false."},
+                "clear": {"type": "boolean", "description": "Empty the field before typing (replace). Default false (append)."},
                 "wait_for": {"type": "string", "description": "Optional CSS selector to wait for (up to 5s) after typing/submit."}
             },
-            "required": ["selector", "text"]
+            "required": ["text"]
         })
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let selector = match input_str(&input, "selector") {
-            Ok(v) => v,
-            Err(e) => return Ok(e),
-        };
         let text = match input_str(&input, "text") {
-            Ok(v) => v,
+            Ok(v) => v.to_string(),
             Err(e) => return Ok(e),
         };
         let submit = input.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
+        let clear = input.get("clear").and_then(|v| v.as_bool()).unwrap_or(false);
         let page = match self.ctx.session.page().await {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
-        let element = match page.find_element(&selector).await {
-            Ok(el) => el,
-            Err(_) => {
-                return Ok(ToolOutput::error(format!(
-                    "未找到元素: {selector}（先 browser_snapshot 获取可用 selector）"
-                )))
+        // 寻址三选一：ref > selector > 比例坐标。ref/selector 统一交给
+        // brother 的 resolve_target_center，走同一条「聚焦 → 输入 → 验证」管线。
+        let target: Option<String> = if let Some(r) = input.get("ref").and_then(|v| v.as_str()) {
+            Some(r.to_string())
+        } else if let Some(r) = input.get("ref").and_then(|v| v.as_i64()) {
+            Some(format!("e{r}"))
+        } else if let Ok(sel) = input_str(&input, "selector") {
+            Some(sel)
+        } else {
+            None
+        };
+        if let Some(t) = target {
+            let bpage = match self.ctx.session.bpage().await {
+                Ok(b) => b,
+                Err(e) => return Ok(ToolOutput::error(e)),
+            };
+            let (cx, cy) = match resolve_target_in_viewport(&bpage, &t).await {
+                Ok(c) => c,
+                Err(stale) => return Ok(ToolOutput::error(stale)),
+            };
+            let label = format!("type(ref={t}, {text:?})");
+            let out = type_at_verified(&self.ctx, &page, label, cx, cy, &text, submit, clear).await;
+            let mut content = out.content;
+            if let Some(sel) = input.get("wait_for").and_then(|v| v.as_str()) {
+                if let Err(e) = wait_for_selector(&page, sel, 5000).await {
+                    content.push_str(&format!("\n⚠ {e}"));
+                }
+            }
+            return Ok(ToolOutput { content, ..out });
+        }
+        // 比例坐标兜底（canvas）。
+        let (rx, ry) = match (coord(&input, "x"), coord(&input, "y")) {
+            (Ok(x), Ok(y)) => (x, y),
+            _ => {
+                return Ok(ToolOutput::error(
+                    "寻址三选一：ref=N（首选）/ selector=CSS / x,y=视口比例 0-1（canvas 兜底）"
+                ))
             }
         };
-        // 清空已有内容再输入（replace 语义）。
-        let _ = element.call_js_fn("function() { this.focus(); this.value = ''; }", false).await;
-        highlight(&element).await;
-        if let Err(e) = element.type_str(&text).await {
-            return Ok(ToolOutput::error(format!("输入失败: {e}")));
+        if !(0.0..=1.0).contains(&rx) || !(0.0..=1.0).contains(&ry) {
+            return Ok(ToolOutput::error(format!(
+                "x/y 必须是 0-1 的视口比例坐标（收到 {rx}, {ry}）"
+            )));
         }
-        if submit {
-            let _ = element.press_key("Enter").await;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let mut note = String::new();
-        if let Some(selector) = input.get("wait_for").and_then(|v| v.as_str()) {
-            if let Err(e) = wait_for_selector(&page, selector, 5000).await {
-                note = format!("\n⚠ {e}");
-            }
-        }
-        match snapshot(&page).await {
-            Ok(info) => Ok(ToolOutput::ok(format!(
-                "{}{}",
-                render_with_console(&self.ctx.session, &info).await,
-                note
-            ))),
-            Err(e) => Ok(ToolOutput::error(e)),
-        }
+        let (x, y, _, _) = ratio_to_css(&page, rx, ry).await;
+        let label = format!("type({text:?})");
+        Ok(type_at_verified(&self.ctx, &page, label, x, y, &text, submit, clear).await)
     }
 }
 
@@ -966,8 +1649,8 @@ impl Tool for BrowserScreenshot {
     fn description(&self) -> &str {
         "Take a screenshot of the current browser page and RETURN THE IMAGE to you \
          (multimodal) — you see exactly what the page looks like. Viewport screenshot \
-         by default: image coordinates map 1:1 to browser_click_at / browser_type_at / \
-         browser_hover_at / browser_scroll_at / browser_drag. Set full_page=true for \
+         by default: image coordinates map 1:1 to browser_click / browser_type / \
+         browser_hover / browser_scroll_at / browser_drag. Set full_page=true for \
          the whole scrollable page (coordinates then do NOT map to viewport tools). \
          Also saved under the workspace `.ox/screenshots/`."
     }
@@ -1235,188 +1918,536 @@ async fn finish_with_screenshot(ctx: &BrowserCtx, note: String) -> ToolOutput {
 }
 
 /// 坐标参数解析（x/y 必填，f64）。
-fn coord(input: &Value, key: &str) -> std::result::Result<f64, ToolOutput> {
-    match input.get(key).and_then(|v| v.as_f64()) {
+fn coord(input: &Value, key: &str) -> std::result::Result<f64, ToolOutput> {    match input.get(key).and_then(|v| v.as_f64()) {
         Some(v) if v.is_finite() => Ok(v),
         _ => Err(ToolOutput::error(format!("{key} 必须是数字坐标"))),
     }
 }
 
-// ---------- 工具：browser_click_at ----------
+// ---------- 动作验证：像素 receipt + DOM fingerprint（截图只做失败诊断） ----------
 
-pub struct BrowserClickAt {
-    pub ctx: Arc<BrowserCtx>,
+/// DOM 指纹采集：URL/标题/节点数/文本哈希/滚动/焦点/视口 + 同源子 frame。
+/// 文本用哈希而非长度——等长的 tooltip 替换不会被漏掉；子 frame 必须覆盖，
+/// 否则 iframe 内一次成功的点击会被误报为「无变化」。跨域 iframe 拿不到
+/// contentDocument（标记 cross），由像素 receipt 兜底（截图是合成后画面）。
+const FINGERPRINT_JS: &str = r#"(() => {
+  const h = (s) => { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0; return x; };
+  const fp = (d) => {
+    try {
+      return {
+        url: d.location.href, title: d.title,
+        nodes: d.getElementsByTagName('*').length,
+        textHash: h(d.body ? d.body.innerText : ''),
+        scrollX: Math.round(d.scrollX), scrollY: Math.round(d.scrollY),
+        active: d.activeElement ? d.activeElement.tagName : '',
+        vw: d.documentElement.clientWidth, vh: d.documentElement.clientHeight
+      };
+    } catch (e) { return { cross: true }; }
+  };
+  const frames = [];
+  for (const f of document.querySelectorAll('iframe')) {
+    try { frames.push(fp(f.contentDocument)); } catch (e) { frames.push({ cross: true }); }
+  }
+  return { main: fp(document), frames };
+})()"#;
+
+/// 采集 DOM 指纹；页面不可评估（跳转中）返回 None——验证层静默降级。
+async fn capture_fingerprint(page: &chromiumoxide::Page) -> Option<Value> {
+    let result = page.evaluate(FINGERPRINT_JS).await.ok()?;
+    result.into_value::<Value>().ok()
 }
 
-#[async_trait::async_trait]
-impl Tool for BrowserClickAt {
-    fn is_read_only(&self) -> bool {
-        true
-    }
-
-    fn name(&self) -> &str {
-        "browser_click_at"
-    }
-
-    fn description(&self) -> &str {
-        "Click at viewport pixel coordinates (x, y) with real mouse events — no CSS \
-         selector needed. Workflow: browser_screenshot → look at the image → click \
-         the pixel position of the target. Returns a fresh screenshot."
-    }
-
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "x": {"type": "number", "description": "Viewport X in pixels (from the last screenshot)."},
-                "y": {"type": "number", "description": "Viewport Y in pixels (from the last screenshot)."}
-            },
-            "required": ["x", "y"]
-        })
-    }
-
-    async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
-            (Ok(x), Ok(y)) => (x, y),
-            (Err(e), _) | (_, Err(e)) => return Ok(e),
-        };
-        let page = match self.ctx.session.page().await {
-            Ok(p) => p,
-            Err(e) => return Ok(ToolOutput::error(e)),
-        };
-        if let Err(e) = mouse_click(&page, x, y).await {
-            return Ok(ToolOutput::error(format!("点击失败: {e}")));
+/// 指纹差异的人类可读摘要（用于成功回传的一行说明）。
+fn fingerprint_diff(before: &Value, after: &Value) -> Option<String> {
+    let (b, a) = (before.get("main")?, after.get("main")?);
+    let mut parts: Vec<String> = Vec::new();
+    for (key, label) in [
+        ("url", "URL"),
+        ("title", "标题"),
+        ("nodes", "节点数"),
+        ("textHash", "文本"),
+        ("scrollY", "滚动"),
+        ("active", "焦点"),
+    ] {
+        let (bv, av) = (b.get(key), a.get(key));
+        if bv.is_some() && av.is_some() && bv != av {
+            match key {
+                "nodes" => parts.push(format!(
+                    "{label} {}→{}",
+                    bv.and_then(|v| v.as_u64()).unwrap_or(0),
+                    av.and_then(|v| v.as_u64()).unwrap_or(0)
+                )),
+                "scrollY" => parts.push(format!(
+                    "滚动 {}→{}",
+                    bv.and_then(|v| v.as_i64()).unwrap_or(0),
+                    av.and_then(|v| v.as_i64()).unwrap_or(0)
+                )),
+                _ => parts.push(label.to_owned()),
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        Ok(finish_with_screenshot(&self.ctx, format!("已在 ({x:.0}, {y:.0}) 点击")).await)
+    }
+    // 子 frame 变化也算命中（iframe 内点击）。
+    if parts.is_empty() && before.get("frames") != after.get("frames") {
+        parts.push("子 frame 状态变化".to_owned());
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+/// 裁剪截图：只取 (x, y) 附近 size×size 的区域（CSS 像素，JPEG）。
+/// 返回原始字节（None = 截图失败，验证层降级）。
+async fn capture_region_jpeg(
+    page: &chromiumoxide::Page,
+    x: f64,
+    y: f64,
+    size: f64,
+) -> Option<Vec<u8>> {
+    use chromiumoxide::cdp::browser_protocol::page::{
+        CaptureScreenshotFormat, CaptureScreenshotParams, Viewport,
+    };
+    let vw = eval_f64(page, "(() => document.documentElement.clientWidth)").await.unwrap_or(0.0);
+    let vh = eval_f64(page, "(() => document.documentElement.clientHeight)").await.unwrap_or(0.0);
+    // 裁剪框夹到视口内（clip 越界部分 Chromium 会按视口截断，显式夹取更稳）。
+    let cx = (x - size / 2.0).max(0.0).min((vw - size).max(0.0));
+    let cy = (y - size / 2.0).max(0.0).min((vh - size).max(0.0));
+    let clip = Viewport::builder()
+        .x(cx)
+        .y(cy)
+        .width(size.min(vw))
+        .height(size.min(vh))
+        .scale(1.0)
+        .build()
+        .ok()?;
+    let bytes = page
+        .screenshot(
+            CaptureScreenshotParams::builder()
+                .format(CaptureScreenshotFormat::Jpeg)
+                .quality(60)
+                .clip(clip)
+                .capture_beyond_viewport(false)
+                .build(),
+        )
+        .await
+        .ok()?;
+    Some(bytes)
+}
+
+/// evaluate 取单个 f64（视口尺寸等）；失败返回 None。
+async fn eval_f64(page: &chromiumoxide::Page, expr: &str) -> Option<f64> {
+    page.evaluate(expr).await.ok()?.into_value::<f64>().ok()
+}
+
+/// 像素 receipt：比较两张小截图，返回是否发生显著变化。
+/// 阈值容错：单通道差 >40 记为显著像素，>1% 显著像素算「有变化」——
+/// 抗时钟/光标闪烁这类微噪声，又不漏真实 UI 变化。
+fn region_changed(before: &[u8], after: &[u8]) -> Option<bool> {
+    let a = image::load_from_memory(before).ok()?.to_rgb8();
+    let b = image::load_from_memory(after).ok()?.to_rgb8();
+    if a.dimensions() != b.dimensions() {
+        return Some(true);
+    }
+    let (w, h) = a.dimensions();
+    let total = u64::from(w) * u64::from(h);
+    let mut significant = 0u64;
+    for (pa, pb) in a.pixels().zip(b.pixels()) {
+        let d = i32::from(pa.0[0]).abs_diff(i32::from(pb.0[0]))
+            + i32::from(pa.0[1]).abs_diff(i32::from(pb.0[1]))
+            + i32::from(pa.0[2]).abs_diff(i32::from(pb.0[2]));
+        if d > 40 {
+            significant += 1;
+        }
+    }
+    Some(significant * 100 > total)
+}
+
+/// 动作验证结果：命中（带证据摘要）或沉默（dead action）。
+enum ActionVerify {
+    /// DOM 或像素任一通道确认变化——动作生效。
+    Hit(String),
+    /// 两通道都沉默——点击可能被吞（遮挡/跨域 iframe/动画元素）。
+    Dead,
+}
+
+/// 点击后验证：先比 DOM 指纹（结构化、抗动画噪声），再比坐标邻域像素
+/// （覆盖跨域 iframe 等指纹够不到的区域）。两通道任一命中即成功。
+async fn verify_action_at(
+    page: &chromiumoxide::Page,
+    x: f64,
+    y: f64,
+    before_fp: &Option<Value>,
+    before_img: &Option<Vec<u8>>,
+) -> ActionVerify {
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    // 通道 1：DOM fingerprint。
+    if let (Some(before), Some(after)) = (capture_fingerprint(page).await, before_fp) {
+        if let Some(summary) = fingerprint_diff(&before, after) {
+            return ActionVerify::Hit(format!("DOM 变化确认: {summary}"));
+        }
+    }
+    // 通道 2：坐标邻域像素 receipt。
+    if let (Some(before), Some(after)) =
+        (before_img, capture_region_jpeg(page, x, y, 96.0).await)
+    {
+        if region_changed(before, &after) == Some(true) {
+            return ActionVerify::Hit("点击邻域像素变化确认（DOM 指纹未覆盖的区域，如跨域 iframe/canvas）".to_owned());
+        }
+    }
+    ActionVerify::Dead
+}
+
+/// 实时视口尺寸：点击那一刻测量，不依赖截图时缓存的值——窗口宽度延迟
+/// 稳定、DPI 缩放误报都会让缓存坐标漂移，实时测量消除这类可避免误差。
+async fn viewport_size(page: &chromiumoxide::Page) -> (f64, f64) {
+    let w = eval_f64(page, "(() => document.documentElement.clientWidth)").await.unwrap_or(0.0);
+    let h = eval_f64(page, "(() => document.documentElement.clientHeight)").await.unwrap_or(0.0);
+    // 兜底：测量失败用设计视口（与 SetDeviceMetricsOverride 一致）。
+    (if w > 0.0 { w } else { 1680.0 }, if h > 0.0 { h } else { 1200.0 })
+}
+
+/// 比例坐标 → CSS 像素：模型回传 0-1 视口比例（对图像缩放/分块变换不变，
+/// 换模型/换后端不会静默失效），点击前按实时视口换算成 CDP 需要的 CSS 像素。
+async fn ratio_to_css(page: &chromiumoxide::Page, rx: f64, ry: f64) -> (f64, f64, f64, f64) {
+    let (vw, vh) = viewport_size(page).await;
+    (
+        (rx * vw).clamp(0.0, vw - 1.0),
+        (ry * vh).clamp(0.0, vh - 1.0),
+        vw,
+        vh,
+    )
+}
+
+/// dead click 的诊断回传：自动重试一次后仍沉默，裁剪点击邻域（240×240）
+/// 作为局部诊断证据回传——截图出现的频率由失败率决定，而不是由步数决定。
+async fn dead_click_diagnostic(
+    ctx: &BrowserCtx,
+    page: &chromiumoxide::Page,
+    x: f64,
+    y: f64,
+    note: &str,
+) -> ToolOutput {
+    let console = ctx.session.drain_console().await;
+    let mut text = format!(
+        "{note}\n已自动重试一次仍无效果——点击可能被遮挡、落在跨域 iframe/canvas 上，\
+         或目标需要先 hover/滚动到位。下方是点击点附近的局部诊断截图（非全屏）。"
+    );
+    if !console.is_empty() {
+        text.push_str("\n[页面控制台错误]");
+        for line in console {
+            text.push_str(&format!("\n- {line}"));
+        }
+    }
+    match capture_region_jpeg(page, x, y, 240.0).await {
+        Some(bytes) => {
+            use base64::Engine as _;
+            ToolOutput::ok(text).with_image(
+                "image/jpeg",
+                base64::engine::general_purpose::STANDARD.encode(&bytes),
+            )
+        }
+        None => ToolOutput::ok(format!("{text}\n（诊断截图失败，可调 browser_screenshot 看全屏）")),
     }
 }
 
-// ---------- 工具：browser_type_at ----------
+// ---------- ref 层：AX 快照（brother）+ ref 实时解析（LLM 只操作 ref，不接触像素坐标） ----------
 
-pub struct BrowserTypeAt {
-    pub ctx: Arc<BrowserCtx>,
+/// ref 是短期句柄（brother 的 e1/e2，映射到 CDP backendNodeId）：快照重建后
+/// 重新分配，动作执行前必须实时解析为坐标，绝不缓存坐标——快照时和点击时
+/// 页面可能已变。brother 的解析自带 stale 兜底：backendNodeId 失效时按
+/// role+name(+nth) 重新定位，页面小变化不必强制重快照；彻底失败才返回
+/// stale_ref，让 LLM 基于新快照重新决策。
+/// brother AX 快照 → 文本（可交互元素 + ref 句柄，形如
+/// `- button "提交" [ref=e5]`）。brother 的快照带 nth 消歧（同名元素标注
+/// 第 N 个）与 interactive_only 过滤；ref 在 stale 时按 role+name 自动兜底。
+async fn brother_snapshot_text(bpage: &brother::Page) -> std::result::Result<String, String> {
+    let snap = bpage
+        .snapshot_with(
+            brother::SnapshotOptions::default()
+                .interactive_only(true)
+                .compact(true),
+        )
+        .await
+        .map_err(|e| format!("AX 快照失败: {e}"))?;
+    let tree = snap.tree();
+    if tree.trim().is_empty() {
+        return Ok("（可访问性树为空——页面可能还在加载，稍后重试）".to_owned());
+    }
+    Ok(tree.to_string())
 }
 
-#[async_trait::async_trait]
-impl Tool for BrowserTypeAt {
-    fn is_read_only(&self) -> bool {
-        true
+/// ref/selector → 实时视口坐标（brother resolve_target_center：ref 优先、
+/// CSS 兜底）。元素在视口外时先滚到视口中部再取一次坐标
+/// （getBoundingClientRect 是视口相对坐标，滚动后变化）。解析彻底失败 =
+/// stale_ref（节点消失且 role+name 兜底也无果）。
+async fn resolve_target_in_viewport(
+    bpage: &brother::Page,
+    target: &str,
+) -> std::result::Result<(f64, f64), String> {
+    let p = bpage.resolve_target_center(target).await.map_err(|e| {
+        format!(
+            "stale_ref: {target} 无法解析（{e}）——页面可能已变化，请重新 browser_snapshot 获取新 ref"
+        )
+    })?;
+    let (vw, vh) = viewport_size(bpage.inner()).await;
+    if p.x < 0.0 || p.y < 0.0 || p.x > vw || p.y > vh {
+        let dy = p.y - vh / 2.0;
+        let _ = bpage
+            .inner()
+            .evaluate(format!("window.scrollBy(0, {dy})"))
+            .await;
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let p2 = bpage.resolve_target_center(target).await.map_err(|e| {
+            format!("stale_ref: {target} 滚动后仍无法解析（{e}）——请重新 browser_snapshot")
+        })?;
+        return Ok((p2.x, p2.y));
     }
+    Ok((p.x, p.y))
+}
 
-    fn name(&self) -> &str {
-        "browser_type_at"
+/// 中心点附近小抖动（±3px）：模拟人类落点，避免精确正中心命中覆盖层或
+/// 触发站点边缘检测（参考 crawlex ref_resolver 的抖动采样思路——它按元素
+/// 框采样，brother 只回中心点，这里在中心邻域内抖动）。
+fn jitter_center(x: f64, y: f64) -> (f64, f64) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0) as f64;
+    let t = (nanos / 1e9).fract();
+    let t2 = (t * 7919.0).fract();
+    (x + (t - 0.5) * 6.0, y + (t2 - 0.5) * 6.0)
+}
+
+/// ref/selector 点击的公共执行：解析（视口外自动滚动）→ 抖动采样 → 点击 →
+/// 双通道验证 → dead 重试 → 裁剪诊断。返回 Ok(ToolOutput)（成功或诊断），
+/// Err(String)（stale_ref 等前置失败）。
+async fn click_ref_verified(
+    ctx: &BrowserCtx,
+    page: &chromiumoxide::Page,
+    bpage: &brother::Page,
+    target: &str,
+) -> std::result::Result<ToolOutput, String> {
+    let (x, y) = resolve_target_in_viewport(bpage, target).await?;
+    let (cx, cy) = jitter_center(x, y);
+    let before_fp = capture_fingerprint(page).await;
+    let before_img = capture_region_jpeg(page, cx, cy, 96.0).await;
+    if let Err(e) = mouse_click(page, cx, cy).await {
+        return Ok(ToolOutput::error(format!("点击失败: {e}")));
     }
-
-    fn description(&self) -> &str {
-        "Click at (x, y) to focus an input, then type text via IME insertText (CJK \
-         safe — Chinese input works). Set submit=true to press Enter afterwards \
-         (form submit / search). Returns a fresh screenshot."
-    }
-
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "x": {"type": "number", "description": "Viewport X of the input field."},
-                "y": {"type": "number", "description": "Viewport Y of the input field."},
-                "text": {"type": "string", "description": "Text to type."},
-                "submit": {"type": "boolean", "description": "Press Enter after typing. Default false."}
-            },
-            "required": ["x", "y", "text"]
-        })
-    }
-
-    async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
-            (Ok(x), Ok(y)) => (x, y),
-            (Err(e), _) | (_, Err(e)) => return Ok(e),
-        };
-        let text = match input_str(&input, "text") {
-            Ok(v) => v.to_string(),
-            Err(e) => return Ok(e),
-        };
-        let submit = input.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
-        let page = match self.ctx.session.page().await {
-            Ok(p) => p,
-            Err(e) => return Ok(ToolOutput::error(e)),
-        };
-        if let Err(e) = mouse_click(&page, x, y).await {
-            return Ok(ToolOutput::error(format!("聚焦失败: {e}")));
+    let note = |why: &str| {
+        format!("✓ click(ref={target}) → 像素 ({cx:.0}, {cy:.0})——{why}")
+    };
+    match verify_action_at(page, cx, cy, &before_fp, &before_img).await {
+        ActionVerify::Hit(why) => {
+            let console = ctx.session.drain_console().await;
+            let mut out = note(&why);
+            if !console.is_empty() {
+                out.push_str("\n[页面控制台错误]");
+                for line in console {
+                    out.push_str(&format!("\n- {line}"));
+                }
+            }
+            out.push_str(&format!("\n{}", mini_state(page).await));
+            Ok(ToolOutput::ok(out))
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        if let Err(e) = page
-            .execute(InsertTextParams::new(text.as_str().to_string()))
-            .await
-            .map_err(|e| format!("输入失败: {e}"))
-        {
-            return Ok(ToolOutput::error(e));
+        ActionVerify::Dead => {
+            let _ = mouse_click(page, cx, cy).await;
+            match verify_action_at(page, cx, cy, &before_fp, &before_img).await {
+                ActionVerify::Hit(why) => Ok(ToolOutput::ok(format!(
+                    "{}（首次点击无效果，重试后生效）",
+                    note(&why)
+                ))),
+                ActionVerify::Dead => Ok(dead_click_diagnostic(
+                    ctx,
+                    page,
+                    cx,
+                    cy,
+                    "dead_click: 点击无效果（DOM 与像素均无变化）——元素可能被遮挡、\
+                     是 canvas 内控件、或需要先 hover/滚动。若目标在诊断截图中可见，\
+                     可用 browser_click 的 x,y 比例坐标兜底。",
+                )
+                .await),
+            }
         }
-        if submit {
-            // Enter：keydown + keyup（windowsVirtualKeyCode 13）。
-            for key_type in [DispatchKeyEventType::KeyDown, DispatchKeyEventType::KeyUp] {
-                let ev = DispatchKeyEventParams::builder()
-                    .r#type(key_type)
-                    .key("Enter")
-                    .code("Enter")
-                    .windows_virtual_key_code(13)
-                    .build();
-                if let Ok(cmd) = ev {
-                    let _ = page.execute(cmd).await;
+    }
+}
+
+/// 输入管线（ref/selector/比例坐标三路共用）：点击聚焦 → 可选清空（React
+/// 兼容的 native setter + input 事件）→ IME insertText → 可选回车 → 双通道
+/// 验证 → dead 重试 → 裁剪诊断。label 由调用方拼好（含 ref 或坐标语义）。
+async fn type_at_verified(
+    ctx: &BrowserCtx,
+    page: &chromiumoxide::Page,
+    label: String,
+    cx: f64,
+    cy: f64,
+    text: &str,
+    submit: bool,
+    clear: bool,
+) -> ToolOutput {
+    const CLEAR_JS: &str = r#"(() => {
+      const el = document.activeElement;
+      if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return false;
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      setter.call(el, '');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()"#;
+    let before_fp = capture_fingerprint(page).await;
+    let before_img = capture_region_jpeg(page, cx, cy, 96.0).await;
+    if let Err(e) = mouse_click(page, cx, cy).await {
+        return ToolOutput::error(format!("聚焦失败: {e}"));
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if clear {
+        let _ = page.evaluate(CLEAR_JS).await;
+    }
+    if let Err(e) = page
+        .execute(InsertTextParams::new(text.to_string()))
+        .await
+        .map_err(|e| format!("输入失败: {e}"))
+    {
+        return ToolOutput::error(e);
+    }
+    if submit {
+        for key_type in [DispatchKeyEventType::KeyDown, DispatchKeyEventType::KeyUp] {
+            let ev = DispatchKeyEventParams::builder()
+                .r#type(key_type)
+                .key("Enter")
+                .code("Enter")
+                .windows_virtual_key_code(13)
+                .build();
+            if let Ok(cmd) = ev {
+                let _ = page.execute(cmd).await;
+            }
+        }
+    }
+    let note = |why: &str| {
+        format!(
+            "✓ {label}{} → 像素 ({cx:.0}, {cy:.0})——{why}",
+            if submit { "并回车" } else { "" }
+        )
+    };
+    match verify_action_at(page, cx, cy, &before_fp, &before_img).await {
+        ActionVerify::Hit(why) => {
+            let console = ctx.session.drain_console().await;
+            let mut out = note(&why);
+            if !console.is_empty() {
+                out.push_str("\n[页面控制台错误]");
+                for line in console {
+                    out.push_str(&format!("\n- {line}"));
+                }
+            }
+            out.push_str(&format!("\n{}", mini_state(page).await));
+            ToolOutput::ok(out)
+        }
+        ActionVerify::Dead => {
+            // 重试：再聚焦再输入。
+            let _ = mouse_click(page, cx, cy).await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            if clear {
+                let _ = page.evaluate(CLEAR_JS).await;
+            }
+            let _ = page.execute(InsertTextParams::new(text.to_string())).await;
+            if submit {
+                for key_type in [DispatchKeyEventType::KeyDown, DispatchKeyEventType::KeyUp] {
+                    let ev = DispatchKeyEventParams::builder()
+                        .r#type(key_type)
+                        .key("Enter")
+                        .code("Enter")
+                        .windows_virtual_key_code(13)
+                        .build();
+                    if let Ok(cmd) = ev {
+                        let _ = page.execute(cmd).await;
+                    }
+                }
+            }
+            match verify_action_at(page, cx, cy, &before_fp, &before_img).await {
+                ActionVerify::Hit(why) => {
+                    ToolOutput::ok(format!("{}（首次无效果，重试后生效）", note(&why)))
+                }
+                ActionVerify::Dead => {
+                    dead_click_diagnostic(
+                        ctx,
+                        page,
+                        cx,
+                        cy,
+                        "dead_type: 输入无效果（焦点可能没落在输入框上）——确认目标确实是文本框，                         或改用 browser_snapshot 重新定位。",
+                    )
+                    .await
                 }
             }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let note = if submit {
-            format!("已在 ({x:.0}, {y:.0}) 输入并回车")
-        } else {
-            format!("已在 ({x:.0}, {y:.0}) 输入")
-        };
-        Ok(finish_with_screenshot(&self.ctx, note).await)
     }
 }
 
-// ---------- 工具：browser_hover_at ----------
+// ---------- 工具：browser_hover ----------
 
-pub struct BrowserHoverAt {
+pub struct BrowserHover {
     pub ctx: Arc<BrowserCtx>,
 }
 
 #[async_trait::async_trait]
-impl Tool for BrowserHoverAt {
+impl Tool for BrowserHover {
     fn is_read_only(&self) -> bool {
         true
     }
 
     fn name(&self) -> &str {
-        "browser_hover_at"
+        "browser_hover"
     }
 
     fn description(&self) -> &str {
-        "Move the mouse to (x, y) — triggers hover menus, tooltips and hover styles. \
-         Returns a fresh screenshot so you can see what appeared."
+        "Move the mouse to an element or position — triggers hover menus, tooltips \
+         and hover styles. Addressing: ref=\"e5\" from browser_snapshot (PREFERRED) \
+         or x,y viewport RATIO 0-1 (canvas fallback). Returns a fresh screenshot so \
+         you can see what appeared, plus a pixel-receipt note telling you whether \
+         the hover actually triggered a visual change."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "x": {"type": "number", "description": "Viewport X."},
-                "y": {"type": "number", "description": "Viewport Y."}
-            },
-            "required": ["x", "y"]
+                "ref": {"type": "string", "description": "Element ref from browser_snapshot, e.g. \"e5\". PREFERRED."},
+                "x": {"type": "number", "description": "Viewport X as RATIO 0-1 (when no ref)."},
+                "y": {"type": "number", "description": "Viewport Y as RATIO 0-1 (when no ref)."}
+            }
         })
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
-            (Ok(x), Ok(y)) => (x, y),
-            (Err(e), _) | (_, Err(e)) => return Ok(e),
-        };
         let page = match self.ctx.session.page().await {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
+        // 寻址二选一：ref > 比例坐标。
+        let (x, y, where_note) = if let Some(t) = input
+            .get("ref")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| input.get("ref").and_then(|v| v.as_i64()).map(|r| format!("e{r}")))
+        {
+            let bpage = match self.ctx.session.bpage().await {
+                Ok(b) => b,
+                Err(e) => return Ok(ToolOutput::error(e)),
+            };
+            match resolve_target_in_viewport(&bpage, &t).await {
+                Ok((px, py)) => (px, py, format!("ref={t}")),
+                Err(stale) => return Ok(ToolOutput::error(stale)),
+            }
+        } else {
+            let (rx, ry) = match (coord(&input, "x"), coord(&input, "y")) {
+                (Ok(x), Ok(y)) => (x, y),
+                (Err(e), _) | (_, Err(e)) => return Ok(e),
+            };
+            if !(0.0..=1.0).contains(&rx) || !(0.0..=1.0).contains(&ry) {
+                return Ok(ToolOutput::error(format!(
+                    "x/y 必须是 0-1 的视口比例坐标（收到 {rx}, {ry}）"
+                )));
+            }
+            let (px, py, _, _) = ratio_to_css(&page, rx, ry).await;
+            (px, py, format!("比例 ({rx:.3}, {ry:.3})"))
+        };
+        let before_img = capture_region_jpeg(&page, x, y, 96.0).await;
         if let Err(e) = mouse_event(
             &page,
             mouse_builder(DispatchMouseEventType::MouseMoved, x, y).build(),
@@ -1426,7 +2457,16 @@ impl Tool for BrowserHoverAt {
             return Ok(ToolOutput::error(format!("移动失败: {e}")));
         }
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-        Ok(finish_with_screenshot(&self.ctx, format!("鼠标已移至 ({x:.0}, {y:.0})")).await)
+        // hover 的效果多在 CSS :hover（不进 DOM 指纹）——像素 receipt 是主验证。
+        let receipt = match (before_img, capture_region_jpeg(&page, x, y, 96.0).await) {
+            (Some(b), Some(a)) => match region_changed(&b, &a) {
+                Some(true) => "hover 已触发视觉变化（菜单/tooltip 出现）".to_owned(),
+                Some(false) => "hover 邻域无视觉变化——目标可能没有 hover 效果，或效果出现在别处（看截图确认）".to_owned(),
+                None => "像素比较失败".to_owned(),
+            },
+            _ => "像素 receipt 不可用".to_owned(),
+        };
+        Ok(finish_with_screenshot(&self.ctx, format!("鼠标已移至 {where_note} → 像素 ({x:.0}, {y:.0})——{receipt}")).await)
     }
 }
 
@@ -1447,16 +2487,18 @@ impl Tool for BrowserScrollAt {
     }
 
     fn description(&self) -> &str {
-        "Scroll the mouse wheel at (x, y) by delta_y pixels (negative = up, positive \
-         = down). Returns a fresh screenshot."
+        "Scroll the mouse wheel at viewport RATIO coordinates (x, y in 0-1) by \
+         delta_y pixels (negative = up, positive = down). Returns a fresh screenshot \
+         (you scroll to SEE content), plus a scroll-receipt note — \"no effect\" \
+         usually means the page is already at the boundary."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "x": {"type": "number", "description": "Viewport X (scroll focus)."},
-                "y": {"type": "number", "description": "Viewport Y (scroll focus)."},
+                "x": {"type": "number", "description": "Viewport X (scroll focus), as RATIO 0-1."},
+                "y": {"type": "number", "description": "Viewport Y (scroll focus), as RATIO 0-1."},
                 "delta_y": {"type": "number", "description": "Scroll amount in pixels; negative = up."}
             },
             "required": ["x", "y", "delta_y"]
@@ -1464,10 +2506,15 @@ impl Tool for BrowserScrollAt {
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let (x, y) = match (coord(&input, "x"), coord(&input, "y")) {
+        let (rx, ry) = match (coord(&input, "x"), coord(&input, "y")) {
             (Ok(x), Ok(y)) => (x, y),
             (Err(e), _) | (_, Err(e)) => return Ok(e),
         };
+        if !(0.0..=1.0).contains(&rx) || !(0.0..=1.0).contains(&ry) {
+            return Ok(ToolOutput::error(format!(
+                "x/y 必须是 0-1 的视口比例坐标（收到 {rx}, {ry}）"
+            )));
+        }
         let dy = match coord(&input, "delta_y") {
             Ok(v) => v,
             Err(e) => return Ok(e),
@@ -1476,6 +2523,8 @@ impl Tool for BrowserScrollAt {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
+        let (x, y, _, _) = ratio_to_css(&page, rx, ry).await;
+        let before_fp = capture_fingerprint(&page).await;
         if let Err(e) = mouse_event(
             &page,
             mouse_builder(DispatchMouseEventType::MouseWheel, x, y)
@@ -1488,9 +2537,24 @@ impl Tool for BrowserScrollAt {
             return Ok(ToolOutput::error(format!("滚动失败: {e}")));
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // 滚动 receipt：scrollY 没变 = 已到边界（或滚动容器不在该点）。
+        let receipt = match (before_fp, capture_fingerprint(&page).await) {
+            (Some(b), Some(a)) => {
+                let (by, ay) = (
+                    b["main"]["scrollY"].as_i64().unwrap_or(0),
+                    a["main"]["scrollY"].as_i64().unwrap_or(0),
+                );
+                if by != ay {
+                    format!("滚动生效: scrollY {by}→{ay}")
+                } else {
+                    "滚动无效果（scrollY 未变）——页面可能已在边界，或该点下是不可滚动的区域".to_owned()
+                }
+            }
+            _ => "滚动 receipt 不可用".to_owned(),
+        };
         Ok(finish_with_screenshot(
             &self.ctx,
-            format!("已在 ({x:.0}, {y:.0}) 滚动 {dy:.0}px"),
+            format!("已在比例 ({rx:.3}, {ry:.3}) 滚动 {dy:.0}px——{receipt}"),
         )
         .await)
     }
@@ -1513,37 +2577,48 @@ impl Tool for BrowserDrag {
     }
 
     fn description(&self) -> &str {
-        "Drag from (from_x, from_y) to (to_x, to_y): mouse press, interpolated moves \
-         (real drag trajectory), release — for sliders and drag-and-drop. Returns a \
-         fresh screenshot."
+        "Drag from (from_x, from_y) to (to_x, to_y) — viewport RATIO coordinates \
+         (0-1): mouse press, interpolated moves (real drag trajectory), release — \
+         for sliders and drag-and-drop. Returns a fresh screenshot plus a \
+         fingerprint receipt telling you whether the page state actually changed."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "from_x": {"type": "number", "description": "Start viewport X."},
-                "from_y": {"type": "number", "description": "Start viewport Y."},
-                "to_x": {"type": "number", "description": "End viewport X."},
-                "to_y": {"type": "number", "description": "End viewport Y."}
+                "from_x": {"type": "number", "description": "Start viewport X, as RATIO 0-1."},
+                "from_y": {"type": "number", "description": "Start viewport Y, as RATIO 0-1."},
+                "to_x": {"type": "number", "description": "End viewport X, as RATIO 0-1."},
+                "to_y": {"type": "number", "description": "End viewport Y, as RATIO 0-1."}
             },
             "required": ["from_x", "from_y", "to_x", "to_y"]
         })
     }
 
     async fn call(&self, input: Value) -> Result<ToolOutput> {
-        let (fx, fy) = match (coord(&input, "from_x"), coord(&input, "from_y")) {
+        let (frx, fry) = match (coord(&input, "from_x"), coord(&input, "from_y")) {
             (Ok(x), Ok(y)) => (x, y),
             (Err(e), _) | (_, Err(e)) => return Ok(e),
         };
-        let (tx, ty) = match (coord(&input, "to_x"), coord(&input, "to_y")) {
+        let (trx, try_) = match (coord(&input, "to_x"), coord(&input, "to_y")) {
             (Ok(x), Ok(y)) => (x, y),
             (Err(e), _) | (_, Err(e)) => return Ok(e),
         };
+        for (name, v) in [("from_x", frx), ("from_y", fry), ("to_x", trx), ("to_y", try_)] {
+            if !(0.0..=1.0).contains(&v) {
+                return Ok(ToolOutput::error(format!(
+                    "{name} 必须是 0-1 的视口比例坐标（收到 {v}）"
+                )));
+            }
+        }
         let page = match self.ctx.session.page().await {
             Ok(p) => p,
             Err(e) => return Ok(ToolOutput::error(e)),
         };
+        let (fx, fy, _, _) = ratio_to_css(&page, frx, fry).await;
+        let (tx, ty, _, _) = ratio_to_css(&page, trx, try_).await;
+        let before_fp = capture_fingerprint(&page).await;
         let run = async {
             mouse_event(
                 &page,
@@ -1581,9 +2656,17 @@ impl Tool for BrowserDrag {
             return Ok(ToolOutput::error(format!("拖拽失败: {e}")));
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // 拖拽 receipt：指纹无变化 = 拖拽可能没被目标识别（HTML5 DnD 需要
+        // dragstart 事件，纯鼠标轨迹对部分组件无效）。
+        let receipt = match (before_fp, capture_fingerprint(&page).await) {
+            (Some(b), Some(a)) => fingerprint_diff(&b, &a)
+                .map(|s| format!("拖拽生效: {s}"))
+                .unwrap_or_else(|| "拖拽后 DOM 无变化——目标可能需要 HTML5 dragstart 事件（纯鼠标轨迹对部分组件无效），改用 selector 路径或组件专用 API".to_owned()),
+            _ => "拖拽 receipt 不可用".to_owned(),
+        };
         Ok(finish_with_screenshot(
             &self.ctx,
-            format!("已从 ({fx:.0}, {fy:.0}) 拖拽到 ({tx:.0}, {ty:.0})"),
+            format!("已从比例 ({frx:.3}, {fry:.3}) 拖拽到 ({trx:.3}, {try_:.3}) → 像素 ({fx:.0}, {fy:.0})→({tx:.0}, {ty:.0})——{receipt}"),
         )
         .await)
     }

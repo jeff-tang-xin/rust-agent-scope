@@ -10,7 +10,14 @@ agentscope-core = { path = "../agentscope-core" }
 async-trait = "0.1"
 base64 = "0.23.1"
 chromiumoxide = "0.9.1"
+# AX 快照 + ref 句柄 + 统一寻址（ref/CSS）的高层封装：底层同为 chromiumoxide 0.9，
+# Page 是薄包装（inner() 取回原 Page），快照层带 nth 消歧与 stale fallback。
+# 验证层（fingerprint + 像素 receipt）为本 crate 自有，brother 不提供。
+brother = "0.4"
 futures = "0.3"
+# 动作验证的像素 receipt：解码点击前后的小区域截图做本地比较（毫秒级），
+# 只留 jpeg 解码，控制编译体积。
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }

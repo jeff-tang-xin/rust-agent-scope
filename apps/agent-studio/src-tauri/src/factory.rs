@@ -545,14 +545,16 @@ pub fn build_agent(
     toolkit.register(Arc::new(crate::browser_tool::BrowserSnapshot { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserClick { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserType { ctx: Arc::clone(&browser_ctx) }));
+    // 批量动作（一次到位）：页面操作流程（打开 → 填表 → 提交 → 等待）一个
+    // turn 完成，含 select/pick/fill_form 专用动作——逐动作往返时每步都要
+    // 模型全量推理 + 全量快照回传，是浏览器流程缓慢的主因。
+    toolkit.register(Arc::new(crate::browser_tool::BrowserAct { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserScreenshot { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserClose { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserEvaluate { ctx: Arc::clone(&browser_ctx) }));
-    // 坐标操作（视觉驱动）：看截图 → 按像素坐标发真实鼠标/键盘事件，
-    // 不依赖 CSS selector；每步回传新截图，模型连续看画面操作。
-    toolkit.register(Arc::new(crate::browser_tool::BrowserClickAt { ctx: Arc::clone(&browser_ctx) }));
-    toolkit.register(Arc::new(crate::browser_tool::BrowserTypeAt { ctx: Arc::clone(&browser_ctx) }));
-    toolkit.register(Arc::new(crate::browser_tool::BrowserHoverAt { ctx: Arc::clone(&browser_ctx) }));
+    // 页面级坐标操作（视觉驱动兜底）：scroll/drag 本质是页面滚动与起终点
+    // 坐标语义，保留独立工具；click/type/hover 已合并进对应工具的
+    // ref/selector/比例坐标三选一寻址（一个工具三种寻址）。
     toolkit.register(Arc::new(crate::browser_tool::BrowserScrollAt { ctx: Arc::clone(&browser_ctx) }));
     toolkit.register(Arc::new(crate::browser_tool::BrowserDrag { ctx: Arc::clone(&browser_ctx) }));
     // 旧版任务记录锚在 workspace_root（用户项目根）下的 tasks/，违反 .ox

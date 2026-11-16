@@ -89,8 +89,10 @@ dependencies = [
  "agentscope-core",
  "async-trait",
  "base64 0.23.1",
+ "brother",
  "chromiumoxide",
  "futures",
+ "image",
  "serde",
  "serde_json",
  "tokio",
@@ -821,6 +823,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "brother"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fc2962bd6df93a6370b2a43593c3362583e08b24287b9b099ea831a6dc3d89c"
+dependencies = [
+ "base64 0.22.1",
+ "chromiumoxide",
+ "dirs 6.0.0",
+ "futures",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

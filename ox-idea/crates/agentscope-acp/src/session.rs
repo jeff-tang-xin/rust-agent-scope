@@ -297,6 +297,49 @@ fn is_compact_command(content: &[ContentBlock]) -> bool {
     text.trim().eq_ignore_ascii_case("/compact")
 }
 
+/// `/skill-name` 前缀的调用包装：用户从 `/` 面板选 skill 后继续输入需求，
+/// 发来的是「/name 需求」纯文本——在这里包装成明确指示（先 load_skill 加载
+/// 该 skill，再按其指引处理需求），不依赖模型对裸 `/name` 文本的遵循度。
+/// 匹配规则：已知 skill 名（skill_commands）的**前缀匹配**，最长名优先——
+/// `/name 需求`（面板选择补空格）与 `/name需求`（手动输入无空格）都成立；
+/// 未声明的 `/` 前缀文本（如路径）不受影响；只有命令没有需求时原样传。
+fn apply_skill_invocation(content: Vec<ContentBlock>, skills: &[Value]) -> Vec<ContentBlock> {
+    let Some(index) = content
+        .iter()
+        .position(|block| matches!(block, ContentBlock::Text { .. }))
+    else {
+        return content;
+    };
+    let ContentBlock::Text { text } = &content[index] else {
+        unreachable!("position 已确认是 Text 块");
+    };
+    let Some(rest) = text.trim_start().strip_prefix('/') else {
+        return content;
+    };
+    // 最长名优先：互为前缀的 skill 名（design / design-pro）取更具体的那个。
+    let mut names: Vec<&str> = skills
+        .iter()
+        .filter_map(|c| c.get("name").and_then(Value::as_str))
+        .filter(|name| !name.is_empty())
+        .collect();
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    let Some((name, demand)) = names
+        .iter()
+        .find_map(|name| rest.strip_prefix(*name).map(|tail| (*name, tail.trim())))
+    else {
+        return content;
+    };
+    if demand.is_empty() {
+        return content;
+    }
+    let wrapped = format!(
+        "用户通过斜杠命令调用了 skill「{name}」。请先调用 load_skill 工具加载该 skill，然后严格按照 skill 的指引处理下面的需求。\n\n{demand}"
+    );
+    let mut content = content;
+    content[index] = ContentBlock::Text { text: wrapped };
+    content
+}
+
 /// 执行 `/compact`：强制压缩会话上下文，进度与结果以 v1 工具卡片帧
 /// （「Compact conversation」）通知 client。不调模型——压缩摘要由
 /// harness 的辅助压缩模型完成。
@@ -489,8 +532,7 @@ fn assemble_agent(
     }
     register_browser!(
         BrowserNavigate, BrowserSnapshot, BrowserClick, BrowserType, BrowserScreenshot,
-        BrowserClose, BrowserEvaluate, BrowserClickAt, BrowserTypeAt, BrowserHoverAt,
-        BrowserScrollAt, BrowserDrag,
+        BrowserClose, BrowserEvaluate, BrowserHover, BrowserScrollAt, BrowserDrag,
     );
     // Skill 生态（对齐 Anthropic Agent Skills 通用原则）：项目级 `.claude/skills/`
     // 可写（跟项目走、可提交版本库），用户级 `~/.claude/skills/` 只读（跨项目
@@ -887,6 +929,11 @@ where
     if is_compact_command(&content) {
         return compact_command(session, session_id, conn).await;
     }
+    // `/skill` 前缀调用包装：/compact 拦截之后、进模型之前——用户从 `/` 面板
+    // 选 skill 后继续输入需求，发来的是「/name 需求」纯文本；在这里包装成
+    // 「先 load_skill 再按指引处理需求」的明确指示，不依赖模型对裸 /name
+    // 文本的遵循度。skills 清单与前端 / 面板同源（availableCommands 条目）。
+    let content = apply_skill_invocation(content, &session.skill_commands);
     // 首条：用户消息（文本 + 可选图片，多模态模型直接看图）；权限往返后：
     // 确认答复消息（带 agentscope_confirm_results 元数据，agent 侧 apply 后续跑，
     // 不会重放成聊天内容）。
