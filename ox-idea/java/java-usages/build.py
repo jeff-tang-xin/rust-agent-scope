@@ -15,6 +15,6 @@ with tempfile.TemporaryDirectory() as out:
                     '-d', out, *[str(p) for p in sorted((root / 'src').rglob('*.java'))]], check=True)
     with zipfile.ZipFile(root / 'oxidea-java-usages.jar', 'w', zipfile.ZIP_DEFLATED) as jar:
         files = {'META-INF/MANIFEST.MF': root / 'MANIFEST.MF', 'plugin.xml': root / 'plugin.xml'}
-        files.update({str(p.relative_to(out)): p for p in pathlib.Path(out).rglob('*.class')})
+        files.update({p.relative_to(out).as_posix(): p for p in pathlib.Path(out).rglob('*.class')})
         for name, path in sorted(files.items()):
             jar.writestr(zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0)), path.read_bytes())

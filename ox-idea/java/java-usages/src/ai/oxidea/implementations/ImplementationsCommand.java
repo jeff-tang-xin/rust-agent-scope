@@ -54,7 +54,7 @@ public final class ImplementationsCommand implements IDelegateCommandHandler {
             JavaCore.addElementChangedListener(event -> {
                 CACHE.clear();
                 LOCKS.clear();
-            }, IElementChangedListener.POST_CHANGE);
+            }, ElementChangedEvent.POST_CHANGE);
             listening = true;
         }
     }

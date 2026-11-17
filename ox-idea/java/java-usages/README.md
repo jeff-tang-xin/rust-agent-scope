@@ -123,7 +123,7 @@ Version 1.10.0 caches completed source type hierarchies per type (bounded LRU,
 coalesced concurrent builds, invalidated on Java model changes), so the gutter's
 many methods of one interface and every revisit share a single whole-workspace
 hierarchy build instead of rebuilding it per symbol; its reproducible SHA-256 is
-recorded on the next build.
+`eda6e452a5c1c9b7a56c49582cec884c374f51265695301894fb2f66aa2b8a50`.
 
 ```sh
 export PATH=/path/to/jdk25/bin:$PATH
