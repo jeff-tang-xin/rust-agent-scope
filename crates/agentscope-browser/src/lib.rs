@@ -45,10 +45,43 @@ pub fn find_browser_executable() -> Option<PathBuf> {
             }
         }
     }
+    // 优先 Chrome/Chromium：Edge headless 在 Windows 易秒退，与面板自愈循环
+    // 叠加曾引发浏览器进程风暴。两者都在时选 Chrome；只有 Edge 才回退默认探测。
+    if let Some(chrome) = prefer_chrome() {
+        return Some(chrome);
+    }
     chromiumoxide::detection::default_executable(
         chromiumoxide::detection::DetectionOptions::default(),
     )
     .ok()
+}
+
+/// 常见 Chrome/Chromium 安装位置（不含 Edge），返回第一个存在的可执行文件。
+fn prefer_chrome() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let candidates: Vec<PathBuf> = {
+        let bases: Vec<PathBuf> = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .map(PathBuf::from)
+            .collect();
+        let rels = [r"Google\Chrome\Application\chrome.exe", r"Chromium\Application\chrome.exe"];
+        bases.iter().flat_map(|b| rels.iter().map(move |r| b.join(r))).collect()
+    };
+    #[cfg(target_os = "macos")]
+    let candidates: Vec<PathBuf> = vec![
+        PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        PathBuf::from("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+    ];
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let candidates: Vec<PathBuf> = {
+        let dirs: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        let cmds = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
+        dirs.iter().flat_map(|d| cmds.iter().map(move |c| d.join(c))).collect()
+    };
+    candidates.into_iter().find(|p| p.is_file())
 }
 
 // ---------- 浏览器会话（懒启动 + 复用 + 死亡自愈） ----------
@@ -72,6 +105,50 @@ pub struct BrowserSession {
     console: Arc<std::sync::Mutex<Vec<String>>>,
     /// 直播（screencast）状态：帧广播 + 是否开启。面板与 Agent 工具共用。
     cast: Arc<CastState>,
+    /// 启动护栏：浏览器起不来（典型 Edge headless 秒退）时，面板自愈循环
+    /// 会反复重 launch 拖垮系统。这里记连续秒退次数与上次启动时刻，限速 +
+    /// 熔断，绝不允许无限 spawn。
+    launch_guard: std::sync::Mutex<LaunchGuard>,
+}
+
+/// 启动熔断参数：浏览器在 `RAPID_DEATH_WINDOW` 内就死掉算一次「秒退」，
+/// 连续 `MAX_RAPID_FAILURES` 次后熔断（停止自动重 launch，报错让用户处理）；
+/// 两次启动至少间隔 `MIN_LAUNCH_INTERVAL`（限速兜底）；静默 `RESET_WINDOW`
+/// 后计数清零，给再次尝试的机会。
+const MAX_RAPID_FAILURES: u32 = 3;
+const RAPID_DEATH_WINDOW: Duration = Duration::from_secs(5);
+const MIN_LAUNCH_INTERVAL: Duration = Duration::from_secs(2);
+const RESET_WINDOW: Duration = Duration::from_secs(30);
+const LAUNCH_CIRCUIT_MSG: &str =
+    "浏览器连续多次启动后立即退出，已停止自动重试以免拖垮系统（常见于 Edge headless 兼容问题）。\
+     请安装 Google Chrome，或用环境变量 AGENTSCOPE_BROWSER_PATH 指定可用的 Chromium 浏览器，再重新打开浏览器面板。";
+
+#[derive(Default)]
+struct LaunchGuard {
+    rapid_failures: u32,
+    last_launch: Option<std::time::Instant>,
+}
+
+impl LaunchGuard {
+    /// 启动前检查：返回本应冷却的时长（限速）；连续秒退达到上限则 Err（熔断，
+    /// 调用方据此停止重 launch）。浏览器稳定存活时由 page() 清零 rapid_failures。
+    fn pre_launch(&mut self) -> std::result::Result<Duration, String> {
+        if let Some(last) = self.last_launch {
+            let elapsed = last.elapsed();
+            if elapsed >= RESET_WINDOW {
+                self.rapid_failures = 0; // 静默足够久，给再次尝试的机会
+            } else if elapsed < RAPID_DEATH_WINDOW {
+                self.rapid_failures += 1; // 上一个浏览器在窗口内就死了
+            }
+        }
+        if self.rapid_failures >= MAX_RAPID_FAILURES {
+            return Err(LAUNCH_CIRCUIT_MSG.to_string());
+        }
+        Ok(self
+            .last_launch
+            .map(|last| MIN_LAUNCH_INTERVAL.saturating_sub(last.elapsed()))
+            .unwrap_or(Duration::ZERO))
+    }
 }
 
 /// screencast 广播通道与开关：`tx` 常驻（订阅者随时 subscribe），监听任务
@@ -113,6 +190,7 @@ impl BrowserSession {
             inner: tokio::sync::Mutex::new(None),
             console: Arc::new(std::sync::Mutex::new(Vec::new())),
             cast: Arc::new(CastState { tx, active: AtomicBool::new(false) }),
+            launch_guard: std::sync::Mutex::new(LaunchGuard::default()),
         }
     }
 
@@ -369,6 +447,8 @@ impl BrowserSession {
         if let Some(handle) = guard.as_ref() {
             // 轻量探测：浏览器被用户手动关闭后 evaluate 会失败 → 重建。
             if handle.page.evaluate("1").await.is_ok() {
+                // 浏览器稳定存活：清零秒退计数（熔断器复位）。
+                self.launch_guard.lock().unwrap_or_else(|e| e.into_inner()).rapid_failures = 0;
                 return Ok(handle.page.clone());
             }
             *guard = None;
@@ -376,6 +456,13 @@ impl BrowserSession {
             // 自行清 active），这里同步重置，保证状态一致。
             self.cast.active.store(false, std::sync::atomic::Ordering::SeqCst);
         }
+        // 启动护栏：浏览器反复秒退（典型 Edge headless）时，面板自愈循环会
+        // 反复重 launch。这里限速 + 熔断，杜绝无限 spawn 浏览器进程拖垮系统。
+        let cooldown = self.launch_guard.lock().unwrap_or_else(|e| e.into_inner()).pre_launch()?;
+        if !cooldown.is_zero() {
+            tokio::time::sleep(cooldown).await;
+        }
+        self.launch_guard.lock().unwrap_or_else(|e| e.into_inner()).last_launch = Some(std::time::Instant::now());
         let exe = find_browser_executable().ok_or_else(|| {
             "未找到 Chromium 系浏览器。请安装 Microsoft Edge 或 Google Chrome（任一即可），\
              或设置环境变量 AGENTSCOPE_BROWSER_PATH 指向浏览器可执行文件"
@@ -423,13 +510,17 @@ impl BrowserSession {
             "--no-default-browser-check".into(),
             "--metrics-recording-only".into(),
             "--mute-audio".into(),
+            // Edge 后台进程收敛：startup boost 会预拉起常驻后台进程、background
+            // mode 让浏览器关窗后仍驻留——headless 自动化里这些只会徒增进程数，
+            // 与「秒退-重 launch」叠加时是进程风暴的放大器，全关。
+            "--disable-background-mode".into(),
             // 进程数收敛：默认每站点一个 renderer 进程（每个 100-300MB），
             // 测试场景通常单页面——process-per-site 合并同站点进程，
             // renderer-process-limit 兜底上限。低配机器（16G）上 IDEA/studio
             // 与 Chrome 同跑，进程数直接决定内存与调度压力。
             "--process-per-site".into(),
             "--renderer-process-limit=2".into(),
-            "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,InterestFeedContentSuggestions".into(),
+            "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,InterestFeedContentSuggestions,msStartupBoost,msBackgroundExtensions,msEfficiencyMode".into(),
         ];
         let (browser, mut handler) = brother::Browser::launch(config)
             .await
@@ -2183,5 +2274,65 @@ impl Tool for BrowserDrag {
             format!("已从比例 ({frx:.3}, {fry:.3}) 拖拽到 ({trx:.3}, {try_:.3}) → 像素 ({fx:.0}, {fy:.0})→({tx:.0}, {ty:.0})——{receipt}"),
         )
         .await)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_launch_has_no_cooldown_and_no_failure() {
+        let mut g = LaunchGuard::default();
+        assert!(g.pre_launch().unwrap().is_zero());
+        assert_eq!(g.rapid_failures, 0);
+    }
+
+    #[test]
+    fn rapid_relaunches_trip_the_circuit() {
+        let mut g = LaunchGuard::default();
+        // 模拟浏览器每次启动后立即死亡：last_launch 紧贴现在（elapsed≈0）。
+        for i in 0..MAX_RAPID_FAILURES {
+            g.last_launch = Some(std::time::Instant::now());
+            let r = g.pre_launch();
+            if i + 1 < MAX_RAPID_FAILURES {
+                assert!(r.is_ok(), "第 {i} 次秒退不应熔断");
+            } else {
+                assert!(r.is_err(), "连续秒退达上限应熔断");
+            }
+        }
+        // 熔断后持续拒绝重 launch（不再 spawn 浏览器进程）。
+        g.last_launch = Some(std::time::Instant::now());
+        assert!(g.pre_launch().is_err());
+    }
+
+    #[test]
+    fn stable_browser_resets_the_circuit() {
+        // 已熔断状态，page() 探测到浏览器稳定存活时清零 rapid_failures。
+        let mut g = LaunchGuard {
+            rapid_failures: MAX_RAPID_FAILURES,
+            last_launch: Some(std::time::Instant::now()),
+        };
+        g.rapid_failures = 0; // page() 存活分支的复位动作
+        assert!(g.pre_launch().is_ok(), "复位后应允许再次启动");
+    }
+
+    #[test]
+    fn long_silence_resets_failures() {
+        let mut g = LaunchGuard {
+            rapid_failures: MAX_RAPID_FAILURES,
+            last_launch: std::time::Instant::now().checked_sub(RESET_WINDOW + Duration::from_secs(1)),
+        };
+        assert!(g.pre_launch().is_ok());
+        assert_eq!(g.rapid_failures, 0);
+    }
+
+    #[test]
+    fn recent_launch_yields_cooldown() {
+        let mut g = LaunchGuard::default();
+        g.last_launch = Some(std::time::Instant::now());
+        let cd = g.pre_launch().unwrap();
+        assert!(cd > Duration::ZERO, "刚启动过应限速");
+        assert!(cd <= MIN_LAUNCH_INTERVAL);
     }
 }

@@ -40,10 +40,14 @@ pub async fn browser_panel_attach(on_frame: Channel<BrowserFrame>) -> IdeResult<
     let url = session.current_url().await.map_err(err)?;
     tokio::spawn(async move {
         let mut last_sent = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        // 断流重连计数：浏览器起不来时避免紧循环重 launch（与 BrowserSession
+        // 的启动熔断器双重保险），超限即退出转发，下次 attach 再走完整流程。
+        let mut reconnects = 0u32;
         loop {
             // 超时轮询 screencast 开关：detach 后转发任务在 1s 内退出。
             match tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await {
                 Ok(Ok(frame)) => {
+                    reconnects = 0; // 帧流健康，重置重连计数
                     // 帧率节流（100ms ≈ 10fps 上限）：页面有动画/光标闪烁时
                     // CDP 会以 30-60fps 发帧，每帧 400KB base64 过 IPC + 前端
                     // img 解码渲染，是 IDE 面板被拖卡的主因。直播看的是页面
@@ -67,8 +71,14 @@ pub async fn browser_panel_attach(on_frame: Channel<BrowserFrame>) -> IdeResult<
                     }
                     // 断流自愈：screencast 已失效（浏览器被关闭后重建、监听
                     // 任务退出时清 active）。面板还开着就重新拉起浏览器并
-                    // 重订阅帧流——agent 与面板共用同一实例，画面自动接上；
-                    // 浏览器起不来才退出转发，下次 attach 再走完整流程。
+                    // 重订阅帧流——agent 与面板共用同一实例，画面自动接上。
+                    // 退避 + 上限：浏览器反复秒退时不紧循环重 launch（启动
+                    // 熔断器之外的第二道闸），超限退出，下次 attach 再试。
+                    reconnects += 1;
+                    if reconnects > 5 {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * u64::from(reconnects.min(6)))).await;
                     match BrowserSession::shared().start_screencast().await {
                         Ok(new_rx) => {
                             rx = new_rx;
