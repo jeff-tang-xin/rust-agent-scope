@@ -192,6 +192,16 @@ try:
         if actual != expected:
             failures.append((file, needle, expected, actual))
     assert not failures, failures
+    # The hierarchy cache must invalidate when a new implementor appears, and a repeat
+    # query must be served from the cache without losing the answer.
+    extra = 'package zoo;\n\npublic class Extra implements Repo<String> {\n    public void save(String item) {\n    }\n}\n'
+    (project / 'src/zoo/Extra.java').write_text(extra)
+    send({'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': uri('Extra.java'), 'languageId': 'java', 'version': 1, 'text': extra}}})
+    request('java/buildWorkspace', True)
+    again, _ = implementations('Repo.java', 'Repo<T>')
+    assert 'Extra.java:2' in again, again
+    repeat, _ = implementations('Repo.java', 'Repo<T>')
+    assert repeat == again, (repeat, again)
     print('ok')
 finally:
     proc.kill()

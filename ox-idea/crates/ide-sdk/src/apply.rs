@@ -677,6 +677,56 @@ fn missing_serial_version(inspections: &InspectionSettings) -> Option<&'static s
     })
 }
 
+/// `file://` URI for a filesystem path (RFC 8089, VS Code-compatible encoding).
+/// Mirrors `ide_lsp::uri::path_to_uri_string` (the canonical encoder). jdtls's
+/// `java.settings.url` must be a proper URI: a raw Windows path makes its file-change
+/// handler (`StandardProjectsManager.getURIs` → `new URI`) throw URISyntaxException.
+fn file_uri(path: &Path) -> String {
+    use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+    const PATH: &AsciiSet = &CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'<')
+        .add(b'>')
+        .add(b'?')
+        .add(b'[')
+        .add(b'\\')
+        .add(b']')
+        .add(b'^')
+        .add(b'`')
+        .add(b'{')
+        .add(b'|')
+        .add(b'}');
+    let s = path.to_string_lossy();
+    let s = if cfg!(windows) { s.replace('\\', "/") } else { s.into_owned() };
+    let mut out = String::from("file://");
+    if !s.starts_with('/') {
+        out.push('/');
+    }
+    out.extend(utf8_percent_encode(&s, PATH));
+    out
+}
+
+#[cfg(test)]
+mod file_uri_tests {
+    use super::file_uri;
+    use std::path::Path;
+
+    #[test]
+    fn encodes_spaces_and_specials() {
+        assert_eq!(file_uri(Path::new("/tmp/a b/c#d.prefs")), "file:///tmp/a%20b/c%23d.prefs");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_drive_is_a_valid_file_uri() {
+        let uri = file_uri(Path::new("C:\\Users\\xinl.tang\\lsp\\jdtls\\compiler-defaults.prefs"));
+        assert_eq!(uri, "file:///C:/Users/xinl.tang/lsp/jdtls/compiler-defaults.prefs");
+    }
+}
+
 /// Workspace compiler defaults; Eclipse project preferences still take precedence.
 /// Each variant has its own file, so changing an inspection restarts the server with it.
 pub fn configure_java_compiler(cfg: &mut LanguageServerConfig, data_dir: &Path, inspections: &InspectionSettings) {
@@ -729,9 +779,10 @@ org.eclipse.jdt.core.compiler.codegen.targetPlatform={jdt_ver}\n"
         tracing::warn!("jdtls: cannot write compiler defaults: {e}");
         return;
     }
-    // jdtls accepts absolute filesystem paths as well as URLs (including paths
-    // containing spaces and Windows backslashes). Explicit server settings win later.
-    let defaults = json!({"settings": {"java": {"settings": {"url": file.to_string_lossy()}}}});
+    // A proper file:// URI: jdtls reads the settings from it, and its file-change handler
+    // parses it with `new URI` (a raw Windows path throws URISyntaxException). Explicit
+    // server settings win later.
+    let defaults = json!({"settings": {"java": {"settings": {"url": file_uri(&file)}}}});
     let existing = cfg.initialization_options.clone();
     merge_init_options(cfg, defaults);
     if let Some(existing) = existing {

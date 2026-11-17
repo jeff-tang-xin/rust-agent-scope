@@ -1236,7 +1236,7 @@ impl LspManager {
         }
         let (method, cap, feature) = goto_method(kind);
         let (snap, targets) = self.doc_targets(doc, feature, |c| c.has(cap)).await?;
-        self.goto_in(&snap, &targets, method, pos, None, None).await
+        self.goto_in(&snap, &targets, method, pos, None, None, false).await
     }
 
     /// Go to Implementation, with the implementations found first passed to `partial` while
@@ -1251,7 +1251,7 @@ impl LspManager {
     ) -> IdeResult<Vec<Location>> {
         let (method, cap, feature) = goto_method(GotoKind::Implementation);
         let (snap, targets) = self.doc_targets(doc, feature, |c| c.has(cap)).await?;
-        self.goto_in(&snap, &targets, method, pos, Some(&cancel), Some(partial)).await
+        self.goto_in(&snap, &targets, method, pos, Some(&cancel), Some(partial), false).await
     }
 
     /// Implementations of the symbols at each of `positions` (gutter line
@@ -1268,7 +1268,7 @@ impl LspManager {
         let (snap, targets) = self.doc_targets(doc, feature, |c| c.has(cap)).await?;
         let requests = positions.iter().copied().map(|pos| {
             let (snap, targets, cancel) = (&snap, &targets, &cancel);
-            async move { self.goto_in(snap, targets, method, pos, Some(cancel), None).await }
+            async move { self.goto_in(snap, targets, method, pos, Some(cancel), None, true).await }
         });
         let results: Vec<IdeResult<Vec<Location>>> =
             futures::stream::iter(requests).buffered(IMPLEMENTATION_CONCURRENCY).collect().await;
@@ -1329,6 +1329,7 @@ impl LspManager {
         pos: Pos,
         cancel: Option<&CancellationToken>,
         partial: Partial<'_>,
+        source_only: bool,
     ) -> IdeResult<Vec<Location>> {
         let mut out = Outcome::new();
         for t in targets.iter().filter(|t| snap.asks(t, pos)) {
@@ -1336,6 +1337,15 @@ impl LspManager {
             let mut first = Vec::new();
             if method == "textDocument/implementation" {
                 let (locs, complete) = self.java_source_implementations(snap, t, pos, cancel).await;
+                // Gutter markers: jdtls's source-only answer is enough. The standard request
+                // builds a type hierarchy over every dependency jar — costly, and a scroll
+                // cancels it mid-flight, so the build is thrown away and retried (a storm).
+                if source_only
+                    && t.server.name == "jdtls"
+                    && t.caps().commands().iter().any(|c| c == JAVA_IMPLEMENTATIONS)
+                {
+                    return Ok(locs);
+                }
                 if complete && !locs.is_empty() {
                     return Ok(locs);
                 }
@@ -1638,7 +1648,7 @@ impl LspManager {
                 return Vec::new();
             }
             let defining = self.ready_targets(&snap.servers, |c| c.has("definitionProvider")).await;
-            self.goto_in(&snap, &defining, "textDocument/definition", pos, Some(&cancel), None)
+            self.goto_in(&snap, &defining, "textDocument/definition", pos, Some(&cancel), None, false)
                 .await
                 .unwrap_or_default()
         };

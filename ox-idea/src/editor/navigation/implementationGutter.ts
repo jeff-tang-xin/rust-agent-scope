@@ -296,6 +296,10 @@ class MarkersPlugin {
   private refresh = debounce(() => void this.run(), DEBOUNCE_MS);
   private generation = 0;
   private request: RequestId | null = null;
+  /** The document text the in-flight pass was fired for; a scroll over the same text must not cancel it. */
+  private inflightDoc: Text | null = null;
+  /** A refresh arrived while a pass was in flight: re-run once it finishes, for the newly visible lines. */
+  private pendingRefresh = false;
   private offSettings: () => void;
 
   constructor(private view: EditorView) {
@@ -328,6 +332,7 @@ class MarkersPlugin {
     if (this.request === null) return;
     void commands.cancelRequest(this.request).catch(() => {});
     this.request = null;
+    this.inflightDoc = null;
   }
 
   private show(placed: PlacedMarker[]) {
@@ -340,6 +345,14 @@ class MarkersPlugin {
     if (!view.dom.isConnected) return;
     const ctx = docOf(view);
     if (!ctx) return;
+    // A pass is already computing markers for this exact document text: let it finish and
+    // fill the cache rather than cancelling it. jdtls builds a whole-workspace type hierarchy
+    // per symbol; cancelling mid-flight throws that work away, the next scroll rebuilds from
+    // scratch, the cache never fills and the server storms (OperationCanceledException).
+    if (this.request !== null && this.inflightDoc === view.state.doc) {
+      this.pendingRefresh = true;
+      return;
+    }
     const gen = ++this.generation;
     this.cancelRequest();
     const groups = enabledGroups(editorPrefs());
@@ -350,6 +363,7 @@ class MarkersPlugin {
     const text = view.state.doc;
     const stale = () => gen !== this.generation || view.state.doc !== text;
     const entry = markersOf(ctx.path, text);
+    let request: RequestId | null = null;
     try {
       if (!entry.outline) {
         const items = await lspRequest(() => commands.docOutline(ctx.doc));
@@ -364,14 +378,24 @@ class MarkersPlugin {
       const first = text.lineAt(from).number - 1 - MARGIN_LINES;
       const last = text.lineAt(to).number - 1 + MARGIN_LINES;
       const visible = candidates.filter((c) => c.line >= first && c.line <= last).slice(0, MAX_PER_PASS);
-      const request = (this.request = nextRequestId());
+      this.inflightDoc = text;
+      request = this.request = nextRequestId();
       await fillMarkers(ctx.path, visible, groups, markerDeps(ctx, items, request, entry.cache), entry.cache);
-      if (this.request === request) this.request = null;
       if (stale()) return;
       this.show(place(text, cachedMarkers(candidates, groups, entry.cache)));
     } catch (e) {
       if (isUnavailable(e)) gutterBackoff.mark(ctx.doc);
       else if (!isCancelled(e)) console.debug("[lineMarkers]", e);
+    } finally {
+      if (request !== null && this.request === request) {
+        this.request = null;
+        this.inflightDoc = null;
+      }
+      // Lines scrolled into view during the pass still need their markers.
+      if (this.pendingRefresh) {
+        this.pendingRefresh = false;
+        this.refresh();
+      }
     }
   }
 

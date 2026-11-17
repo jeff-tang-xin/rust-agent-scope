@@ -1,8 +1,11 @@
 package ai.oxidea.implementations;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.OperationCanceledException;
@@ -24,6 +27,55 @@ import org.eclipse.lsp4j.Location;
 public final class ImplementationsCommand implements IDelegateCommandHandler {
     /** Classpath attribute of the Kotlin bridge's library entries (`java/kotlin-bridge`). */
     private static final String KOTLIN_OUTPUT = "ai.oxidea.kotlin";
+
+    /**
+     * Completed source type hierarchies by type handle. Building one walks every source root
+     * in the workspace (costly on a large multi-module project); the gutter asks for many
+     * methods of the same interface, and revisits the same file, so one build serves them all.
+     * Bounded LRU; cleared on any Java model change (a subtype may have appeared or gone).
+     */
+    private static final int MAX_CACHED = 64;
+    private static final Map<String, ITypeHierarchy> CACHE =
+            Collections.synchronizedMap(new LinkedHashMap<String, ITypeHierarchy>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, ITypeHierarchy> eldest) {
+                    return size() > MAX_CACHED;
+                }
+            });
+    /** Per-type build locks: concurrent calls for one type coalesce into a single build. */
+    private static final ConcurrentHashMap<String, Object> LOCKS = new ConcurrentHashMap<>();
+    private static volatile boolean listening = false;
+
+    /** Invalidates the cache once the Java model changes; registered a single time. */
+    private static void ensureListening() {
+        if (listening) return;
+        synchronized (ImplementationsCommand.class) {
+            if (listening) return;
+            JavaCore.addElementChangedListener(event -> {
+                CACHE.clear();
+                LOCKS.clear();
+            }, IElementChangedListener.POST_CHANGE);
+            listening = true;
+        }
+    }
+
+    /** The source hierarchy for {@code type}, cached and coalesced; built with {@code monitor} on a miss. */
+    private static ITypeHierarchy hierarchyFor(IType type, IRegion sources, IProgressMonitor monitor)
+            throws JavaModelException {
+        ensureListening();
+        String key = type.getHandleIdentifier();
+        ITypeHierarchy cached = CACHE.get(key);
+        if (cached != null) return cached;
+        Object lock = LOCKS.computeIfAbsent(key, k -> new Object());
+        synchronized (lock) {
+            cached = CACHE.get(key);
+            if (cached != null) return cached;
+            if (monitor.isCanceled()) throw new OperationCanceledException();
+            ITypeHierarchy hierarchy = type.getJavaProject().newTypeHierarchy(type, sources, monitor);
+            CACHE.put(key, hierarchy);
+            return hierarchy;
+        }
+    }
 
     @Override
     public Object executeCommand(String command, List<Object> arguments, IProgressMonitor monitor) throws Exception {
@@ -62,7 +114,7 @@ public final class ImplementationsCommand implements IDelegateCommandHandler {
                 }
             }
         }
-        ITypeHierarchy hierarchy = type.getJavaProject().newTypeHierarchy(type, sources, monitor);
+        ITypeHierarchy hierarchy = hierarchyFor(type, sources, monitor);
         for (IType subtype : hierarchy.getAllSubtypes(type)) {
             if (monitor.isCanceled()) throw new OperationCanceledException();
             IMember found;

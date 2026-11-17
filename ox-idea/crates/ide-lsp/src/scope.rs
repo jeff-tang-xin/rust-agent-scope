@@ -217,7 +217,7 @@ impl LspManager {
         }
         let Some(word) = search_word(snap, pos) else { return GoMentions::default() };
         let declarations: Vec<Location> = self
-            .goto_in(snap, std::slice::from_ref(t), "textDocument/definition", pos, Some(cancel), None)
+            .goto_in(snap, std::slice::from_ref(t), "textDocument/definition", pos, Some(cancel), None, false)
             .await
             .unwrap_or_default()
             .into_iter()

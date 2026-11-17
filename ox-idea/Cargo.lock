@@ -5053,6 +5053,7 @@ dependencies = [
  "ide-run",
  "ide-vfs",
  "ignore",
+ "percent-encoding",
  "serde",
  "serde_json",
  "specta",

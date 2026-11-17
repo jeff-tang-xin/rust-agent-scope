@@ -2324,6 +2324,12 @@ async fn java_implementations_come_from_sources_first() {
     assert_eq!(asked[0]["command"], "oxidea.java.implementations");
     assert_eq!((asked[0]["arguments"][1].clone(), asked[0]["arguments"][2].clone()), (json!(0), json!(10)));
 
+    // The gutter batch for a dependency-declared type stays source-only: the standard request
+    // would build a type hierarchy over every jar, which a scroll cancels mid-flight (a storm).
+    let markers = h.mgr.implementations(doc, &[Pos::new(2, 6)], Default::default()).await.unwrap();
+    assert_eq!(lines(&markers[0]), vec![1]);
+    assert!(s.requested("textDocument/implementation").is_empty(), "gutter batch never searches the dependencies");
+
     // A dependency's type: those in the sources first, then the dependencies' too.
     let partial = Mutex::new(Vec::new());
     let found = h
