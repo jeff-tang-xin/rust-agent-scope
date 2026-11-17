@@ -232,6 +232,75 @@ export function markVisible(task: string): () => void {
 
 let generation = 0;
 
+/** Entry events of the current frame, by entries key: applied as one `setState` per frame. */
+let pendingEntries = new Map<
+  string,
+  { task: string; subagent: string | null; items: Array<{ index: number; entry: AgentEntry }> }
+>();
+let entriesFlushScheduled = false;
+
+/**
+ * Queues an entry event instead of updating the store at once: streaming deltas arrive
+ * in bursts (several per frame), and every `setState` re-renders the open conversation
+ * end to end. One flush per animation frame keeps that to a single render.
+ */
+function queueEntry(e: Extract<AgentEvent, { type: "entry" }>) {
+  if (
+    !e.subagent &&
+    ((e.entry.type === "agent" && e.entry.text.trim()) ||
+      e.entry.type === "error" ||
+      (e.entry.type === "permission" && e.entry.chosen === null))
+  ) {
+    markUnread(e.task);
+  }
+  const key = entriesKey(e.task, e.subagent);
+  let pending = pendingEntries.get(key);
+  if (!pending) {
+    pending = { task: e.task, subagent: e.subagent, items: [] };
+    pendingEntries.set(key, pending);
+  }
+  pending.items.push({ index: e.index, entry: e.entry });
+  // A hidden window gets no animation frames: apply at once (nothing renders there).
+  if (document.visibilityState === "hidden") {
+    flushEntries();
+    return;
+  }
+  if (!entriesFlushScheduled) {
+    entriesFlushScheduled = true;
+    requestAnimationFrame(flushEntries);
+  }
+}
+
+function flushEntries() {
+  entriesFlushScheduled = false;
+  const queued = pendingEntries;
+  pendingEntries = new Map();
+  if (!queued.size) return;
+  let entries = useAgents.getState().entries;
+  let changed = false;
+  for (const [key, { task, subagent, items }] of queued) {
+    const current = entries.get(key);
+    if (!current) continue; // Not loaded: the conversation isn't open; opening loads it.
+    let next = current;
+    for (const { index, entry } of items) {
+      const up = upsertEntry(next, index, entry);
+      if (!up) {
+        void loadEntries(task, subagent); // Out of order: reload the conversation.
+        next = current;
+        break;
+      }
+      next = up;
+    }
+    if (next !== current) {
+      entries = new Map(entries).set(key, next);
+      changed = true;
+    }
+    const last = items[items.length - 1]!.entry;
+    if (last.type === "tool" && last.status === "completed" && last.diffs.length) scheduleChanges(task);
+  }
+  if (changed) useAgents.setState({ entries });
+}
+
 /** Subscribes this window to the project's agents (again after the project changed). */
 export async function connect(): Promise<void> {
   if (!isTauri()) return;
@@ -273,6 +342,7 @@ export async function connect(): Promise<void> {
 
 export function disconnect() {
   generation++;
+  pendingEntries.clear();
   useAgents.setState({
     loaded: false,
     error: null,
@@ -315,6 +385,7 @@ function onEvent(e: AgentEvent) {
       break;
     }
     case "truncated": {
+      pendingEntries.delete(e.task); // Drop queued deltas of the cut conversation.
       const current = s.entries.get(e.task);
       if (current) useAgents.setState({ entries: new Map(s.entries).set(e.task, current.slice(0, e.length)) });
       scheduleChanges(e.task);
@@ -329,23 +400,7 @@ function onEvent(e: AgentEvent) {
       break;
     }
     case "entry": {
-      if (
-        !e.subagent &&
-        ((e.entry.type === "agent" && e.entry.text.trim()) ||
-          e.entry.type === "error" ||
-          (e.entry.type === "permission" && e.entry.chosen === null))
-      ) {
-        markUnread(e.task);
-      }
-      const key = entriesKey(e.task, e.subagent);
-      const current = s.entries.get(key);
-      if (!current) return;
-      const next = upsertEntry(current, e.index, e.entry);
-      if (next) useAgents.setState({ entries: new Map(s.entries).set(key, next) });
-      else void loadEntries(e.task, e.subagent);
-      if (e.entry.type === "tool" && e.entry.status === "completed" && e.entry.diffs.length) {
-        scheduleChanges(e.task);
-      }
+      queueEntry(e);
       break;
     }
   }

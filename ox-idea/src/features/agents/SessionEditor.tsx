@@ -8,7 +8,6 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type ReactElement,
@@ -211,7 +210,7 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
         ) : (
           <>
             <QuestionCard task={task} entries={entries ?? null} />
-            <SessionComposer task={task} entries={entries ?? null} head={head} onOpenSubagent={openSubagent} />
+            <SessionComposer task={task} head={head} onOpenSubagent={openSubagent} />
           </>
         )}
       </div>
@@ -313,15 +312,7 @@ function Header({
 }
 
 /** The task's agent, model, checkout and state, just above the composer. */
-function SessionStatus({
-  task,
-  entries,
-  head,
-}: {
-  task: AgentTask;
-  entries: AgentEntry[] | null;
-  head: string | null;
-}) {
+function SessionStatus({ task, head }: { task: AgentTask; head: string | null }) {
   const tx = useTx();
   const project = useProject((s) => s.project);
   const projectName = project?.workspace ? basename(task.projectRoot ?? project.root) : null;
@@ -344,7 +335,7 @@ function SessionStatus({
         <T>{statusLabel(task.status)}</T>
         {task.status === "limited" && task.resetsMs != null && ` · ${tx`resets ${formatSentAt(task.resetsMs)}`}`}
       </span>
-      <Meters task={task} entries={entries} />
+      <Meters task={task} />
     </div>
   );
 }
@@ -353,7 +344,7 @@ function SessionStatus({
  * Context use, usage limits and cost (when the agent reports them) and the time spent on
  * the task, each as Settings › Tools › Agents › Chat allows.
  */
-function Meters({ task, entries }: { task: AgentTask; entries: AgentEntry[] | null }) {
+function Meters({ task }: { task: AgentTask }) {
   const tx = useTx();
   const show = useProject((s) => s.settings?.agents);
   const busy = isBusy(task.status);
@@ -362,7 +353,26 @@ function Meters({ task, entries }: { task: AgentTask; entries: AgentEntry[] | nu
   const reported = useAgents((s) => s.limits.get(task.provider));
   const limits = show?.showUsageLimits !== false ? (reported ?? []) : [];
   const cost = show?.showCost === true ? task.usage?.cost : null;
-  const work = show?.showWorkTime !== false && entries ? workTime(entries, busy ? now : null) : 0;
+  // Work time in two stable parts (streaming deltas must not re-render the meters):
+  // finished turns come from a store subscription, the running turn is measured
+  // against the meter's own clock.
+  const done = useTaskDerived(
+    task.id,
+    0,
+    (entries) => workTime(entries, null),
+    (a, b) => a === b,
+  );
+  const runningSince = useTaskDerived(
+    task.id,
+    null as number | null,
+    (entries) => {
+      const last = entries.findLast((e): e is UserEntry => e.type === "user");
+      return last && last.doneMs == null ? (last.sentMs ?? null) : null;
+    },
+    (a, b) => a === b,
+  );
+  const work =
+    show?.showWorkTime !== false ? done + (busy && runningSince != null ? Math.max(0, now - runningSince) : 0) : 0;
   return (
     <span className={styles.meters}>
       {usage && <Usage usage={usage} />}
@@ -536,6 +546,170 @@ interface StreamProps {
 /** Entries rendered at a time when a conversation opens at its end. */
 const ENTRY_BATCH = 40;
 
+/** First position where the two arrays hold different entry references (`length` when equal). */
+function diffAt(prev: readonly AgentEntry[], next: readonly AgentEntry[]): number {
+  const n = Math.min(prev.length, next.length);
+  let i = 0;
+  while (i < n && prev[i] === next[i]) i++;
+  return i;
+}
+
+const isStreamEntry = (e: AgentEntry) => e.type === "agent" || e.type === "thought";
+
+const EMPTY_HEADERS: Set<number> = new Set();
+
+/** Indexes of rows that open an agent-authored block (a message after user content). */
+function authorHeadersOf(rows: ConversationRow[]): Set<number> {
+  const headers = new Set<number>();
+  const byAgent = (row: ConversationRow) =>
+    row.kind === "process" ||
+    (row.entry.type !== "user" &&
+      row.entry.type !== "subagent" &&
+      !(row.entry.type === "message" && row.entry.incoming));
+  rows.forEach((row, i) => {
+    const previous = rows[i - 1];
+    if (byAgent(row) && (!previous || !byAgent(previous))) headers.add(row.index);
+  });
+  return headers;
+}
+
+/**
+ * `entries` with only the last entry replaced (the streaming-delta shape): reuse
+ * `prevRows` up to the last painted row and recompute just that one. A replaced
+ * entry before `start` (the user is reading history) touches no painted row.
+ */
+function rowsTailReplaced(
+  prevRows: ConversationRow[],
+  entries: AgentEntry[],
+  start: number,
+  d: number,
+): ConversationRow[] {
+  if (d < start) return prevRows;
+  const last = prevRows[prevRows.length - 1];
+  if (!last) return conversationRows(entries, start);
+  const lastStart = last.kind === "process" ? last.entries[0]!.index : last.index;
+  const lastEnd = last.kind === "process" ? last.entries[last.entries.length - 1]!.index : last.index;
+  if (lastEnd < d) return conversationRows(entries, start);
+  return [...prevRows.slice(0, -1), ...conversationRows(entries, lastStart)];
+}
+
+/**
+ * Conversation derivations whose references survive streaming deltas. A delta replaces
+ * only the last entry, so the user/agent structure (and everything computed from it)
+ * usually stays the same: returning the previous maps and arrays keeps `renderRow` and
+ * the memoized `Entry`/`ProcessRun` from re-rendering the whole conversation per frame.
+ */
+interface StreamDerived {
+  turns: Map<number, number> | null;
+  replies: Map<number, ReplyTurn> | null;
+  times: Map<number, ReplyTimes> | null;
+  waiting: boolean;
+  lastUser: UserEntry | undefined;
+  lastStreamIndex: number;
+  rows: ConversationRow[];
+  authorHeaders: Set<number>;
+}
+
+function useStreamDerived(entries: AgentEntry[] | null, start: number, subagent: boolean): StreamDerived | null {
+  // Render-time state comparison (react.dev "storing information from previous
+  // renders"): a cache miss updates the state and React re-renders once with the
+  // cache in place, so the expensive derivations run once per new structure.
+  const [cache, setCache] = useState<(StreamDerived & { entries: AgentEntry[]; start: number }) | null>(null);
+  if (!entries) return null;
+  if (cache && cache.entries === entries && cache.start === start) return cache;
+
+  const prev = cache;
+  const full = () => {
+    const rows = conversationRows(entries, start);
+    const next: StreamDerived & { entries: AgentEntry[]; start: number } = {
+      entries,
+      start,
+      turns: subagent ? null : turnNumbers(entries),
+      replies: subagent ? null : replyTurns(entries, prev?.replies ?? undefined),
+      times: subagent ? null : replyTimes(entries, prev?.times ?? undefined),
+      waiting: entries.some((e) => e.type === "permission" && !e.chosen),
+      lastUser: entries.findLast((e): e is UserEntry => e.type === "user"),
+      lastStreamIndex: entries.findLastIndex(isStreamEntry),
+      rows,
+      authorHeaders: authorHeadersOf(rows),
+    };
+    setCache(next);
+    return next;
+  };
+
+  if (!prev || prev.start !== start || entries.length < prev.entries.length) return full();
+
+  const d = diffAt(prev.entries, entries);
+  if (d === prev.entries.length && entries.length === prev.entries.length) return prev; // identical
+  if (d === prev.entries.length - 1 && entries.length === prev.entries.length) {
+    // Streaming delta: only the last entry was replaced.
+    const a = prev.entries[d]!;
+    const b = entries[d]!;
+    const turnsStable = a.type !== "user" && b.type !== "user";
+    const timesStable = (a.type === "agent") === (b.type === "agent");
+    const repliesStable =
+      (a.type === "agent" && b.type === "agent" && (a.text.trim() !== "") === (b.text.trim() !== "")) ||
+      (a.type !== "agent" && a.type !== "user" && b.type !== "agent" && b.type !== "user");
+    if (turnsStable && timesStable && repliesStable) {
+      const next: StreamDerived & { entries: AgentEntry[]; start: number } = {
+        entries,
+        start,
+        turns: prev.turns,
+        replies: prev.replies,
+        times: prev.times,
+        waiting:
+          a.type === "permission" || b.type === "permission"
+            ? entries.some((e) => e.type === "permission" && !e.chosen)
+            : prev.waiting,
+        lastUser: prev.lastUser,
+        lastStreamIndex:
+          isStreamEntry(a) === isStreamEntry(b) ? prev.lastStreamIndex : entries.findLastIndex(isStreamEntry),
+        rows: rowsTailReplaced(prev.rows, entries, start, d),
+        authorHeaders: prev.authorHeaders,
+      };
+      setCache(next);
+      return next;
+    }
+  }
+  return full();
+}
+
+/**
+ * Derives a value from the task's entries without re-rendering per streaming frame:
+ * the derivation runs on store updates, but a result equal to the previous one keeps
+ * the component from rendering (the store applies deltas once per frame).
+ */
+function useTaskDerived<T>(
+  task: string,
+  initial: T,
+  compute: (entries: AgentEntry[], previous: { entries: AgentEntry[]; value: T } | null) => T,
+  isEqual: (a: T, b: T) => boolean,
+): T {
+  const [value, setValue] = useState(initial);
+  const last = useRef<{ entries: AgentEntry[]; value: T } | null>(null);
+  // oxlint-disable-next-line react/refs -- latest callbacks, read only from the subscription
+  const fns = useRef({ compute, isEqual });
+  // oxlint-disable-next-line react/refs -- latest callbacks, read only from the subscription
+  fns.current = { compute, isEqual };
+  useEffect(() => {
+    last.current = null;
+    const update = (s: { entries: Map<string, AgentEntry[]> }) => {
+      const entries = s.entries.get(task);
+      if (!entries || last.current?.entries === entries) return;
+      const next = fns.current.compute(entries, last.current);
+      if (last.current && fns.current.isEqual(last.current.value, next)) {
+        last.current = { entries, value: last.current.value }; // absorb the new array
+        return;
+      }
+      last.current = { entries, value: next };
+      setValue(next);
+    };
+    update(useAgents.getState());
+    return useAgents.subscribe(update);
+  }, [task]);
+  return value;
+}
+
 function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, onCloseFind }: StreamProps) {
   const ref = useRef<HTMLDivElement>(null);
   useSelectionBoundary(ref);
@@ -552,6 +726,7 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
   let start = finding || !entries ? 0 : Math.max(0, entries.length - shown);
   // Keep a process run intact so prepending never replaces the anchored row.
   while (entries && start > 0 && isProcessEntry(entries[start]!) && isProcessEntry(entries[start - 1]!)) start--;
+  const derived = useStreamDerived(entries ?? null, start, !!subagent);
   const dragging = useRef(false);
   // Earlier entries are prepended above the view: remember where the first painted row is
   // so the content stays put and the scrollbar doesn't jump under the pointer.
@@ -660,32 +835,20 @@ function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, o
     setAway(false);
     el.focus({ preventScroll: true });
   }, []);
-  const waiting = entries?.some((e) => e.type === "permission" && !e.chosen);
-  const lastUser = entries?.findLast((e): e is UserEntry => e.type === "user");
+  const waiting = derived?.waiting ?? false;
+  const lastUser = derived?.lastUser;
   // Forks and undo apply to the task's own turns, not a subagent's conversation.
-  const turns = useMemo(() => (entries && !subagent ? turnNumbers(entries) : null), [entries, subagent]);
-  const replies = useMemo(() => (entries && !subagent ? replyTurns(entries) : null), [entries, subagent]);
-  const times = useMemo(() => (entries && !subagent ? replyTimes(entries) : null), [entries, subagent]);
+  const turns = derived?.turns ?? null;
+  const replies = derived?.replies ?? null;
+  const times = derived?.times ?? null;
   const busy = subagent ? subagentWorking(subagent.status) : isBusy(task.status);
   // 流式判定用最后一个 agent/thought entry：steer 的用户消息插入后，agent
   // 当前步的输出仍追加在它前面（timeline open_stream），打字机要跟着那条
   // 消息走——用 entries.length-1 会被用户消息顶掉，原消息冻结在中途。
-  const lastStreamIndex = entries ? entries.findLastIndex((e) => e.type === "agent" || e.type === "thought") : -1;
+  const lastStreamIndex = derived?.lastStreamIndex ?? -1;
   // Keep the row stable when earlier history is prepended; its author can move with the work.
-  const rows = useMemo(() => (entries ? conversationRows(entries, start) : []), [entries, start]);
-  const authorHeaders = useMemo(() => {
-    const headers = new Set<number>();
-    const byAgent = (row: ConversationRow) =>
-      row.kind === "process" ||
-      (row.entry.type !== "user" &&
-        row.entry.type !== "subagent" &&
-        !(row.entry.type === "message" && row.entry.incoming));
-    rows.forEach((row, i) => {
-      const previous = rows[i - 1];
-      if (byAgent(row) && (!previous || !byAgent(previous))) headers.add(row.index);
-    });
-    return headers;
-  }, [rows]);
+  const rows = derived?.rows ?? [];
+  const authorHeaders = derived?.authorHeaders ?? EMPTY_HEADERS;
   const renderRow = useCallback(
     (row: EntryRow) => (
       <Entry
@@ -1787,9 +1950,14 @@ function SubagentCard({
 }
 
 /** The subagents of the conversation still at work, to look in on. */
-function WorkingSubagents({ entries, onOpen }: { entries: AgentEntry[] | null; onOpen: (id: string) => void }) {
+function WorkingSubagents({ task, onOpen }: { task: AgentTask; onOpen: (id: string) => void }) {
   const tx = useTx();
-  const working = (entries ?? []).filter((e): e is SubagentEntry => e.type === "subagent" && subagentWorking(e.status));
+  const working = useTaskDerived(
+    task.id,
+    [] as SubagentEntry[],
+    (entries) => entries.filter((e): e is SubagentEntry => e.type === "subagent" && subagentWorking(e.status)),
+    (a, b) => a.length === b.length && a.every((e, i) => e === b[i]),
+  );
   if (!working.length) return null;
   return (
     <div className={styles.subagentStrip} aria-label={tx("Subagents at work")}>
@@ -2177,12 +2345,10 @@ function QuestionForm({
 
 function SessionComposer({
   task,
-  entries,
   head,
   onOpenSubagent,
 }: {
   task: AgentTask;
-  entries: AgentEntry[] | null;
   head: string | null;
   onOpenSubagent: (id: string) => void;
 }) {
@@ -2191,10 +2357,27 @@ function SessionComposer({
   const [sending, setSending] = useState(false);
   const agentCommands = useAgentCommands(task.provider, task.id, task.commands);
   const busy = isBusy(task.status);
-  // ↑ recalls this conversation's messages, newest first.
-  const history = useMemo(
-    () => (entries ?? []).flatMap((e) => (e.type === "user" && e.text ? [e.text] : [])).reverse(),
-    [entries],
+  // ↑ recalls this conversation's messages, newest first. Derived through a store
+  // subscription: streaming deltas replace the last entry, which rarely adds a user
+  // message, so the composer (and the input box inside it) skips the per-frame renders.
+  const history = useTaskDerived(
+    task.id,
+    [] as string[],
+    (entries, previous) => {
+      if (previous) {
+        const d = diffAt(previous.entries, entries);
+        if (d === previous.entries.length && entries.length === previous.entries.length) return previous.value;
+        if (d === previous.entries.length && !entries.slice(d).some((e) => e.type === "user")) return previous.value;
+        if (
+          d === previous.entries.length - 1 &&
+          entries.length === previous.entries.length &&
+          entries[d]!.type !== "user"
+        )
+          return previous.value;
+      }
+      return entries.flatMap((e) => (e.type === "user" && e.text ? [e.text] : [])).reverse();
+    },
+    (a, b) => a === b,
   );
   const send = (now: boolean) => {
     if (!canSend(composer) || sending || task.status === "archived") return;
@@ -2211,7 +2394,7 @@ function SessionComposer({
     );
   return (
     <div className={styles.composerArea}>
-      <SessionStatus task={task} entries={entries} head={head} />
+      <SessionStatus task={task} head={head} />
       {task.status === "archived" && (
         <div className={styles.banner}>
           <span className={styles.bannerText}>
@@ -2224,7 +2407,7 @@ function SessionComposer({
           />
         </div>
       )}
-      <WorkingSubagents entries={entries} onOpen={onOpenSubagent} />
+      <WorkingSubagents task={task} onOpen={onOpenSubagent} />
       <BackgroundTasks task={task} />
       {task.queue.length > 0 && <Queue task={task} />}
       <Composer

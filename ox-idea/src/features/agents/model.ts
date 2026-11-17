@@ -139,19 +139,24 @@ export interface ReplyTimes {
 }
 
 /** When the turn behind each agent reply was asked and finished, by entry index. */
-export function replyTimes(entries: AgentEntry[]): Map<number, ReplyTimes> {
+export function replyTimes(entries: AgentEntry[], reuse?: Map<number, ReplyTimes>): Map<number, ReplyTimes> {
   const out = new Map<number, ReplyTimes>();
   let current: Extract<AgentEntry, { type: "user" }> | null = null;
   entries.forEach((entry, i) => {
     if (entry.type === "user" && !entry.steered) current = entry;
-    else if (entry.type === "agent" && current)
-      out.set(i, { sentMs: current.sentMs ?? null, doneMs: current.doneMs ?? null });
+    else if (entry.type === "agent" && current) {
+      const sentMs = current.sentMs ?? null;
+      const doneMs = current.doneMs ?? null;
+      const old = reuse?.get(i);
+      const same = old && old.sentMs === sentMs && old.doneMs === doneMs;
+      out.set(i, same ? old : { sentMs, doneMs });
+    }
   });
   return out;
 }
 
 /** Only the last reply of a turn offers actions that change the conversation. */
-export function replyTurns(entries: AgentEntry[]): Map<number, ReplyTurn> {
+export function replyTurns(entries: AgentEntry[], reuse?: Map<number, ReplyTurn>): Map<number, ReplyTurn> {
   const out = new Map<number, ReplyTurn>();
   let current: ReplyTurn | null = null;
   let previous: number | null = null;
@@ -164,7 +169,11 @@ export function replyTurns(entries: AgentEntry[]): Map<number, ReplyTurn> {
       } else if (current) current.steered = true;
     } else if (entry.type === "agent" && entry.text.trim() && current) {
       if (previous !== null) out.delete(previous);
-      out.set(i, current);
+      // Recomputing over an unchanged prefix yields the same value: keep the old
+      // object so rows that hold it skip re-rendering (`useStreamDerived`).
+      const old = reuse?.get(i);
+      const same = old && old.turn === current.turn && old.prompt === current.prompt && old.steered === current.steered;
+      out.set(i, same ? old : current);
       previous = i;
     }
   });
