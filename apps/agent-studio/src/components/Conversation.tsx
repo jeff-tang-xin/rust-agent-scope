@@ -1679,9 +1679,9 @@ export default function Conversation({
             <div className="bubble">{e.text}</div>
           ) : (
             <div className="bubble md">
-              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
-                {e.text}
-              </Markdown>
+              {/* 用户消息发出后不可变：memo 掉避免流式期间每帧重解析 remarkGfm
+                  （与助手消息同策略；plugins/components 完全一致，渲染语义不变）。 */}
+              <MemoMarkdown text={e.text} />
             </div>
           )}
         </div>
