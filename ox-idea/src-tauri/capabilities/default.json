@@ -7,8 +7,7 @@
     "project-*",
     "settings-*",
     "comparison-*",
-    "deployment-*",
-    "floating-ball"
+    "deployment-*"
   ],
   "permissions": [
     "core:default",

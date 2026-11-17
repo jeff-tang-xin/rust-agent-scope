@@ -125,7 +125,6 @@ export function activateFeatures(): () => void {
 export { SettingsWindow } from "./settings";
 export { ComparisonWindow } from "./vcs";
 export { DeploymentWindow } from "./deployment";
-export { default as FloatingBallApp } from "./floating-ball/FloatingBallApp";
 
 /**
  * A comparison window of project window `parent`: the changed files between two revisions and

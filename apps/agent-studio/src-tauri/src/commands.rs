@@ -12,9 +12,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-// 悬浮球命令（ball.rs）：generate_handler 按名引用函数本体。
-use crate::ball::{ball_get_disabled, ball_hide, ball_menu_resize, ball_set_disabled, ball_show_main};
-
 use agentscope_core::message::{ContentBlock, Role, Source};
 use agentscope_core::{Msg, RuntimeContext};
 use serde::{Deserialize, Serialize};
@@ -2002,16 +1999,6 @@ fn notify_if_background(
 ) {
     use tauri::Manager;
     use tauri_plugin_notification::NotificationExt;
-    // 悬浮球徽标：完成/等授权总是全局广播（球上显示提醒，点击回主窗处理）；
-    // 系统通知仍只在主窗非聚焦时发（聚焦时用户就在看，不打扰）。
-    let attention = match kind {
-        agentscope_core::event::AgentEventKind::AgentEnd { .. } => Some("ready"),
-        agentscope_core::event::AgentEventKind::RequireUserConfirm { .. } => Some("needs_input"),
-        _ => None,
-    };
-    if let Some(attention) = attention {
-        let _ = app.emit("agent-attention", serde_json::json!({ "kind": attention }));
-    }
     let focused = app
         .get_webview_window("main")
         .and_then(|w| w.is_focused().ok())
@@ -2964,11 +2951,6 @@ pub fn run() {
                 browser_session: Arc::new(crate::browser_tool::BrowserSession::new()),
                 test_runs: Arc::new(Mutex::new(HashMap::new())),
             });
-            // 桌面悬浮球：未停用则启动即显示（可拖拽小机器人，见 ball.rs）。
-            // config 已 move 进 AppState，从 state 读开关。
-            if !app.state::<AppState>().snapshot().floating_ball_disabled {
-                crate::ball::spawn_floating_ball(app.app_handle());
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3060,11 +3042,6 @@ pub fn run() {
             test_build_bug_report,
             list_skills,
             read_skill,
-            ball_menu_resize,
-            ball_show_main,
-            ball_hide,
-            ball_get_disabled,
-            ball_set_disabled,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
