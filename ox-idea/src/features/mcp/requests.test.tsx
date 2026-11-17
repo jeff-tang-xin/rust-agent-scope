@@ -8,6 +8,7 @@ vi.mock("@/platform/ipc", async (original) => ({
 }));
 vi.mock("@/workbench/contributions", () => ({ editorService: () => ({ openFile: mocks.open }) }));
 import { McpConfirmHost } from "./ConfirmDialog";
+import { registerAction } from "@/platform/actions";
 import { answerConfirm, denyAll, dropConfirm, handleMcpRequest, useMcpConfirms } from "./requests";
 
 const confirm = {
@@ -74,5 +75,50 @@ describe("MCP confirmations", () => {
     mocks.open.mockRejectedValueOnce(new Error("cannot open"));
     await handleMcpRequest(8, { type: "openFile", path: "/project/b.ts", line: null, column: null });
     expect(mocks.respond).toHaveBeenCalledWith(8, false, "Error: cannot open");
+  });
+});
+
+describe("MCP action dispatch", () => {
+  const disposers: Array<() => void> = [];
+  const ran: unknown[] = [];
+  beforeEach(() => {
+    ran.length = 0;
+    disposers.push(
+      registerAction({ id: "test.agentAction", title: "Agent Action", run: (c) => void ran.push(c.arg) }),
+      registerAction({ id: "test.alphaOne", title: "Alpha One", run: () => {} }),
+      registerAction({ id: "test.alphaTwo", title: "Alpha Two", run: () => {} }),
+      registerAction({ id: "test.gated", title: "Gated", when: "editorFocus", run: () => void ran.push("gated") }),
+    );
+  });
+  afterEach(() => {
+    disposers.splice(0).forEach((d) => d());
+  });
+  it("runs a registered action with a parsed JSON argument and answers allow", async () => {
+    await handleMcpRequest(10, { type: "executeAction", actionId: "test.agentAction", arg: '{"line":42}' });
+    expect(ran).toEqual([{ line: 42 }]);
+    expect(mocks.respond).toHaveBeenCalledWith(10, true, null);
+  });
+  it("runs without an argument when arg is null", async () => {
+    await handleMcpRequest(11, { type: "executeAction", actionId: "test.agentAction", arg: null });
+    expect(ran).toEqual([undefined]);
+    expect(mocks.respond).toHaveBeenCalledWith(11, true, null);
+  });
+  it("answers unknown ids with near-match suggestions", async () => {
+    await handleMcpRequest(12, { type: "executeAction", actionId: "test.alpha", arg: null });
+    expect(mocks.respond).toHaveBeenCalledWith(
+      12,
+      false,
+      "Error: Unknown action: test.alpha; near matches: test.alphaOne, test.alphaTwo",
+    );
+  });
+  it("answers disabled actions (when clause) as errors without running them", async () => {
+    await handleMcpRequest(13, { type: "executeAction", actionId: "test.gated", arg: null });
+    expect(ran).toEqual([]);
+    expect(mocks.respond).toHaveBeenCalledWith(13, false, "Error: Action unavailable: test.gated");
+  });
+  it("rejects malformed JSON arguments", async () => {
+    await handleMcpRequest(14, { type: "executeAction", actionId: "test.agentAction", arg: "{oops" });
+    expect(ran).toEqual([]);
+    expect(mocks.respond).toHaveBeenCalledWith(14, false, "Error: arg must be valid JSON text");
   });
 });

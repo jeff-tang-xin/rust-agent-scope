@@ -15,6 +15,10 @@ use std::sync::Arc;
 pub enum McpUiRequest {
     Confirm { client: String, tool: String, subject: String, project: String, detail: Option<String> },
     OpenFile { path: crate::IpcPath, line: Option<u32>, column: Option<u32> },
+    /// Run a registered UI action by its stable id (the agent's `ide_action` tool).
+    /// `arg` is JSON text for actions that take an argument; the window answers
+    /// allow=true once the action ran, or an error when unknown/disabled/failed.
+    ExecuteAction { action_id: String, arg: Option<String> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

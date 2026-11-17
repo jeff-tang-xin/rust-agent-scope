@@ -9,12 +9,12 @@ use agentscope_harness::skill::{AgentSkill, SkillUtil};
 /// OXidea 使用指南（任意模式可加载：plan / code 都在 sys_prompt 引导）。
 pub const OXIDEA_USAGE_SKILL: &str = r#"---
 name: oxidea-usage
-description: OXidea IDE 操作指南，覆盖五类工作场景的具体做法与工具调用顺序——调查（搜代码/追调用链/摸结构）、编码（改代码/重构/编译验证/问题检查）、调试（跑应用/断点调试/查进程/定位循环）、Git（状态/差异/提交/分支）、浏览器验证（页面操作/截图）。开始任何编码、调试或代码调查任务前加载本 skill，按对应场景的标准步骤操作。
+description: OXidea IDE 操作指南，覆盖六类工作场景的具体做法与工具调用顺序——调查（搜代码/追调用链/摸结构）、编码（改代码/重构/编译验证/问题检查）、调试（跑应用/断点调试/查进程/定位循环）、Git（状态/差异/提交/分支）、浏览器验证（页面操作/截图）、界面操作（按 actionId 派发 IDE 动作）。开始任何编码、调试或代码调查任务前加载本 skill，按对应场景的标准步骤操作。
 ---
 
 # OXidea 使用指南
 
-本 skill 指导你在 OXidea 中完成五类工作：**调查**（搞清代码现状）、**编码**（改代码并验证）、**调试**（跑起来并定位问题）、**Git**（查看与提交）、**浏览器验证**（页面操作与截图）。每个场景给出标准步骤与工具调用顺序，按场景照做，不要凭直觉乱试。文末「环境事实」是开局即知的 IDE 内在构造，不要靠失败去试探。
+本 skill 指导你在 OXidea 中完成六类工作：**调查**（搞清代码现状）、**编码**（改代码并验证）、**调试**（跑起来并定位问题）、**Git**（查看与提交）、**浏览器验证**（页面操作与截图）、**界面操作**（按 actionId 派发 IDE 动作）。每个场景给出标准步骤与工具调用顺序，按场景照做，不要凭直觉乱试。文末「环境事实」是开局即知的 IDE 内在构造，不要靠失败去试探。
 
 ## 一、调查：搞清代码现状
 
@@ -137,6 +137,34 @@ java -cp target/classes com.example.AgentMain     # ❌ ClassNotFoundException
 - **权限分层**：只读工具免确认直接执行；写/执行类工具走用户确认（HITL）；`db_dml` 变更确认是设计不是故障。确认被拒就停下说明，不要换路径绕过。
 - **`.oxidea/` 目录域**：`screenshots/` 浏览器截图、`evicted/` 超大工具结果卸载落盘（占位里有文件地址，`read_file` 可读回）、`agent/` 记忆+黑板+specs。这些是系统数据域，不要用文件工具直接改其中的记忆/黑板文件。
 - **上下文会被压缩**：长会话历史自动压缩、超大结果卸载落盘——关键中间结论随手 `blackboard_append`，压缩后仍可读回。
+
+## 八、界面操作（action 派发）
+
+快捷键的本质是 action ID（Shift+F9 = `run.debug`）：按键组合随用户 keymap 变化，action ID 稳定。**不要模拟按键**——语义工具没覆盖的界面操作用 `ide_action(actionId)` 直接派发，走与快捷键/菜单/命令面板同一注册表，界面有可见反馈，需用户确认。
+
+- 分工：代码搜索/编辑/构建/运行/调试/git 优先用语义工具（结构化输出 + 进程簿记）；开面板、跳转、重构菜单、设置等纯界面操作才用 `ide_action`。
+- `when` 门控：action 在当前上下文不可用会报错（如编辑器没焦点时的编辑动作），不要盲目重试。
+- 个别 action 接受 `arg`（JSON 文本字符串），不确定就不传；未知 ID 的报错会带近似候选，据此自纠。
+- 高频目录（完整目录让用户开 `navigate.findAction` 面板自查）：
+
+| 意图 | actionId |
+|---|---|
+| 运行/调试当前配置 | `run.run` / `run.debug`（agent 自己起进程仍优先 execute_run_configuration / start_debug_session） |
+| 停止运行 | `run.stop` |
+| 构建项目/模块 | `build.buildProject` / `build.buildModule` |
+| 全局搜索/查找动作 | `navigate.searchEverywhere` / `navigate.findAction` |
+| 跳转文件/符号/行 | `navigate.gotoFile` / `navigate.gotoSymbol` / `navigate.gotoLine` |
+| 最近文件/后退/前进 | `navigate.recentFiles` / `navigate.back` / `navigate.forward` |
+| 声明/实现/文件结构 | `navigate.declaration` / `navigate.implementation` / `navigate.fileStructure` |
+| 下一个错误 | `navigate.nextError` |
+| 格式化/优化导入/意图动作 | `code.reformat` / `code.optimizeImports` / `code.showIntentions` |
+| 重命名/提取方法/重构菜单 | `refactor.rename` / `refactor.extractMethod` / `refactor.thisMenu` |
+| 设置/项目结构 | `file.settings` / `file.projectStructure` |
+| 项目/终端/Git/提交/服务面板 | `toolwindow.project` / `toolwindow.terminal` / `toolwindow.git` / `toolwindow.commit` / `toolwindow.services` |
+| 隐藏全部面板 | `toolwindow.hideAll` |
+| 提交/推送/分支/差异/回滚 UI | `vcs.commit` / `vcs.push` / `vcs.branches` / `vcs.showDiff` / `vcs.rollback`（agent 自己提交仍用 git_commit） |
+| 断点开关/断点列表/求值 | `debug.toggleBreakpoint` / `debug.viewBreakpoints` / `debug.evaluate` |
+| 保存/关闭标签/向右拆分 | `file.save` / `editor.closeTab` / `editor.splitRight` |
 
 ## 工具边界（为什么这样分工）
 

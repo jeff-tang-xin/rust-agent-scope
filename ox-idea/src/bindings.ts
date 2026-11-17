@@ -5946,7 +5946,13 @@ export type McpServerStatus = {
 	stdioCommand: string[],
 };
 
-export type McpUiRequest = { type: "confirm"; client: string; tool: string; subject: string; project: string; detail: string | null } | { type: "openFile"; path: IpcPath; line: number | null; column: number | null };
+export type McpUiRequest = { type: "confirm"; client: string; tool: string; subject: string; project: string; detail: string | null } | { type: "openFile"; path: IpcPath; line: number | null; column: number | null } | 
+/**
+ *  Run a registered UI action by its stable id (the agent's `ide_action` tool).
+ *  `arg` is JSON text for actions that take an argument; the window answers
+ *  allow=true once the action ran, or an error when unknown/disabled/failed.
+ */
+{ type: "executeAction"; actionId: string; arg: string | null };
 
 export type MemoryCategory = 
 /**  The backend and its WebView processes. */

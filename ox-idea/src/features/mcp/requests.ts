@@ -1,5 +1,6 @@
 /** Window requests from the built-in MCP server, answered through window-scoped IPC. */
 import { create } from "zustand";
+import { allActions, executeActionOrThrow, getAction } from "@/platform/actions";
 import { call, commands, type McpUiRequest } from "@/platform/ipc";
 import { editorService } from "@/workbench/contributions";
 
@@ -41,6 +42,34 @@ export async function handleMcpRequest(
     useMcpConfirms.setState((s) =>
       s.queue.some((c) => c.id === id) ? s : { queue: [...s.queue, { ...request, id }] },
     );
+    return;
+  }
+  if (request.type === "executeAction") {
+    try {
+      if (!getAction(request.actionId)) {
+        const near = allActions()
+          .filter((a) => !a.hidden && a.id.toLowerCase().includes(request.actionId.toLowerCase()))
+          .slice(0, 10)
+          .map((a) => a.id);
+        throw new Error(
+          `Unknown action: ${request.actionId}` +
+            (near.length ? `; near matches: ${near.join(", ")}` : "; no near matches"),
+        );
+      }
+      let arg: unknown;
+      if (request.arg != null) {
+        try {
+          arg = JSON.parse(request.arg);
+        } catch {
+          throw new Error("arg must be valid JSON text");
+        }
+      }
+      // Throws when the action's `when` clause disables it in the current context.
+      await executeActionOrThrow(request.actionId, arg);
+      await send(id, true);
+    } catch (error) {
+      await send(id, false, String(error)).catch(() => {});
+    }
     return;
   }
   try {

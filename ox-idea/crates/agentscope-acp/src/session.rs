@@ -243,6 +243,17 @@ impl AcpSessionHub {
         if !session.busy.load(std::sync::atomic::Ordering::Acquire) {
             return Err(RpcError::invalid_params("会话空闲，无需插队"));
         }
+        // 命令类 prompt 不能插队：steer 路径没有命令拦截，/compact 会被当
+        // 普通文本喂给模型（压缩从不发生，模型只回一句确认），/skill 调用
+        // 丢失加载包装。拒绝后 ide-agent 把消息退回排队队列，turn 结束走
+        // prompt 路径正确执行（与空闲时发命令的行为一致）。
+        if is_compact_command(&content)
+            || skill_invocation(&content, &session.skill_commands).is_some()
+        {
+            return Err(RpcError::invalid_params(
+                "命令不支持运行中插队，已退回排队，将在当前回合结束后执行",
+            ));
+        }
         // 插队消息加引导块：模型看到裸的用户消息时容易把它当新指令处理完
         // 就停（EndTurn），用户观感是「介入就结束」。引导它吸收反馈继续当前
         // 工作；方向变更时先简要说明调整再继续，不要只回复确认就停下。
@@ -298,41 +309,44 @@ fn is_compact_command(content: &[ContentBlock]) -> bool {
     text.trim().eq_ignore_ascii_case("/compact")
 }
 
-/// `/skill-name` 前缀的调用包装：用户从 `/` 面板选 skill 后继续输入需求，
-/// 发来的是「/name 需求」纯文本——在这里包装成明确指示（先 load_skill 加载
-/// 该 skill，再按其指引处理需求），不依赖模型对裸 `/name` 文本的遵循度。
-/// 匹配规则：已知 skill 名（skill_commands）的**前缀匹配**，最长名优先——
-/// `/name 需求`（面板选择补空格）与 `/name需求`（手动输入无空格）都成立；
-/// 未声明的 `/` 前缀文本（如路径）不受影响；只有命令没有需求时原样传。
-fn apply_skill_invocation(content: Vec<ContentBlock>, skills: &[Value]) -> Vec<ContentBlock> {
-    let Some(index) = content
-        .iter()
-        .position(|block| matches!(block, ContentBlock::Text { .. }))
-    else {
-        return content;
-    };
-    let ContentBlock::Text { text } = &content[index] else {
-        unreachable!("position 已确认是 Text 块");
-    };
-    let Some(rest) = text.trim_start().strip_prefix('/') else {
-        return content;
-    };
-    // 最长名优先：互为前缀的 skill 名（design / design-pro）取更具体的那个。
+/// 斜杠 skill 调用识别（prompt 包装与 steer 命令拦截共用）：首个 Text 块
+/// `/name 需求` 前缀匹配已知 skill 名，最长名优先（design / design-pro 取更
+/// 具体的那个）；只有命令没有需求时不算调用。返回 (skill 名, 需求)。
+fn skill_invocation<'a>(content: &[ContentBlock], skills: &'a [Value]) -> Option<(&'a str, String)> {
+    let text = content.iter().find_map(|block| match block {
+        ContentBlock::Text { text } => Some(text.as_str()),
+        _ => None,
+    })?;
+    let rest = text.trim_start().strip_prefix('/')?;
     let mut names: Vec<&str> = skills
         .iter()
         .filter_map(|c| c.get("name").and_then(Value::as_str))
         .filter(|name| !name.is_empty())
         .collect();
     names.sort_by_key(|name| std::cmp::Reverse(name.len()));
-    let Some((name, demand)) = names
+    let (name, demand) = names
         .iter()
-        .find_map(|name| rest.strip_prefix(*name).map(|tail| (*name, tail.trim())))
+        .find_map(|name| rest.strip_prefix(*name).map(|tail| (*name, tail.trim())))?;
+    if demand.is_empty() {
+        return None;
+    }
+    Some((name, demand.to_owned()))
+}
+
+/// `/skill-name` 前缀的调用包装：用户从 `/` 面板选 skill 后继续输入需求，
+/// 发来的是「/name 需求」纯文本——在这里包装成明确指示（先 load_skill 加载
+/// 该 skill，再按其指引处理需求），不依赖模型对裸 `/name` 文本的遵循度。
+/// 匹配规则见 [`skill_invocation`]；未声明的 `/` 前缀文本（如路径）不受影响。
+fn apply_skill_invocation(content: Vec<ContentBlock>, skills: &[Value]) -> Vec<ContentBlock> {
+    let Some((name, demand)) = skill_invocation(&content, skills) else {
+        return content;
+    };
+    let Some(index) = content
+        .iter()
+        .position(|block| matches!(block, ContentBlock::Text { .. }))
     else {
         return content;
     };
-    if demand.is_empty() {
-        return content;
-    }
     let wrapped = format!(
         "用户通过斜杠命令调用了 skill「{name}」。请先调用 load_skill 工具加载该 skill，然后严格按照 skill 的指引处理下面的需求。\n\n{demand}"
     );
@@ -419,6 +433,7 @@ fn ide_section_text(names: &[String], brief: Option<&str>) -> String {
          - 改代码：优先用补丁/编辑工具（理解项目结构、能检查冲突），不要用 shell 重定向整文件覆盖。\n\
          - 构建与检查：用构建与问题检查工具拿结构化结果，比解析裸命令输出更可靠。\n\
          - 编辑器上下文：用户说「这个文件」「我选中的」时，先用 get_current_file / get_all_open_file_paths 确认所指，不要猜。\n\
+         - 界面操作：语义工具没覆盖的纯界面操作（开面板/跳转/重构菜单/设置）用 ide_action 按稳定 actionId 派发（高频目录见 oxidea-usage skill），不要模拟按键。\n\
          - 每个工具的详细用途与参数见其工具定义（description），不确定就先读再调，不要猜参数。\n",
         names.join(", ")
     )
@@ -1221,6 +1236,16 @@ where
                             "completed",
                             detail.as_deref().unwrap_or(""),
                         ),
+                    )
+                    .await;
+                }
+                AgentEventKind::ContextCompactionFailed { reply_id, error } => {
+                    // 压缩失败：卡片落定 failed + 真实错误原因。此前失败静默
+                    // 降级，卡片永远停在「压缩中」，用户误以为压缩完成，而
+                    // 上下文原封未动，下一条消息立刻再次触发自动压缩。
+                    conn.notify(
+                        "session/update",
+                        protocol::compaction_tool_result(session_id, &reply_id, "failed", &error),
                     )
                     .await;
                 }
@@ -2186,6 +2211,35 @@ mod tests {
                 .store(true, std::sync::atomic::Ordering::SeqCst);
         }
         assert!(hub.steer(&params).is_ok());
+    }
+
+    #[test]
+    fn steer_rejects_command_prompts_for_queue_fallback() {
+        let hub = crate::AcpSessionHub::new(Vec::new());
+        let (agent, _model) = build_agent(vec![], false, false);
+        let (cancel_tx, _rx) = tokio::sync::watch::channel(false);
+        hub.sessions.lock().unwrap().insert(
+            "s1".to_string(),
+            Arc::new(AcpSession {
+                agent,
+                cwd: PathBuf::from("."),
+                busy: std::sync::atomic::AtomicBool::new(true),
+                cancel_tx,
+                skill_commands: vec![json!({ "name": "oxidea-usage" })],
+            }),
+        );
+        let steer = |text: &str| {
+            hub.steer(&json!({
+                "sessionId": "s1",
+                "prompt": [{ "type": "text", "text": text }],
+            }))
+        };
+        // 命令插队被拒（ide-agent 据此退回排队，turn 结束走 prompt 路径执行）。
+        assert!(steer("/compact").is_err());
+        assert!(steer("/oxidea-usage 帮我调查这个模块").is_err());
+        // 普通消息与裸 skill 名（无需求，prompt 路径也原样放行）照常插队。
+        assert!(steer("改用另一个方案").is_ok());
+        assert!(steer("/oxidea-usage").is_ok());
     }
 
     #[test]
