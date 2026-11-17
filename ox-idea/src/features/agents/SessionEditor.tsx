@@ -125,7 +125,6 @@ export function SessionEditor({ input, docked = false }: { input: EditorInput; d
 
 function TaskSession({ id, docked }: { id: string; docked: boolean }) {
   const task = useAgents((s) => s.tasks.get(id));
-  const entries = useAgents((s) => s.entries.get(id));
   const changes = useAgents((s) => s.changes.get(id));
   const project = useProject((s) => s.project);
   const head = useLocalHead(
@@ -136,7 +135,6 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
   // The subagent conversation shown, with the subagents that lead to it (empty: the task's own).
   const [path, setPath] = useState<string[]>([]);
   const view = path.at(-1) ?? null;
-  const viewEntries = useAgents((s) => s.entries.get(entriesKey(id, view)));
   // Each subagent's card, from its parent's conversation.
   const cards = useAgents(
     useShallow((s) => path.map((sub, i) => findSubagent(s.entries.get(entriesKey(id, path[i - 1] ?? null)), sub))),
@@ -195,7 +193,6 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
           <Stream
             key={view ?? ""}
             task={task}
-            entries={viewEntries ?? null}
             subagent={view ? (cards.at(-1) ?? null) : null}
             onOpenSubagent={openSubagent}
             finding={finding && shown}
@@ -209,7 +206,7 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
           </div>
         ) : (
           <>
-            <QuestionCard task={task} entries={entries ?? null} />
+            <QuestionCard task={task} />
             <SessionComposer task={task} head={head} onOpenSubagent={openSubagent} />
           </>
         )}
@@ -533,7 +530,6 @@ function useOffscreenRows(ref: RefObject<HTMLElement | null>, visible: boolean, 
 
 interface StreamProps {
   task: AgentTask;
-  entries: AgentEntry[] | null;
   /** The card of the subagent whose conversation this is; `null`: the task's own. */
   subagent: SubagentEntry | null;
   onOpenSubagent: (id: string) => void;
@@ -710,10 +706,13 @@ function useTaskDerived<T>(
   return value;
 }
 
-function Stream({ task, entries, subagent, onOpenSubagent, finding, findFocus, onCloseFind }: StreamProps) {
+function Stream({ task, subagent, onOpenSubagent, finding, findFocus, onCloseFind }: StreamProps) {
   const ref = useRef<HTMLDivElement>(null);
   useSelectionBoundary(ref);
   const key = entriesKey(task.id, subagent?.id ?? null);
+  // Subscribed here, not by the parent: a streaming frame re-renders only this
+  // subtree, leaving the header, question card and composer around it untouched.
+  const entries = useAgents((s) => s.entries.get(key)) ?? null;
   const positions = useAgents.getState().scrollPositions;
   const position = useRef(positions.get(key) ?? { top: 0, stick: true });
   const restored = useRef(false);
@@ -2120,10 +2119,18 @@ const isRecommended = (label: string) => label.endsWith(RECOMMENDED_SUFFIX);
 const plainLabel = (label: string) => (isRecommended(label) ? label.slice(0, -RECOMMENDED_SUFFIX.length) : label);
 
 /** An open `AskUserQuestion` request, as a card above the composer that answers all its questions at once. */
-function QuestionCard({ task, entries }: { task: AgentTask; entries: AgentEntry[] | null }) {
-  const entry = entries?.find(
-    (candidate): candidate is PermissionEntry =>
-      candidate.type === "permission" && !candidate.chosen && !!candidate.questions?.length,
+function QuestionCard({ task }: { task: AgentTask }) {
+  // Subscribe + compare by reference (the Meters/SessionComposer pattern): streaming
+  // frames don't re-render the card; the form mounts only while a question waits.
+  const entry = useTaskDerived<PermissionEntry | null>(
+    task.id,
+    null,
+    (entries) =>
+      entries.find(
+        (candidate): candidate is PermissionEntry =>
+          candidate.type === "permission" && !candidate.chosen && !!candidate.questions?.length,
+      ) ?? null,
+    (a, b) => a === b,
   );
   return entry?.questions ? (
     <QuestionForm key={entry.id} task={task} entry={entry} questions={entry.questions} />
