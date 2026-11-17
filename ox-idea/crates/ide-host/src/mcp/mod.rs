@@ -196,4 +196,22 @@ mod tests {
         assert!(!super::allowed(&tool, false));
         assert!(super::allowed(&tool, true));
     }
+
+    /// 防漂移契约：内置 skill（oxidea-usage）必须覆盖全部 IDE 语义工具名。
+    /// 新增工具不写进 skill，本测试即红——「智能体深刻了解 IDE」是可维护的
+    /// 不变式，不是一次性文档。确属无需引导的工具须显式列名豁免并说明理由。
+    #[test]
+    fn oxidea_usage_skill_covers_all_builtin_tools() {
+        const EXEMPT: &[&str] = &[];
+        let skill = agentscope_acp::oxidea_skill::OXIDEA_USAGE_SKILL;
+        let missing: Vec<String> = super::tools()
+            .into_iter()
+            .map(|t| t.metadata.name)
+            .filter(|name| !EXEMPT.contains(&name.as_str()) && !skill.contains(name.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "oxidea-usage skill 未覆盖工具: {missing:?}——补进 agentscope-acp/src/oxidea_skill.rs 或显式豁免"
+        );
+    }
 }
