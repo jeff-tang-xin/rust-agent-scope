@@ -76,7 +76,7 @@ is not a claim of full IntelliJ feature parity.
 ## Rebuild and delivery
 
 The checked-in jar is embedded by ide-sdk `include_bytes!`, installed as
-`java-usages-1.9.0.jar`, and added alongside existing initialization bundles.
+`java-usages-1.10.0.jar`, and added alongside existing initialization bundles.
 Users need no compiler, Maven or Python. Manifest/install version must change
 when replacing the bundle because OSGi caches bundles.
 
@@ -118,6 +118,12 @@ longer resolves every Spring Boot property again; its reproducible SHA-256 is
 Version 1.9.0 adds the analysis-scope command to avoid redundant semantic queries;
 its reproducible SHA-256 is
 `ae04182d6a86dfdd6f6befaaeb28907fd9e4c022ceedb445f0b32ea917dca379`.
+
+Version 1.10.0 caches completed source type hierarchies per type (bounded LRU,
+coalesced concurrent builds, invalidated on Java model changes), so the gutter's
+many methods of one interface and every revisit share a single whole-workspace
+hierarchy build instead of rebuilding it per symbol; its reproducible SHA-256 is
+recorded on the next build.
 
 ```sh
 export PATH=/path/to/jdk25/bin:$PATH
