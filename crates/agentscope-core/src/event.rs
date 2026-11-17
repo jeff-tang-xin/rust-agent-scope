@@ -201,11 +201,19 @@ pub enum AgentEventKind {
     /// 可能耗时数秒——前端据此显示「压缩中」状态，避免误判为卡死）。
     ContextCompactionStart { reply_id: String },
     /// 上下文压缩结束（写回成功后触发；`detail` 描述压缩结果，
-    /// 如「57 条消息合并为 1 条摘要」。失败降级时不发 End）。
+    /// 如「57 条消息合并为 1 条摘要」）。
     ContextCompactionEnd {
         reply_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
+    },
+    /// 上下文压缩失败（摘要模型调用出错等；本轮降级为不压缩，不阻断调用）。
+    /// 前端据此把「压缩中」卡片落定为失败态——此前失败静默降级、不发 End，
+    /// 卡片永远停在 in_progress，用户误以为压缩完成，而上下文原封未动，
+    /// 下一条消息立刻再次触发压缩。
+    ContextCompactionFailed {
+        reply_id: String,
+        error: String,
     },
 
     // ---------- 控制流 ----------
@@ -294,6 +302,7 @@ pub enum AgentEventType {
     AllToolsDenied,
     ContextCompactionStart,
     ContextCompactionEnd,
+    ContextCompactionFailed,
     Custom,
 }
 
@@ -345,6 +354,9 @@ impl AgentEvent {
                 AgentEventType::ContextCompactionStart
             }
             AgentEventKind::ContextCompactionEnd { .. } => AgentEventType::ContextCompactionEnd,
+            AgentEventKind::ContextCompactionFailed { .. } => {
+                AgentEventType::ContextCompactionFailed
+            }
             AgentEventKind::ExceedMaxIters { .. } => AgentEventType::ExceedMaxIters,
             AgentEventKind::RequireUserConfirm { .. } => AgentEventType::RequireUserConfirm,
             AgentEventKind::RequireExternalExecution { .. } => {

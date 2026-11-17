@@ -1226,6 +1226,13 @@ impl ReActAgent {
             // 在 reasoning 之前执行；失败即终止调用（钩子自行决定是否降级）。
             if let Some(hook) = &self.iteration_hook {
                 hook(&ctx.runtime, &ctx.state, false, ctx.events.0.as_ref()).await?;
+                // 钩子可能改写上下文（压缩提交）：立即再落盘一次。上面的步边界
+                // persist 在钩子之前——压缩结果原本要等下一步边界/回合末才持久化，
+                // 期间进程重启/被杀会丢掉压缩，下次重载满上下文又触发压缩
+                // （「自动压缩刚完成，输入几个字又压缩」的成因之一）。
+                if self.history_mode == SessionHistoryMode::Legacy {
+                    let _ = self.persist_state(&ctx.snapshot());
+                }
             }
             let assistant = match self.reasoning(ctx, streaming).await {
                 Ok(msg) => msg,
@@ -1240,6 +1247,10 @@ impl ReActAgent {
                     }
                     if let Some(hook) = &self.iteration_hook {
                         hook(&ctx.runtime, &ctx.state, true, ctx.events.0.as_ref()).await?;
+                        // 强制压缩结果同样立即落盘（防重试 reasoning 期间重启丢失）。
+                        if self.history_mode == SessionHistoryMode::Legacy {
+                            let _ = self.persist_state(&ctx.snapshot());
+                        }
                     }
                     self.reasoning(ctx, streaming).await?
                 }
@@ -3660,6 +3671,67 @@ mod tests {
         let reply = agent.call(Msg::user("user", "1加2等于几？")).await.unwrap();
         assert_eq!(reply.text(), "1 加 2 等于 3");
         assert_eq!(*calls.lock().unwrap(), vec![false, false]);
+    }
+
+    #[tokio::test]
+    async fn hook_context_change_is_persisted_before_reasoning() {
+        // 钩子（压缩）改写上下文后必须立即落盘：步边界 persist 在钩子之前，
+        // 若压缩结果只活在内存里，reasoning 期间进程重启会丢掉压缩，下次
+        // 重载满上下文又触发压缩（「自动压缩刚完成，输入几个字又压缩」）。
+        struct StorePeekingModel {
+            store: Arc<dyn AgentStateStore>,
+            seen_len: Arc<Mutex<Option<usize>>>,
+        }
+        #[async_trait::async_trait]
+        impl Model for StorePeekingModel {
+            async fn call(&self, _request: ChatRequest) -> Result<crate::model::ChatResponse> {
+                let loaded = self
+                    .store
+                    .get::<AgentState>(None, "s-hook", LEGACY_STATE_KEY)
+                    .unwrap();
+                *self.seen_len.lock().unwrap() = loaded.map(|s| s.context.len());
+                Ok(crate::model::ChatResponse::from_text("完成"))
+            }
+        }
+        let store: Arc<dyn AgentStateStore> =
+            Arc::new(crate::state::InMemoryAgentStateStore::new());
+        let mut seeded = AgentState::new();
+        seeded.session_id = "s-hook".to_string();
+        seeded.context = (0..6).map(|i| Msg::user("user", &format!("m{i}"))).collect();
+        store
+            .save::<AgentState>(None, "s-hook", LEGACY_STATE_KEY, &seeded)
+            .unwrap();
+        let seen = Arc::new(Mutex::new(None));
+        let agent = ReActAgent::builder()
+            .name("assistant")
+            .model(Arc::new(StorePeekingModel {
+                store: Arc::clone(&store),
+                seen_len: Arc::clone(&seen),
+            }))
+            .memory(Arc::new(InMemoryMemory::new()))
+            .state_store(Arc::clone(&store))
+            .iteration_hook(Arc::new(|_rc, state, _forced, _sink| {
+                // 模拟压缩提交：只保留最后一条。
+                let mut guard = state.lock().unwrap();
+                let keep = guard.context.last().cloned();
+                guard.context.clear();
+                if let Some(msg) = keep {
+                    guard.context.push(msg);
+                }
+                Box::pin(async { Ok(()) })
+            }))
+            .build()
+            .unwrap();
+        let reply = agent
+            .call_with_context(
+                RuntimeContext::new().with_session_id("s-hook"),
+                Msg::user("user", "你好"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply.text(), "完成");
+        // reasoning 时持久层里已是压缩后的 1 条（而非钩子前的 7 条）。
+        assert_eq!(*seen.lock().unwrap(), Some(1));
     }
 
     #[tokio::test]

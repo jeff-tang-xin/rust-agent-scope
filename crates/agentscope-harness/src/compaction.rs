@@ -1153,8 +1153,15 @@ fn filter_summary_messages(messages: &[Msg]) -> Vec<Msg> {
 /// [`agentscope_core::agent::is_context_overflow_error`]）时用最激进配置
 /// （trigger=1/keep=1/keepTokens=0，对齐 Java `overflowRecovery`）。
 ///
-/// 返回压缩说明（如「57 条消息合并为 1 条摘要」）：`Some` = 本次发生了摘要
-/// 压缩（手动 `/compact` 入口据此给前端回执）；`None` = 未触发或降级。
+/// 返回压缩说明（如「57 条消息合并为 1 条摘要」）：`Ok(Some)` = 本次发生了
+/// 摘要压缩（手动 `/compact` 入口据此给前端回执）；`Ok(None)` = 未触发 /
+/// 无可压缩内容；`Err` = 压缩失败（如摘要模型调用出错）。
+///
+/// **失败必须向上传播**：此前错误被静默吞成 `None`，手动 `/compact` 把
+/// `None` 渲染成绿色「完成」卡片——摘要模型失败时用户以为压缩成功，实际
+/// 上下文原封未动，下一条消息立刻再次触发自动压缩（表现为「刚压缩完，
+/// 输入几个字又压缩」）。迭代钩子路径自行降级（不阻断调用），手动入口
+/// 据此把真实错误报给前端。
 pub(crate) async fn compact_in_state(
     rc: &RuntimeContext,
     compactor: &ConversationCompactor,
@@ -1163,14 +1170,14 @@ pub(crate) async fn compact_in_state(
     window: usize,
     forced: bool,
     sink: Option<&agentscope_core::agent::EventSink>,
-) -> Option<String> {
+) -> Result<Option<String>, agentscope_core::Error> {
     let snapshot: Vec<Msg> = state
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .context
         .clone();
     if snapshot.is_empty() {
-        return None;
+        return Ok(None);
     }
     let (prefix, conversation): (Vec<Msg>, Vec<Msg>) = snapshot
         .iter()
@@ -1207,13 +1214,11 @@ pub(crate) async fn compact_in_state(
                 next.extend(compacted);
                 guard.context = next;
             }
-            Some(format!("{merged} 条消息合并为 1 条摘要"))
+            Ok(Some(format!("{merged} 条消息合并为 1 条摘要")))
         }
-        _ => {
-            // 未触发 / 摘要模型失败等：降级为本次不压缩（对齐 Java
-            // prepareCandidate 的 onErrorResume → Optional.empty）。
-            None
-        }
+        Ok(None) => Ok(None),
+        // 摘要模型失败等：向上传播（手动入口报真实错误；钩子路径自行降级）。
+        Err(error) => Err(error),
     }
 }
 
@@ -1870,7 +1875,9 @@ mod tests {
         };
         let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
         let rc = RuntimeContext::new();
-        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
+        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None)
+            .await
+            .unwrap();
         let guard = state.lock().unwrap();
         assert_eq!(guard.context.len(), 2);
         assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
@@ -1893,7 +1900,9 @@ mod tests {
         };
         let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
         let rc = RuntimeContext::new();
-        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None).await;
+        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None)
+            .await
+            .unwrap();
         let guard = state.lock().unwrap();
         assert_eq!(guard.context.len(), 2);
         assert_eq!(guard.context[0].name, COMPACTION_SUMMARY_MSG_NAME);
@@ -1913,9 +1922,110 @@ mod tests {
         };
         let state = state_with(vec![user_msg("a"), user_msg("b")]);
         let rc = RuntimeContext::new();
-        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
+        let detail = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None)
+            .await
+            .unwrap();
         assert_eq!(state.lock().unwrap().context.len(), 2);
         assert!(model.requests().is_empty());
         assert!(detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn chained_manual_compaction_feeds_old_summary_and_new_material() {
+        // 用户路径：/compact → 介入消息（+回复）→ 再次 /compact。第二次摘要
+        // 输入必须同时含旧摘要与新材料（链式累积）——否则第二次压缩蒸馏的
+        // 是空上下文，模型只能吐出占位符（用户实测「就 3 个字符」的怀疑点）。
+        let model = MockModel::new(vec![
+            ChatResponse::from_text("## SESSION INTENT\nSecond generation."),
+            ChatResponse::from_text("## SESSION INTENT\nFirst generation."),
+        ]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig { flush_before_compact: false, ..Default::default() };
+        let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
+        let rc = RuntimeContext::new();
+        // 第一次手动压缩（forced）。
+        let first = compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None)
+            .await
+            .unwrap();
+        assert!(first.is_some());
+        // 介入消息 + 助手回复（压缩后的新回合）。
+        {
+            let mut guard = state.lock().unwrap();
+            guard.context.push(user_msg("介入：改用方案B"));
+            guard.context.push(Msg::new(
+                Role::Assistant,
+                "assistant",
+                vec![ContentBlock::Text { text: "好的，改用方案B。".into() }],
+            ));
+        }
+        // 第二次手动压缩。
+        let second = compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None)
+            .await
+            .unwrap();
+        assert!(second.is_some());
+        let requests = model.requests();
+        assert_eq!(requests.len(), 2, "两次手动压缩应各调一次摘要模型: {requests:?}");
+        let second_prompt = requests[1].messages[0].text();
+        assert!(
+            second_prompt.contains("First generation."),
+            "第二次摘要输入必须含旧摘要（链式累积）: {second_prompt}"
+        );
+        assert!(
+            second_prompt.contains("介入：改用方案B"),
+            "第二次摘要输入必须含介入消息: {second_prompt}"
+        );
+        let guard = state.lock().unwrap();
+        assert_eq!(guard.context.len(), 2);
+        assert!(guard.context[0].text().contains("Second generation."));
+        assert_eq!(guard.context[1].text(), "好的，改用方案B。");
+    }
+
+    #[tokio::test]
+    async fn compact_in_state_propagates_summary_model_error() {
+        // 摘要模型失败必须报 Err，不能吞成 Ok(None)——否则手动 /compact 把
+        // 失败渲染成绿色「完成」卡片，上下文原封未动，下一条消息立刻再次
+        // 触发自动压缩（用户实测「刚压缩完，输入 3 个字又压缩」的根因）。
+        let model = MockModel::new(vec![]); // 无响应 → call 报错
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig {
+            trigger_messages: 4,
+            keep_tokens: Some(15), // 尾部只装 1 条，cutoff > 0 才会调摘要模型
+            flush_before_compact: false,
+            ..Default::default()
+        };
+        let state = state_with((0..6).map(|i| user_msg(&format!("message {i}"))).collect());
+        let rc = RuntimeContext::new();
+        let result =
+            compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None).await;
+        assert!(result.is_err(), "摘要模型失败必须向上传播: {result:?}");
+        // 失败不改动上下文（保持原样，等待下次重试或手动处理）。
+        assert_eq!(state.lock().unwrap().context.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn successful_manual_compaction_does_not_retrigger_on_small_prompt() {
+        // 压缩成功后上下文只剩 摘要 + 尾部 1 条；随后一条极短用户消息
+        // （3 个字符）绝不应再次触发自动压缩——触发阈值是 200 条消息或
+        // ~160k token，压缩后的上下文离阈值差几个数量级。
+        let model = MockModel::new(vec![ChatResponse::from_text(
+            "## SESSION INTENT\nCompacted goal.",
+        )]);
+        let compactor = ConversationCompactor::new(model.clone(), flush_manager(model.clone()));
+        let config = CompactionConfig { flush_before_compact: false, ..Default::default() };
+        let state = state_with((0..60).map(|i| user_msg(&format!("message {i}"))).collect());
+        let rc = RuntimeContext::new();
+        let first = compact_in_state(&rc, &compactor, &config, &state, 100_000, true, None)
+            .await
+            .unwrap();
+        assert!(first.is_some());
+        assert_eq!(state.lock().unwrap().context.len(), 2);
+        // 用户输入 3 个字符的新消息。
+        state.lock().unwrap().context.push(user_msg("继续吧"));
+        let again = compact_in_state(&rc, &compactor, &config, &state, 100_000, false, None)
+            .await
+            .unwrap();
+        assert!(again.is_none(), "压缩成功后短消息不应再触发压缩: {again:?}");
+        assert_eq!(model.requests().len(), 1, "只应有一次摘要调用");
+        assert_eq!(state.lock().unwrap().context.len(), 3);
     }
 }

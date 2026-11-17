@@ -510,7 +510,8 @@ impl HarnessAgent {
             true,
             None,
         )
-        .await;
+        .await
+        .map_err(|error| error.to_string())?;
         if detail.is_some() {
             let compacted = shared.lock().unwrap_or_else(|error| error.into_inner());
             self.delegate
@@ -985,8 +986,10 @@ impl HarnessAgentBuilder {
                         let compactor = Arc::clone(&compactor);
                         let config = config.clone();
                         Box::pin(async move {
-                            // 返回值（压缩说明）只对手动 /compact 有意义，钩子路径丢弃。
-                            let _ = compact_in_state(
+                            // 压缩说明只对手动 /compact 有意义；失败降级为不压缩
+                            // （不阻断调用），但发 Failed 事件让前端卡片落定失败态，
+                            // 不再永远停在「压缩中」伪装成功。
+                            if let Err(error) = compact_in_state(
                                 rc,
                                 &compactor,
                                 &config,
@@ -995,7 +998,19 @@ impl HarnessAgentBuilder {
                                 forced,
                                 sink,
                             )
-                            .await;
+                            .await
+                            {
+                                if let Some(sink) = sink {
+                                    let _ = sink
+                                        .send(agentscope_core::event::AgentEvent::new(
+                                            agentscope_core::event::AgentEventKind::ContextCompactionFailed {
+                                                reply_id: rc.reply_id().to_string(),
+                                                error: error.to_string(),
+                                            },
+                                        ))
+                                        .await;
+                                }
+                            }
                             Ok(())
                         })
                     })
@@ -1331,6 +1346,55 @@ mod tests {
             crate::memory::COMPACTION_SUMMARY_MSG_NAME
         );
         assert_eq!(compacted.context[1].text(), "message 5");
+        agent.close();
+        std::fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[tokio::test]
+    async fn auto_compaction_failure_emits_failed_event() {
+        // 自动压缩的摘要模型失败：必须发 ContextCompactionFailed 事件
+        // （前端卡片落定失败态），不再静默降级让卡片永远停在「压缩中」、
+        // 上下文原封未动、下一条消息又触发压缩。
+        let workspace = temp_dir("compact-fail-event");
+        let agent = HarnessAgentBuilder::new()
+            .model(Arc::new(MockModel { responses: Mutex::new(vec![]) }))
+            .workspace(&workspace)
+            .compaction(CompactionConfig {
+                trigger_messages: 4,
+                keep_tokens: Some(15), // 尾部只装 1 条，cutoff > 0 才会调摘要模型
+                flush_before_compact: false,
+                ..Default::default()
+            })
+            .build()
+            .unwrap();
+        let mut state = agent.delegate.agent_state_for(None, "s1").unwrap();
+        state.context = (0..6)
+            .map(|i| Msg::user("user", &format!("message {i}")))
+            .collect();
+        agent
+            .delegate
+            .save_agent_state_for(None, "s1", &state)
+            .unwrap();
+        let mut rx = agent
+            .stream_events(
+                RuntimeContext::new().with_session_id("s1"),
+                Msg::user("user", "继续"),
+            )
+            .await
+            .unwrap();
+        let mut failed = None;
+        while let Some(event) = rx.recv().await {
+            if let agentscope_core::event::AgentEventKind::ContextCompactionFailed {
+                error, ..
+            } = &event.kind
+            {
+                failed = Some(error.clone());
+            }
+        }
+        assert!(
+            failed.is_some(),
+            "摘要模型失败必须发 ContextCompactionFailed 事件"
+        );
         agent.close();
         std::fs::remove_dir_all(&workspace).ok();
     }
