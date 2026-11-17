@@ -1530,8 +1530,8 @@ async fn turn_chain(
         {
             Ok((rx, task)) => {
                 session.track(task).await;
-                // 悬浮球状态灯：正常 turn 启动也广播（此前只有 steer 场景发
-                // turn-started，球永远进不了工作态）。
+                // turn-started：左栏运行状态标记与会话页 busy 态都依赖它；
+                // 正常 turn 启动也广播（此前只有 steer 场景发，前端进不了工作态）。
                 let _ = app.emit(
                     "turn-started",
                     TurnStarted {
