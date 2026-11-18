@@ -19,6 +19,12 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# 同一 tag 的新推送取消还在跑的旧运行，避免旧（含 bug）运行与新运行同时
+# 往同一个 Release 上传产物造成混乱。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-tauri:
     permissions:
