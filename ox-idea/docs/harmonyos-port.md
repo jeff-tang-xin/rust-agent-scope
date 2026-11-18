@@ -51,8 +51,8 @@ webview 绑定（WebView2 / WKWebView / WebKitGTK / Android WebView）里没有�
 | 阶段 | 目标 | 完成标准 |
 |---|---|---|
 | **P0 前提验证（gate）** | 落实第五节三项待验证 | 三项均有华为文档/实测结论；若存在 Linux 兼容层则改走最优路径 |
-| **P1 工具链就绪** | OHOS SDK/NDK + DevEco + Rust OHOS target + 鸿蒙 PC JDK | 能编一个 OHOS hello-world Rust `.so` 并在鸿蒙 PC 加载 |
-| **P2 Rust 后端编译** | 纯 Rust crate 编 OHOS | `ide-core` 等无 C 依赖 crate 过 `--target aarch64-unknown-linux-ohos`；C 依赖（tree-sitter）配 OHOS 交叉编译器 |
+| **P1 工具链就绪** 🟡 大部分就绪 | OHOS SDK/NDK + DevEco + Rust OHOS target + 鸿蒙 PC JDK | DevEco 26 + NDK API 26 + Rust target 已备（见六）；剩鸿蒙 PC JDK |
+| **P2 Rust 后端编译** ✅ check 已验证 | 纯 Rust + C 依赖 crate 编 OHOS | ide-core / ide-run（含 37 个 tree-sitter）check 通过；剩 link 成 `.so` |
 | **P3 壳 + 桥** | ArkTS 壳 + ArkWeb + NAPI + invoke shim | 前端在 ArkWeb 渲染，一个 invoke 调用经 NAPI 往返 Rust 成功 |
 | **P4 语言服务** | jdtls/JDK 集成 + 进程/文件权限适配 | 鸿蒙 PC 上 spawn jdtls 并完成一次 Java 跳转 |
 | **P5 打包真机** | HAP 打包 + 真机验证 | 鸿蒙 PC 真机安装运行，核心编辑/导航/运行可用 |
@@ -65,11 +65,29 @@ webview 绑定（WebView2 / WKWebView / WebKitGTK / Android WebView）里没有�
 
 > 搜索引擎反爬（必应地域重定向 / DuckDuck 验证码 / 百度安全验证），上述需直接查华为开发者文档或真机实测。
 
-## 六、环境限制
+## 六、工具链与已验证里程碑（2026-11-18 实测）
 
-- 本机**无 OHOS SDK/NDK、无 DevEco/ArkTS 工具链**，无法本地构建鸿蒙包；P1 需先备齐。
-- 本机 rustc 1.99.1；OHOS 为 tier-3 target，std 可能需要 nightly / `-Z build-std`（P1 确认）。
-- 现有 Linux 交叉编译卡在 tree-sitter C 依赖（需 `x86_64-linux-gnu-gcc`）；OHOS 同理需对应交叉工具链。
+**本机已具备完整 OHOS 工具链**（DevEco Studio 自带，P1 基本就绪）：
+- DevEco Studio **26.0.0.821**（`C:\Program Files\Huawei\DevEco Studio`），自带 jbr（JDK 21+）、hvigor、ohpm、node、模拟器。
+- OHOS NDK **API 26**（`sdk\default\openharmony\native`）：OHOS clang **15.0.4** + 各架构 wrapper（aarch64/armv7/x86_64/loongarch64-unknown-linux-ohos）+ lld + llvm-ar + sysroot。
+- Rust OHOS target `aarch64-unknown-linux-ohos` **已装**（rustup 有预编译 std，**无需 nightly/build-std**；下载走 7897 代理）。
+
+**P2 概念验证已通过**：
+- `cargo check -p ide-core --target aarch64-unknown-linux-ohos` → Finished 9.6s，零错误。
+- `cargo check -p ide-run --target aarch64-unknown-linux-ohos`（含 37 个 tree-sitter C 依赖 + portable-pty）→ Finished 45.6s，零错误。
+
+**可用的 NDK 交叉编译配置**（路径含空格，用 8.3 短路径规避 cc-rs 的 CFLAGS 空格解析）：
+```
+CC_aarch64_unknown_linux_ohos=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\native\llvm\bin\clang.exe
+CFLAGS_aarch64_unknown_linux_ohos=--target=aarch64-unknown-linux-ohos --sysroot=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\native\sysroot
+AR_aarch64_unknown_linux_ohos=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\native\llvm\bin\llvm-ar.exe
+```
+注：`aarch64-unknown-linux-ohos-clang` wrapper 是 bash 脚本，Windows cmd 不能直接跑，须用 `clang.exe` + 显式 `--target`/`--sysroot`。
+
+**仍待解决**：
+- 实际 link 成 `.so`（check 不 link）需配 cargo target linker（clang.exe + `-C link-arg=--target/--sysroot`）。
+- Tauri 壳 `src-tauri` 无法编 OHOS（wry 无鸿蒙后端，预期）→ 走路径 B ArkTS 壳。
+- 鸿蒙 PC JDK（jdtls 用）+ 进程/文件权限 + 兼容层（P0 三项，需华为文档/真机）。
 
 ## 七、复用与改动面
 
