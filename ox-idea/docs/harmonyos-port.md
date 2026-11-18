@@ -1,15 +1,17 @@
 # OXidea 鸿蒙 PC 移植方案
 
-> 状态：调研中（分支 `feat/harmonyos`，从 main `5d3590f9` 切出）。
+> 状态：**P0 已落实，架构定案**（分支 `feat/harmonyos`，已推 origin）。
 > 定位：把 OXidea（Tauri 2 桌面 IDE）移植到**鸿蒙 PC**（HarmonyOS 5/6 桌面版）。
-> 原则：**先验证平台能力，再动手**；最大化复用现有前端与 Rust 后端，不造新轮子。
-> 可行性详情见知识库 `oxidea-harmonyos-port-feasibility`。
+> **定案：Linux 子系统跑完整后端 + 鸿蒙 HAP 前端壳**，而非纯原生 HAP。
+> 事实与配置详情见知识库 `oxidea-harmonyos-port-feasibility`。
 
-## 〇、结论速览
+## 〇、结论速览（架构定案）
 
-- **可行移植项目，不是「加个编译 target」**。核心障碍 = Tauri/wry 没有鸿蒙 WebView 后端。
-- 鸿蒙 PC 是桌面形态，IDE 产品形态匹配；Java 有鸿蒙生态基础（但需确认鸿蒙 PC 可用 JDK）。
-- **推荐路径 B**：鸿蒙 ArkTS 壳 + ArkWeb 装现有前端 + Rust 编 OHOS `.so` + NAPI 桥替代 Tauri IPC。
+- **最优架构 = 融合开发引擎 Linux 子系统跑完整后端（Rust + jdtls + JDK21）+ 鸿蒙 HAP 前端壳**，localhost/共享文件夹通信。
+- 为何不走纯原生 HAP：① 原生沙箱**禁止 fork 子进程**（spawn jdtls/终端/Git 行不通）② 官方仅**毕昇 JDK 17**（jdtls 需 21+，禁 `sun.*` 反射、无 AWT/Swing）。
+- **已有 Tauri 鸿蒙分支 / cj-tauri（仓颉版）**，前端壳不必从零造。
+- 本机 DevEco 工具链就绪，Rust 后端已实证可编鸿蒙 AArch64 `.so`（P2 完成，用作薄壳 native 入口）。
+- **最低成本捷径待验证**：融合开发引擎能否跑 Linux GUI 应用——若能，OXidea Linux 整包可能零移植直接跑。
 
 ## 一、已证实事实（来源：en.wikipedia.org/wiki/HarmonyOS）
 
@@ -26,44 +28,66 @@
 webview 绑定（WebView2 / WKWebView / WebKitGTK / Android WebView）里没有鸿蒙 ArkWeb。
 壳起不来，整个 Tauri 应用就起不来——这是必须做的工程，但可逾越。
 
-## 三、两条路径
+## 三、定案架构与 JDK 运行机制
 
-### 路径 A：给 wry 加鸿蒙后端（上游级）
-- 用 ArkWeb 实现 wry 的 webview trait；Tauri IPC 改走 NAPI。
-- 做成后 OXidea 基本按 Tauri 流程编鸿蒙包；工作量大，社区受益。
+### 核心问题：JDK 21/25（jdtls/IDEA 需要）怎么在鸿蒙 PC 跑？
 
-### 路径 B：ArkTS 壳 + Rust native 库（应用级，推荐）
-```
-鸿蒙 ArkTS 壳应用 (HAP)
-  └─ ArkWeb 组件 ── 加载现有前端 dist/（HTML/JS 基本不动）
-       └─ window.__TAURI__.invoke ── shim ──> NAPI 桥
-                                              └─ Rust 后端 .so（aarch64-unknown-linux-ohos）
-                                                   ├─ ide-core / ide-run / ide-lsp / ide-host …
-                                                   └─ spawn jdtls（需鸿蒙 PC JDK）
-```
-1. 前端塞进 ArkWeb；
-2. Rust 后端编 OHOS target 成 `.so`；
-3. NAPI 搭 ArkTS↔Rust 桥，替代 Tauri IPC；
-4. 前端给 `window.__TAURI__.invoke` 写 shim 映射 NAPI——**前端业务代码大部分复用**。
+**关键概念区分**：「鸿蒙官方支持毕昇 JDK 17」指的是**原生应用层认证的 JDK**，不是通用 JVM。
+要在鸿蒙 PC 跑 jdtls/IDEA 这类需要 JDK 21/25 的重型 Java 程序，**不在原生沙箱里跑，而在 Linux 子系统里跑标准 Linux OpenJDK**。
 
-## 四、阶段计划（每阶段有可检验完成标准）
-
-| 阶段 | 目标 | 完成标准 |
+| 途径 | 怎么跑 JDK 21/25 | 现实性 |
 |---|---|---|
-| **P0 前提验证（gate）** | 落实第五节三项待验证 | 三项均有华为文档/实测结论；若存在 Linux 兼容层则改走最优路径 |
-| **P1 工具链就绪** 🟡 大部分就绪 | OHOS SDK/NDK + DevEco + Rust OHOS target + 鸿蒙 PC JDK | DevEco 26 + NDK API 26 + Rust target 已备（见六）；剩鸿蒙 PC JDK |
-| **P2 Rust 后端编译** ✅ 完成 | 纯 Rust + C 依赖 crate 编 OHOS + link | ide-core/ide-run check 通过；ide-ohos link 成 AArch64 `.so`，探针符号导出 |
-| **P3 壳 + 桥** 🟡 起点已建 | ArkTS 壳 + ArkWeb + NAPI + invoke shim | ide-ohos cdylib 桥接 crate 已建（链接探针）；剩真 NAPI 桥 + ArkTS 壳 |
-| **P4 语言服务** | jdtls/JDK 集成 + 进程/文件权限适配 | 鸿蒙 PC 上 spawn jdtls 并完成一次 Java 跳转 |
-| **P5 打包真机** | HAP 打包 + 真机验证 | 鸿蒙 PC 真机安装运行，核心编辑/导航/运行可用 |
+| **① Linux 子系统（融合开发引擎，最优）** | openEuler Linux 环境里跑**标准 OpenJDK 21/25 Linux 版**（aarch64/x64），当普通 Linux 进程，完整 JVM，**无 fork/反射/Swing 限制** | 最高，官方兜底 |
+| ② JVM 共享库嵌入（社区 Eclipse 移植） | `libjvm.so` 编 OHOS 嵌进 app 进程，NAPI/JNI 交互 | 重工程，fork 限制仍在 |
+| ③ OpenHarmony 标准系统开发板 | Linux 内核跑 OpenJDK 移植 | 开发板，非消费级 PC |
 
-## 五、待验证（P0 gate，需华为开发者文档）
+**IDEA 怎么跑**：IntelliJ IDEA 是 Swing 桌面 Java 应用 → 原生沙箱跑不了（毕昇 JDK17 无 AWT/Swing + fork 禁）；
+**在 Linux 子系统里用完整 Linux JDK 直接跑**（若融合开发引擎支持 Linux GUI，IDEA/OXidea Linux 整包可零移植运行）。
 
-1. **进程/文件权限**：鸿蒙 PC 原生应用能否自由 spawn 子进程、访问任意目录（jdtls/终端/Git 的命脉）。
-2. **鸿蒙 PC JDK**：是否有现成可跑在鸿蒙 PC 的 JDK（jdtls 需 JDK 21+）。毕昇 JDK 主面向鲲鹏 ARM + openEuler Linux，非现成鸿蒙 PC JDK。
-3. **兼容层**：鸿蒙 PC 有无 Linux/Windows 应用兼容层——**若有，现有 Linux 包可能低成本直接跑，是最优路径**，可跳过 P1~P5 大部分工作。
+### 定案分层架构
 
-> 搜索引擎反爬（必应地域重定向 / DuckDuck 验证码 / 百度安全验证），上述需直接查华为开发者文档或真机实测。
+```
+鸿蒙 PC
+├─ 展示层：鸿蒙原生 HAP 壳（ArkWeb 渲染 OXidea 前端 dist/）
+│    └─ invoke ── localhost / 共享文件夹 ──┐
+└─ 融合开发引擎 Linux 子系统（openEuler）   │
+     └─ OXidea 完整后端 ◀─────────────────┘
+          ├─ Rust 后端（现有 Linux build）
+          ├─ jdtls + 完整 JDK 21/25（标准 Linux OpenJDK，无限制）
+          └─ 终端 / Git / 运行调试（自由 spawn）
+```
+
+### 前端壳选型（已有 Tauri 鸿蒙适配，非从零）
+
+| 方案 | 说明 | 成熟度 |
+|---|---|---|
+| **cj-tauri（仓颉版）** | 业务代码零修改；WebView 换 ArkWeb + `desktopMode` + `ohos.permission.INTERNET` | 较成熟，有成功案例 |
+| **Rust 版 Tauri 鸿蒙分支** | 官方文档提及，Rust 后端 + HAP | 生态不如 cj-tauri |
+| **自建 ArkTS + ArkWeb + NAPI** | ide-ohos `.so` 做薄壳 native 入口，转发到 Linux 后端 | 工作量大，兜底 |
+
+### 为何不走纯原生 HAP（路径已否决）
+原生沙箱**禁止 fork**（spawn jdtls/pty/git 行不通）+ 官方仅 JDK17（jdtls 需 21+、禁 `sun.*` 反射、无 AWT/Swing）。
+故 ide-ohos `.so` 只做**薄壳入口**（NAPI 转发到 Linux 后端），不在原生沙箱 spawn jdtls。
+
+## 四、阶段计划（重排）
+
+| 阶段 | 目标 | 状态 / 完成标准 |
+|---|---|---|
+| **P0 前提验证** | 进程权限 / JDK / 兼容层 | ✅ 已落实（见五） |
+| **P-opt 捷径验证** | 融合开发引擎跑 Linux GUI | 待验证：若能跑 OXidea Linux 整包则零移植 |
+| **P1 工具链** | DevEco + NDK + Rust OHOS target | 🟡 本机就绪（见六） |
+| **P2 Rust 编鸿蒙** | 后端编译 + link | ✅ 完成：ide-ohos link 成 AArch64 `.so`（薄壳入口） |
+| **P3 前端 HAP 壳** | 选型 + ArkWeb 装前端 + invoke | 评估 cj-tauri / Rust 鸿蒙分支 / 自建；前端 dist/ 渲染 |
+| **P4 后端部署 + 通信** | Linux 子系统跑后端 + IPC | OXidea headless server / localhost / 共享文件夹打通；jdtls + JDK21/25 在子系统跑 |
+| **P5 集成真机** | HAP + 子系统联调 | 鸿蒙 PC 真机编辑/导航/运行可用 |
+
+## 五、P0 三项已落实（2026-11-18 权威分析）
+
+1. **进程权限**：强沙箱不放开；PC 有 `system_grant` 免弹窗权限（文件读写下载/文档/桌面 + `FILE_ACCESS_PERSIST` 持久化任意目录；PTRACE `kernel.DEBUGGER`；抓包 `kernel.NET_RAW`）。**普通应用禁止 fork**，`KILL_APP_PROCESSES` 仅系统级；受限权限可申请（开放能力管理，约 3 工作日）。→ 完整 IDE 后端不能放原生沙箱。
+2. **JDK**：官方仅**毕昇 JDK 17**（jdtls 需 21+，不够）；无 AWT/Swing（曾预计 2026-06，需确认）；禁反射 `sun.*`（IllegalAccessException）；无 JDK21+ 时间表。社区 JVM 共享库嵌入（Eclipse 移植）重工程化。
+3. **Linux 兼容层（最优兜底）**：华为官方**融合开发引擎**（openEuler Linux 子系统，轻量虚拟化，一键跑大多数 Linux CLI/应用）；社区 **Harmonix**（QEMU，跑 Alpine/Ubuntu）。→ 后端放 Linux 子系统用完整 JDK，前端 HAP 壳。
+
+> 详见知识库 `oxidea-harmonyos-port-feasibility`。搜索引擎反爬（必应/DuckDuck/百度），事实由用户提供权威分析落实。
 
 ## 六、工具链与已验证里程碑（2026-11-18 实测）
 
@@ -93,22 +117,23 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=C:\PROGRA~1\Huawei\DEVECO~1\sdk\d
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS=-C link-arg=--target=aarch64-unknown-linux-ohos -C link-arg=--sysroot=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\native\sysroot
 ```
 
-**仍待解决**：
-- P3：`ide-ohos` 探针替换为真正 NAPI 桥（napi-rs 或手写 NAPI）+ ArkTS 壳 + ArkWeb 装前端 + `invoke` shim。
-- Tauri 壳 `src-tauri` 无法编 OHOS（wry 无鸿蒙后端，预期）→ 走路径 B ArkTS 壳。
-- 鸿蒙 PC JDK（jdtls 用）+ 进程/文件权限 + 兼容层（P0 三项，需华为文档/真机）。
+**仍待解决（架构定案后）**：
+- P-opt：验证融合开发引擎能否跑 Linux GUI（决定 OXidea Linux 整包能否零移植）。
+- P3：前端 HAP 壳选型（cj-tauri / Rust 鸿蒙分支 / 自建 ArkTS+ArkWeb）+ 接前端 dist/。
+- P4：OXidea 后端 headless server 模式 + Linux 子系统部署 + localhost/共享文件夹通信。
+- ide-ohos 重定位为薄壳 native 入口（NAPI 转发到 Linux 后端），不在原生沙箱 spawn jdtls。
 
 ## 七、复用与改动面
 
 | 部分 | 复用程度 | 改动 |
 |---|---|---|
-| 前端 `src/` + `dist/` | 高 | 仅加 `invoke` shim 映射 NAPI |
-| Rust 后端 crates | 中 | OHOS 编译 + 桌面 API（进程/文件/pty）鸿蒙适配 |
-| Tauri 壳 `src-tauri/` | 低 | 鸿蒙不用 Tauri 壳，改 ArkTS 壳 + NAPI 桥（新增） |
-| Java 扩展 `java/java-usages` | 中 | jar 逻辑复用，但需鸿蒙 PC JDK 运行 jdtls |
+| 前端 `src/` + `dist/` | 高 | HAP 壳 ArkWeb 加载；invoke 经 localhost 转 Linux 后端 |
+| Rust 后端 crates | 高 | 直接用现有 Linux build 跑在 Linux 子系统（无需 OHOS 适配）；ide-ohos 仅薄壳入口 |
+| Tauri 壳 `src-tauri/` | 中 | 前端壳用 cj-tauri / Rust 鸿蒙分支 / 自建 ArkTS；后端 headless server 化 |
+| Java 扩展 `java/java-usages` | 高 | jar 逻辑复用，jdtls + 完整 JDK21/25 在 Linux 子系统跑 |
 
 ## 八、Java「鸿蒙版」澄清
 
 - 早期鸿蒙 2/3 支持 Java API 开发应用；NEXT 主推 ArkTS / 仓颉 Cangjie，Java 应用 API 非主力。
 - 毕昇 JDK = 华为 OpenJDK 发行版（鲲鹏 ARM + openEuler），**不等于鸿蒙 PC 可用 JDK**。
-- jdtls 依赖标准 JDK 21+ 运行时，鸿蒙 PC 能否提供是 P0 待验证项 2。
+- jdtls 需标准 JDK 21+：鸿蒙原生仅毕昇 JDK17 不够 → **放 Linux 子系统跑标准 Linux OpenJDK 21/25**（见三）。
