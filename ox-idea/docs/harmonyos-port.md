@@ -12,6 +12,10 @@
 - **已有 Tauri 鸿蒙分支 / cj-tauri（仓颉版）**，前端壳不必从零造。
 - 本机 DevEco 工具链就绪，Rust 后端已实证可编鸿蒙 AArch64 `.so`（P2 完成，用作薄壳 native 入口）。
 - **最低成本捷径待验证**：融合开发引擎能否跑 Linux GUI 应用——若能，OXidea Linux 整包可能零移植直接跑。
+- **产品目标（用户定案 A）**：做**鸿蒙 PC 完整 IDE 产品**，HAP 一键安装运行；非在平板/手机跑。
+- **测试约束**：用户只有鸿蒙平板+手机、无 PC 真机；本机 DevEco 仅 **phone 模拟器镜像**（HarmonyOS 7.0.0 x86），能测 HAP 壳界面，**测不了 PC 后端**（融合开发引擎是 PC 特性）。
+- **传输要点**：ArkWeb 是浏览器、不能开 raw TCP，前端 `invoke` 需 **WebSocket 或 NAPI 桥**接 oxidea-server（当前 `--listen` 是 raw TCP + Content-Length 帧）。
+- **命门待确认**：HAP 能否编程式控制融合开发引擎（启动/管理 Linux 进程）——决定一键全功能 HAP 可行性。
 
 ## 一、已证实事实（来源：en.wikipedia.org/wiki/HarmonyOS）
 
