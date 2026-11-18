@@ -1,0 +1,12 @@
+[package]
+name = "ide-ohos"
+description = "OXidea OpenHarmony native bridge (cdylib for ArkTS NAPI); currently a link-proof stub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ide-core.workspace = true

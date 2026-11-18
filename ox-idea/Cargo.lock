@@ -4965,6 +4965,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ide-ohos"
+version = "0.0.2"
+dependencies = [
+ "ide-core",
+]
+
+[[package]]
 name = "ide-plugin"
 version = "0.0.2"
 dependencies = [

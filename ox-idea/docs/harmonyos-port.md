@@ -52,8 +52,8 @@ webview 绑定（WebView2 / WKWebView / WebKitGTK / Android WebView）里没有�
 |---|---|---|
 | **P0 前提验证（gate）** | 落实第五节三项待验证 | 三项均有华为文档/实测结论；若存在 Linux 兼容层则改走最优路径 |
 | **P1 工具链就绪** 🟡 大部分就绪 | OHOS SDK/NDK + DevEco + Rust OHOS target + 鸿蒙 PC JDK | DevEco 26 + NDK API 26 + Rust target 已备（见六）；剩鸿蒙 PC JDK |
-| **P2 Rust 后端编译** ✅ check 已验证 | 纯 Rust + C 依赖 crate 编 OHOS | ide-core / ide-run（含 37 个 tree-sitter）check 通过；剩 link 成 `.so` |
-| **P3 壳 + 桥** | ArkTS 壳 + ArkWeb + NAPI + invoke shim | 前端在 ArkWeb 渲染，一个 invoke 调用经 NAPI 往返 Rust 成功 |
+| **P2 Rust 后端编译** ✅ 完成 | 纯 Rust + C 依赖 crate 编 OHOS + link | ide-core/ide-run check 通过；ide-ohos link 成 AArch64 `.so`，探针符号导出 |
+| **P3 壳 + 桥** 🟡 起点已建 | ArkTS 壳 + ArkWeb + NAPI + invoke shim | ide-ohos cdylib 桥接 crate 已建（链接探针）；剩真 NAPI 桥 + ArkTS 壳 |
 | **P4 语言服务** | jdtls/JDK 集成 + 进程/文件权限适配 | 鸿蒙 PC 上 spawn jdtls 并完成一次 Java 跳转 |
 | **P5 打包真机** | HAP 打包 + 真机验证 | 鸿蒙 PC 真机安装运行，核心编辑/导航/运行可用 |
 
@@ -84,8 +84,17 @@ AR_aarch64_unknown_linux_ohos=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\n
 ```
 注：`aarch64-unknown-linux-ohos-clang` wrapper 是 bash 脚本，Windows cmd 不能直接跑，须用 `clang.exe` + 显式 `--target`/`--sysroot`。
 
+**P2 链接实证已通过**（新建 `ide-ohos` cdylib 桥接 crate，P3 起点）：
+- `cargo build -p ide-ohos --target aarch64-unknown-linux-ohos` → 产出 `libide_ohos.so`（4.7MB），ELF 64 位 **AArch64**（machine 183），ide-core 已链入，Finished 22.8s 零错误。
+- `llvm-nm -D` 确认导出符号 `oxidea_ohos_probe`（T 全局，NAPI 可调用）。
+- linker 配置（env，路径用 8.3 短路径）：
+```
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\native\llvm\bin\clang.exe
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS=-C link-arg=--target=aarch64-unknown-linux-ohos -C link-arg=--sysroot=C:\PROGRA~1\Huawei\DEVECO~1\sdk\default\OPENHA~1\native\sysroot
+```
+
 **仍待解决**：
-- 实际 link 成 `.so`（check 不 link）需配 cargo target linker（clang.exe + `-C link-arg=--target/--sysroot`）。
+- P3：`ide-ohos` 探针替换为真正 NAPI 桥（napi-rs 或手写 NAPI）+ ArkTS 壳 + ArkWeb 装前端 + `invoke` shim。
 - Tauri 壳 `src-tauri` 无法编 OHOS（wry 无鸿蒙后端，预期）→ 走路径 B ArkTS 壳。
 - 鸿蒙 PC JDK（jdtls 用）+ 进程/文件权限 + 兼容层（P0 三项，需华为文档/真机）。
 
