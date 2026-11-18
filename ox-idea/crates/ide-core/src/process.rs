@@ -113,6 +113,15 @@ pub fn process_created(child: &Child) -> Option<u64> {
     process_created_handle(child.as_raw_handle())
 }
 
+/// 非 Windows：Unix 用进程组信号终止/探测整棵树，不需要「创建时间防 PID 复用」锚点，
+/// 故恒为 `None`（与上文文档「`None` elsewhere」一致）。保留此桩让调用处在各平台
+/// 无需 cfg 即可编译。
+#[cfg(not(windows))]
+pub fn process_created(child: &Child) -> Option<u64> {
+    let _ = child;
+    None
+}
+
 /// [`process_created`] for a raw process handle (a `tokio` child's `raw_handle()`).
 #[cfg(windows)]
 pub fn process_created_handle(handle: std::os::windows::io::RawHandle) -> Option<u64> {
