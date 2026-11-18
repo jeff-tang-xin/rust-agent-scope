@@ -57,6 +57,18 @@ webview 绑定（WebView2 / WKWebView / WebKitGTK / Android WebView）里没有�
           └─ 终端 / Git / 运行调试（自由 spawn）
 ```
 
+### 现成地基：oxidea-server 远程开发架构（P4 已实证）
+
+OXidea **已有完整的客户端-服务端远程开发架构**，鸿蒙几乎直接复用：
+- `ide-host` = 无 UI toolkit 的 IDE 后端（Host：项目/终端/进程/LSP/插件）。
+- `oxidea-server`（headless 后端）：`--stdio`（SSH exec）/ `--connect`（relay）/ **`--listen <port>`（本次新增，localhost TCP）**。
+- JSON-RPC 协议 v2：`invoke {window, cmd, args}` → 命令结果；`event`/`channel` 通知回传。前端 `remote_dev.rs` 的 `remote_invoke` 已走此协议。
+- `rpc::serve<R: AsyncRead, W: AsyncWrite>` 传输无关，`TcpStream` 直接传入。
+
+**本次实现 + 实证**：给 oxidea-server 加 `--listen <port>` 模式（TcpListener accept → split → rpc::serve；ide-host tokio 加 `net` feature）。
+本机冒烟测试通过：`oxidea-server --listen 18765` → TCP 客户端发 `initialize` → 返回 `ServerInfo {arch, os, protocol:2, version, home}`。
+**鸿蒙映射**：Linux 子系统跑 `oxidea-server --listen <port>`，HAP 前端 ArkWeb 经 localhost TCP/WebSocket 发 `invoke`、收 `event`——前端业务代码与后端几乎全复用。
+
 ### 前端壳选型（已有 Tauri 鸿蒙适配，非从零）
 
 | 方案 | 说明 | 成熟度 |
@@ -78,7 +90,7 @@ webview 绑定（WebView2 / WKWebView / WebKitGTK / Android WebView）里没有�
 | **P1 工具链** | DevEco + NDK + Rust OHOS target | 🟡 本机就绪（见六） |
 | **P2 Rust 编鸿蒙** | 后端编译 + link | ✅ 完成：ide-ohos link 成 AArch64 `.so`（薄壳入口） |
 | **P3 前端 HAP 壳** | 选型 + ArkWeb 装前端 + invoke | 评估 cj-tauri / Rust 鸿蒙分支 / 自建；前端 dist/ 渲染 |
-| **P4 后端部署 + 通信** | Linux 子系统跑后端 + IPC | OXidea headless server / localhost / 共享文件夹打通；jdtls + JDK21/25 在子系统跑 |
+| **P4 后端部署 + 通信** 🟡 传输已实证 | Linux 子系统跑后端 + IPC | oxidea-server `--listen` localhost TCP 已实现 + 冒烟通过；剩 Linux 子系统部署 + 前端对接 |
 | **P5 集成真机** | HAP + 子系统联调 | 鸿蒙 PC 真机编辑/导航/运行可用 |
 
 ## 五、P0 三项已落实（2026-11-18 权威分析）

@@ -1,5 +1,6 @@
-//! `oxidea-server --stdio`: the IDE backend for remote development, serving
-//! one desktop client over stdin / stdout (started by the client over SSH).
+//! `oxidea-server`: the IDE backend for remote development, serving one desktop
+//! client over stdin / stdout (`--stdio`, an SSH exec channel) or localhost TCP
+//! (`--listen <port>`, e.g. a HarmonyOS HAP frontend reaching the Linux subsystem).
 
 use ide_host::plugins::remote::{RemotePluginLanguages, SYNC_COMMAND};
 use ide_host::plugins::remote_host::RemotePlugins;
@@ -29,8 +30,20 @@ fn main() {
         };
         std::process::exit(code);
     }
-    if !args.iter().any(|a| a == "--stdio") {
-        eprintln!("usage: oxidea-server --stdio | --connect <host> <port> | --version");
+    // --listen <port>: serve JSON-RPC over localhost TCP (e.g. a HarmonyOS HAP frontend
+    // reaching this backend running in the PC's Linux subsystem); --stdio: an SSH exec channel.
+    let listen = match args.iter().position(|a| a == "--listen") {
+        Some(i) => match args.get(i + 1).and_then(|p| p.parse::<u16>().ok()).filter(|&p| p != 0) {
+            Some(port) => Some(port),
+            None => {
+                eprintln!("usage: oxidea-server --listen <port>");
+                std::process::exit(2);
+            }
+        },
+        None => None,
+    };
+    if listen.is_none() && !args.iter().any(|a| a == "--stdio") {
+        eprintln!("usage: oxidea-server --stdio | --listen <port> | --connect <host> <port> | --version");
         std::process::exit(2);
     }
     // stdout carries the protocol: logs go to stderr.
@@ -48,11 +61,11 @@ fn main() {
     ide_dap::adapter::set_tools_root(ide_tools::tools_dir(&data_dir));
     ide_sdk::java::add_jdk_root(&ide_tools::jdk::jdks_dir(&data_dir));
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
-    let code = runtime.block_on(run(base));
+    let code = runtime.block_on(run(base, listen));
     std::process::exit(code);
 }
 
-async fn run(base: PathBuf) -> i32 {
+async fn run(base: PathBuf, listen: Option<u16>) -> i32 {
     let (config_dir, data_dir) = (base.join("config"), base.join("data"));
     for dir in [&config_dir, &data_dir] {
         if let Err(e) = std::fs::create_dir_all(dir) {
@@ -111,7 +124,31 @@ async fn run(base: PathBuf) -> i32 {
             Ok(report)
         }
     });
-    rpc::serve(host.clone(), dispatcher, peer, tokio::io::stdin(), tokio::io::stdout()).await;
+    match listen {
+        Some(port) => {
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            let listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    eprintln!("cannot listen on {addr}: {e}");
+                    return 1;
+                }
+            };
+            tracing::info!("oxidea-server listening on {addr}");
+            let (stream, _peer_addr) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    eprintln!("accept failed: {e}");
+                    return 1;
+                }
+            };
+            let (reader, writer) = tokio::io::split(stream);
+            rpc::serve(host.clone(), dispatcher, peer, reader, writer).await;
+        }
+        None => {
+            rpc::serve(host.clone(), dispatcher, peer, tokio::io::stdin(), tokio::io::stdout()).await;
+        }
+    }
     if let Some(plugins) = &plugins {
         plugins.host().shutdown();
     }
