@@ -47,7 +47,7 @@
   "mainBinaryName": "oxidea",
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJCREU5QkJDQ0Y5MkI5MzYKUldRMnVaTFB2SnZldXcyNk1lYXN2WlcyZ2xOYjJKcjBScVYybURidHFyM25JdHpXbjNhWFdSRjMK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQxNkI0ODVENTUwMDgyMDUKUldRRmdnQlZYVWhyUWNydnUrY3EwanM3b1BMbTdSMjVnWGY1MzFoQ1Z4UGEwOS8remVuK012dkQK",
       "endpoints": ["https://github.com/jeff-tang-xin/rust-agent-scope/releases/latest/download/latest.json"]
     }
   }
