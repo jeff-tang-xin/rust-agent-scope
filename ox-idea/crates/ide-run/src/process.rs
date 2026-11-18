@@ -1015,7 +1015,10 @@ fn group_alive(pid: u32, entry: &Entry) -> bool {
 }
 
 #[cfg(unix)]
-fn kill_tree(pid: u32, force: bool) {
+fn kill_tree(pid: u32, force: bool, created: Option<u64>) {
+    // Unix 用进程组信号终止整棵树，不需要 Windows 那套「创建时间防 PID 复用」，
+    // 但签名与 Windows 版统一（调用处一律传 created），故收下并忽略。
+    let _ = created;
     let sig = if force { libc::SIGKILL } else { libc::SIGINT };
     let pid = pid as libc::pid_t;
     if pid <= 0 {
