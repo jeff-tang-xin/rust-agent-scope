@@ -1,0 +1,87 @@
+name: Release
+
+# 推 v* tag（如 v0.1.0）自动出 Windows/macOS/Linux 三平台安装包并发布到
+# GitHub Releases，同时生成 updater 清单 latest.json。应用内自动更新指向
+# https://github.com/jeff-tang-xin/rust-agent-scope/releases/latest/download/latest.json
+#
+# 发布流程：
+#   cd ox-idea && pnpm release:prepare 0.1.0   # 改 Cargo.toml/package.json/tauri.conf.json 版本
+#   git commit -am "chore: v0.1.0" && git tag v0.1.0 && git push origin main --tags
+#
+# 必需仓库 Secrets（Settings → Secrets and variables → Actions）：
+#   TAURI_SIGNING_PRIVATE_KEY           updater 签名私钥（pnpm tauri signer generate 生成）
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  私钥密码（生成时未设则留空）
+#   GITHUB_TOKEN 由 Actions 自动提供，无需手动配。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest        # Apple Silicon (arm64)
+            target: aarch64-apple-darwin
+          - platform: macos-13            # Intel (x64)
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04        # 较旧 glibc，AppImage 兼容面广
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ox-idea/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ox-idea
+
+      - name: Install frontend dependencies
+        working-directory: ox-idea
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: ox-idea
+          tauriScript: pnpm tauri
+          tagName: v__VERSION__
+          releaseName: 'OXidea v__VERSION__'
+          releaseBody: 'Download the installer for your platform below. In-app auto-update is built in.'
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: --target ${{ matrix.target }}
