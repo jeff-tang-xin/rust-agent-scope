@@ -404,6 +404,31 @@ impl BrowserSession {
         Ok(())
     }
 
+    /// 面板人机协同：按 0-1 视口比例点击（实时换算 CSS 像素，与 Agent
+    /// 工具同一坐标口径，截图缩放/面板宽度变化不影响命中）。
+    pub async fn click_ratio(&self, rx: f64, ry: f64) -> std::result::Result<(), String> {
+        let page = self.page().await?;
+        let (x, y, _, _) = ratio_to_css(&page, rx, ry).await;
+        self.dispatch_mouse("pressed", x, y, Some("left"), 1, 0.0, 0.0)
+            .await?;
+        self.dispatch_mouse("released", x, y, Some("left"), 1, 0.0, 0.0)
+            .await
+    }
+
+    /// 面板人机协同：按比例定位滚轮事件（delta 为 CSS 像素，正 y 向下）。
+    pub async fn scroll_ratio(
+        &self,
+        rx: f64,
+        ry: f64,
+        delta_x: f64,
+        delta_y: f64,
+    ) -> std::result::Result<(), String> {
+        let page = self.page().await?;
+        let (x, y, _, _) = ratio_to_css(&page, rx, ry).await;
+        self.dispatch_mouse("wheel", x, y, None, 0, delta_x, delta_y)
+            .await
+    }
+
     // ---------- 面板导航 ----------
 
     /// 导航到 `url`，返回页面最终 URL（重定向后）。

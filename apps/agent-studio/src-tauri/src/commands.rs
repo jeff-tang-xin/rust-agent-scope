@@ -1071,6 +1071,128 @@ pub async fn browser_preview_shot(state: State<'_, AppState>) -> Result<String, 
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
+// ---------- 浏览器人机协同：面板里的用户操作回传到 Agent 共驾的页面 ----------
+// 与 browser_preview_shot 不同：交互命令不拉起浏览器，未启动时返回友好
+// 错误（只有 Agent 工具调用才启动浏览器，避免面板误触拉起进程）。
+
+/// 协同点击：x/y 为 0-1 视口比例（前端按截图矩形换算），后端实时换算
+/// CSS 像素，与 Agent 工具同一坐标口径。
+#[tauri::command]
+pub async fn browser_human_click(state: State<'_, AppState>, x: f64, y: f64) -> Result<(), String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动，等待 Agent 打开页面后再操作".into());
+    }
+    state.browser_session.click_ratio(x, y).await
+}
+
+/// 协同滚动：x/y 为 0-1 比例定位滚轮落点，delta 为 CSS 像素（正 y 向下）。
+#[tauri::command]
+pub async fn browser_human_scroll(
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    delta_x: f64,
+    delta_y: f64,
+) -> Result<(), String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动，等待 Agent 打开页面后再操作".into());
+    }
+    state.browser_session.scroll_ratio(x, y, delta_x, delta_y).await
+}
+
+/// 协同输入：IME/粘贴式整段文本插入（不经键盘事件，中文等输入法友好）。
+#[tauri::command]
+pub async fn browser_human_type(state: State<'_, AppState>, text: String) -> Result<(), String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动，等待 Agent 打开页面后再操作".into());
+    }
+    state.browser_session.insert_text(&text).await
+}
+
+/// 协同按键：可打印单字符且无修饰键走 insert_text（CDP char 事件兼容差）；
+/// 其余（特殊键/组合键）走 keydown+keyup。windows_vk 未传时按特殊键名补齐。
+#[tauri::command]
+pub async fn browser_human_key(
+    state: State<'_, AppState>,
+    key: String,
+    code: String,
+    modifiers: i64,
+    windows_vk: i64,
+) -> Result<(), String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动，等待 Agent 打开页面后再操作".into());
+    }
+    let session = &state.browser_session;
+    let mut chars = key.chars();
+    let printable = match (chars.next(), chars.next()) {
+        (Some(c), None) => !c.is_control(),
+        _ => false,
+    };
+    if printable && modifiers == 0 {
+        return session.insert_text(&key).await;
+    }
+    let vk = if windows_vk != 0 {
+        windows_vk
+    } else {
+        match key.as_str() {
+            "Enter" => 13,
+            "Tab" => 9,
+            "Backspace" => 8,
+            "Escape" => 27,
+            "ArrowLeft" => 37,
+            "ArrowUp" => 38,
+            "ArrowRight" => 39,
+            "ArrowDown" => 40,
+            _ => 0,
+        }
+    };
+    // Enter 的 keydown 需带 text="\r" 才会触发换行/表单提交（与主流自动化
+    // 实现一致）；其余特殊键不带 text。
+    let text = if key == "Enter" { Some("\r") } else { None };
+    session
+        .dispatch_key("keydown", &key, &code, text, modifiers, vk)
+        .await?;
+    session
+        .dispatch_key("keyup", &key, &code, None, modifiers, vk)
+        .await
+}
+
+/// 协同导航：无协议头自动补 https://，返回重定向后的最终 URL。
+#[tauri::command]
+pub async fn browser_human_navigate(state: State<'_, AppState>, url: String) -> Result<String, String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动，等待 Agent 打开页面后再操作".into());
+    }
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("请输入要访问的 URL".into());
+    }
+    let url = if url.contains("://") {
+        url.to_owned()
+    } else {
+        format!("https://{url}")
+    };
+    state.browser_session.navigate(&url).await
+}
+
+/// 当前页面 URL（面板地址栏随截图轮询同步刷新）。
+#[tauri::command]
+pub async fn browser_human_url(state: State<'_, AppState>) -> Result<String, String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动".into());
+    }
+    state.browser_session.current_url().await
+}
+
+/// 协同历史导航：back/forward/reload。
+#[tauri::command]
+pub async fn browser_human_history(state: State<'_, AppState>, action: String) -> Result<(), String> {
+    if state.browser_session.current_page().await.is_none() {
+        return Err("浏览器未启动，等待 Agent 打开页面后再操作".into());
+    }
+    state.browser_session.history_go(&action).await
+}
+
 #[tauri::command]
 pub fn delete_workspace(state: State<'_, AppState>, workspace_id: String) -> Result<(), String> {
     let mut config = state.snapshot();
@@ -2957,6 +3079,13 @@ pub fn run() {
             list_providers,
             ollama_list_models,
             browser_preview_shot,
+            browser_human_click,
+            browser_human_scroll,
+            browser_human_type,
+            browser_human_key,
+            browser_human_navigate,
+            browser_human_url,
+            browser_human_history,
             save_provider,
             delete_provider,
             list_databases,
