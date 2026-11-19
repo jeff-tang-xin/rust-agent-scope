@@ -468,11 +468,19 @@ fn updater(app: &AppHandle, source: UpdateSource) -> IdeResult<Option<tauri_plug
 #[tauri::command]
 #[specta::specta]
 pub async fn app_check_update(app: AppHandle, source: UpdateSource) -> IdeResult<UpdateCheck> {
-    // Placeholder: the OXidea update endpoint is not live yet, so every check reports
-    // success with no update instead of requesting the configured URL. Restore the
-    // real check (see git history) once the OXidea endpoint serves latest.json.
-    let _ = (app, source);
-    Ok(UpdateCheck { enabled: true, update: None })
+    let Some(updater) = updater(&app, source)? else {
+        return Ok(UpdateCheck { enabled: false, update: None });
+    };
+    let update = updater.check().await.map_err(|e| IdeError::unavailable(e.to_string()))?;
+    Ok(UpdateCheck {
+        enabled: true,
+        update: update.map(|u| UpdateInfo {
+            version: u.version.clone(),
+            current_version: u.current_version.clone(),
+            notes: u.body.clone(),
+            date: u.date.map(|d| d.to_string()),
+        }),
+    })
 }
 
 /// The background check made once per process when the first window starts;
