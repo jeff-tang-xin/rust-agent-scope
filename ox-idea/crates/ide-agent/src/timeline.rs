@@ -4,6 +4,7 @@ use crate::model::{AgentEntry, AgentPlanItem, AgentSubagentStatus, AgentToolDiff
 use ide_core::IpcPath;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Tool output kept per call; longer output keeps its tail.
 const MAX_OUTPUT: usize = 64 * 1024;
@@ -22,6 +23,8 @@ pub(crate) struct Timeline {
     /// 只有零星后续，看起来像「输出断了」。tool_call/plan（步边界）与
     /// end_turn（turn 结束）关闭它；User entry 不关。
     open_stream: Option<usize>,
+    /// Where the full text of truncated tool output is saved (`None`: tail only).
+    pub outputs_dir: Option<PathBuf>,
 }
 
 /// What a `session/update` changed in the timeline.
@@ -171,7 +174,9 @@ impl Timeline {
     }
 
     fn merge_tool(&mut self, index: usize, update: &Value) {
-        let AgentEntry::Tool { input, title, kind, status, locations: locs, output, diffs, .. } = &mut self.entries[index]
+        let outputs_dir = self.outputs_dir.clone();
+        let AgentEntry::Tool { id, input, title, kind, status, locations: locs, output, diffs, .. } =
+            &mut self.entries[index]
         else {
             return;
         };
@@ -210,11 +215,28 @@ impl Timeline {
                     let (added, removed) = line_stats(old, new);
                     new_diffs.push(AgentToolDiff { path: IpcPath(str_field(item, "path").into()), added, removed });
                 }
-                _ => {}
+                _ => {
+                    // v1 agents send bare blocks ({type:"text",…}) without the v2
+                    // {type:"content",content:{…}} wrapper. Render what text we can
+                    // find instead of dropping the agent's output silently.
+                    let rendered = content_text(Some(item))
+                        .or_else(|| item.get("text").and_then(Value::as_str).map(str::to_owned))
+                        .unwrap_or_else(|| item.to_string());
+                    tracing::warn!("tool call content of unexpected shape, kept as text: {item}");
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&rendered);
+                }
             }
         }
         if !text.is_empty() {
-            *output = Some(tail(text));
+            let full = if text.len() > MAX_OUTPUT {
+                outputs_dir.as_deref().and_then(|dir| spill(dir, id, &text))
+            } else {
+                None
+            };
+            *output = Some(tail(text, full.as_deref()));
         }
         if !new_diffs.is_empty() {
             *diffs = new_diffs;
@@ -422,15 +444,39 @@ fn line_stats(old: &str, new: &str) -> (u32, u32) {
     ide_vcs::diff_hunks(old, new).iter().fold((0, 0), |(a, r), h| (a + h.lines, r + h.old_lines))
 }
 
-fn tail(mut text: String) -> String {
+/// Keeps the tail of long output behind a notice saying how much was cut, and
+/// where the full text was saved when it was spilled to disk.
+fn tail(mut text: String, full: Option<&Path>) -> String {
     if text.len() > MAX_OUTPUT {
+        let total_kb = text.len().div_ceil(1024);
         let mut cut = text.len() - MAX_OUTPUT;
         while !text.is_char_boundary(cut) {
             cut += 1;
         }
-        text.replace_range(..cut, "…");
+        let mut notice = format!("[output truncated: keeping the last {} KB of {total_kb} KB]", MAX_OUTPUT / 1024);
+        if let Some(path) = full {
+            notice.push_str(&format!("; full output: {}", path.display()));
+        }
+        notice.push('\n');
+        text.replace_range(..cut, &notice);
     }
     text
+}
+
+/// Saves the full output beside the task store so the truncation notice can point at it.
+/// The tool call id comes from the agent: keep only filename-safe characters.
+fn spill(dir: &Path, id: &str, text: &str) -> Option<PathBuf> {
+    let mut name: String =
+        id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    if name.is_empty() {
+        name.push('_');
+    }
+    let path = dir.join(format!("{name}.txt"));
+    if let Err(e) = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, text)) {
+        tracing::warn!("saving full tool output {}: {e}", path.display());
+        return None;
+    }
+    Some(path)
 }
 
 #[cfg(test)]
@@ -543,7 +589,70 @@ mod tests {
 
     #[test]
     fn long_output_keeps_its_tail() {
-        let s = tail("é".repeat(MAX_OUTPUT));
-        assert!(s.starts_with('…') && s.len() <= MAX_OUTPUT + 3);
+        let s = tail("é".repeat(MAX_OUTPUT), None);
+        assert!(s.starts_with("[output truncated: keeping the last 64 KB of 128 KB]\n"));
+        assert!(s.ends_with(&"é".repeat(MAX_OUTPUT / 2)));
+    }
+
+    #[test]
+    fn bare_v1_text_content_is_kept() {
+        let mut t = Timeline::default();
+        t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Run", "status": "in_progress"}));
+        t.apply(&json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
+            "content": [{"type": "text", "text": "hello from v1"}]}));
+        let AgentEntry::Tool { output, .. } = &t.entries[0] else { panic!() };
+        assert_eq!(output.as_deref(), Some("hello from v1"));
+    }
+
+    #[test]
+    fn unknown_content_shape_is_rendered_not_dropped() {
+        let mut t = Timeline::default();
+        t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Run", "status": "in_progress"}));
+        t.apply(&json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1",
+            "content": [{"type": "mystery", "data": 7}, {"type": "odd", "text": "still text"}]}));
+        let AgentEntry::Tool { output, .. } = &t.entries[0] else { panic!() };
+        let out = output.as_deref().unwrap();
+        // No text to extract: the block is shown as JSON; a text field is kept as text.
+        assert!(out.contains("\"mystery\"") && out.contains('7'));
+        assert!(out.ends_with("still text"));
+    }
+
+    #[test]
+    fn v2_wrapped_content_is_unchanged() {
+        let mut t = Timeline::default();
+        t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Run", "status": "in_progress"}));
+        t.apply(&json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1",
+        "content": [
+            {"type": "content", "content": {"type": "text", "text": "wrapped"}},
+            {"type": "text", "text": "bare"}
+        ]}));
+        let AgentEntry::Tool { output, .. } = &t.entries[0] else { panic!() };
+        assert_eq!(output.as_deref(), Some("wrapped\nbare"));
+    }
+
+    #[test]
+    fn truncated_output_is_marked_and_spilled() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut t = Timeline::default();
+        t.outputs_dir = Some(dir.path().to_path_buf());
+        t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Run", "status": "in_progress"}));
+        let long = "x".repeat(MAX_OUTPUT + 1024);
+        t.apply(&json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1",
+            "content": [{"type": "content", "content": {"type": "text", "text": long}}]}));
+        let AgentEntry::Tool { output, .. } = &t.entries[0] else { panic!() };
+        let out = output.as_deref().unwrap();
+        assert!(out.starts_with("[output truncated: keeping the last 64 KB of 65 KB]"));
+        let path = dir.path().join("c1.txt");
+        assert!(out.contains(&path.display().to_string()));
+        assert!(out.ends_with(&"x".repeat(1024)));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), long);
+    }
+
+    #[test]
+    fn spill_file_names_stay_inside_the_outputs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = spill(dir.path(), "../evil/id", "text").unwrap();
+        assert_eq!(path, dir.path().join("___evil_id.txt"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "text");
     }
 }

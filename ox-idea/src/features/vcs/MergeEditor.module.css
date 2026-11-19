@@ -47,6 +47,11 @@
 .labels > span + span {
   border-left: 1px solid var(--border);
 }
+.deletedNote {
+  margin-left: 6px;
+  font-style: normal;
+  color: var(--vcs-conflict);
+}
 .panes {
   flex: 1;
   min-height: 0;

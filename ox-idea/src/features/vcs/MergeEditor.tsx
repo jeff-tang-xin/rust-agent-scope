@@ -44,6 +44,7 @@ import {
   canApply,
   changesIn,
   changesInSide,
+  fillAuto,
   resolveSimple,
   revertResolved,
   mergeField,
@@ -128,6 +129,10 @@ export function MergeEditor({ input }: { input: EditorInput }) {
   const load = useCallback(async () => {
     try {
       const v = await call(commands.vcsConflictVersions(path));
+      // No stages at all: the file is not (or no longer) conflicted, or the index could
+      // not be read. Never offer a resolution that would delete the file on a guess.
+      if (v.base === null && v.ours === null && v.theirs === null)
+        throw new Error(tx("No conflict versions found for this file. It may no longer be conflicted."));
       if ([v.base, v.ours, v.theirs].some((text) => text?.includes("\0"))) {
         throw new Error(tx("Binary files cannot be resolved in the merge editor."));
       }
@@ -218,9 +223,29 @@ export function MergeEditor({ input }: { input: EditorInput }) {
       // The starting point, not a step to undo.
       if (spec) result.dispatch({ ...spec, annotations: Transaction.addToHistory.of(false) });
     }
+    // The word-level merge of a conflict can take seconds; compute the pending ones in
+    // idle time, one per callback, so opening the editor never waits for them. The wand
+    // and Resolve Simple Conflicts light up as each conflict's merge becomes known.
+    const ric: (cb: () => void, opts: { timeout: number }) => number =
+      typeof requestIdleCallback === "function" ? requestIdleCallback : (cb) => window.setTimeout(cb, 32);
+    const cic: (handle: number) => void =
+      typeof cancelIdleCallback === "function" ? cancelIdleCallback : (h) => window.clearTimeout(h);
+    let idleHandle: number | null = null;
+    const pendingAuto = () =>
+      result.state.field(mergeField).findIndex((c) => c.kind === "conflict" && c.auto === undefined);
+    const fillNextAuto = () => {
+      idleHandle = null;
+      const next = pendingAuto();
+      if (next < 0) return;
+      const spec = fillAuto(result.state, [next]);
+      if (spec) result.dispatch(spec);
+      if (pendingAuto() >= 0) idleHandle = ric(fillNextAuto, { timeout: 1000 });
+    };
+    if (pendingAuto() >= 0) idleHandle = ric(fillNextAuto, { timeout: 1000 });
     // Scroll the three panes together, lined up through their changes.
     const stopSync = syncMergeScroll({ ours, result, theirs });
     return () => {
+      if (idleHandle !== null) cic(idleHandle);
       stopSync();
       ours.destroy();
       theirs.destroy();
@@ -257,6 +282,14 @@ export function MergeEditor({ input }: { input: EditorInput }) {
     v.dispatch(spec);
     const first = reveal ? unresolved(v.state)[0] : undefined;
     if (first) moveTo(v, first.from);
+  };
+
+  /** Automatic resolving needs the word-level merges; compute any still pending first. */
+  const ensureAuto = (indexes?: readonly number[]) => {
+    const v = resultView.current;
+    if (!v) return;
+    const spec = fillAuto(v.state, indexes);
+    if (spec) v.dispatch(spec);
   };
 
   /** Saves `text` as the resolved file and stages it; like IDEA, that closes the merge editor. */
@@ -307,7 +340,18 @@ export function MergeEditor({ input }: { input: EditorInput }) {
   /** Accept Yours / Accept Theirs: that version as it is, whatever was done in the result. */
   const acceptSide = async (side: MergeSide) => {
     if (!state) return;
-    if (
+    if (state.deleted[side]) {
+      // That version deleted the file: accepting it removes the file. Say so first.
+      if (
+        !(await confirmDialog({
+          title: side === "left" ? "Accept Yours" : "Accept Theirs",
+          message: tx`That version deleted the file. Accepting it removes the file and marks the deletion as resolved.`,
+          okLabel: "Delete File",
+          danger: true,
+        }))
+      )
+        return;
+    } else if (
       modified() &&
       !(await confirmDialog({
         title: side === "left" ? "Accept Yours" : "Accept Theirs",
@@ -438,6 +482,7 @@ export function MergeEditor({ input }: { input: EditorInput }) {
       case "applyRight":
         return command((s) => applyNonConflicting(s, "right"), true);
       case "resolveSimple":
+        ensureAuto();
         return command(resolveSimple, true);
       case "revert":
         return command(revertResolved, true);
@@ -463,12 +508,18 @@ export function MergeEditor({ input }: { input: EditorInput }) {
       case "ignore":
       case "resolveAutomatically": {
         const decision = selectionDecision(id);
-        if (decision) command((s) => applyTo(s, decision.indexes, decision.action));
+        if (decision) {
+          if (decision.action.type === "auto") ensureAuto(decision.indexes);
+          command((s) => applyTo(s, decision.indexes, decision.action));
+        }
         return;
       }
       case "change": {
         const change = arg as { indexes: number[]; action: MergeAction } | undefined;
-        if (change) command((s) => applyTo(s, change.indexes, change.action));
+        if (change) {
+          if (change.action.type === "auto") ensureAuto(change.indexes);
+          command((s) => applyTo(s, change.indexes, change.action));
+        }
         return;
       }
       case "annotate": {
@@ -579,11 +630,17 @@ export function MergeEditor({ input }: { input: EditorInput }) {
     <div ref={rootRef} className={styles.root} {...focusProps}>
       <MergeToolbar summary={summary} />
       <div className={styles.labels}>
-        <span>{txt(titles.yours)}</span>
+        <span>
+          {txt(titles.yours)}
+          {state?.deleted.left ? <em className={styles.deletedNote}>{tx("deleted in this version")}</em> : null}
+        </span>
         <span>
           <T>Result</T>
         </span>
-        <span>{txt(titles.theirs)}</span>
+        <span>
+          {txt(titles.theirs)}
+          {state?.deleted.right ? <em className={styles.deletedNote}>{tx("deleted in this version")}</em> : null}
+        </span>
       </div>
       {!state || lang === null ? (
         <div className={styles.message}>

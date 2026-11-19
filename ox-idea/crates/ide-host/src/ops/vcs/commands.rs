@@ -801,8 +801,17 @@ pub async fn vcs_remote(
 /// The user's side is `ours` (sides swapped during a rebase, as in IDEA).
 pub async fn vcs_conflict_versions(host: &Host, window: &str, path: PathBuf) -> IdeResult<ide_vcs::MergeVersions> {
     let project = host.project(window)?;
-    blocking(move || project.with_repo_of(&path, |r| r.merge_versions(&path, project.vcs_encoding(&path, Some(":2"))?)))
-        .await
+    blocking(move || {
+        project.with_repo_of(&path, |r| {
+            let (base, ours, theirs) = r.conflict_versions(&path, project.vcs_encoding(&path, Some(":2"))?)?;
+            let sides = r.merge_sides()?;
+            let (ours, theirs) = if sides.reversed { (theirs, ours) } else { (ours, theirs) };
+            // The merge editor does its own three-way merge; `merged` (git merge-file
+            // over three temp files) is not consumed, so skip that subprocess entirely.
+            Ok(ide_vcs::MergeVersions { base, ours, theirs, sides, merged: None })
+        })
+    })
+    .await
 }
 
 pub async fn vcs_diff_text(host: &Host, window: &str, path: PathBuf, staged: bool) -> IdeResult<String> {

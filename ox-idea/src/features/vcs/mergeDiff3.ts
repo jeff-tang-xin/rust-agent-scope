@@ -180,12 +180,19 @@ export interface TextChange {
   base: string;
   right: string;
   kind: ChangeKind;
-  /** The word-level merge of a conflict, when the sides changed different words. */
-  auto: string | null;
+  /**
+   * The word-level merge of a conflict, when the sides changed different words.
+   * `undefined`: not computed yet (`computeAuto` was off); `null`: a real conflict.
+   */
+  auto: string | null | undefined;
 }
 
-/** The changes between the versions line by line; `null` when the files are too different to compare. */
-export function mergeChanges(left: string, base: string, right: string): TextChange[] | null {
+/**
+ * The changes between the versions line by line; `null` when the files are too different to compare.
+ * `computeAuto` off leaves each conflict's word-level merge pending (`auto === undefined`):
+ * it costs up to seconds per conflict, so the merge editor computes it in idle time instead.
+ */
+export function mergeChanges(left: string, base: string, right: string, computeAuto = true): TextChange[] | null {
   const lines = [splitLines(left), splitLines(base), splitLines(right)] as const;
   const clusters = diff3(lines[0], lines[1], lines[2], undefined, 3000, true);
   if (!clusters) return null;
@@ -214,7 +221,12 @@ export function mergeChanges(left: string, base: string, right: string): TextCha
       base: b,
       right: r,
       kind,
-      auto: kind === "conflict" && b !== "" && l !== "" && r !== "" ? tryResolve(l, b, r) : null,
+      auto:
+        kind === "conflict" && b !== "" && l !== "" && r !== ""
+          ? computeAuto
+            ? tryResolve(l, b, r)
+            : undefined
+          : null,
     });
   }
   return out;

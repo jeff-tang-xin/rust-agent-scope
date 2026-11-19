@@ -341,8 +341,13 @@ impl SubagentsMiddleware {
             return;
         };
         let user_id = ctx.user_id();
-        let state = agent.state_for(user_id, session_id);
-        if let Ok(Some(mut state)) = state {
+        // 严格时序：运行期间活槽位是对话的唯一真相源，store 只是同步落盘镜像。
+        // 这里必须取活槽位（agent_state_for 槽位优先），不能用 state_for——后者
+        // 在 Legacy 模式只读磁盘 store，可能滞后于刚提交的压缩；随后
+        // save_agent_state_for 会用这份旧快照整体覆盖活槽位，把压缩成果抹掉，
+        // 下一迭代边界又拿到同一份全量历史再次触发压缩（用户实测「压缩成功后
+        // 介入，AI 思考一轮又用完全相同的内容压缩」的根因）。
+        if let Ok(mut state) = agent.agent_state_for(user_id, session_id) {
             state.context.push(msg.clone());
             let _ = agent.save_agent_state_for(user_id, session_id, &state);
         }

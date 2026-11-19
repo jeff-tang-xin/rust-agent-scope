@@ -40,7 +40,10 @@ export function syncMergeScroll(views: Record<MergePane, EditorView>): () => voi
     const b = views.result.state.doc;
     const hit = built.get(side);
     if (hit && hit.a === a && hit.b === b) return hit.chunks;
-    const fresh = Chunk.build(a, b);
+    // Bounded like the diff viewer (diffOptions): an unbounded Myers diff here runs
+    // synchronously in the scroll handler and can freeze the panes on big files.
+    // A degraded diff only approximates the scroll mapping, never the merge itself.
+    const fresh = Chunk.build(a, b, { scanLimit: 500, timeout: 200 });
     built.set(side, { a, b, chunks: fresh });
     return fresh;
   };

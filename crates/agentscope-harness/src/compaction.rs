@@ -1213,8 +1213,15 @@ pub(crate) async fn compact_in_state(
                 let mut next = prefix;
                 next.extend(compacted);
                 guard.context = next;
+                Ok(Some(format!("{merged} 条消息合并为 1 条摘要")))
+            } else {
+                // 并发改动使压缩结果作废：如实报错，不伪装成功。此前静默丢弃
+                // 却返回成功说明——手动 /compact 显示绿色完成卡片，上下文却原封
+                // 未动，下一条消息立刻再次触发自动压缩。
+                Err(agentscope_core::Error::InvalidInput(
+                    "compaction discarded: context changed concurrently".into(),
+                ))
             }
-            Ok(Some(format!("{merged} 条消息合并为 1 条摘要")))
         }
         Ok(None) => Ok(None),
         // 摘要模型失败等：向上传播（手动入口报真实错误；钩子路径自行降级）。

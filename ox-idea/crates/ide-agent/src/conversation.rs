@@ -10,6 +10,7 @@ use crate::model::AgentEntry;
 use crate::timeline::{Timeline, blocks_text, content_text};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
 
 /// Where an entry lives: the task's own conversation (`None`) or a subagent's session.
 pub(crate) type Session = Option<String>;
@@ -19,6 +20,8 @@ pub(crate) struct Conversation {
     pub main: Timeline,
     /// In the order they started.
     subagents: Vec<Subagent>,
+    /// Where full tool output is spilled; every timeline gets it, later subagents included.
+    outputs_dir: Option<PathBuf>,
 }
 
 struct Subagent {
@@ -45,6 +48,7 @@ impl Conversation {
                 .into_iter()
                 .map(|s| Subagent { id: s.id, parent: s.parent, timeline: Timeline::from_entries(s.entries) })
                 .collect(),
+            outputs_dir: None,
         }
     }
 
@@ -53,6 +57,16 @@ impl Conversation {
             .iter()
             .map(|s| SavedSubagent { id: s.id.clone(), parent: s.parent.clone(), entries: s.timeline.entries.clone() })
             .collect()
+    }
+
+    /// Where the full text of truncated tool output is saved, for every timeline of this
+    /// task (`None`: tail only). Subagents announced later get it too.
+    pub fn set_outputs_dir(&mut self, dir: Option<PathBuf>) {
+        self.outputs_dir = dir.clone();
+        self.main.outputs_dir = dir.clone();
+        for s in &mut self.subagents {
+            s.timeline.outputs_dir = dir.clone();
+        }
     }
 
     pub fn timeline(&self, session: &Session) -> Option<&Timeline> {
@@ -99,7 +113,9 @@ impl Conversation {
             "subagent_update" => {
                 let Some(id) = update.get("sessionId").and_then(Value::as_str) else { return out };
                 if self.parent_of(id).is_none() {
-                    self.subagents.push(Subagent { id: id.to_owned(), parent: owner, timeline: Timeline::default() });
+                    let mut timeline = Timeline::default();
+                    timeline.outputs_dir = self.outputs_dir.clone();
+                    self.subagents.push(Subagent { id: id.to_owned(), parent: owner, timeline });
                 }
                 let parent = self.parent_of(id).cloned().flatten();
                 let Some(timeline) = self.timeline_mut(&parent) else { return out };
@@ -161,6 +177,7 @@ impl Conversation {
         let mut entries = std::mem::take(&mut self.main.entries);
         entries.truncate(len);
         self.main = Timeline::from_entries(entries);
+        self.main.outputs_dir = self.outputs_dir.clone();
         let shown = |c: &Conversation, id: &str| {
             c.main.entries.iter().any(|e| matches!(e, AgentEntry::Subagent { id: card, .. } if card == id))
         };
@@ -290,5 +307,28 @@ mod tests {
         assert_eq!(settled, vec![(None, 0), (a.clone(), 1)]);
         assert!(matches!(c.main.entries[0], AgentEntry::Subagent { status: AgentSubagentStatus::Cancelled, .. }));
         assert!(matches!(card(&c, &a, 1), AgentEntry::Tool { status: AgentToolStatus::Failed, .. }));
+    }
+
+    #[test]
+    fn outputs_dir_reaches_every_timeline_and_survives_truncate() {
+        let mut c = Conversation::default();
+        let dir = PathBuf::from("store/outputs/t1");
+        c.set_outputs_dir(Some(dir.clone()));
+        c.apply(
+            None,
+            &json!({"sessionUpdate": "subagent_update", "sessionId": "child", "state": {"state": "running"}}),
+            1.0,
+        );
+        // A subagent announced after the setter, by another subagent, gets it too.
+        c.apply(
+            Some("child"),
+            &json!({"sessionUpdate": "subagent_update", "sessionId": "grand", "state": {"state": "running"}}),
+            2.0,
+        );
+        assert_eq!(c.timeline(&None).unwrap().outputs_dir, Some(dir.clone()));
+        assert_eq!(c.timeline(&Some("child".to_owned())).unwrap().outputs_dir, Some(dir.clone()));
+        assert_eq!(c.timeline(&Some("grand".to_owned())).unwrap().outputs_dir, Some(dir.clone()));
+        c.truncate(1);
+        assert_eq!(c.timeline(&None).unwrap().outputs_dir, Some(dir));
     }
 }

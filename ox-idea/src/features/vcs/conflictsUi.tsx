@@ -6,7 +6,7 @@ import { call, commands } from "@/platform/ipc";
 import { Dialog, Icon, List, fileIconName, T } from "@/ui";
 import { editorService, notifications } from "@/workbench/contributions";
 import { blockAt, parseConflicts, resolutionText, type Resolution } from "./conflicts";
-import { openDialog } from "./dialogs";
+import { confirmDialog, openDialog } from "./dialogs";
 import { mergeInput } from "./mergeKind";
 import { baseName, dirName, relTo, stripSlash } from "./model";
 import { controlLabel, controlOperation, inProgress, operationTitle, type InProgress } from "./operations";
@@ -46,20 +46,33 @@ export function openMergeEditor(path: string) {
 /** Accept Yours / Accept Theirs for a whole conflicted file. */
 export async function acceptSide(f: FileStatus, side: "ours" | "theirs") {
   const path = stripSlash(f.path);
+  const title = side === "ours" ? tx`Accept yours for ${baseName(path)}` : tx`Accept theirs for ${baseName(path)}`;
   await runOp(
-    side === "ours" ? tx`Accept yours for ${baseName(path)}` : tx`Accept theirs for ${baseName(path)}`,
+    title,
     async () => {
       const v = await call(commands.vcsConflictVersions(path));
+      // No stages at all: not (or no longer) conflicted, or the index could not be read.
+      // Never delete the file on a guess.
+      if (v.base === null && v.ours === null && v.theirs === null)
+        throw new Error(tx("No conflict versions found for this file. It may no longer be conflicted."));
       const text = side === "ours" ? v.ours : v.theirs;
       if (text === null) {
-        // The file was deleted on that side: resolving means removing it.
+        // The file was deleted on that side: resolving means removing it — ask first.
+        const ok = await confirmDialog({
+          title: side === "ours" ? "Accept Yours" : "Accept Theirs",
+          message: tx`That version deleted the file. Accepting it removes the file and marks the deletion as resolved.`,
+          okLabel: "Delete File",
+          danger: true,
+        });
+        if (!ok) return false;
         await call(commands.fsDelete(path));
       } else {
         await writeFileText(path, text, { save: true });
       }
       await call(commands.vcsStage([path]));
+      return true;
     },
-    { success: tx`${baseName(path)} resolved` },
+    { success: (applied) => (applied ? tx`${baseName(path)} resolved` : "") },
   );
 }
 
@@ -180,9 +193,12 @@ export function resolveAtCaret(how: Resolution): boolean {
     notifications().notify({ group: "vcs", level: "info", title: "The caret is not inside a conflict" });
     return false;
   }
+  // The user's work is git's "theirs" section during a rebase, and during an unstash
+  // (conflicts with no operation in progress), as in the merge editor (merge_sides).
+  const op = inProgress();
+  const reversed = op === "rebase" || (op === null && conflictedFiles().length > 0);
   view.dispatch({
-    // During a rebase the user's commit is git's "theirs" section, as in the merge editor.
-    changes: { from: block.from, to: block.to, insert: resolutionText(block, how, inProgress() === "rebase") },
+    changes: { from: block.from, to: block.to, insert: resolutionText(block, how, reversed) },
     userEvent: "input.resolve",
     scrollIntoView: true,
   });

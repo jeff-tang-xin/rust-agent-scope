@@ -1,6 +1,7 @@
 /**
  * Agent messages: Markdown → sanitized HTML (marked + DOMPurify). Fenced code is
- * highlighted and gets a Copy button; inline code naming a file of the task opens it.
+ * highlighted and gets Copy / Insert / Apply buttons (see codeActions.tsx); inline
+ * code naming a file of the task opens it.
  * Mermaid fences become `[data-mermaid]` placeholders drawn by the Markdown viewer's
  * shared renderer after each render; the block keeps a Copy button of its own, since
  * the drawn diagram hides the code block, and `onDiagramDrawn` lets the conversation
@@ -17,6 +18,7 @@ import { openExternalUrl } from "@/platform/openUrl";
 import { copyText } from "@/ui";
 import { editorService } from "@/workbench/contributions";
 import { hasMermaid, renderMermaidIn } from "@/features/viewers/markdown/mermaid";
+import { applyCodeBlock, insertCodeAtCaret } from "./codeActions";
 import { fileHref, pathLink, type PathLink } from "./conversation";
 import { loadImages } from "./markdownImages";
 import styles from "./Session.module.css";
@@ -29,8 +31,15 @@ const marked = new Marked({
   breaks: true,
   renderer: {
     code({ text, lang }) {
-      if (lang?.trim().split(/\s+/)[0]?.toLowerCase() !== "mermaid") return false;
-      return `<div data-mermaid=""><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>\n`;
+      if (lang?.trim().split(/\s+/)[0]?.toLowerCase() === "mermaid")
+        return `<div data-mermaid=""><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>\n`;
+      // Like marked's default, but keeping the fence's full info string (`ts src/a.ts`)
+      // for the Apply action, which always previews a diff before writing.
+      const info = lang?.trim() ?? "";
+      const first = info.split(/\s+/)[0] ?? "";
+      const cls = first ? ` class="language-${escapeHtml(first)}"` : "";
+      const attr = info ? ` data-info="${escapeHtml(info)}"` : "";
+      return `<pre><code${cls}${attr}>${escapeHtml(text.replace(/\n$/, ""))}\n</code></pre>\n`;
     },
   },
 });
@@ -80,9 +89,9 @@ function renderHtml(text: string): string {
     FORBID_TAGS: ["style", "form", "source"],
     FORBID_ATTR: ["style", "srcset"],
     ALLOW_DATA_ATTR: false,
-    // Only the mermaid placeholder written by the renderer above; data attributes
-    // quoted in a reply stay out.
-    ADD_ATTR: ["data-mermaid"],
+    // The mermaid placeholder and the fence info string written by the renderer above;
+    // other data attributes quoted in a reply stay out.
+    ADD_ATTR: ["data-mermaid", "data-info"],
   }) as HTMLElement;
   root.querySelectorAll("li").forEach(wrapLooseText);
   // WebKit cuts controls inside <pre> out of a text selection, even when transparent.
@@ -162,7 +171,26 @@ function enhance(root: HTMLElement, cwd: string, images: Map<string, Promise<str
     const block = pre.parentElement!;
     block.appendChild(copy);
     copies.push(copy);
-    if (!block.hasAttribute("data-mermaid")) void highlightInto(code, text, lang);
+    if (!block.hasAttribute("data-mermaid")) {
+      // Insert / Apply carry the source text (highlighting rewrites the code's DOM).
+      const action = (icon: string, label: string, extra: string) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `${styles.codeCopy!} ${extra}`;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.appendChild(iconNode(icon, 14));
+        block.appendChild(button);
+        copies.push(button);
+        return button;
+      };
+      const insert = action("paste", tx("Insert at Caret"), styles.codeInsert!);
+      insert.dataset.insert = text;
+      const apply = action("edit", tx("Apply to File"), styles.codeApply!);
+      apply.dataset.apply = text;
+      apply.dataset.info = code.getAttribute("data-info") ?? "";
+      void highlightInto(code, text, lang);
+    }
   });
   root.querySelectorAll<HTMLElement>("code").forEach((code) => {
     if (code.parentElement?.tagName === "PRE" || code.closest("a")) return;
@@ -220,6 +248,16 @@ export function Markdown({
       className={styles.markdown}
       onClick={(e) => {
         const target = e.target as HTMLElement;
+        const insert = target.closest<HTMLElement>("button[data-insert]");
+        if (insert) {
+          insertCodeAtCaret(insert.dataset.insert ?? "");
+          return;
+        }
+        const apply = target.closest<HTMLElement>("button[data-apply]");
+        if (apply) {
+          void applyCodeBlock(apply.dataset.apply ?? "", apply.dataset.info ?? "", cwd);
+          return;
+        }
         const copy = target.closest<HTMLElement>("button[data-copy]");
         if (copy) {
           void copyText(copy.dataset.copy ?? "");

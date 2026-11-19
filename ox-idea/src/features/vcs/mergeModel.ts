@@ -9,11 +9,12 @@ import {
   ChangeSet,
   StateEffect,
   StateField,
+  Transaction,
   type EditorState,
   type Text,
   type TransactionSpec,
 } from "@codemirror/state";
-import { mergeChanges, type ChangeKind } from "./mergeDiff3";
+import { mergeChanges, tryResolve, type ChangeKind } from "./mergeDiff3";
 
 export type MergeSide = "left" | "right";
 
@@ -28,8 +29,11 @@ export interface MergeChange {
   /** Where the change is in the left and the right version, for the side panes. */
   leftRange: readonly [number, number];
   rightRange: readonly [number, number];
-  /** The word-level merge of a conflict whose sides changed different words. */
-  auto: string | null;
+  /**
+   * The word-level merge of a conflict whose sides changed different words.
+   * `undefined`: still to compute ([`fillAuto`]); `null`: a real conflict.
+   */
+  auto: string | null | undefined;
   /** The sides that were accepted or ignored. */
   done: { readonly left: boolean; readonly right: boolean };
   /** One side of a conflict was accepted and the other is still to be decided. */
@@ -92,7 +96,9 @@ export function startMerge(left: string, base: string, right: string): { text: s
   left = left.replace(/\r\n?/g, "\n");
   base = base.replace(/\r\n?/g, "\n");
   right = right.replace(/\r\n?/g, "\n");
-  const found = mergeChanges(left, base, right);
+  // The word-level merges stay pending: they are expensive, and only the automatic
+  // resolving needs them. The editor fills them in idle time (fillAuto).
+  const found = mergeChanges(left, base, right, false);
   // Too different to compare line by line: the whole file is one change.
   const whole = (): MergeChange[] => {
     if (left === base && right === base) return [];
@@ -128,6 +134,25 @@ export function startMerge(left: string, base: string, right: string): { text: s
       oneside: false,
     })) ?? whole();
   return { text: base, changes };
+}
+
+/**
+ * Computes the still-pending word-level merges (`auto === undefined`) of the conflicts at
+ * `indexes`, or of every change. No text is edited; the transaction only settles the model,
+ * outside the undo history. The editor calls it in idle time, one conflict per callback,
+ * and before an automatic resolving that must not miss a pending conflict.
+ */
+export function fillAuto(state: EditorState, indexes?: readonly number[]): TransactionSpec | null {
+  const changes = state.field(mergeField);
+  const plans: Plan[] = [];
+  for (const i of indexes ?? changes.map((_, j) => j)) {
+    const c = changes[i];
+    if (!c || c.kind !== "conflict" || c.auto !== undefined) continue;
+    const auto = c.base !== "" && c.left !== "" && c.right !== "" ? tryResolve(c.left, c.base, c.right) : null;
+    plans.push({ index: i, next: { ...c, auto } });
+  }
+  const spec = commit(state, plans, "input.resolve");
+  return spec && { ...spec, annotations: Transaction.addToHistory.of(false) };
 }
 
 /** A change's new state, and the edit of the result that goes with it. */
@@ -196,7 +221,8 @@ const edited = (doc: Text, c: MergeChange) => doc.sliceString(c.from, c.to) !== 
 /** IntelliJ's `canResolveChangeAutomatically`: `base` stands for "whatever fits". */
 export function canResolveAutomatically(doc: Text, c: MergeChange, side: MergeSide | "base"): boolean {
   if (edited(doc, c)) return false;
-  if (isConflict(c)) return side === "base" && c.auto !== null && !c.done.left && !c.done.right;
+  // A pending word-level merge (undefined) is not resolvable yet, as a real conflict (null).
+  if (isConflict(c)) return side === "base" && c.auto != null && !c.done.left && !c.done.right;
   return !isResolved(c) && (side === "base" || changesSide(c, side));
 }
 
@@ -330,15 +356,28 @@ export interface MergeSummary {
   revert: boolean;
 }
 
+/**
+ * The last summary, kept while the document and the changes it was computed from stay the
+ * same: the toolbar asks for it once per command, and only an edit or a decision (fillAuto
+ * included, which changes no text) invalidates it. Both are new objects then: the document
+ * by CodeMirror, the changes by mergeField.
+ */
+let summaryCache: { doc: Text; changes: readonly MergeChange[]; summary: MergeSummary } | null = null;
+
 export function summarize(state: EditorState): MergeSummary {
+  const doc = state.doc;
+  const changes = state.field(mergeField);
+  if (summaryCache && summaryCache.doc === doc && summaryCache.changes === changes) return summaryCache.summary;
   const open = unresolved(state);
-  return {
+  const summary: MergeSummary = {
     pending: open.length,
     conflicts: open.filter(isConflict).length,
     left: hasNonConflicting(state, "left"),
     all: hasNonConflicting(state, "base"),
     right: hasNonConflicting(state, "right"),
     simple: hasSimple(state),
-    revert: state.field(mergeField).some(isResolved),
+    revert: changes.some(isResolved),
   };
+  summaryCache = { doc, changes, summary };
+  return summary;
 }

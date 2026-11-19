@@ -1061,6 +1061,7 @@ impl AgentManager {
         self.tasks.write().remove(id);
         *task.deleted.lock() = true;
         let _ = std::fs::remove_file(self.shared.paths.store_dir.join(format!("{id}.json")));
+        let _ = std::fs::remove_dir_all(self.shared.paths.store_dir.join("outputs").join(id));
         self.shared.emit(AgentEvent::Removed { id: id.to_owned() });
         Ok(())
     }
@@ -1094,7 +1095,9 @@ impl Task {
     fn restore(file: TaskFile, shared: Arc<Shared>) -> Arc<Self> {
         let mut task = file.task;
         config::add_client_options(&task.provider, &mut task.config);
-        let conversation = Conversation::restore(file.entries, file.subagents);
+        let mut conversation = Conversation::restore(file.entries, file.subagents);
+        // Full tool output spills beside the task store; the truncation notice points at it.
+        conversation.set_outputs_dir(Some(shared.paths.store_dir.join("outputs").join(&task.id)));
         Arc::new(Self {
             id: task.id.clone(),
             shared,

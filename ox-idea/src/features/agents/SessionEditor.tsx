@@ -28,6 +28,7 @@ import type {
 } from "@/bindings";
 import { executeAction } from "@/platform/actions";
 import { call, commands, onIdeEvent } from "@/platform/ipc";
+import { notifyFileOperation } from "@/platform/fileOps";
 import { basename, relativeDir, useProject } from "@/platform/project";
 import { editorService, notifications, useEditorShown, type EditorInput } from "@/workbench/contributions";
 import {
@@ -116,6 +117,7 @@ import {
 } from "./store";
 import { setFocusedSession, focusedSession, type FocusedSession } from "./sessionFocus";
 import { taskMenu } from "./taskActions";
+import { WorktreeMerge } from "./WorktreeMerge";
 import styles from "./Session.module.css";
 
 export function SessionEditor({ input, docked = false }: { input: EditorInput; docked?: boolean }) {
@@ -333,6 +335,7 @@ function SessionStatus({ task, head }: { task: AgentTask; head: string | null })
         {task.status === "limited" && task.resetsMs != null && ` · ${tx`resets ${formatSentAt(task.resetsMs)}`}`}
       </span>
       <Meters task={task} />
+      <WorktreeMerge task={task} />
     </div>
   );
 }
@@ -950,58 +953,44 @@ function Stream({ task, subagent, onOpenSubagent, finding, findFocus, onCloseFin
 type UserEntry = Extract<AgentEntry, { type: "user" }>;
 
 /**
- * Streaming reply as plain text, catching up to the latest text every animation
- * frame — a smooth typewriter. Markdown rendering (parse + sanitize + highlight
- * over the whole accumulated text) happens once when the turn ends; doing it per
- * delta is what stalled long replies, and batching it made the stream choppy.
+ * Streaming reply as Markdown in micro-batches: parse + sanitize + highlight over
+ * the accumulated text at most every STREAM_BATCH_MS, not per delta (which stalled
+ * long replies). Each batch shows the latest text, so a pausing stream settles on
+ * the full text within one batch, and the turn-end swap to the finished reply keeps
+ * the same formatting instead of jumping from plain text to Markdown.
  */
-/** Typewriter for streamed plain text: reveals characters at a steady,
- * self-adapting pace instead of dumping each delta batch in one chunk.
- * The reveal lags the stream slightly (bounded) and plays at a constant
- * per-frame rate; when the model bursts, the pace catches up (capped) so
- * the lag stays under ~1s. Turn end swaps to <Markdown> for the full text. */
-function StreamText({ text }: { text: string }) {
-  const [shown, setShown] = useState(text.length);
-  const progress = useRef(text.length);
-  const acc = useRef(0);
+const STREAM_BATCH_MS = 120;
+
+function StreamText({ text, cwd, onDiagramDrawn }: { text: string; cwd: string; onDiagramDrawn?: () => void }) {
+  const [shown, setShown] = useState(text);
+  const latest = useRef(text);
+  const timer = useRef<number | null>(null);
   useEffect(() => {
-    // Already caught up (or remounted with full text): nothing to play.
-    if (text.length <= progress.current) {
-      progress.current = text.length;
-      acc.current = 0;
-      setShown(text.length);
-      return;
+    // Refs are written here, not during render. A reset (rollback, replaced entry)
+    // is not an append: flush it on the next tick rather than batching it. Every
+    // setShown happens in the timer callback, never synchronously in the effect.
+    const reset = !text.startsWith(latest.current);
+    latest.current = text;
+    if (reset && timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
     }
-    let raf = 0;
-    let idle = 0;
-    const tick = () => {
-      const behind = text.length - progress.current;
-      if (behind <= 0) {
-        // Caught up: keep the loop alive waiting for the next batch instead of
-        // stopping and visibly resuming per batch (the "choppy" feel); give up
-        // after ~1s idle — the next delta restarts the loop via this effect.
-        if (++idle > 60) return;
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-      idle = 0;
-      // Play ~1/30 of the backlog per frame: the reveal rate converges to the
-      // arrival rate (steady-state lag ≈ half a second of stream), so bursts
-      // accelerate and slow streams decelerate instead of sprint-and-stall.
-      // The accumulator allows sub-character frame rates for slow streams.
-      acc.current += Math.max(behind / 30, 1 / 6);
-      const take = Math.floor(acc.current);
-      if (take > 0) {
-        acc.current -= take;
-        progress.current = Math.min(text.length, progress.current + take);
-        setShown(progress.current);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    if (timer.current !== null) return;
+    timer.current = window.setTimeout(
+      () => {
+        timer.current = null;
+        setShown(latest.current);
+      },
+      reset ? 0 : STREAM_BATCH_MS,
+    );
   }, [text]);
-  return <div className={styles.streamText}>{text.slice(0, shown)}</div>;
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
+  return <Markdown text={shown} cwd={cwd} onDiagramDrawn={onDiagramDrawn} />;
 }
 
 /** Message text with file references and skills as tags, distinct from prose. */
@@ -1282,7 +1271,7 @@ const Entry = memo(function Entry({
         <div className={styles.agentMessage}>
           <div className={styles.agentCard}>
             {working ? (
-              <StreamText text={entry.text} />
+              <StreamText text={entry.text} cwd={task.cwd} onDiagramDrawn={onDiagramDrawn} />
             ) : (
               <AgentReply
                 text={entry.text}
@@ -1320,7 +1309,7 @@ const Entry = memo(function Entry({
           >
             <div className={styles.thoughtBody}>
               {working ? (
-                <StreamText text={entry.text} />
+                <StreamText text={entry.text} cwd={task.cwd} onDiagramDrawn={onDiagramDrawn} />
               ) : (
                 <Markdown text={entry.text} cwd={task.cwd} onDiagramDrawn={onDiagramDrawn} />
               )}
@@ -2520,6 +2509,30 @@ function loadChangesOpen(): Record<string, boolean> {
   }
 }
 
+const CHANGES_ACCEPTED_KEY = "oxidea.agents.changesAccepted.v1";
+
+/** Files the user reviewed and accepted, per task: a review mark only, no git operation. */
+function loadChangesAccepted(): Record<string, string[]> {
+  try {
+    const raw = globalThis.localStorage?.getItem(CHANGES_ACCEPTED_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : {};
+    return v && typeof v === "object" ? (v as Record<string, string[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveChangesAccepted(task: string, paths: ReadonlySet<string>) {
+  try {
+    globalThis.localStorage?.setItem(
+      CHANGES_ACCEPTED_KEY,
+      JSON.stringify({ ...loadChangesAccepted(), [task]: [...paths] }),
+    );
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 /**
  * Whether the Changes pane is shown for `task`: the user's choice once made, else
  * only while the task has changes. Docked sessions stay in the conversation until
@@ -2561,6 +2574,25 @@ function ChangesPane({
   onHide: () => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [accepted, setAccepted] = useState<{ task: string; paths: Set<string> }>(() => ({
+    task: task.id,
+    paths: new Set(loadChangesAccepted()[task.id] ?? []),
+  }));
+  const acceptedPaths = accepted.task === task.id ? accepted.paths : new Set(loadChangesAccepted()[task.id] ?? []);
+  const busy = isBusy(task.status);
+  const toggleAccepted = (path: string) => {
+    const paths = new Set(acceptedPaths);
+    if (paths.has(path)) paths.delete(path);
+    else paths.add(path);
+    setAccepted({ task: task.id, paths });
+    saveChangesAccepted(task.id, paths);
+  };
+  const revert = async (change: AgentChange) => {
+    if (await revertChange(task, change)) {
+      // The content moved back to the base: a previous review no longer applies.
+      if (acceptedPaths.has(change.path)) toggleAccepted(change.path);
+    }
+  };
   const added = changes?.reduce((n, c) => n + c.added, 0) ?? 0;
   const removed = changes?.reduce((n, c) => n + c.removed, 0) ?? 0;
   return (
@@ -2604,18 +2636,47 @@ function ChangesPane({
             selected={selected}
             onSelectionChange={(sel) => setSelected(sel)}
             onActivate={(c) => void openChangeDiff(task, c.path)}
-            renderNode={(c) => (
-              <span className={styles.change} title={c.relPath}>
-                <Icon name={fileIconName(basename(c.path), c.path)} size={16} />
-                <span className={styles.changeName} style={{ color: KIND_COLOR[c.kind] }}>
-                  {basename(c.path)}
+            renderNode={(c) => {
+              const isAccepted = acceptedPaths.has(c.path);
+              return (
+                <span className={styles.change} title={c.relPath}>
+                  <Icon name={fileIconName(basename(c.path), c.path)} size={16} />
+                  <span
+                    className={styles.changeName}
+                    style={{ color: isAccepted ? "var(--fg-subtle)" : KIND_COLOR[c.kind] }}
+                  >
+                    {basename(c.path)}
+                  </span>
+                  <span className={clsx(styles.changeDir, isAccepted && styles.changeAccepted)}>
+                    {relativeDir(task.cwd, c.path)}
+                  </span>
+                  <span className={clsx(styles.changeStat, isAccepted && styles.changeAccepted)}>
+                    <span className={styles.added}>+{c.added}</span>{" "}
+                    <span className={styles.removed}>−{c.removed}</span>
+                  </span>
+                  <span className={styles.changeActions} onDoubleClick={(e) => e.stopPropagation()}>
+                    <IconButton
+                      icon="revert"
+                      size="small"
+                      title={
+                        busy
+                          ? tx("Wait for the task to finish before reverting")
+                          : tx("Revert this file to its state before the task")
+                      }
+                      disabled={busy}
+                      onClick={() => void revert(c)}
+                    />
+                    <IconButton
+                      icon="check"
+                      size="small"
+                      className={isAccepted ? styles.acceptedMark : undefined}
+                      title={isAccepted ? tx("Accepted — click to clear the mark") : tx("Mark as accepted")}
+                      onClick={() => toggleAccepted(c.path)}
+                    />
+                  </span>
                 </span>
-                <span className={styles.changeDir}>{relativeDir(task.cwd, c.path)}</span>
-                <span className={styles.changeStat}>
-                  <span className={styles.added}>+{c.added}</span> <span className={styles.removed}>−{c.removed}</span>
-                </span>
-              </span>
-            )}
+              );
+            }}
             empty={
               <div className={styles.changesEmpty}>
                 <T>No changes yet</T>
@@ -2626,6 +2687,41 @@ function ChangesPane({
       </div>
     </aside>
   );
+}
+
+/**
+ * Restores one changed file to its state before the task: the base text, or removal
+ * when the file did not exist at the base. Returns whether the revert happened.
+ */
+async function revertChange(task: AgentTask, change: AgentChange): Promise<boolean> {
+  // Loaded on demand, like the diff machinery: dialogs stay out of this module graph.
+  const { confirmDialog } = await import("@/features/vcs/dialogs");
+  const name = basename(change.path);
+  const ok = await confirmDialog({
+    title: "Revert",
+    okLabel: "Revert",
+    danger: true,
+    message:
+      change.kind === "added" || change.kind === "untracked"
+        ? tx`Delete '${name}'? It did not exist before the task started.`
+        : tx`Discard the agent's changes to '${name}' and restore its previous content?`,
+  });
+  if (!ok) return false;
+  try {
+    const base = await call(commands.agentBaseText(task.id, change.path));
+    if (base === null) {
+      await call(commands.fsDelete(change.path));
+      notifyFileOperation({ kind: "deleted", paths: [change.path] });
+    } else {
+      const { writeFileText } = await import("@/features/vcs/ops");
+      await writeFileText(change.path, base, { save: true, exact: true });
+    }
+    await refreshChanges(task.id);
+    return true;
+  } catch (e) {
+    notifications().notify({ level: "error", title: "Couldn't revert the file", body: String(e) });
+    return false;
+  }
 }
 
 /** Opens the diff of `path` between the task's start and now. */

@@ -86,6 +86,32 @@
   color: var(--fg-subtle);
 }
 
+/* Merge-to-base / Create-PR actions for a finished worktree task, in the status bar. */
+.worktreeMerge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.worktreeMergeBtn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--link);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.worktreeMergeBtn:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+.worktreeMergeBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  text-decoration: none;
+}
+
 /* The conversation with its find bar. */
 .streamArea {
   min-width: 0;
@@ -433,6 +459,13 @@
 .codeCopy:hover {
   background: var(--bg-hover);
 }
+/* Insert / Apply sit left of Copy on the same row (22px buttons, 4px gaps). */
+.codeInsert {
+  right: 30px;
+}
+.codeApply {
+  right: 56px;
+}
 /* Mermaid diagrams: the source stays until the diagram is drawn (and next to an
    error), and the Copy button lives on the block — the drawn diagram hides the
    code block that would otherwise carry it. */
@@ -565,11 +598,6 @@
 .thoughtBody {
   margin-top: var(--space-2);
   color: var(--fg-secondary);
-}
-/* Streaming reply as plain text (typewriter): markdown rendering happens once when the turn ends. */
-.streamText {
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
 }
 .thoughtText {
   margin-top: 4px;
@@ -1092,6 +1120,19 @@
   font-size: var(--fs-small);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.changeActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Accepted files stay listed but read as reviewed: dimmed dir/stat, subtle name. */
+.changeAccepted {
+  opacity: 0.55;
+}
+.acceptedMark {
+  color: var(--vcs-added);
 }
 
 .added {

@@ -7,6 +7,7 @@ import {
   canApply,
   changesIn,
   changesInSide,
+  fillAuto,
   hasNonConflicting,
   hasSimple,
   isResolved,
@@ -29,6 +30,9 @@ function merge(left: string, base: string, right: string) {
     doc: start.text,
     extensions: [history(), mergeHistory, mergeField.init(() => start.changes)],
   });
+  // The editor computes the pending word-level merges in idle time; tests start settled.
+  const fill = fillAuto(state);
+  if (fill) state = state.update(fill).state;
   const view = {
     get state() {
       return state;
@@ -246,6 +250,71 @@ describe("resolving automatically", () => {
     m.run(resolveSimple(m.view.state));
     expect(m.text).toBe(pad("x", "b"));
     expect(m.changes.map(isResolved)).toEqual([true, false]);
+  });
+});
+
+describe("the pending word-level merges", () => {
+  const b = "let a = 1 + b;\n";
+  const l = "let x = 1 + b;\n";
+  const r = "let a = 1 + 2;\n";
+
+  /** A model as it is right after opening, before the idle computation ran. */
+  function pending(left: string, base: string, right: string) {
+    const start = startMerge(left, base, right);
+    let state = EditorState.create({
+      doc: start.text,
+      extensions: [history(), mergeHistory, mergeField.init(() => start.changes)],
+    });
+    return {
+      get state() {
+        return state;
+      },
+      fill: (indexes?: readonly number[]) => {
+        const spec = fillAuto(state, indexes);
+        if (spec) state = state.update(spec).state;
+        return spec;
+      },
+    };
+  }
+
+  it("opens without computing them: no automatic resolving until they are filled", () => {
+    const p = pending(l, b, r);
+    expect(p.state.field(mergeField)[0]!.auto).toBeUndefined();
+    expect(hasSimple(p.state)).toBe(false);
+    expect(applyTo(p.state, [0], { type: "auto", side: "base" })).toBeNull();
+  });
+
+  it("fillAuto computes the merge, enables the resolving, and is idempotent", () => {
+    const p = pending(l, b, r);
+    expect(p.fill()).not.toBeNull();
+    expect(p.state.field(mergeField)[0]!.auto).toBe("let x = 1 + 2;\n");
+    expect(hasSimple(p.state)).toBe(true);
+    expect(p.fill()).toBeNull();
+  });
+
+  it("marks a conflict of the same word as a real conflict (null)", () => {
+    const p = pending("let x = 1;\n", "let a = 1;\n", "let y = 1;\n");
+    p.fill();
+    expect(p.state.field(mergeField)[0]!.auto).toBeNull();
+    expect(hasSimple(p.state)).toBe(false);
+  });
+
+  it("fills only the given indexes", () => {
+    const p = pending(
+      "let x = 1;\nmid\nlet b = 7;\n",
+      "let a = 1;\nmid\nlet b = 2;\n",
+      "let a = 9;\nmid\nlet y = 2;\n",
+    );
+    p.fill([0]);
+    expect(p.state.field(mergeField)[0]!.auto).toBe("let x = 9;\n");
+    expect(p.state.field(mergeField)[1]!.auto).toBeUndefined();
+    p.fill();
+    expect(p.state.field(mergeField)[1]!.auto).toBe("let y = 7;\n");
+  });
+
+  it("does not add an undo step", () => {
+    const m = merge(l, b, r);
+    expect(m.undo()).toBe(false);
   });
 });
 
