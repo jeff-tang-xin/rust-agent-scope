@@ -261,7 +261,8 @@ fn register_base_tools(
     memory_workspace: Arc<WorkspaceManager>,
     // 是否装配文件工具与本地 shell。测试工作区传 false：测试只对需求负责、
     // 不碰代码（代码实现与修复是协同侧的职责），文件工具只会诱导它去读
-    // 被测系统源码（绑定协同后工作区根就是协同项目目录）。
+    // 被测系统源码（绑定协同后工作区根就是协同项目目录）。skill 创建/管理
+    // 与本开关解耦——所有类别（含 test）都装 load_skill/skill_manage/propose_skill。
     include_fs: bool,
 ) -> Result<(), String> {
     let fs = workspace
@@ -283,27 +284,20 @@ fn register_base_tools(
     // + 用户级 ~/.claude/skills/（只读，跨项目复用）——与 OXidea 同目录约定，
     // 同一项目跨宿主共享 skill。身份驱动的用法引导见 BASE_PROMPT（开发找语言/
     // 框架规范、测试找网页功能/接口测试、运维找服务器操作、数据库找数据库操作）。
-    // - include_fs=true（solo/team/ops/db）：三工具全装——skill_manage/propose_skill
-    //   可写项目级（skill_manage 自带静态安全扫描，危险内容拒绝落盘并归档；
-    //   auto_promote 直写正式根）。写 .claude/skills 触碰用户代码资产，默认 ask
-    //   授权（不进 DEVELOP_ALLOWLIST）。
-    // - include_fs=false（test）：只装 load_skill（只读）——测试身份要能加载
-    //   测试类 skill（网页功能/接口测试等），但安装 skill（写代码资产区）不是
-    //   测试职责。
-    let skill_main = if include_fs {
-        Arc::new(WorkspaceSkillRepository::writable(
-            Arc::clone(&fs),
-            ".claude/skills",
-            Some("project"),
-        ))
-    } else {
-        Arc::new(WorkspaceSkillRepository::new(
-            Arc::clone(&fs),
-            ".claude/skills",
-            Some("project"),
-            false,
-        ))
-    };
+    // - 三工具（load_skill/skill_manage/propose_skill）对所有类别开放（含 test）：
+    //   skill_manage/propose_skill 可写项目级（skill_manage 自带静态安全扫描，
+    //   危险内容拒绝落盘并归档；auto_promote 直写正式根）。写 .claude/skills
+    //   触碰用户代码资产，默认 ask 授权（不进 DEVELOP_ALLOWLIST）。
+    // - include_fs 只控制文件工具与本地 shell：test（include_fs=false）不装
+    //   write_file/edit_file/execute，但仍可加载/创建测试类 skill。
+    // skill 主仓库对所有类别可写（含 test）：skill 创建与文件工具解耦——
+    // test 不装 write_file/edit_file/execute，但可沉淀测试类 skill。fs 沙箱
+    // 可写（build_workspace 恒 Sandboxed），写 .claude/skills 不受 include_fs 影响。
+    let skill_main = Arc::new(WorkspaceSkillRepository::writable(
+        Arc::clone(&fs),
+        ".claude/skills",
+        Some("project"),
+    ));
     let mut skill_repos: Vec<Arc<WorkspaceSkillRepository>> = vec![Arc::clone(&skill_main)];
     if let Some(home) = user_home_dir() {
         let home_fs = Arc::new(LocalFilesystem::new(
@@ -319,23 +313,23 @@ fn register_base_tools(
         )));
     }
     toolkit.register(Arc::new(LoadSkillTool::new(skill_repos)));
-    if include_fs {
-        let skill_drafts = Arc::new(WorkspaceSkillRepository::writable(
-            Arc::clone(&fs),
-            ".claude/skills/_drafts",
-            Some("project"),
-        ));
-        let skill_manage = Arc::new(SkillManageTool::new(
-            skill_main,
-            skill_drafts,
-            SkillManageConfig::defaults()
-                .with_main_dir(".claude/skills")
-                .with_drafts_dir(".claude/skills/_drafts")
-                .with_auto_promote(true),
-        ));
-        toolkit.register(Arc::new(ProposeSkillTool::new(Arc::clone(&skill_manage))));
-        toolkit.register(skill_manage);
-    }
+    // skill 创建/管理对所有类别开放（含 test）：skill_manage 自带静态安全扫描
+    // （危险内容拒绝落盘并归档），写 .claude/skills 触碰代码资产默认 ask 授权。
+    let skill_drafts = Arc::new(WorkspaceSkillRepository::writable(
+        Arc::clone(&fs),
+        ".claude/skills/_drafts",
+        Some("project"),
+    ));
+    let skill_manage = Arc::new(SkillManageTool::new(
+        skill_main,
+        skill_drafts,
+        SkillManageConfig::defaults()
+            .with_main_dir(".claude/skills")
+            .with_drafts_dir(".claude/skills/_drafts")
+            .with_auto_promote(true),
+    ));
+    toolkit.register(Arc::new(ProposeSkillTool::new(Arc::clone(&skill_manage))));
+    toolkit.register(skill_manage);
     // 记忆工具锚定独立的 .ox 记忆工作区（<项目>/.ox/）：MEMORY.md 与
     // memory/ 台账不落项目根，非业务产出与业务代码分离（.ox 数据规范）。
     let memory = MemoryToolSet::new(memory_workspace.clone());
@@ -683,10 +677,11 @@ pub fn build_agent(
     }
     // 远程能力统一注册（ops/db 的类别默认 + 各类别的绑定开放，一套语义）：
     // - ops 类别默认开放 remote_shell；db 类别默认开放 db_query/db_dml；
-    // - 其余类别（collab）绑定非空才开放对应工具；
+    // - 其余类别（collab/test）绑定非空才开放对应工具；
     // - 绑定列表非空时一律收窄为白名单（工具内校验，越界即拒绝）。
-    // - test 类别工具面固定：既不开放也不因绑定而开放（测试只做浏览器测试）。
-    if mode != StudioMode::Test && (mode == StudioMode::Ops || !ws.bound_servers.is_empty()) {
+    // - test 类别绑定后开放 remote_shell（每次确认）+ db_query（只读），
+    //   不开放 db_dml（数据变更非测试职责）。
+    if mode == StudioMode::Ops || !ws.bound_servers.is_empty() {
         toolkit.register(Arc::new(RemoteShellTool::new(
             Arc::clone(&resources.ssh_pool),
             allowlist(&ws.bound_servers),
@@ -694,7 +689,7 @@ pub fn build_agent(
         .with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))
         .with_config(Arc::clone(&resources.config))));
     }
-    if mode != StudioMode::Test && (mode == StudioMode::Db || !ws.bound_databases.is_empty()) {
+    if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
         let allowed = allowlist(&ws.bound_databases);
         // 会话状态目录：db 工具执行时按会话绑定（binding.json）收窄白名单。
         let session_state_dir = Some(
@@ -705,11 +700,14 @@ pub fn build_agent(
             allowed.clone(),
             session_state_dir.clone(),
         )));
-        toolkit.register(Arc::new(DbDmlTool::new(
-            Arc::clone(&resources.db_catalog),
-            allowed,
-            session_state_dir,
-        )));
+        // 测试工作区只读查询，不开放数据变更（db_dml 非测试职责）。
+        if mode != StudioMode::Test {
+            toolkit.register(Arc::new(DbDmlTool::new(
+                Arc::clone(&resources.db_catalog),
+                allowed,
+                session_state_dir,
+            )));
+        }
     }
 
     // solo 的 spawn 分身体系（AgentScope 语义：solo 派自己的分身，独立会话跑
@@ -879,9 +877,16 @@ fn default_permission_context(
     let mut ask_tools: Vec<&'static str> = match mode {
         StudioMode::Ops => vec!["remote_shell"],
         StudioMode::Db => vec!["db_dml"],
-        // 测试工作区：浏览器工具全部只读免确认（headless 沙箱内操作），
-        // 文件写入/编辑/shell 不在工具面，无需 ask 规则。
-        StudioMode::Test => vec![],
+        // 测试工作区：浏览器工具只读免确认（headless 沙箱内操作）；绑定服务器
+        // 后开放 remote_shell（远程命令每次确认）；db_query 只读免确认，不开放
+        // db_dml；skill_manage/propose_skill 写代码资产由裁决链默认 ask。
+        StudioMode::Test => {
+            let mut tools = vec![];
+            if !ws.bound_servers.is_empty() {
+                tools.push("remote_shell");
+            }
+            tools
+        }
         StudioMode::Solo | StudioMode::Team => {
             let mut tools = vec!["execute", "write_file", "edit_file"];
             if !ws.bound_servers.is_empty() {
@@ -1104,11 +1109,11 @@ mod tests {
 
     use super::*;
 
-    /// skill 生态装配：include_fs=true 注册三工具（load_skill / skill_manage /
-    /// propose_skill，项目级 .claude/skills 可写 + 用户级只读）；测试工作区
-    /// （include_fs=false）不装——测试只对需求负责，不碰代码资产区。
+    /// skill 生态装配：skill 创建/管理（load_skill/skill_manage/propose_skill）
+    /// 对所有类别开放（含 test，include_fs=false）；include_fs 只控制文件工具
+    /// 与本地 shell——test 不装 write_file/execute，但可加载/创建测试类 skill。
     #[test]
-    fn skill_tools_follow_filesystem_inclusion() {
+    fn skill_creation_decoupled_from_filesystem_tools() {
         let root = std::env::temp_dir().join(format!("skill_tools_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let workspace = build_workspace(&root).unwrap();
@@ -1122,16 +1127,25 @@ mod tests {
                 "{name} should be registered for fs-enabled workspace"
             );
         }
+        // include_fs=true：文件工具与本地 shell 在工具面。
+        for name in ["write_file", "execute"] {
+            assert!(
+                toolkit.get(name).is_some(),
+                "{name} should be registered when include_fs=true"
+            );
+        }
 
-        // 测试工作区（include_fs=false）：只装只读 load_skill（测试身份要加载
-        // 测试类 skill），不装安装管理工具（写代码资产区不是测试职责）。
+        // 测试工作区（include_fs=false）：skill 三工具仍全装（可加载/创建测试类
+        // skill），但文件工具与本地 shell 不在工具面（测需求不碰代码）。
         let mut test_toolkit = Toolkit::new();
         register_base_tools(&mut test_toolkit, &workspace, memory_ws, false).unwrap();
-        assert!(
-            test_toolkit.get("load_skill").is_some(),
-            "load_skill must be registered (read-only) for test workspace"
-        );
-        for name in ["skill_manage", "propose_skill"] {
+        for name in ["load_skill", "skill_manage", "propose_skill"] {
+            assert!(
+                test_toolkit.get(name).is_some(),
+                "{name} must be registered for test workspace (skill creation decoupled from fs)"
+            );
+        }
+        for name in ["write_file", "execute"] {
             assert!(
                 test_toolkit.get(name).is_none(),
                 "{name} must not be registered for test workspace"
