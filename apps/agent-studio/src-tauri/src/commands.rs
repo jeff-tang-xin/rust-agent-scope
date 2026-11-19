@@ -945,9 +945,8 @@ fn validate_workspace(config: &StudioConfig, ws: &WorkspaceConfig) -> Result<(),
         if ws.agent_id != crate::config::TEST_AGENT_ID {
             return Err("测试工作区固定使用内置测试助手，不能绑定其他智能体".to_string());
         }
-        if !ws.bound_servers.is_empty() || !ws.bound_databases.is_empty() {
-            return Err("测试工作区不支持绑定服务器/数据库（工具面固定）".to_string());
-        }
+        // 服务器/数据库绑定允许：测试可自己绑定；绑定协同工作区时复用协同的
+        // 绑定（见 factory::effective_bindings）。
         // 绑定协同工作区：目标必须存在且是 collab 类（共用其工作目录），
         // 不可指向自己（自指会让目录解析语义含糊）。
         if let Some(bid) = ws.bound_workspace_id.as_deref() {
@@ -3456,13 +3455,13 @@ mod tests {
         // 协同工作区 + 其他智能体 → 通过（不受测试约束）。
         assert!(validate_workspace(&config, &mk("collab", "custom-agent")).is_ok());
 
-        // 测试工作区绑服务器/数据库 → 拒绝。
+        // 测试工作区绑服务器/数据库 → 允许（可自己绑定；绑定协同时复用协同的）。
         let mut bound = mk("test", crate::config::TEST_AGENT_ID);
         bound.bound_servers = vec!["srv".into()];
-        assert!(validate_workspace(&config, &bound).is_err());
+        assert!(validate_workspace(&config, &bound).is_ok());
         let mut bound_db = mk("test", crate::config::TEST_AGENT_ID);
         bound_db.bound_databases = vec!["db".into()];
-        assert!(validate_workspace(&config, &bound_db).is_err());
+        assert!(validate_workspace(&config, &bound_db).is_ok());
     }
 
     /// 测试工作区判定（set_plan_mode/get_plan_status 的固定 plan 护栏依据）：

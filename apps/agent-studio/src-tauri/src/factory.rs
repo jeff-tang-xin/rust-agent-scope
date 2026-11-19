@@ -150,6 +150,32 @@ pub fn effective_workspace_root(
     resolve_workspace_root(data_dir, ws)
 }
 
+/// 测试工作区的远程资源有效绑定：复用绑定协同工作区的服务器/数据库（被测
+/// 系统就是协同绑定的那些），并叠加测试自己绑定的（去重）。绑定协同不是必须
+/// 的——未绑定协同（或协同缺失）时回落测试自己的绑定。非 test 类别用自己的
+/// 绑定。绑定/解绑后新装配的会话自动生效（build_agent 每次重新解析）。
+fn effective_bindings(config: &StudioConfig, ws: &WorkspaceConfig) -> (Vec<String>, Vec<String>) {
+    let mut servers = ws.bound_servers.clone();
+    let mut databases = ws.bound_databases.clone();
+    if ws.kind == "test" {
+        if let Some(bid) = ws.bound_workspace_id.as_deref().filter(|b| !b.trim().is_empty()) {
+            if let Some(target) = config.workspace(bid) {
+                for s in &target.bound_servers {
+                    if !servers.contains(s) {
+                        servers.push(s.clone());
+                    }
+                }
+                for d in &target.bound_databases {
+                    if !databases.contains(d) {
+                        databases.push(d.clone());
+                    }
+                }
+            }
+        }
+    }
+    (servers, databases)
+}
+
 /// 是否有测试工作区绑定到该协同工作区：req_* 工具与闭环协议只在此时
 /// 注册/拼接——没绑定时这些工具读的是空数据，注册只会误导模型。
 /// 绑定/解绑后新装配的会话自动生效（build_agent 每次都重新判定）。
@@ -677,20 +703,24 @@ pub fn build_agent(
     }
     // 远程能力统一注册（ops/db 的类别默认 + 各类别的绑定开放，一套语义）：
     // - ops 类别默认开放 remote_shell；db 类别默认开放 db_query/db_dml；
-    // - 其余类别（collab/test）绑定非空才开放对应工具；
+    // - 其余类别（collab/test）有效绑定非空才开放对应工具；
     // - 绑定列表非空时一律收窄为白名单（工具内校验，越界即拒绝）。
-    // - test 类别绑定后开放 remote_shell（每次确认）+ db_query（只读），
-    //   不开放 db_dml（数据变更非测试职责）。
-    if mode == StudioMode::Ops || !ws.bound_servers.is_empty() {
+    // - test 有效绑定 = 自己绑定的 + 复用绑定协同的（effective_bindings）；
+    //   开放 remote_shell（每次确认）+ db_query（只读），不开放 db_dml。
+    let (eff_servers, eff_databases) = {
+        let cfg = resources.config.lock().unwrap_or_else(|e| e.into_inner());
+        effective_bindings(&cfg, ws)
+    };
+    if mode == StudioMode::Ops || !eff_servers.is_empty() {
         toolkit.register(Arc::new(RemoteShellTool::new(
             Arc::clone(&resources.ssh_pool),
-            allowlist(&ws.bound_servers),
+            allowlist(&eff_servers),
         ).with_terminal_workspace((mode == StudioMode::Ops).then(|| ws.id.clone()))
         .with_session_dir(workspace_dir(data_dir, &ws.id).join("state").join(USER_ID))
         .with_config(Arc::clone(&resources.config))));
     }
-    if mode == StudioMode::Db || !ws.bound_databases.is_empty() {
-        let allowed = allowlist(&ws.bound_databases);
+    if mode == StudioMode::Db || !eff_databases.is_empty() {
+        let allowed = allowlist(&eff_databases);
         // 会话状态目录：db 工具执行时按会话绑定（binding.json）收窄白名单。
         let session_state_dir = Some(
             workspace_dir(data_dir, &ws.id).join("state").join(USER_ID),
@@ -783,7 +813,8 @@ pub fn build_agent(
     builder = builder.permission_context(default_permission_context(
         &read_only_tools,
         mode,
-        ws,
+        &eff_servers,
+        &eff_databases,
         data_dir,
         &ws.id,
     ));
@@ -865,7 +896,8 @@ const DEVELOP_ALLOWLIST: &[&str] = &[
 fn default_permission_context(
     read_only_tools: &[String],
     mode: StudioMode,
-    ws: &WorkspaceConfig,
+    bound_servers: &[String],
+    bound_databases: &[String],
     data_dir: &Path,
     workspace_id: &str,
 ) -> PermissionContextState {
@@ -882,17 +914,17 @@ fn default_permission_context(
         // db_dml；skill_manage/propose_skill 写代码资产由裁决链默认 ask。
         StudioMode::Test => {
             let mut tools = vec![];
-            if !ws.bound_servers.is_empty() {
+            if !bound_servers.is_empty() {
                 tools.push("remote_shell");
             }
             tools
         }
         StudioMode::Solo | StudioMode::Team => {
             let mut tools = vec!["execute", "write_file", "edit_file"];
-            if !ws.bound_servers.is_empty() {
+            if !bound_servers.is_empty() {
                 tools.push("remote_shell");
             }
-            if !ws.bound_databases.is_empty() {
+            if !bound_databases.is_empty() {
                 tools.push("db_dml");
             }
             tools
@@ -1313,6 +1345,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 测试工作区有效绑定：复用绑定协同的服务器/数据库 + 叠加自己的（去重）；
+    /// 未绑定协同回落自己的；非 test 类别用自己的（不继承）。
+    #[test]
+    fn effective_bindings_test_inherits_bound_collab() {
+        let mk = |id: &str, kind: &str, servers: Vec<&str>, dbs: Vec<&str>, bound: Option<&str>| {
+            WorkspaceConfig {
+                id: id.into(),
+                name: id.into(),
+                kind: kind.into(),
+                agent_id: "a".into(),
+                dir: String::new(),
+                members: vec![],
+                bound_servers: servers.into_iter().map(String::from).collect(),
+                bound_databases: dbs.into_iter().map(String::from).collect(),
+                created_at: 0,
+                auto_resource: None,
+                bound_workspace_id: bound.map(String::from),
+            }
+        };
+        let mut config = StudioConfig::default();
+        config.workspaces.push(mk("collab", "collab", vec!["srv-a"], vec!["db-a"], None));
+        // 测试绑定协同 + 自己绑 srv-b / db-a（db-a 与协同重复 → 去重）。
+        config.workspaces.push(mk("test", "test", vec!["srv-b"], vec!["db-a"], Some("collab")));
+        // 未绑定协同的测试工作区：只有自己的绑定。
+        config.workspaces.push(mk("test-solo", "test", vec!["srv-c"], vec![], None));
+
+        let (servers, databases) = effective_bindings(&config, config.workspace("test").unwrap());
+        assert_eq!(servers, vec!["srv-b".to_string(), "srv-a".to_string()]);
+        assert_eq!(databases, vec!["db-a".to_string()]);
+
+        let (servers, databases) = effective_bindings(&config, config.workspace("test-solo").unwrap());
+        assert_eq!(servers, vec!["srv-c".to_string()]);
+        assert!(databases.is_empty());
+
+        // 非 test（协同自身）：用自己的绑定，不继承。
+        let (servers, _) = effective_bindings(&config, config.workspace("collab").unwrap());
+        assert_eq!(servers, vec!["srv-a".to_string()]);
+    }
+
     #[test]
     fn default_context_ask_tools_not_in_readonly_allowlist() {
         // ask 工具即使被误标只读也不进白名单（ask 优先级保护）。
@@ -1333,7 +1404,8 @@ mod tests {
         let context = default_permission_context(
             &read_only,
             StudioMode::Solo,
-            &ws,
+            &ws.bound_servers,
+            &ws.bound_databases,
             std::path::Path::new("nonexistent-dir"),
             "ws_t",
         );

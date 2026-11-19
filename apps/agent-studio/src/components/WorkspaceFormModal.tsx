@@ -103,7 +103,8 @@ export default function WorkspaceFormModal({
       ? boundDatabases.filter((n) => n !== name)
       : [...boundDatabases, name];
     setBoundDatabases(next);
-    if (editing || next.length === 0) return;
+    // 测试工作区有自己的名字与目录（或跟随协同），不按数据库连接名自动预填。
+    if (editing || next.length === 0 || isTest) return;
     const first = next[0];
     if (!nameTouched) setName(first);
     if (!dirTouched) setDir(`~/.ox/db/${first}`);
@@ -120,9 +121,10 @@ export default function WorkspaceFormModal({
       agent_id: effectiveAgentId,
       dir,
       members: kind === "collab" ? members.filter((m) => m !== agentId) : [],
-      // 测试工作区工具面固定：不绑服务器/数据库（后端同样拒绝）。
-      bound_servers: isTest ? [] : boundServers,
-      bound_databases: isTest ? [] : boundDatabases,
+      // 服务器/数据库绑定：测试可自己绑定；绑定协同工作区时后端复用协同的
+      // 绑定（factory::effective_bindings），两者叠加。
+      bound_servers: boundServers,
+      bound_databases: boundDatabases,
       created_at: initial?.created_at ?? 0,
       // 绑定协同工作区（仅测试类；空串归一为 null = 不绑定）。
       bound_workspace_id: isTest ? boundWsId || null : null,
@@ -286,11 +288,12 @@ export default function WorkspaceFormModal({
           </>
         )}
 
-        {!isTest && (
-          <>
+        <>
             <label className="lbl">绑定服务器</label>
             <div className="desc" style={{ marginBottom: 4 }}>
-              勾选后开放 remote_shell 且仅限勾选的服务器；不勾选 = 可操作全部
+              {isTest
+                ? "勾选后开放 remote_shell（每次确认）且仅限勾选的服务器；绑定协同工作区时自动复用协同绑定的服务器"
+                : "勾选后开放 remote_shell 且仅限勾选的服务器；不勾选 = 可操作全部"}
             </div>
             {servers.length === 0 ? (
               <div className="desc">暂无服务器档案——可先到 Settings 添加。</div>
@@ -314,7 +317,9 @@ export default function WorkspaceFormModal({
 
             <label className="lbl">绑定数据库</label>
             <div className="desc" style={{ marginBottom: 4 }}>
-              勾选后开放 db_query / db_dml 且仅限勾选的库；不勾选 = 可访问全部
+              {isTest
+                ? "勾选后开放 db_query（只读，无数据变更）且仅限勾选的库；绑定协同工作区时自动复用协同绑定的数据库"
+                : "勾选后开放 db_query / db_dml 且仅限勾选的库；不勾选 = 可访问全部"}
             </div>
             {databases.length === 0 ? (
               <div className="desc">暂无数据库档案——可先到 Settings 添加。</div>
@@ -336,8 +341,7 @@ export default function WorkspaceFormModal({
                 ))}
               </div>
             )}
-          </>
-        )}
+        </>
 
         <div className="modal-actions">
           <button

@@ -213,8 +213,9 @@ impl StudioConfig {
         }
     }
 
-    /// 测试工作区归一化（幂等）：测试工作区固定使用内置测试助手，且不绑定
-    /// 服务器/数据库（工具面固定为「浏览器 + 只读文件 + 检索」）。
+    /// 测试工作区归一化（幂等）：测试工作区固定使用内置测试助手。服务器/数据库
+    /// 绑定保留——测试可自己绑定，绑定协同工作区时复用协同的绑定
+    /// （见 factory::effective_bindings）。
     ///
     /// 存量工作区的迁移：老配置里 test 工作区可能绑了别的智能体（早期新建
     /// 时下拉默认取列表第一个）——一律改绑内置测试助手。若测试助手尚未绑定
@@ -225,8 +226,6 @@ impl StudioConfig {
             if ws.kind != "test" {
                 continue;
             }
-            ws.bound_servers.clear();
-            ws.bound_databases.clear();
             if ws.agent_id == TEST_AGENT_ID {
                 continue;
             }
@@ -530,8 +529,9 @@ mod tests {
 
         let test_ws = config.workspace("ws-test").unwrap();
         assert_eq!(test_ws.agent_id, TEST_AGENT_ID);
-        assert!(test_ws.bound_servers.is_empty());
-        assert!(test_ws.bound_databases.is_empty());
+        // 服务器/数据库绑定保留（测试可自己绑定，不再强制清空）。
+        assert_eq!(test_ws.bound_servers, vec!["srv".to_string()]);
+        assert_eq!(test_ws.bound_databases, vec!["db".to_string()]);
         // provider 继承：测试助手此前没绑 → 继承原智能体的。
         assert_eq!(config.agent(TEST_AGENT_ID).unwrap().provider, "my-provider");
         // 协同工作区原样保留。
