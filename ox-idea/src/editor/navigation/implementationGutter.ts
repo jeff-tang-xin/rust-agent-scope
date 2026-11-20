@@ -62,6 +62,8 @@ interface DocMarkers {
   outline: { items: OutlineItem[]; candidates: MarkerCandidate[] } | null;
   /** `changes` when the cache was started. */
   changes: number;
+  /** Loaded from the persistent cache: show it at once, then revalidate against the server. */
+  revalidate?: boolean;
 }
 
 /** Marker caches by path, most recently used last. */
@@ -97,11 +99,102 @@ function watchChanges() {
   });
 }
 
+// --- T2 persistent semantic cache -------------------------------------------------
+// Resolved gutter answers persisted by document content hash, so reopening a file
+// (or a new session) shows its inheritance icons at once instead of waiting for a
+// cold whole-workspace jdtls scan. Stale-while-revalidate: the persisted answer is
+// shown immediately, then re-checked against the server in the background, so an
+// implementation added/removed elsewhere since last time is corrected without the
+// user staring at an empty gutter. Best-effort (localStorage quota / private mode).
+const PERSIST_PREFIX = "oxidea.gutter.v1.";
+const PERSIST_MAX = 64;
+const hashMemo = new WeakMap<Text, string>();
+
+/** cyrb53 content hash (fast, low collision); memoized per document version. */
+function textHash(doc: Text): string {
+  const memo = hashMemo.get(doc);
+  if (memo !== undefined) return memo;
+  const s = doc.toString();
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hash = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  hashMemo.set(doc, hash);
+  return hash;
+}
+
+interface PersistedMarkers {
+  outline: { items: OutlineItem[]; candidates: MarkerCandidate[] } | null;
+  entries: [string, CacheEntry][];
+  unsupported: MarkerGroup[];
+}
+
+const persistKey = (path: string, doc: Text) => PERSIST_PREFIX + path + "." + textHash(doc);
+
+function loadPersisted(path: string, doc: Text): { cache: MarkerCache; outline: PersistedMarkers["outline"] } | null {
+  try {
+    const raw = localStorage.getItem(persistKey(path, doc));
+    if (!raw) return null;
+    const data = JSON.parse(raw) as PersistedMarkers;
+    if (!Array.isArray(data.entries)) return null;
+    return {
+      cache: { entries: new Map(data.entries), unsupported: new Set(data.unsupported ?? []) },
+      outline: data.outline ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Debounced so scrolling (a pass per viewport) coalesces into one write, not jank. */
+function savePersisted(path: string, doc: Text, entry: DocMarkers): void {
+  const key = persistKey(path, doc);
+  const prev = persistTimers.get(key);
+  if (prev) clearTimeout(prev);
+  persistTimers.set(
+    key,
+    setTimeout(() => {
+      persistTimers.delete(key);
+      try {
+        const data: PersistedMarkers = {
+          outline: entry.outline,
+          entries: [...entry.cache.entries],
+          unsupported: [...entry.cache.unsupported],
+        };
+        localStorage.setItem(key, JSON.stringify(data));
+        const keys: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k?.startsWith(PERSIST_PREFIX)) keys.push(k);
+        }
+        for (const k of keys.slice(0, Math.max(0, keys.length - PERSIST_MAX))) localStorage.removeItem(k);
+      } catch {
+        // Quota exceeded / unavailable: the in-memory cache still works.
+      }
+    }, 1000),
+  );
+}
+
 /** The cache for `doc` at `path`: kept while its text and other files are unchanged. */
 export function markersOf(path: string, doc: Text): DocMarkers {
   let entry = docMarkers.get(path);
-  if (!entry || entry.doc !== doc) entry = { doc, cache: emptyCache(), outline: null, changes };
-  else if (entry.changes !== changes) entry = { ...entry, cache: emptyCache(), changes };
+  if (!entry || entry.doc !== doc) {
+    // Cold open (new tab / new session): reuse the persisted answer for this exact
+    // content so icons appear at once; run() revalidates it against the server.
+    const persisted = loadPersisted(path, doc);
+    entry = persisted
+      ? { doc, cache: persisted.cache, outline: persisted.outline, changes, revalidate: true }
+      : { doc, cache: emptyCache(), outline: null, changes };
+  } else if (entry.changes !== changes) {
+    entry = { ...entry, cache: emptyCache(), changes };
+  }
   docMarkers.delete(path);
   docMarkers.set(path, entry);
   if (docMarkers.size > MAX_CACHED_DOCS) docMarkers.delete(docMarkers.keys().next().value!);
@@ -155,6 +248,7 @@ export async function fillMarkers(
   groups: ReadonlySet<MarkerGroup>,
   deps: MarkerDeps,
   cache: MarkerCache,
+  revalidate = false,
 ): Promise<void> {
   const entry = (c: MarkerCandidate) => {
     const key = candidateKey(c);
@@ -164,11 +258,15 @@ export async function fillMarkers(
   };
   const down =
     groups.has("inheritors") && !cache.unsupported.has("inheritors")
-      ? candidates.filter((c) => c.inheritable && cache.entries.get(candidateKey(c))?.inheritors === undefined)
+      ? candidates.filter(
+          (c) => c.inheritable && (revalidate || cache.entries.get(candidateKey(c))?.inheritors === undefined),
+        )
       : [];
   const up =
     groups.has("supers") && !cache.unsupported.has("supers")
-      ? candidates.filter((c) => c.overriding && c.owner && cache.entries.get(candidateKey(c))?.supers === undefined)
+      ? candidates.filter(
+          (c) => c.overriding && c.owner && (revalidate || cache.entries.get(candidateKey(c))?.supers === undefined),
+        )
       : [];
 
   let implementations: Location[][] = [];
@@ -378,11 +476,28 @@ class MarkersPlugin {
       const first = text.lineAt(from).number - 1 - MARGIN_LINES;
       const last = text.lineAt(to).number - 1 + MARGIN_LINES;
       const visible = candidates.filter((c) => c.line >= first && c.line <= last).slice(0, MAX_PER_PASS);
+      // T2 stale-while-revalidate: show the persisted/known answer at once (instant
+      // icons on reopen / tab switch), then re-check against the server and swap in
+      // the fresh result. A persisted cache is force-revalidated into a fresh one so
+      // implementations added/removed elsewhere since last session are corrected.
+      if (entry.cache.entries.size) this.show(place(text, cachedMarkers(candidates, groups, entry.cache)));
+      const revalidate = entry.revalidate === true;
+      entry.revalidate = false;
+      // Revalidate into a COPY of the known cache: the viewport's answers are refreshed
+      // while off-viewport persisted answers survive (they revalidate when scrolled to).
+      const fillCache: MarkerCache = revalidate
+        ? { entries: new Map(entry.cache.entries), unsupported: new Set(entry.cache.unsupported) }
+        : entry.cache;
       this.inflightDoc = text;
       request = this.request = nextRequestId();
-      await fillMarkers(ctx.path, visible, groups, markerDeps(ctx, items, request, entry.cache), entry.cache);
+      await fillMarkers(ctx.path, visible, groups, markerDeps(ctx, items, request, fillCache), fillCache, revalidate);
       if (stale()) return;
+      // Keep the persisted answer if the server could not revalidate (a group became
+      // unsupported): stale icons beat wiping them while the server is unavailable.
+      const revalidateFailed = [...fillCache.unsupported].some((g) => !entry.cache.unsupported.has(g));
+      if (revalidate && !revalidateFailed) entry.cache = fillCache;
       this.show(place(text, cachedMarkers(candidates, groups, entry.cache)));
+      savePersisted(ctx.path, text, entry);
     } catch (e) {
       if (isUnavailable(e)) gutterBackoff.mark(ctx.doc);
       else if (!isCancelled(e)) console.debug("[lineMarkers]", e);
