@@ -912,6 +912,15 @@ pub fn configure_server(cfg: &mut LanguageServerConfig, root: &Path, server_root
         // The jdtls launcher forwards `--jvm-arg=` values to the JVM it starts.
         let args = s.languages.java.jdtls_vm_args.split_whitespace().map(|a| format!("--jvm-arg={a}"));
         cfg.args.extend(args);
+        // Apply Maven build-configuration changes (including annotation-processor paths
+        // for MapStruct/Lombok) automatically. jdtls defaults to `interactive`, whose
+        // confirmation prompt OXidea does not surface, so the POM's annotation-processing
+        // setup would otherwise never be applied and generated classes stay missing. A
+        // user's own language-server settings merge last and still override this default.
+        merge_init_options(
+            cfg,
+            json!({ "settings": { "java": { "configuration": { "updateBuildConfiguration": "automatic" } } } }),
+        );
         // m2e (the Maven import) reads mirrors, servers and `<localRepository>` from it.
         if let Some(file) = setting_path(root, &s.languages.java.maven.user_settings) {
             let file = file.to_string_lossy();
@@ -1547,6 +1556,14 @@ mod java_compiler_tests {
         serde_json::to_value(cfg.initialization_options.as_ref().unwrap()).unwrap()
     }
 
+    /// Decode a `file://` URI (as `file_uri` produces) back to a filesystem path, so
+    /// tests can read the preferences file the URL points at.
+    fn url_path(url: &str) -> PathBuf {
+        let s = url.strip_prefix("file://").unwrap_or(url);
+        let s = if cfg!(windows) { s.strip_prefix('/').unwrap_or(s) } else { s };
+        PathBuf::from(percent_encoding::percent_decode_str(s).decode_utf8_lossy().into_owned())
+    }
+
     #[test]
     fn serial_version_inspection_sets_the_compiler_option() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1561,22 +1578,26 @@ mod java_compiler_tests {
             s
         };
         let off = url(&InspectionSettings::default());
-        assert!(!std::fs::read_to_string(&off).unwrap().contains("missingSerialVersion"));
+        assert!(!std::fs::read_to_string(url_path(&off)).unwrap().contains("missingSerialVersion"));
         let on = url(&set(ide_core::settings::InspectionOverride { enabled: Some(true), ..Default::default() }));
         assert_ne!(on, off, "a new file, so the server restarts with it");
-        assert!(std::fs::read_to_string(&on).unwrap().ends_with("compiler.problem.missingSerialVersion=warning\n"));
+        assert!(
+            std::fs::read_to_string(url_path(&on))
+                .unwrap()
+                .ends_with("compiler.problem.missingSerialVersion=warning\n")
+        );
         let error = url(&set(ide_core::settings::InspectionOverride {
             enabled: Some(true),
             severity: Some(InspectionLevel::Error),
             ..Default::default()
         }));
-        assert!(std::fs::read_to_string(error).unwrap().ends_with("missingSerialVersion=error\n"));
+        assert!(std::fs::read_to_string(url_path(&error)).unwrap().ends_with("missingSerialVersion=error\n"));
         let weak = url(&set(ide_core::settings::InspectionOverride {
             enabled: Some(true),
             severity: Some(InspectionLevel::WeakWarning),
             ..Default::default()
         }));
-        assert!(std::fs::read_to_string(weak).unwrap().ends_with("missingSerialVersion=info\n"));
+        assert!(std::fs::read_to_string(url_path(&weak)).unwrap().ends_with("missingSerialVersion=info\n"));
         let severity_only = url(&set(ide_core::settings::InspectionOverride {
             severity: Some(InspectionLevel::Error),
             ..Default::default()
@@ -1592,7 +1613,7 @@ mod java_compiler_tests {
         merge_init_options(&mut cfg, json!({"settings": {"java": {"format": {"tabSize": 4}}}}));
         configure_java_compiler(&mut cfg, &cache, &InspectionSettings::default());
         let options = options(&cfg);
-        let path = PathBuf::from(options.pointer("/settings/java/settings/url").unwrap().as_str().unwrap());
+        let path = url_path(options.pointer("/settings/java/settings/url").unwrap().as_str().unwrap());
         assert!(path.starts_with(&cache));
         let prefs = std::fs::read_to_string(&path).unwrap();
         assert_eq!(prefs.lines().count(), 2);
