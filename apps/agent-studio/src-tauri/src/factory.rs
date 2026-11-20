@@ -176,6 +176,38 @@ fn effective_bindings(config: &StudioConfig, ws: &WorkspaceConfig) -> (Vec<Strin
     (servers, databases)
 }
 
+/// 会话级绑定（各会话 binding.json）里出现的服务器/库：装配工具面时并入有效
+/// 绑定，使「已开对话之后才绑定的资源」也能注册对应工具并进白名单。toolkit 按
+/// 工作区共享，运行时再由各会话自己的 binding.json 收窄（effective_allowed）。
+/// 绑定变更经 set_session_binding → invalidate 触发下一次装配重新读取。
+fn session_bound_resources(data_dir: &Path, ws_id: &str) -> (Vec<String>, Vec<String>) {
+    let dir = workspace_dir(data_dir, ws_id).join("state").join(USER_ID);
+    let mut servers: Vec<String> = Vec::new();
+    let mut databases: Vec<String> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return (servers, databases);
+    };
+    for entry in entries.flatten() {
+        let Ok(bytes) = std::fs::read(entry.path().join("binding.json")) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        if let Some(s) = value.get("server").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            if !servers.iter().any(|x| x == s) {
+                servers.push(s.to_string());
+            }
+        }
+        if let Some(d) = value.get("database").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            if !databases.iter().any(|x| x == d) {
+                databases.push(d.to_string());
+            }
+        }
+    }
+    (servers, databases)
+}
+
 /// 是否有测试工作区绑定到该协同工作区：req_* 工具与闭环协议只在此时
 /// 注册/拼接——没绑定时这些工具读的是空数据，注册只会误导模型。
 /// 绑定/解绑后新装配的会话自动生效（build_agent 每次都重新判定）。
@@ -707,10 +739,23 @@ pub fn build_agent(
     // - 绑定列表非空时一律收窄为白名单（工具内校验，越界即拒绝）。
     // - test 有效绑定 = 自己绑定的 + 复用绑定协同的（effective_bindings）；
     //   开放 remote_shell（每次确认）+ db_query（只读），不开放 db_dml。
-    let (eff_servers, eff_databases) = {
+    let (mut eff_servers, mut eff_databases) = {
         let cfg = resources.config.lock().unwrap_or_else(|e| e.into_inner());
         effective_bindings(&cfg, ws)
     };
+    // 并入会话级绑定：已开对话后才绑定的资源也要注册工具并进白名单（否则
+    // toolkit 装配时快照看不到后绑的库/服务器）。运行时各会话再按 binding.json 收窄。
+    let (sess_servers, sess_databases) = session_bound_resources(data_dir, &ws.id);
+    for s in sess_servers {
+        if !eff_servers.contains(&s) {
+            eff_servers.push(s);
+        }
+    }
+    for d in sess_databases {
+        if !eff_databases.contains(&d) {
+            eff_databases.push(d);
+        }
+    }
     if mode == StudioMode::Ops || !eff_servers.is_empty() {
         toolkit.register(Arc::new(RemoteShellTool::new(
             Arc::clone(&resources.ssh_pool),
@@ -1140,6 +1185,35 @@ mod tests {
     }
 
     use super::*;
+
+    /// 会话级绑定收集：读各会话 binding.json，库/服务器去重汇总；供装配工具面
+    /// 并入有效绑定（已开对话后绑定的资源也能注册工具）。空/缺失目录返回空。
+    #[test]
+    fn session_bound_resources_collects_and_dedupes() {
+        let data_dir = std::env::temp_dir().join(format!("sess_bound_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        let ws_id = "ws1";
+        let state_dir = workspace_dir(&data_dir, ws_id).join("state").join(USER_ID);
+        for (sess, json) in [
+            ("s1", r#"{"database":"db1","server":"srv1"}"#),
+            ("s2", r#"{"database":"db1"}"#),
+            ("s3", r#"{"database":"db2"}"#),
+        ] {
+            let dir = state_dir.join(sess);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("binding.json"), json).unwrap();
+        }
+        let (servers, databases) = session_bound_resources(&data_dir, ws_id);
+        assert_eq!(servers.len(), 1, "servers: {servers:?}");
+        assert!(servers.contains(&"srv1".to_string()));
+        assert_eq!(databases.len(), 2, "databases deduped: {databases:?}");
+        assert!(databases.contains(&"db1".to_string()));
+        assert!(databases.contains(&"db2".to_string()));
+        // 无会话目录的工作区：空汇总（不报错）。
+        let (s2, d2) = session_bound_resources(&data_dir, "no-such-ws");
+        assert!(s2.is_empty() && d2.is_empty());
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
 
     /// skill 生态装配：skill 创建/管理（load_skill/skill_manage/propose_skill）
     /// 对所有类别开放（含 test，include_fs=false）；include_fs 只控制文件工具

@@ -431,7 +431,17 @@ pub fn save_database(
         "db",
         crate::config::DB_AGENT_ID,
     );
-    state.persist(&config).map(|_| outcome)
+    state.persist(&config)?;
+    // 档案变更（host/CLI/类型）失效引用它的工作区缓存：自动衍生工作区 + 显式
+    // 绑定该库的工作区，下一个 turn 重建刷新白名单/工具面。catalog 虽共享实时读，
+    // 但工具的 allowed_databases 白名单是装配时快照，不失效则旧会话拿不到变更。
+    state.invalidate(&format!("database:{}", database.name));
+    for ws in &config.workspaces {
+        if ws.bound_databases.iter().any(|d| d == &database.name) {
+            state.invalidate(&ws.id);
+        }
+    }
+    Ok(outcome)
 }
 
 /// 保存数据库档案的验证结果（CLI 驱动类型才有内容；不阻断保存）。
@@ -466,6 +476,12 @@ pub fn delete_database(state: State<'_, AppState>, name: String) -> Result<(), S
     state.persist(&config)?;
     for id in removed {
         state.invalidate(&id);
+    }
+    // 显式绑定该库的其它工作区也失效（白名单装配时快照，删库后需重建剔除）。
+    for ws in &config.workspaces {
+        if ws.bound_databases.iter().any(|d| d == &name) {
+            state.invalidate(&ws.id);
+        }
     }
     Ok(())
 }
@@ -2247,7 +2263,12 @@ pub fn set_session_binding(
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let bytes = serde_json::to_vec_pretty(&binding).map_err(|e| e.to_string())?;
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    // 绑定变更即失效该工作区的 agent 缓存：toolkit 是装配那一刻的快照，已开的
+    // 对话下一个 turn 会重建工具面，实时拿到新绑定的库/服务器（否则旧会话一直
+    // 用旧快照，后加的工具看不到）。会话状态持久化在 state_store，重建不丢历史。
+    state.invalidate(&workspace_id);
+    Ok(())
 }
 
 /// 列出某 agent 的已有会话（读 JsonFile 状态库目录布局
