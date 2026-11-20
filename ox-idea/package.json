@@ -2,7 +2,7 @@
   "name": "oxidea",
   "private": true,
   "description": "An open-source IDE inspired by IntelliJ IDEA",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
