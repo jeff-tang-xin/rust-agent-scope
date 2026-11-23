@@ -7,12 +7,14 @@
 //! - [`session`]：ACP 会话 ↔ agentscope agent 的桥（事件流映射 + 权限 HITL 映射）。
 //!
 //! 协议面（v1 子集）：
-//! - client → agent：`initialize`、`session/new`、`session/prompt`、`session/cancel`；
+//! - client → agent：`initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel`；
 //! - agent → client：通知 `session/update`（agent_message_chunk / agent_thought_chunk /
 //!   tool_call / tool_call_update），请求 `session/request_permission`。
 //!
-//! `session/load` 未声明（`loadSession: false`）：会话状态由 agentscope 的
-//! state store 自管，进程重启后靠 agentscope 侧恢复，不走 ACP 重放。
+//! `session/load` 已声明（`loadSession: true`）：按 sessionId 经 Legacy state
+//! store 重建 agent 恢复模型上下文（ide-agent 侧 timeline 自有持久化，历史
+//! update 帧无需重放）；同进程活会话幂等返回，持久层没有的会话报错让 client
+//! fallback `session/new`。
 
 pub mod datasource;
 pub mod oxidea_skill;
@@ -31,6 +33,11 @@ use crate::session::{AcpSessionHub, PromptOutcome};
 
 /// 单个 ACP 连接的服务循环：读入站消息 → 分发到会话/协议处理 → 写响应。
 /// 泛型 IO 便于测试与进程内宿主用内存 duplex 替代 stdio。
+/// 每轮 IDE 现场快照提供者：prompt 时查询当前聚焦文件/选区/诊断，返回一段
+/// 注入用户消息首部的现场描述；无聚焦编辑器时返回 None。回调须 Send+Sync
+/// （在 agent 异步运行时跨线程查询宿主状态）。
+pub type IdeSnapshot = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 /// IDE 宿主按任务工作目录提供的上下文：语义工具 + 记忆锚点。
 pub struct OxHostContext {
     /// IDE 语义工具（搜索/符号/补丁/构建/VCS 等），注册进 agent 的 Toolkit。
@@ -42,6 +49,10 @@ pub struct OxHostContext {
     /// agent 开局即知「这是什么项目、有哪些牌可打」，不必拿目录树瞎摸。
     /// `None` 时该节省略（独立 stdio 进程或未命中项目）。
     pub project_brief: Option<String>,
+    /// 每轮 IDE 现场快照（当前聚焦文件/选区/诊断），prompt 时现查注入用户消息
+    /// 首部——agent 开局即知用户在看什么，不必先调 get_current_file。
+    /// `None` 时不注入（独立 stdio 进程或未命中项目）。
+    pub ide_snapshot: Option<IdeSnapshot>,
 }
 
 /// IDE 语义工具与记忆锚点的提供者：按任务工作目录返回上下文。
@@ -86,6 +97,7 @@ pub(crate) fn ox_context_for(cwd: &Path) -> OxHostContext {
             tools: Vec::new(),
             memory_root: Some(fallback_root),
             project_brief: None,
+            ide_snapshot: None,
         })
 }
 

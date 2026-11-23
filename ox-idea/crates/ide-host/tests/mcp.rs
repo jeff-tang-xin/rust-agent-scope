@@ -395,6 +395,20 @@ async fn execute_reports_output_exit_code_and_requires_confirmation() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn call_hierarchy_is_external_read_only_and_validates_direction() {
+    let h = Harness::new();
+    h.trust().await;
+    let tools = Registry::new(h.host.clone()).tools(&h.root).unwrap();
+    let tool = tools.iter().find(|t| t.name == "call_hierarchy").expect("call_hierarchy not listed");
+    assert!(tool.read_only);
+    assert!(!tool.builtin_only);
+    let missing = h.error("call_hierarchy", json!({"filePath":"src/a.txt", "line":1, "column":1})).await;
+    assert!(missing.contains("direction"), "{missing}");
+    let invalid = h.error("call_hierarchy", json!({"filePath":"src/a.txt", "line":1, "column":1, "direction":"sideways"})).await;
+    assert!(invalid.contains("incoming") && invalid.contains("outgoing"), "{invalid}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires rust-analyzer, like language_smoke::rust"]
 async fn rust_references_and_rename_through_mcp() {
     let h = Harness::new();

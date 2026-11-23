@@ -18,14 +18,26 @@ impl ToolRegistry for Registry {
 
     fn tools(&self, project: &Path) -> Result<Vec<Tool>, String> {
         assert_eq!(project, self.project);
-        Ok(vec![Tool {
-            name: "echo".into(),
-            description: "Says it back".into(),
-            input_schema: json!({ "type": "object", "properties": { "text": { "type": "string" } } }),
-            read_only: true,
-            destructive: false,
-            output_schema: None,
-        }])
+        Ok(vec![
+            Tool {
+                name: "echo".into(),
+                description: "Says it back".into(),
+                input_schema: json!({ "type": "object", "properties": { "text": { "type": "string" } } }),
+                read_only: true,
+                destructive: false,
+                output_schema: None,
+                builtin_only: false,
+            },
+            Tool {
+                name: "secret".into(),
+                description: "Reserved for the built-in agent".into(),
+                input_schema: json!({ "type": "object" }),
+                read_only: true,
+                destructive: false,
+                output_schema: None,
+                builtin_only: true,
+            },
+        ])
     }
 
     fn call(
@@ -39,6 +51,8 @@ impl ToolRegistry for Registry {
         match name {
             "echo" if args["text"] == "fail" => Err(ToolCallError::Failed("it failed".into())),
             "echo" => Ok(format!("{} in {}", args["text"].as_str().unwrap_or(""), project.display())),
+            // Reachable only if the external boundary fails to filter it.
+            "secret" => Ok("secret ran".into()),
             _ => Err(ToolCallError::UnknownTool(format!("no tool {name:?}"))),
         }
     }
@@ -161,6 +175,21 @@ async fn initialize_list_and_call_tools() {
     let replies: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(replies.as_array().unwrap().len(), 2);
     assert_eq!(replies[0]["result"]["content"][0]["text"], expected.replacen("hi", "a", 1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn builtin_only_tools_are_hidden_from_and_rejected_for_external_clients() {
+    let s = setup();
+    let list = rpc(&s, "tools/list", json!({})).await;
+    let names: Vec<&str> =
+        list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"echo"), "external tools still listed: {names:?}");
+    assert!(!names.contains(&"secret"), "builtin-only tool must not be listed: {names:?}");
+    // Calling it answers exactly as for an unknown tool (existence not leaked),
+    // even though the registry itself would run it (the boundary blocks it).
+    let call = rpc(&s, "tools/call", json!({ "name": "secret", "arguments": {} })).await;
+    assert_eq!(call["error"]["code"], -32602);
+    assert!(call["error"]["message"].as_str().unwrap().contains("unknown tool"), "{call}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

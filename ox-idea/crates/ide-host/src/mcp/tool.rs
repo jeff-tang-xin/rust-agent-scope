@@ -207,6 +207,7 @@ impl Tool {
                 description: description.into(),
                 read_only: true,
                 destructive: false,
+                builtin_only: false,
                 output_schema: None,
                 input_schema: json!({ "type": "object", "properties": {
                     "projectPath": { "type": "string", "description": "Any directory inside an open project. Optional when only one project is open." }
@@ -217,6 +218,13 @@ impl Tool {
     }
     pub fn write(mut self) -> Self {
         self.metadata.read_only = false;
+        self
+    }
+    /// Reserve this tool for the IDE's built-in agent (ox-hareness): external
+    /// MCP clients neither see it in `tools/list` nor may call it. The built-in
+    /// agent's in-process tool injection ignores the flag and keeps full access.
+    pub fn builtin(mut self) -> Self {
+        self.metadata.builtin_only = true;
         self
     }
     pub fn param(mut self, param: Param) -> Self {

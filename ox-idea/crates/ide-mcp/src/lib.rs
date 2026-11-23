@@ -45,6 +45,10 @@ pub struct Tool {
     pub read_only: bool,
     /// May destroy data (`annotations.destructiveHint`).
     pub destructive: bool,
+    /// Reserved for the IDE's built-in agent: external MCP clients neither see
+    /// it in `tools/list` nor may call it (`tools/call` answers "unknown tool").
+    /// The in-process built-in agent (ox-hareness) ignores this and gets all tools.
+    pub builtin_only: bool,
 }
 
 /// A failed `tools/call`.

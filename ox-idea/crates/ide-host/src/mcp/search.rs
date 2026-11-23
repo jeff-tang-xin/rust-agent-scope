@@ -47,7 +47,7 @@ fn search_text() -> Tool {
     Tool::new(
         "search_text",
         "Searches for a text substring within project files.
-Use this tool for fast text search with match coordinates.
+Use this tool for fast text search with match coordinates (error messages, log fragments, exact substrings). Prefer search_symbol to locate a declaration by name and find_references to see who calls a known symbol.
 Results include match coordinates when available (1-based line/column, end exclusive).
 
 Paths are glob patterns relative to the project root.
@@ -82,7 +82,7 @@ fn search_symbol() -> Tool {
     Tool::new(
         "search_symbol",
         "Searches for symbols (classes, methods, fields).
-Use this tool for semantic lookup by identifier fragments.
+Use this tool for semantic lookup by identifier fragments. After locating a symbol, use get_symbol_info for its signature/docs and find_references for its callers.
 Results include match coordinates when available (1-based line/column, end exclusive).
 
 Paths are glob patterns relative to the project root.
@@ -106,7 +106,7 @@ fn search_file() -> Tool {
     Tool::new(
         "search_file",
         "Searches for files by glob pattern within the project.
-Use this tool when you need to match file paths using glob syntax.
+Use this tool when you need to match file paths using glob syntax. To explore project structure rather than match a name, use list_directory_tree once instead of repeated guesses.
 
 Glob patterns are relative to the project root.
 Examples: \"**/*.kt\", \"src/**/Foo*.java\", \"build.gradle.kts\".

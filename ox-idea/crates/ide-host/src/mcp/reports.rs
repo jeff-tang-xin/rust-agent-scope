@@ -4,7 +4,8 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +37,9 @@ struct Window {
     editors: Vec<PathBuf>,
     focused: Option<FocusedEditor>,
     problems: BTreeMap<PathBuf, Vec<Diagnostic>>,
+    /// When each path's problems were last reported, so a caller that just changed a
+    /// file can tell a fresh analysis from a stale one.
+    problem_times: BTreeMap<PathBuf, Instant>,
 }
 impl Reports {
     pub fn set_open_editors(&self, window: &str, paths: Vec<PathBuf>) {
@@ -50,16 +54,19 @@ impl Reports {
     }
     pub fn report_problems(&self, window: &str, reset: bool, files: Vec<FileProblems>) {
         let mut state = self.0.write();
-        let problems = &mut state.windows.entry(window.into()).or_default().problems;
+        let w = state.windows.entry(window.into()).or_default();
         if reset {
-            problems.clear();
+            w.problems.clear();
+            w.problem_times.clear();
         }
+        let now = Instant::now();
         for file in files {
-            let path = file.path.into();
+            let path: PathBuf = file.path.into();
+            w.problem_times.insert(path.clone(), now);
             if file.items.is_empty() {
-                problems.remove(&path);
+                w.problems.remove(&path);
             } else {
-                problems.insert(path, file.items);
+                w.problems.insert(path, file.items);
             }
         }
     }
@@ -120,5 +127,12 @@ impl Reports {
             }
         }
         files.into_iter().map(|(path, items)| FileProblems { path: path.into(), items }).collect()
+    }
+    /// When the Problems view last reported `path` in any of `windows`; `None` if never.
+    /// A caller that just edited the file compares this against its edit time to wait
+    /// for a fresh analysis instead of reading a stale one.
+    pub(crate) fn problem_time(&self, windows: &[String], path: &Path) -> Option<Instant> {
+        let state = self.0.read();
+        windows.iter().filter_map(|w| state.windows.get(w)).filter_map(|w| w.problem_times.get(path)).max().copied()
     }
 }

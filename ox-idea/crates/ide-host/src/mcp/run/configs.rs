@@ -45,6 +45,7 @@ fn describe_config(call: &Call, c: &RunConfig) -> Value {
     let mut v = json!({
         "name": c.name,
         "description": c.kind,
+        "isTest": c.is_test,
         "supportsDynamicLaunchOverrides": supports_overrides(c),
     });
     if supports_overrides(c) {

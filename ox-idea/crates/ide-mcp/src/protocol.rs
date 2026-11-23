@@ -141,7 +141,9 @@ impl Session<'_> {
             "tools/list" => {
                 let project = self.project()?;
                 let tools = self.registry.tools(&project).map_err(|e| RpcError::new(NOT_OPEN, e))?;
-                Ok(json!({ "tools": tools.iter().map(tool_json).collect::<Vec<_>>() }))
+                // Built-in-only tools are reserved for the IDE's own agent;
+                // external MCP clients never see them.
+                Ok(json!({ "tools": tools.iter().filter(|t| !t.builtin_only).map(tool_json).collect::<Vec<_>>() }))
             }
             "tools/call" => self.call(params, cancel),
             _ => Err(RpcError::new(METHOD_NOT_FOUND, format!("no method {method:?}"))),
@@ -186,6 +188,14 @@ impl Session<'_> {
             return Err(RpcError::new(INVALID_PARAMS, "projectPath must be a string"));
         }
         let project = self.resolve_project(requested.and_then(Value::as_str).or(self.project))?;
+        // External MCP clients may not call built-in-only tools: answer exactly
+        // as for an unknown tool, so their existence isn't leaked. The built-in
+        // agent reaches tools in-process (ox_tools), not through this server.
+        if let Ok(tools) = self.registry.tools(&project)
+            && tools.iter().any(|t| t.name == name && t.builtin_only)
+        {
+            return Err(RpcError::new(INVALID_PARAMS, format!("unknown tool: {name}")));
+        }
         let outcome = if cancel.is_cancelled() {
             Err(ToolCallError::Failed("cancelled".into()))
         } else {

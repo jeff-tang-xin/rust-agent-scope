@@ -1,7 +1,7 @@
 //! Quick Documentation through the project's language services.
 use super::tool::{Call, Output, Param, ParamType, Tool};
 use ide_core::{IdeError, IdeResult, Pos, Range};
-use ide_lsp::types::GotoKind;
+use ide_lsp::types::{GotoKind, HierarchyDirection, ReferencesIncomplete};
 use serde::Serialize;
 use serde_json::json;
 use std::path::Path;
@@ -15,7 +15,7 @@ The information may include the symbol's name, signature, type, documentation, e
 
 If the position has a reference to a symbol the tool will return a piece of code with the declaration of the symbol if possible.
 
-Use this tool to understand symbols declaration, semantics, where it's declared, etc.", get_info)
+Use this tool to understand symbols declaration, semantics, where it's declared, etc. To see who uses the symbol, use find_references (this tool only shows the declaration).", get_info)
     .param(Param::required("filePath", ParamType::String, "Path relative to the project root"))
     .param(Param::required("line", ParamType::Integer, "1-based line number"))
     .param(Param::required("column", ParamType::Integer, "1-based UTF-16 column number"))
@@ -231,55 +231,7 @@ pub fn find_references() -> Tool {
             _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => { call.host.cancel_request(request); let _ = work.await; return Err(IdeError::unavailable("references timed out; retry when analysis finishes")); }
         };
         let mut value = serde_json::to_value(&result).map_err(|e| IdeError::internal(e.to_string()))?;
-        // Convert every Location range at this boundary, including declarations.
-        fn positions(value: &mut serde_json::Value) {
-            match value {
-                serde_json::Value::Object(map) => {
-                    if let (Some(line), Some(col)) = (map.get("line").and_then(|v| v.as_u64()), map.get("col").and_then(|v| v.as_u64())) {
-                        map.insert("line".into(), (line + 1).into()); map.insert("col".into(), (col + 1).into());
-                    } else { for v in map.values_mut() { positions(v); } }
-                }
-                serde_json::Value::Array(items) => { for v in items { positions(v); } }
-                _ => {}
-            }
-        }
         positions(&mut value);
-        // 输出形态对齐其他工具与原版 MCP findReferences：LSP 结果的 path 是
-        // 绝对路径，相对化到项目根（search_text 等工具给 agent 的都是相对
-        // 路径）；剥掉行源码 text 与冗余 uri——原版只返回位置，agent 需要
-        // 看代码时用 read_file。带源码行的结果在常用符号（上千处引用）下
-        // 会膨胀到数百 KB，撑爆模型上下文。
-        // kind/access 未分类（unknown）时省略字段——缺失与 unknown 对
-        // agent 等价，有真实分类时照常输出。
-        // range 保持具名对象不压扁成数组：全项目工具的位置口径都是
-        // line/column 具名键，无名数组要靠模型猜顺序，猜错就定位错行。
-        // 影响面查询的语义是完备性，不做条数上限。
-        fn slim(value: &mut serde_json::Value, call: &Call) {
-            match value {
-                serde_json::Value::Object(map) => {
-                    for key in ["kind", "access"] {
-                        if map.get(key).and_then(|v| v.as_str()) == Some("unknown") {
-                            map.remove(key);
-                        }
-                    }
-                    if let Some(p) = map.get("path").and_then(|v| v.as_str()) {
-                        let displayed = call.display(Path::new(p));
-                        map.insert("path".into(), serde_json::Value::String(displayed));
-                    }
-                    map.remove("text");
-                    map.remove("uri");
-                    for v in map.values_mut() {
-                        slim(v, call);
-                    }
-                }
-                serde_json::Value::Array(items) => {
-                    for v in items {
-                        slim(v, call);
-                    }
-                }
-                _ => {}
-            }
-        }
         slim(&mut value, &call);
         Output::json(value)
     })
@@ -287,6 +239,115 @@ pub fn find_references() -> Tool {
     .param(Param::required("line", ParamType::Integer, "1-based line"))
     .param(Param::required("column", ParamType::Integer, "1-based UTF-16 column"))
     .param(Param::optional("includeDeclaration", ParamType::Boolean, "Include declarations (default true)"))
+}
+
+pub fn call_hierarchy() -> Tool {
+    Tool::new("call_hierarchy", "Call hierarchy through the language service: who calls the symbol at the position (direction=incoming) or what that symbol calls (direction=outgoing). Positions are 1-based UTF-16. Reports incomplete results when analysis is still running.\n\nUse this tool to trace caller/callee chains and the transitive impact of a change: each item carries its call sites (fromRanges), so follow the chain level by level by calling again at a caller/callee position. For the flat list of direct references to a declaration use find_references; for the declaration itself (signature, documentation) use get_symbol_info.", |call| async move {
+        let direction = match call.str("direction")?.as_str() {
+            "incoming" => HierarchyDirection::Incoming,
+            "outgoing" => HierarchyDirection::Outgoing,
+            other => return Err(IdeError::invalid(format!("direction must be \"incoming\" or \"outgoing\", got \"{other}\""))),
+        };
+        let path = call.resolve_readable(&call.str("filePath")?).await?;
+        let line = call.opt_i64("line")?.ok_or_else(|| IdeError::invalid("missing line"))?;
+        let column = call.opt_i64("column")?.ok_or_else(|| IdeError::invalid("missing column"))?;
+        let project = call.project.clone();
+        let (doc, text) = call.host.blocking(move || {
+            let text = project.text_of(&path)?;
+            let doc = project.documents.open(&path)?;
+            Ok((doc.id, text))
+        }).await?;
+        struct Close(std::sync::Arc<crate::Project>, ide_core::DocId);
+        impl Drop for Close { fn drop(&mut self) { self.0.documents.close(self.1); } }
+        let _close = Close(call.project.clone(), doc);
+        let pos = mcp_position(&text, line, column)?;
+        let request = super::tool::request_id();
+        let work = crate::ops::lsp::lsp_call_hierarchy(&call.host, &call.window, request, doc, pos, direction);
+        tokio::pin!(work);
+        let result = tokio::select! {
+            result = &mut work => result?,
+            _ = call.cancel.cancelled() => { call.host.cancel_request(request); let _ = work.await; return Err(IdeError::cancelled()); }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => { call.host.cancel_request(request); let _ = work.await; return Err(IdeError::unavailable("call hierarchy timed out; retry when analysis finishes")); }
+        };
+        let mut value = serde_json::to_value(&result).map_err(|e| IdeError::internal(e.to_string()))?;
+        positions(&mut value);
+        slim(&mut value, &call);
+        if let Some(incomplete) = result.incomplete {
+            let reason = match incomplete {
+                ReferencesIncomplete::Indexing => super::util::INDEXING_PARTIAL_RESULT_REASON,
+                ReferencesIncomplete::TooManyFiles => "More files mention the symbol than were checked; the hierarchy may be incomplete.",
+                ReferencesIncomplete::FilesSkipped => "Some files were too large or unreadable to check; the hierarchy may be incomplete.",
+                ReferencesIncomplete::ServerFailed => "The language server query failed; only indexed results are available. Retry when analysis finishes.",
+            };
+            value["partialResultReason"] = reason.into();
+        }
+        Output::json(value)
+    })
+    .param(Param::required("filePath", ParamType::String, "Path relative to the project root"))
+    .param(Param::required("line", ParamType::Integer, "1-based line"))
+    .param(Param::required("column", ParamType::Integer, "1-based UTF-16 column"))
+    .param(Param::required("direction", ParamType::String, "\"incoming\" (callers) or \"outgoing\" (callees)"))
+}
+
+// Convert every {line, col} position at this boundary to 1-based, including declarations.
+fn positions(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let (Some(line), Some(col)) =
+                (map.get("line").and_then(|v| v.as_u64()), map.get("col").and_then(|v| v.as_u64()))
+            {
+                map.insert("line".into(), (line + 1).into());
+                map.insert("col".into(), (col + 1).into());
+            } else {
+                for v in map.values_mut() {
+                    positions(v);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for v in items {
+                positions(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+// 输出形态对齐其他工具与原版 MCP findReferences：LSP 结果的 path 是
+// 绝对路径，相对化到项目根（search_text 等工具给 agent 的都是相对
+// 路径）；剥掉行源码 text 与冗余 uri——原版只返回位置，agent 需要
+// 看代码时用 read_file。带源码行的结果在常用符号（上千处引用）下
+// 会膨胀到数百 KB，撑爆模型上下文。
+// kind/access 未分类（unknown）时省略字段——缺失与 unknown 对
+// agent 等价，有真实分类时照常输出。
+// range 保持具名对象不压扁成数组：全项目工具的位置口径都是
+// line/column 具名键，无名数组要靠模型猜顺序，猜错就定位错行。
+// 影响面查询的语义是完备性，不做条数上限。
+fn slim(value: &mut serde_json::Value, call: &Call) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in ["kind", "access"] {
+                if map.get(key).and_then(|v| v.as_str()) == Some("unknown") {
+                    map.remove(key);
+                }
+            }
+            if let Some(p) = map.get("path").and_then(|v| v.as_str()) {
+                let displayed = call.display(Path::new(p));
+                map.insert("path".into(), serde_json::Value::String(displayed));
+            }
+            map.remove("text");
+            map.remove("uri");
+            for v in map.values_mut() {
+                slim(v, call);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for v in items {
+                slim(v, call);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn mcp_position(text: &str, line: i64, column: i64) -> IdeResult<Pos> {
@@ -298,4 +359,20 @@ fn mcp_position(text: &str, line: i64, column: i64) -> IdeResult<Pos> {
         return Err(IdeError::invalid("column is out of bounds"));
     }
     Ok(Pos::new((line - 1) as u32, (column - 1) as u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// find_references 与 call_hierarchy 共用此转换：嵌套的 line/col 全部 +1，其余字段原样。
+    #[test]
+    fn positions_convert_nested_line_and_col_to_one_based() {
+        let mut value =
+            json!({"items":[{"range":{"line":0,"col":2},"fromRanges":[{"line":4,"col":0}]}],"incomplete":null});
+        super::positions(&mut value);
+        assert_eq!(value["items"][0]["range"], json!({"line":1,"col":3}));
+        assert_eq!(value["items"][0]["fromRanges"][0], json!({"line":5,"col":1}));
+        assert_eq!(value["incomplete"], json!(null));
+    }
 }

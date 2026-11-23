@@ -43,7 +43,7 @@ fn innermost_repo<T>(repos: Vec<(PathBuf, T)>, path: &Path) -> Option<(PathBuf, 
 }
 
 // Read tools must never invoke repository-configured executables, including in Restricted Mode.
-fn read_command(git: &str, root: &Path) -> std::process::Command {
+pub(super) fn read_command(git: &str, root: &Path) -> std::process::Command {
     let mut command = std::process::Command::new(git);
     command
         .current_dir(root)

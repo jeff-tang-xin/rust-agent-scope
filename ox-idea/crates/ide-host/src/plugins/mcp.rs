@@ -89,6 +89,7 @@ impl PluginHost {
                     output_schema: None,
                     read_only: d["readOnly"].as_bool().unwrap_or(false),
                     destructive: d["destructive"].as_bool().unwrap_or(true),
+                    builtin_only: false,
                 },
             ));
         }

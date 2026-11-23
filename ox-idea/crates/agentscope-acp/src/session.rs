@@ -59,6 +59,9 @@ struct AcpSession {
     /// `/` 面板的 skill 声明（availableCommands 条目）：装配时算好，
     /// session/new 与 session/load 幂等返回共用一份。
     skill_commands: SkillCommands,
+    /// 每轮 IDE 现场快照提供者（宿主注入）：drive_turn 首轮用户消息首部注入
+    /// 当前聚焦文件/选区/诊断；None 时不注入。
+    ide_snapshot: Option<crate::IdeSnapshot>,
 }
 
 /// 会话表：sessionId → 会话。
@@ -86,7 +89,7 @@ impl AcpSessionHub {
         let cwd = protocol::parse_new_session(&params)?;
         let model = build_model(&self.env).map_err(RpcError::internal)?;
         let session_id = uuid::Uuid::new_v4().to_string();
-        let (agent, skill_commands) =
+        let (agent, skill_commands, ide_snapshot) =
             assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
         let (cancel_tx, _cancel_rx) = watch::channel(false);
         self.sessions.lock().unwrap().insert(
@@ -97,6 +100,7 @@ impl AcpSessionHub {
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
                 skill_commands: skill_commands.clone(),
+                ide_snapshot,
             }),
         );
         // 新会话固定 Code 态：plan 由用户切换，装配时不预设。
@@ -132,7 +136,7 @@ impl AcpSessionHub {
             return Err(RpcError::invalid_params(format!("未知会话: {session_id}")));
         }
         let model = build_model(&self.env).map_err(RpcError::internal)?;
-        let (agent, skill_commands) =
+        let (agent, skill_commands, ide_snapshot) =
             assemble_agent(&cwd, model, &self.env).map_err(RpcError::internal)?;
         let (cancel_tx, _cancel_rx) = watch::channel(false);
         self.sessions.lock().unwrap().insert(
@@ -143,6 +147,7 @@ impl AcpSessionHub {
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
                 skill_commands: skill_commands.clone(),
+                ide_snapshot,
             }),
         );
         // 恢复会话的 plan 态随 AgentState 持久化（plan_mode_context），重建后
@@ -433,7 +438,7 @@ fn ide_section_text(names: &[String], brief: Option<&str>) -> String {
          - 改代码：优先用补丁/编辑工具（理解项目结构、能检查冲突），不要用 shell 重定向整文件覆盖。\n\
          - 构建与检查：用构建与问题检查工具拿结构化结果，比解析裸命令输出更可靠。\n\
          - 编辑器上下文：用户说「这个文件」「我选中的」时，先用 get_current_file / get_all_open_file_paths 确认所指，不要猜。\n\
-         - 界面操作：语义工具没覆盖的纯界面操作（开面板/跳转/重构菜单/设置）用 ide_action 按稳定 actionId 派发（高频目录见 oxidea-usage skill），不要模拟按键。\n\
+         - 界面操作：语义工具没覆盖的纯界面操作（开面板/跳转/重构菜单/设置）用 ide_action 按稳定 actionId 派发（高频目录见「OXidea 操作指南」节），不要模拟按键。\n\
          - 每个工具的详细用途与参数见其工具定义（description），不确定就先读再调，不要猜参数。\n",
         names.join(", ")
     )
@@ -454,7 +459,7 @@ fn assemble_agent(
     cwd: &str,
     model: Arc<dyn Model>,
     env: &[(String, String)],
-) -> Result<(Arc<HarnessAgent>, Vec<Value>), String> {
+) -> Result<(Arc<HarnessAgent>, Vec<Value>, Option<crate::IdeSnapshot>), String> {
     // 本地磁盘文件系统层（Sandboxed：文件工具的绝对路径一律拒绝，锚定 cwd）。
     let sandboxed = |root: PathBuf| {
         Arc::new(LocalFilesystem::new(
@@ -474,6 +479,7 @@ fn assemble_agent(
     // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.oxidea/agent`，跨 worktree 共享）。
     // 提前获取：fs 层同名工具跳过注册需要它的工具名清单。
     let host_ctx = crate::ox_context_for(Path::new(cwd));
+    let ide_snapshot = host_ctx.ide_snapshot.clone();
     let mut toolkit = Toolkit::new();
     // IDE 语义工具优先：与 IDE 工具同名的 fs 层工具跳过注册（当前只有
     // `read_file`——IDE 版支持 jar/zip 内读取、依赖源码根与行号渲染，比
@@ -495,7 +501,7 @@ fn assemble_agent(
     ))));
     // IDE 宿主注入：语义工具（进程内直调）+ 记忆锚点（`<项目根>/.oxidea/agent`，跨 worktree 共享）。
     // host_ctx 已在上方提前获取（fs 层同名工具跳过注册需要它的工具名清单）。
-    let ide_section = if host_ctx.tools.is_empty() {
+    let mut ide_section = if host_ctx.tools.is_empty() {
         String::new()
     } else {
         let names: Vec<String> = host_ctx.tools.iter().map(|t| t.name().to_owned()).collect();
@@ -504,6 +510,18 @@ fn assemble_agent(
         }
         ide_section_text(&names, host_ctx.project_brief.as_deref())
     };
+    // IDE agent 的核心操作手册（oxidea-usage 正文）确定性注入：IDE 场景恒相关，
+    // 属基础指令而非按需加载的 skill——故不进 skill 清单/`/` 面板，也不走
+    // load_skill（其余可选 skill 仍严格渐进披露）。仅 IDE 工具在场时注入——
+    // 降级为纯文件 + shell 时注入 IDE 指南反而误导。与第 3 节通用规程互补：
+    // 通用规程讲方法论，本手册讲 IDE 具体工具调用顺序与环境事实。
+    if !ide_section.is_empty()
+        && let Some(skill) = crate::oxidea_skill::oxidea_usage_skill()
+    {
+        ide_section.push_str("\n## OXidea 操作指南（核心操作手册，恒相关，直接照做）\n\n");
+        ide_section.push_str(skill.skill_content());
+        ide_section.push('\n');
+    }
     // 黑板报（与记忆同域锚定 `<项目根>/.oxidea/agent/blackboard.json`）：工作现场的
     // 信号流（发现/结论/风险/提醒），跨会话共享、只增不改——长任务上下文被压缩后
     // 仍可读回的持久化通道。与记忆管线同进退（宿主注入 memory_root 才启用）。
@@ -587,9 +605,9 @@ fn assemble_agent(
             false,
         )));
     }
-    toolkit.register(Arc::new(LoadSkillTool::new(skill_repos).with_extra_builtins(
-        crate::oxidea_skill::oxidea_usage_skill().into_iter().collect(),
-    )));
+    // oxidea-usage 是核心操作手册（正文已注入 sys_prompt），不作可加载 skill；
+    // load_skill 只服务真正渐进披露的外置/框架 skill。
+    toolkit.register(Arc::new(LoadSkillTool::new(skill_repos)));
     let blackboard_section = if has_blackboard {
         "\n## 黑板报\n\
          - 黑板是工作现场的信号流（区别于记忆的沉淀知识）：发现（finding）、结论（conclusion）、风险（risk）、提醒（note），跨会话共享、只增不改。\n\
@@ -622,17 +640,11 @@ fn assemble_agent(
         crate::datasource::render_section(&datasources)
     };
     // Skill 清单（L1 元数据，渐进披露第一层）：项目级在前、用户级在后，同名项目级
-    // 优先——与 load_skill 的仓库检索顺序一致。
-    // Skill 清单（L1 元数据，渐进披露第一层）：项目级在前、用户级在后，同名项目级
-    // 优先——与 load_skill 的仓库检索顺序一致。宿主专属内置（oxidea-usage）追加
-    // 在外置清单之后：load_skill 走 extra_builtins 兜底，清单里标注内置与适用模式。
-    let mut skill_summaries =
+    // 优先——与 load_skill 的仓库检索顺序一致。oxidea-usage 不在此清单：它是 IDE
+    // agent 恒相关的核心操作手册，正文已注入 sys_prompt「OXidea 操作指南」节，
+    // 不作按需加载的 skill（也不进 / 面板），避免双重处理与「按需加载」矛盾。
+    let skill_summaries =
         agentscope_harness::skill::collect_skill_summaries(Path::new(cwd), skill_home.as_deref());
-    if let Some(skill) = crate::oxidea_skill::oxidea_usage_skill() {
-        if let (Some(name), Some(desc)) = (skill.name(), skill.description()) {
-            skill_summaries.push((name.to_string(), desc.to_string()));
-        }
-    }
     // Skill 清单（L1 元数据，渐进披露第一层）：外置清单由上方扫描得出；
     // 内置分组、渐进披露与冲突裁决引导都在 harness 的 skill_section_markdown
     // 里统一渲染（框架行为，acp 只做产品化组装）。
@@ -732,13 +744,13 @@ fn assemble_agent(
          \n\
          你的每一步动作都由三类外部能力承载，先认清它们是什么，再决定怎么用：\n\
          - **工具（tool）= 原子动作**：一次调用一个明确效果（读文件、改代码、跑命令），结果直接回给你。考量：选最小够用的——有专用工具（如语义检索）就不用 shell 兜底；破坏性动作（删除/覆盖/推送）按铁律 5 征得同意。\n\
-         - **skill = 战术手册**：某类任务的领域知识包（流程、模板、坑），按需加载不占常驻上下文。考量：任务与某 skill 的 description 匹配时，先 load_skill 读全文再动手——方法论来自 skill，动作交给工具；skill 细化本提示词——与本提示词冲突时以本提示词为准，与工具描述冲突时以 skill 为准。**`oxidea-usage` 是本 IDE 的操作指南（调查/编码/调试/Git/浏览器验证五类场景的标准步骤与环境事实）——开始任何编码、调试或代码调查任务前先加载它，plan 与 code 模式下都适用。**\n\
+         - **skill = 战术手册**：某类任务的领域知识包（流程、模板、坑），按需加载不占常驻上下文。考量：任务与某 skill 的 description 匹配时，先 load_skill 读全文再动手——方法论来自 skill，动作交给工具；skill 细化本提示词——与本提示词冲突时以本提示词为准，与工具描述冲突时以 skill 为准。**IDE 操作指南（oxidea-usage）是恒相关的核心手册，不是按需加载的 skill：其正文已注入本提示词「OXidea 操作指南」节（调查/编码/调试/Git/浏览器验证/界面操作六类场景的标准步骤与环境事实），开始任何编码、调试或代码调查任务前直接照做，plan 与 code 模式下都适用。**\n\
          - **MCP = 外部服务**：宿主接入的外部系统（数据库、远程运维、第三方 API），工具面由服务端定义。考量：调用前读工具描述确认副作用与必填参数；外部返回是事实来源，不臆测；凭证与敏感数据不进参数、不落盘。\n\
          决策顺序：想清楚要达成什么 → 有匹配 skill 先加载（怎么做）→ 选最小够用的工具/MCP 工具（去做）→ 结果异常先读报错再重试，同一手段两次失败就止损（铁律 4）。\n\
          \n\
          ### 构建与运行\n\
          跑应用用 get_run_configurations → execute_run_configuration；长驻服务用 waitForExit=true + 短 timeout 启动拿输出快照，进程转后台后 read_file 该日志文件看新输出。\n\
-         启动后要验证/调试时：应用是否在跑用 get_running_processes 现查，停掉用 stop_process；断点调试走 IDE 的 DAP 工具链（set_breakpoint → start_debug_session → get_debug_state / debug_control / evaluate_expression → stop_debug_session，详见 oxidea-usage skill），不要用 shell 起进程再 print 硬凑——IDE 调试的断点/变量/栈在界面里可见，shell 调试是纯黑盒。\n\
+         启动后要验证/调试时：应用是否在跑用 get_running_processes 现查，停掉用 stop_process；断点调试走 IDE 的 DAP 工具链（set_breakpoint → start_debug_session → get_debug_state / debug_control / evaluate_expression → stop_debug_session，详见「OXidea 操作指南」节），不要用 shell 起进程再 print 硬凑——IDE 调试的断点/变量/栈在界面里可见，shell 调试是纯黑盒。\n\
          {skill_section}\
          ### 数据库（面板连接已注册时才有 db 工具）\n\
          {datasource_section}\
@@ -834,7 +846,7 @@ fn assemble_agent(
         builder = builder.state_store(Arc::clone(store));
     }
     let agent = builder.build().map_err(|e| format!("装配 agent 失败: {e}"))?;
-    Ok((Arc::new(agent), skill_commands))
+    Ok((Arc::new(agent), skill_commands, ide_snapshot))
 }
 
 /// 从给定环境构建模型实例（对齐 studio factory 的分发模式）：
@@ -958,6 +970,18 @@ where
     // 「先 load_skill 再按指引处理需求」的明确指示，不依赖模型对裸 /name
     // 文本的遵循度。skills 清单与前端 / 面板同源（availableCommands 条目）。
     let content = apply_skill_invocation(content, &session.skill_commands);
+    // 每轮 IDE 现场快照（B7）：当前聚焦文件/选区/诊断作为独立 Text 块 prepend
+    // 到首轮用户消息首部——agent 开局即知用户在看什么，不必先调 get_current_file。
+    // UI 用 prompt 原文显示不受影响（参照 steer 引导块）；仅首轮注入，权限
+    // 回灌的续跑消息不带快照。
+    let content = match session.ide_snapshot.as_ref().and_then(|s| s()) {
+        Some(text) => {
+            let mut guided = vec![ContentBlock::Text { text }];
+            guided.extend(content);
+            guided
+        }
+        None => content,
+    };
     // 首条：用户消息（文本 + 可选图片，多模态模型直接看图）；权限往返后：
     // 确认答复消息（带 agentscope_confirm_results 元数据，agent 侧 apply 后续跑，
     // 不会重放成聊天内容）。
@@ -1524,6 +1548,7 @@ mod tests {
             busy: std::sync::atomic::AtomicBool::new(false),
             cancel_tx,
             skill_commands: Vec::new(),
+            ide_snapshot: None,
         };
 
         // 读循环：消费 server 端入站帧（client 回的响应），配对给等待者。
@@ -1597,6 +1622,7 @@ mod tests {
                                 busy: std::sync::atomic::AtomicBool::new(true),
                                 cancel_tx: cancel_tx.clone(),
                                 skill_commands: Vec::new(),
+                                ide_snapshot: None,
                             }),
                         );
                         hub.steer(&json!({
@@ -2019,6 +2045,7 @@ mod tests {
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
                 skill_commands: Vec::new(),
+                ide_snapshot: None,
             }),
         );
         let params = json!({ "sessionId": "s1", "cwd": "/p", "mcpServers": [] });
@@ -2061,6 +2088,7 @@ mod tests {
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
                 skill_commands: Vec::new(),
+                ide_snapshot: None,
             }),
         );
         let (_client, server) = tokio::io::duplex(64 * 1024);
@@ -2122,6 +2150,7 @@ mod tests {
             tools: Vec::new(),
             memory_root: Some(memory_root.clone()),
             project_brief: None,
+            ide_snapshot: None,
         }));
         let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
 
@@ -2160,6 +2189,7 @@ mod tests {
             tools: Vec::new(),
             memory_root: Some(memory_root.clone()),
             project_brief: None,
+            ide_snapshot: None,
         }));
         let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
 
@@ -2196,6 +2226,7 @@ mod tests {
                 busy: std::sync::atomic::AtomicBool::new(false),
                 cancel_tx,
                 skill_commands: Vec::new(),
+                ide_snapshot: None,
             }),
         );
         let params = json!({
@@ -2226,6 +2257,7 @@ mod tests {
                 busy: std::sync::atomic::AtomicBool::new(true),
                 cancel_tx,
                 skill_commands: vec![json!({ "name": "oxidea-usage" })],
+                ide_snapshot: None,
             }),
         );
         let steer = |text: &str| {
@@ -2413,6 +2445,7 @@ mod tests {
             tools: Vec::new(),
             memory_root: None,
             project_brief: None,
+            ide_snapshot: None,
         }));
         let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
 
@@ -2467,6 +2500,36 @@ mod tests {
         );
         // 模型确实被第二次调用（工具结果入历史后继续推理）。
         assert!(!model.seen_texts(1).is_empty(), "模型应被第二次调用");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 路A：oxidea-usage 是恒相关核心手册——IDE 工具在场时正文注入 sys_prompt，
+    /// 但不进 L1 skill 清单（不作按需加载的 skill，也不进 / 面板）。
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn oxidea_usage_is_core_manual_not_catalog_skill() {
+        use crate::{OxHostContext, set_ox_tool_provider};
+        let _guard = crate::OX_PROVIDER_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("ox-acp-core-manual-{}", std::process::id()));
+        let cwd = root.join("proj");
+        std::fs::create_dir_all(&cwd).unwrap();
+        set_ox_tool_provider(Arc::new(move |_| OxHostContext {
+            tools: vec![Arc::new(EchoTool)],
+            memory_root: None,
+            project_brief: None,
+            ide_snapshot: None,
+        }));
+        let env = vec![("AGENTSCOPE_MAX_ITERS".to_owned(), "5".to_owned())];
+        let model = MockModel::new(vec![ChatResponse::from_text("完成")]);
+        let agent = assemble_agent(cwd.to_str().unwrap(), model.clone(), &env).unwrap().0;
+        let (_notifications, outcome) = run_drive_turn(agent, "你好", None, false, None).await;
+        assert_eq!(outcome, PromptOutcome::EndTurn);
+        let first = model.seen_texts(0).join("\n");
+        // 核心手册正文已注入（标题 + 正文场景标记）。
+        assert!(first.contains("核心操作手册"), "sys_prompt 应注入核心手册标题: {first}");
+        assert!(first.contains("一、调查"), "sys_prompt 应含手册正文: {first}");
+        // 但不作 L1 清单条目（清单格式 name: description）。
+        assert!(!first.contains("oxidea-usage: OXidea IDE 操作指南"), "oxidea-usage 不应进 skill 清单: {first}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

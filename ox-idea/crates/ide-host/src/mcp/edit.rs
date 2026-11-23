@@ -9,18 +9,27 @@
 mod diff;
 mod format;
 mod patch;
+mod refactor;
 mod rename;
 
 use crate::Project;
 use crate::mcp::tool::{Call, Output, Param, ParamType, Tool};
 use ide_core::event::McpUiRequest;
-use ide_core::{DocId, FileEdit, IdeError, IdeResult, Pos, Range, TextEdit, WorkspaceEdit};
+use ide_core::{Diagnostic, DocId, FileEdit, IdeError, IdeResult, Pos, Range, Severity, TextEdit, WorkspaceEdit};
 use patch::FileOp;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub fn tools() -> Vec<Tool> {
-    vec![create_new_file(), apply_patch(), format::reformat_file(), rename::rename_refactoring(), open_file_in_editor()]
+    vec![
+        create_new_file(),
+        apply_patch(),
+        format::reformat_file(),
+        rename::rename_refactoring(),
+        refactor::refactor_code_action(),
+        open_file_in_editor(),
+    ]
 }
 
 /// What tools without a result value answer (JetBrains renders `Unit` so).
@@ -183,6 +192,56 @@ async fn requested_files(call: &Call) -> IdeResult<Vec<(String, PathBuf)>> {
     Ok(out)
 }
 
+// --- post-edit feedback -------------------------------------------------------------
+
+/// After a write, surface the edited files' problems so the agent sees what it broke
+/// without a separate call (the edit→verify→fix loop). The Problems view is pushed
+/// asynchronously, so wait briefly for a fresh analysis; if none arrives, report the
+/// last known state with a caveat instead of silently showing stale results.
+async fn post_edit_problems(call: &Call, paths: &[PathBuf]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let since = Instant::now();
+    let windows = call.host.mcp_windows(call.root());
+    let is_fresh = || paths.iter().all(|p| call.host.mcp_reports.problem_time(&windows, p).is_some_and(|t| t >= since));
+    let deadline = since + Duration::from_millis(1200);
+    while !is_fresh() && Instant::now() < deadline {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            _ = call.cancel.cancelled() => return String::new(),
+        }
+    }
+    let fresh = is_fresh();
+    let files = call.host.mcp_reports.problems(&windows);
+    let mut lines = Vec::new();
+    for p in paths {
+        let items: Vec<&Diagnostic> = files.iter().filter(|f| f.path.0 == *p).flat_map(|f| &f.items).collect();
+        for d in items.iter().take(20) {
+            let sev = if d.severity == Severity::Error { "error" } else { "warning" };
+            lines.push(format!("{}:{}: [{}] {}", call.display(p), d.range.start.line + 1, sev, d.message));
+        }
+    }
+    if lines.is_empty() {
+        return if fresh {
+            "\nPost-edit analysis: no problems reported.".to_string()
+        } else {
+            "\nPost-edit analysis: no problems reported yet (language servers may still be analyzing). \
+             Verify with get_file_problems or build_project before finishing."
+                .to_string()
+        };
+    }
+    let mut out = format!("\nPost-edit analysis ({} problem(s)):", lines.len());
+    for l in lines.iter().take(40) {
+        out.push('\n');
+        out.push_str(l);
+    }
+    if !fresh {
+        out.push_str("\n(Analysis may still be updating; re-check with get_file_problems or build_project.)");
+    }
+    out
+}
+
 // --- create_new_file ----------------------------------------------------------------
 
 fn create_new_file() -> Tool {
@@ -208,8 +267,10 @@ Note: Creates any necessary parent directories automatically",
                     format!("File already exists: {raw}. Specify 'overwrite=true' to overwrite it"),
                 ));
             }
+            let feedback_path = path.clone();
             create_or_replace(&call, path, text, overwrite).await?;
-            Ok(Output::text(SUCCESS))
+            let feedback = post_edit_problems(&call, &[feedback_path]).await;
+            Ok(Output::text(format!("{SUCCESS}{feedback}")))
         },
     )
     .write()
@@ -245,6 +306,7 @@ Paths must stay inside the project directory.",
             let mut applied = 0usize;
             let mut errors = Vec::new();
             let mut notes = Vec::new();
+            let mut changed: Vec<String> = Vec::new();
             // Each operation stands alone, as in JetBrains: a failed one leaves the others applied.
             for op in ops {
                 if let FileOp::Skip { path, note } = op {
@@ -252,8 +314,19 @@ Paths must stay inside the project directory.",
                     continue;
                 }
                 let path = op.path().to_owned();
+                // Feedback targets the resulting file: a move's destination, not deletes.
+                let feedback_path = match &op {
+                    FileOp::Update { move_to: Some(to), .. } => Some(to.clone()),
+                    FileOp::Delete { .. } => None,
+                    _ => Some(path.clone()),
+                };
                 match apply_op(&call, op, &mut notes).await {
-                    Ok(()) => applied += 1,
+                    Ok(()) => {
+                        applied += 1;
+                        if let Some(fp) = feedback_path {
+                            changed.push(fp);
+                        }
+                    }
                     Err(e) if e.kind == ide_core::error::ErrorKind::Cancelled => return Err(e),
                     Err(e) => errors.push(format!("{path}: {}", e.message)),
                 }
@@ -273,6 +346,13 @@ Paths must stay inside the project directory.",
                     let _ = write!(out, "\n- {n}");
                 }
             }
+            let mut abs = Vec::new();
+            for raw in &changed {
+                if let Ok(p) = call.resolve_inside(raw) {
+                    abs.push(p);
+                }
+            }
+            out.push_str(&post_edit_problems(&call, &abs).await);
             Ok(Output::text(out))
         },
     )

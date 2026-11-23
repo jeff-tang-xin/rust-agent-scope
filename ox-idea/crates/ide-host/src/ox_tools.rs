@@ -107,7 +107,7 @@ fn project_brief(root: &std::path::Path) -> Option<String> {
 pub fn ox_tool_provider(host: Arc<Host>) -> OxToolProvider {
     Arc::new(move |cwd| {
         let Some(project) = project_for(&host, cwd) else {
-            return OxHostContext { tools: Vec::new(), memory_root: None, project_brief: None };
+            return OxHostContext { tools: Vec::new(), memory_root: None, project_brief: None, ide_snapshot: None };
         };
         let registry = Arc::new(Registry::new(host.clone()));
         let tools = match registry.tools(&project) {
@@ -133,7 +133,13 @@ pub fn ox_tool_provider(host: Arc<Host>) -> OxToolProvider {
             tracing::warn!("could not update .oxidea/.gitignore: {e}");
         }
         let project_brief = project_brief(&project);
-        OxHostContext { tools, memory_root: Some(memory_root), project_brief }
+        // 每轮 IDE 现场快照（B7）：prompt 时现查聚焦文件/选区/诊断，注入用户消息
+        // 首部。回调捕获 host + project，在 agent 运行时同步读宿主状态。
+        let snapshot_host = host.clone();
+        let snapshot_project = project.clone();
+        let ide_snapshot: Option<agentscope_acp::IdeSnapshot> =
+            Some(Arc::new(move || snapshot_host.ide_snapshot_text(&snapshot_project)));
+        OxHostContext { tools, memory_root: Some(memory_root), project_brief, ide_snapshot }
     })
 }
 

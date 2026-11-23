@@ -10,8 +10,9 @@ use serde_json::{json, Value};
 
 use crate::RpcError;
 
-/// `initialize` 响应（v1 形态）。`loadSession: false`——会话恢复走 agentscope
-/// 侧 state store，不经 ACP 重放；fs 能力不声明（agent 自带文件工具，
+/// `initialize` 响应（v1 形态）。`loadSession: true`——session/load 按 sessionId
+/// 经 Legacy state store 重建 agent 恢复模型上下文（ide-agent 侧 timeline 自有
+/// 持久化，历史 update 帧无需重放）；fs 能力不声明（agent 自带文件工具，
 /// 不依赖 client 的 fs 代理）。
 pub fn initialize_result() -> Value {
     json!({
