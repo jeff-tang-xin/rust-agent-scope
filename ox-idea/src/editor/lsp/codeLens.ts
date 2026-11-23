@@ -18,6 +18,8 @@ import { featureBackoff, onLspRefresh, onServerSettled } from "./availability";
 import { editorPrefs } from "@/platform/editorSettings";
 import { authorLabel, authorSummary, authorTooltip, blameFor, onBlameInvalidated } from "./authorLens";
 import { tx } from "@/platform/i18n";
+import type { Location } from "@/bindings";
+import { setUsageSeed } from "./usageSeed";
 
 const LENS_KINDS = new Set<SymbolKind>([
   "class",
@@ -100,7 +102,10 @@ const lensField = StateField.define<CodeLens[]>({
 const usagesEnabled = () => editorPrefs().inlay.codeVisionUsages;
 const authorEnabled = () => editorPrefs().inlay.codeVisionAuthor;
 
-function openUsages(view: EditorView, offset: number) {
+function openUsages(view: EditorView, offset: number, symbol: string, locations: Location[]) {
+  // Instant open: seed the popup with the locations the lens already counted;
+  // Show Usages displays them at once, then the full-scope search refreshes.
+  setUsageSeed(symbol, locations);
   view.dispatch({ selection: EditorSelection.cursor(offset), userEvent: "select.lens" });
   view.focus();
   void executeAction("find.showUsages");
@@ -108,8 +113,8 @@ function openUsages(view: EditorView, offset: number) {
 
 class UsagesLensPlugin {
   private schedule = debounce(() => void this.run(), 900);
-  /** `${line}:${col}:${name}` → count, valid for `cacheDoc`. */
-  private cache = new Map<string, number>();
+  /** `${line}:${col}:${name}` → count + locations, valid for `cacheDoc`. */
+  private cache = new Map<string, { count: number; locations: Location[] }>();
   private cacheDoc: Text | null = null;
   private outline: { doc: Text; targets: LensTarget[] } | null = null;
   private generation = 0;
@@ -208,7 +213,7 @@ class UsagesLensPlugin {
               }, wanted);
               if (wanted()) {
                 if (incomplete) this.incomplete = true;
-                else this.cache.set(key(t), refs.length);
+                else this.cache.set(key(t), { count: refs.length, locations: refs });
               }
             } catch (e) {
               if (wanted() && isUnavailable(e)) unavailable = true;
@@ -228,14 +233,14 @@ class UsagesLensPlugin {
         const who = lines && authorSummary(lines, t.startLine, t.endLine);
         if (who)
           lenses.push({ pos: offset, title: authorLabel(who), tooltip: authorTooltip(who), icon: "user", order: 20 });
-        const n = usages ? this.cache.get(key(t)) : undefined;
-        if (n === undefined) continue;
+        const entry = usages ? this.cache.get(key(t)) : undefined;
+        if (entry === undefined) continue;
         lenses.push({
           pos: offset,
-          title: usagesLabel(n),
+          title: usagesLabel(entry.count),
           tooltip: tx`Show usages of ${t.name}`,
           order: 10,
-          run: (v) => openUsages(v, Math.min(offset, v.state.doc.length)),
+          run: (v) => openUsages(v, Math.min(offset, v.state.doc.length), t.name, entry.locations),
         });
       }
       if (!sameLenses(view.state.field(lensField), lenses)) view.dispatch({ effects: setLenses.of(lenses) });

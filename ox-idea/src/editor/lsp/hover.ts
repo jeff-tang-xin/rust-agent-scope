@@ -3,13 +3,14 @@
  * plus the explicit actions code.quickDocumentation (F1, sticky popup with
  * history, `docs.ts`) and code.quickDefinition (⌥Space, definition source popup).
  */
-import { EditorSelection } from "@codemirror/state";
+import { EditorSelection, type Text } from "@codemirror/state";
 import { closeHoverTooltips, hasHoverTooltips, hoverTooltip, ViewPlugin, type EditorView } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import {
   commands,
   isTauri,
   nextRequestId,
+  onIdeEvent,
   type Hover,
   type Location,
   type Pos,
@@ -22,6 +23,7 @@ import { diagnosticsAt, type PlacedDiagnostic } from "./diagnostics";
 import { isEmptyMarkup, languageForPath, renderMarkup } from "./markdown";
 import { selectableText } from "@/ui/selectableText";
 import { docOf, lspRequest, reportLspError } from "./lsp";
+import { onServerSettled } from "./availability";
 import { offsetToPos, rangeToOffsets } from "./positions";
 import { showHint } from "./hint";
 import { caretAnchor, focusPopup, openPopup, useLspPopup, type DefinitionTarget, type DocEntry } from "./popupStore";
@@ -38,6 +40,22 @@ import { navigationModifierHeld, onNavigationModifier, pointerTarget } from "@/p
 import { languageSemantics } from "./semantic";
 
 let hoverRequest: RequestId | null = null;
+
+// Freshness-only hover documentation cache: stable per symbol while the document
+// text and server index are unchanged. Refresh/settle events invalidate; the age
+// limit backstops servers that don't report every semantic change. Empty answers
+// are never retained (indexing may still be in progress).
+const HOVER_MAX_AGE = 30_000;
+const HOVER_MAX_ENTRIES = 128;
+interface CachedHover {
+  text: Text;
+  at: number;
+  hover: Hover;
+}
+const hoverCache = new Map<string, CachedHover>();
+const clearHoverCache = () => hoverCache.clear();
+onIdeEvent("lspRefresh", clearHoverCache);
+onServerSettled(clearHoverCache);
 
 /** Documentation of a language construct (PHP's `empty`) at `pos`, via the language's registration. */
 function constructAt(state: EditorView["state"], pos: number, language: string | null | undefined) {
@@ -60,6 +78,13 @@ export async function requestHover(view: EditorView, pos: number): Promise<Hover
       contents: { kind: "markdown", value: construct.markdown },
       range: { start: offsetToPos(view.state.doc, construct.from), end: offsetToPos(view.state.doc, construct.to) },
     };
+  const text = view.state.doc;
+  const word = view.state.wordAt(pos);
+  const cacheKey = `${doc.doc}:${word ? `${word.from}:${word.to}` : pos}`;
+  const cached = hoverCache.get(cacheKey);
+  if (cached && cached.text.eq(text) && Date.now() - cached.at < HOVER_MAX_AGE) {
+    return cached.hover;
+  }
   if (hoverRequest !== null && isTauri()) void commands.cancelRequest(hoverRequest);
   const id = (hoverRequest = nextRequestId());
   try {
@@ -67,7 +92,15 @@ export async function requestHover(view: EditorView, pos: number): Promise<Hover
       () => commands.lspHover(id, doc.doc, offsetToPos(view.state.doc, pos)),
       () => hoverRequest === id,
     );
-    return h && !isEmptyMarkup(h.contents) ? h : null;
+    const result = h && !isEmptyMarkup(h.contents) ? h : null;
+    if (result) {
+      hoverCache.set(cacheKey, { text, at: Date.now(), hover: result });
+      if (hoverCache.size > HOVER_MAX_ENTRIES) {
+        const oldest = hoverCache.keys().next().value;
+        if (oldest !== undefined) hoverCache.delete(oldest);
+      }
+    }
+    return result;
   } finally {
     if (hoverRequest === id) hoverRequest = null;
   }

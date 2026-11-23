@@ -4,6 +4,7 @@ import { Channel } from "@tauri-apps/api/core";
 import type { ClassifiedReference, ReferenceAccess, ReferenceKind, Location, References, RequestId } from "@/bindings";
 import { clearLineTokens } from "@/editor/lineTokens";
 import { incompleteNote } from "@/editor/lsp/lsp";
+import { takeUsageSeed } from "@/editor/lsp/usageSeed";
 import { commands, IpcError, isCancelled, nextRequestId } from "@/platform/ipc";
 import { shortcutLabel } from "@/platform/keymap";
 import { synchronizeDocumentIndexes, toolWindowService } from "@/workbench/contributions";
@@ -422,6 +423,22 @@ async function searchPopup(c: CaretContext, libraries: boolean, widenable: boole
     early = true;
     useUsagesPopup.setState({ ...found, loading: true, scope: widenable ? "libraries" : null });
   };
+  // Instant-open seed (lens click): show the locations the lens already counted
+  // as provisional results (loading), then the full-scope search below replaces
+  // and corrects them. Only for the first project-scope open; reopen/widen skip.
+  const seed = takeUsageSeed();
+  if (seed && !libraries && !reopened && seed.symbol === c.word && seed.locations.length > 0) {
+    useUsagesPopup.setState({
+      open: true,
+      anchor: caretPoint(),
+      symbol: c.word,
+      groups: groupUsages(seed.locations, new Map()),
+      note: null,
+      loading: true,
+      scope: null,
+    });
+    early = true;
+  }
   const again = shortcutLabel("find.showUsages");
   try {
     const { groups, note, librariesSkipped } = await fetchUsages(
