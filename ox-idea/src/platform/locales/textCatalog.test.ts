@@ -265,6 +265,9 @@ const UNTRANSLATED = new Set<string>([
   "run pytest",
   "run python",
   "snake_case",
+  "qwen2.5-coder:7b",
+  "qwen3-coder-plus",
+  "sk-…",
   "tests",
   '{ "section": { "key": "value" } }',
   // Identifiers that only look like text: icon names, error codes, categories, console output
