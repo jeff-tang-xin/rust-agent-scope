@@ -44,6 +44,8 @@ export function BrowserView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** The latest frame's device size: input coordinates are scaled by it. */
   const device = useRef({ width: 0, height: 0 });
+  /** Last forwarded hover-move timestamp: throttles mousemove to ~30Hz. */
+  const lastMove = useRef(0);
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   /** Attached once the frame channel is live; frames flow until unmount. */
@@ -51,20 +53,59 @@ export function BrowserView() {
 
   useEffect(() => {
     const channel = new Channel<BrowserFrame>();
-    channel.onmessage = (frame) => {
+    // 合帧渲染管线：只保留最新帧，requestAnimationFrame 调度 + busy 标志防解码
+    // 重叠。解码慢时丢弃过期帧而非堆积连绘——页面加载期视觉剧变、帧密集，
+    // 旧实现每帧 new Image() 无合帧会拖垮主线程。canvas 用 JPEG 自然尺寸
+    // （screencast 已降到 1280×914，比 1680×1200 视口小，drawImage 更省）；
+    // 坐标换算仍用帧的 device_width/height（CSS 视口 1680×1200），口径不变。
+    let pending: BrowserFrame | null = null;
+    let busy = false;
+    let rafId = 0;
+    let liveShown = false;
+    let alive = true;
+    function schedule() {
+      if (alive && !rafId) rafId = requestAnimationFrame(drawLatest);
+    }
+    function drawLatest() {
+      rafId = 0;
+      if (!alive || busy) return; // 上一帧仍在解码，完成后会重新调度
+      const frame = pending;
+      if (!frame) return;
+      pending = null;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const width = frame.device_width ?? 0;
-      const height = frame.device_height ?? 0;
-      if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
-        canvas.width = width;
-        canvas.height = height;
-        device.current = { width, height };
-      }
+      busy = true;
       const image = new Image();
-      image.onload = () => canvas.getContext("2d")?.drawImage(image, 0, 0);
+      const finish = () => {
+        busy = false;
+        if (pending) schedule(); // 解码期间又到了新帧，接着绘最新的
+      };
+      image.onload = () => {
+        const c = canvasRef.current;
+        if (!c || !alive) {
+          finish();
+          return;
+        }
+        if (c.width !== image.naturalWidth || c.height !== image.naturalHeight) {
+          c.width = image.naturalWidth;
+          c.height = image.naturalHeight;
+        }
+        const width = frame.device_width ?? 0;
+        const height = frame.device_height ?? 0;
+        if (width > 0 && height > 0) device.current = { width, height };
+        c.getContext("2d")?.drawImage(image, 0, 0);
+        if (!liveShown) {
+          liveShown = true;
+          setLive(true);
+        }
+        finish();
+      };
+      image.onerror = finish;
       image.src = `data:image/jpeg;base64,${frame.data}`;
-      if (!live) setLive(true);
+    }
+    channel.onmessage = (frame) => {
+      pending = frame; // 只留最新帧，过期帧在解码前即被丢弃
+      schedule();
     };
     call(commands.browserPanelAttach(channel))
       .then((state) => {
@@ -79,7 +120,9 @@ export function BrowserView() {
         .catch(() => {});
     }, 2000);
     return () => {
+      alive = false;
       clearInterval(poll);
+      if (rafId) cancelAnimationFrame(rafId);
       void commands.browserPanelDetach().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,6 +140,14 @@ export function BrowserView() {
 
   const mouse = useCallback(
     (eventType: string, e: React.MouseEvent, button: string | null = null, clickCount = 0) => {
+      // hover 移动节流到 ~30Hz：每个 mousemove 都过 IPC→CDP，鼠标移动时会形成
+      // ~60Hz 洪泛（agent-studio 根本不转发 hover）；按下/抬起/滚轮是离散低频
+      // 事件，保持即时。
+      if (eventType === "moved") {
+        const now = performance.now();
+        if (now - lastMove.current < 33) return;
+        lastMove.current = now;
+      }
       const { x, y } = toPage(e.clientX, e.clientY);
       void call(commands.browserPanelMouse(eventType, x, y, button, clickCount, 0, 0)).catch(() => {});
     },
@@ -114,9 +165,7 @@ export function BrowserView() {
   const key = useCallback((eventType: "keydown" | "keyup", e: React.KeyboardEvent) => {
     const modifiers =
       (e.altKey ? MOD_ALT : 0) | (e.ctrlKey ? MOD_CTRL : 0) | (e.metaKey ? MOD_META : 0) | (e.shiftKey ? MOD_SHIFT : 0);
-    void call(
-      commands.browserPanelKey(eventType, e.key, e.code, null, modifiers, VK[e.key] ?? 0),
-    ).catch(() => {});
+    void call(commands.browserPanelKey(eventType, e.key, e.code, null, modifiers, VK[e.key] ?? 0)).catch(() => {});
   }, []);
 
   const onKeyDown = useCallback(
@@ -127,7 +176,9 @@ export function BrowserView() {
       key("keydown", e);
       // A printable character (no shortcuts): CDP pages want a `char` with text.
       if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        void call(commands.browserPanelKey("char", e.key, e.code, e.key, e.shiftKey ? MOD_SHIFT : 0, 0)).catch(() => {});
+        void call(commands.browserPanelKey("char", e.key, e.code, e.key, e.shiftKey ? MOD_SHIFT : 0, 0)).catch(
+          () => {},
+        );
       }
     },
     [key],
@@ -142,11 +193,12 @@ export function BrowserView() {
     const trimmed = target.trim();
     if (!trimmed) return;
     // A bare host or phrase is a search/query URL, like browsers treat the box.
-    const withScheme = /^[a-z][\w+.-]*:/i.test(trimmed) || trimmed.startsWith("localhost")
-      ? trimmed
-      : /[\s]/.test(trimmed) || !trimmed.includes(".")
-        ? `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`
-        : `https://${trimmed}`;
+    const withScheme =
+      /^[a-z][\w+.-]*:/i.test(trimmed) || trimmed.startsWith("localhost")
+        ? trimmed
+        : /[\s]/.test(trimmed) || !trimmed.includes(".")
+          ? `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`
+          : `https://${trimmed}`;
     call(commands.browserPanelNavigate(withScheme))
       .then(setUrl)
       .catch((e) => setError(message(e)));

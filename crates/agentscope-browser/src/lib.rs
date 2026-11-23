@@ -248,8 +248,19 @@ impl BrowserSession {
             StartScreencastParams::builder()
                 .format(StartScreencastFormat::Jpeg)
                 .quality(60)
-                .max_width(1680)
-                .max_height(1200)
+                // 直播帧与 Agent 视口解耦：视口仍 1680×1200（Agent 测 ~1600px
+                // 中台布局必需，device_width/height 元数据随之不变，面板坐标
+                // 换算口径不动），但 screencast JPEG 只需面板显示分辨率——按
+                // 1.4:1 等比降到 1280×914，帧体积/解码量降约 40%。面板显示宽
+                // 通常 <1280，仍过采样，观感基本无损。
+                .max_width(1280)
+                .max_height(914)
+                // 源端降编码率：disable_gpu 下 Chrome 纯 CPU 软件编码，页面有
+                // 动画/加载时按 30-60fps 全帧率编码，而转发层只用 10fps，多编
+                // 的帧全是与 IDE 抢 CPU 的浪费。every_nth_frame(3) 让 Chrome 每
+                // 3 帧才采 1 帧（≈20fps 源），编码开销降约 3 倍；IPC 侧 10fps
+                // 节流仍兜底。直播看页面状态非视频，此帧率足够。
+                .every_nth_frame(3)
                 .build(),
         )
         .await
@@ -572,9 +583,10 @@ impl BrowserSession {
         let page = Arc::new(bpage.inner().clone());
         // 显式设定页面视口：window_size 只决定浏览器窗口，headless 新标签页
         // 的页面视口仍是 Chromium 默认 800×600——页面按窄屏渲染（响应式布局
-        // 塌缩、面板画面浪费），与窗口 1680×1200 及 screencast 上限不一致。
+        // 塌缩、面板画面浪费），与窗口 1680×1200 不一致。
         // setDeviceMetricsOverride 让 CSS 视口 = 1680×1200，screencast 帧的
-        // device_width/height 随之对齐，面板坐标换算（device_width/显示宽）不变。
+        // device_width/height 随之对齐（取决于 CSS 视口，与 screencast JPEG
+        // 的降采样上限无关），面板坐标换算（device_width/显示宽）不变。
         page.execute(
             SetDeviceMetricsOverrideParams::builder()
                 .width(1680)
