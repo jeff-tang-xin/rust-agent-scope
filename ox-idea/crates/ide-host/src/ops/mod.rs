@@ -3,6 +3,7 @@
 //! and the command's arguments, and streams through [`Emit`] callbacks.
 
 pub mod agent;
+pub mod ai_completion;
 pub mod analysis;
 pub mod build;
 pub mod bytes;
