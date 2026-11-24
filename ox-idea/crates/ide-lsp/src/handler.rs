@@ -277,6 +277,7 @@ impl Handler for ClientHandler {
             }
             "tsserver/request" => mgr.forward_tsserver_requests(self.server.clone(), self.generation, params),
             "language/status" if self.server.name == "jdtls" && params["type"] == "ServiceReady" => {
+                self.server.set_java_service_ready(self.generation);
                 mgr.java_import_ready(self.server.clone(), self.generation);
             }
             "language/status" if self.server.name == "jdtls" && params["type"] == "ProjectStatus" => {

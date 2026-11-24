@@ -63,6 +63,33 @@ pub fn agent_in_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Option<Path
     })
 }
 
+/// The `--jvm-arg=-javaagent:` argument to attach to the language server's JVM, if any:
+/// the user's own agent (`own`, the configured JVM options) wins; else the app-provided
+/// jar (`managed`, inert without Lombok on the classpath); else, for a project using
+/// Lombok, the newest cached release that current jdtls can run. `None` leaves the
+/// launch as it is (no agent of the user's own, no usable jar to attach).
+pub fn agent_argument(
+    root: &Path,
+    own: &str,
+    managed: Option<PathBuf>,
+    maven_repo: Option<PathBuf>,
+) -> Option<String> {
+    if agent_in_args(own.split_whitespace()).is_some() {
+        return None;
+    }
+    let agent = match managed {
+        Some(jar) => LombokAgent::Found { jar, version: None },
+        // An outdated cached jar drops every annotation of the compilation unit, so it
+        // is not attached; the hint tells the user to install a newer one instead.
+        None => match lombok_agent(root, None, None, maven_repo) {
+            agent if agent.jar().is_some() && !agent.outdated() => agent,
+            _ => return None,
+        },
+    };
+    let jar = agent.jar()?;
+    Some(format!("--jvm-arg=-javaagent:{}", jar.to_string_lossy()))
+}
+
 /// The Lombok agent for the project at `root`: the user's own (`own`, from the JVM
 /// options) wins, then `managed` (the app-provided jar, always attached: it is inert
 /// without Lombok on the classpath), then, for a project using Lombok, the build caches
@@ -333,6 +360,40 @@ fn parse_version(v: &str) -> Option<[u32; 3]> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn agent_argument_own_managed_then_usable_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("proj");
+        fs::create_dir_all(&root).unwrap();
+        // The user's own agent wins: nothing to attach.
+        assert_eq!(agent_argument(&root, "-javaagent:/x/lombok.jar", None, None), None);
+        // The app-provided jar is attached as is (inert without Lombok on the classpath).
+        let jar = tmp.path().join("lombok-1.18.42.jar");
+        fs::write(&jar, "").unwrap();
+        assert_eq!(
+            agent_argument(&root, "", Some(jar.clone()), None),
+            Some(format!("--jvm-arg=-javaagent:{}", jar.display()))
+        );
+        // A project without Lombok and no managed jar: nothing to attach.
+        assert_eq!(agent_argument(&root, "", None, None), None);
+        // A cached release new enough for current jdtls is attached; an outdated one is
+        // not (it would drop every annotation of the compilation unit).
+        let repo = tmp.path().join("repo");
+        let new = repo.join("org").join("projectlombok").join("lombok").join("1.18.42");
+        let old = repo.join("org").join("projectlombok").join("lombok").join("1.18.10");
+        fs::create_dir_all(&new).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(new.join("lombok-1.18.42.jar"), "").unwrap();
+        fs::write(old.join("lombok-1.18.10.jar"), "").unwrap();
+        fs::write(root.join("pom.xml"), format!("<project><artifactId>demo</artifactId>{LOMBOK_DEP}</project>")).unwrap();
+        assert_eq!(
+            agent_argument(&root, "", None, Some(repo.clone())),
+            Some(format!("--jvm-arg=-javaagent:{}", new.join("lombok-1.18.42.jar").display()))
+        );
+        fs::remove_file(new.join("lombok-1.18.42.jar")).unwrap();
+        assert_eq!(agent_argument(&root, "", None, Some(repo)), None);
+    }
 
     #[test]
     fn detects_lombok_in_build_files() {

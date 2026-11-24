@@ -54,9 +54,12 @@ async fn resolve_launch(
             project.java_launch_snapshots.lock().initialize();
             let model = load(&project.root, &project.build_cache_dir(), &settings);
             let non_java = build && compile::launch_has_non_java_sources(&project.root, &model, &module, test);
+            // A Maven module always builds with Maven before a launch: javac writes the
+            // same classes the user's terminal build does, and the outputs are snapshotted
+            // out of jdtls's reach, so the ECJ classes jdtls keeps in `target/classes`
+            // (mixed with Maven's, sometimes stale or half-written) never reach the JVM.
             let delegated = build
-                && model.maven.as_ref().is_some_and(|m| m.projects.iter().any(|p| project.root.join(&p.dir) == module))
-                && (non_java || cache::has_record(&project.root, &project.build_cache_dir(), &module));
+                && model.maven.as_ref().is_some_and(|m| m.projects.iter().any(|p| project.root.join(&p.dir) == module));
             let external = non_java || delegated;
             (model, external, delegated)
         })

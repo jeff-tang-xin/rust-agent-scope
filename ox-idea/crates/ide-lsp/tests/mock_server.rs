@@ -1856,6 +1856,7 @@ async fn java_source_paths_reach_initialization_live_configuration_and_builds() 
     assert_eq!(notification["settings"]["java"]["project"]["referencedLibraries"], json!(["lib/**/*.jar"]));
     assert_eq!(state.launches.load(Ordering::SeqCst), 1);
     state.respond("java/buildWorkspace", json!(1));
+    state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
     assert_eq!(
         h.mgr.java_build(&h.root, false, &Default::default()).await.unwrap(),
         ide_lsp::jdtls::JavaBuildStatus::Succeeded
@@ -1876,13 +1877,48 @@ async fn java_source_paths_reach_initialization_live_configuration_and_builds() 
 #[tokio::test(flavor = "multi_thread")]
 async fn java_build_asks_for_a_full_build_when_rebuilding() {
     let h = harness_for("java", "java", &[("jdtls", incremental_caps())], &[]);
+    let (_, _file) = h.open("Main.java", "public class Main {}");
+    h.wait_status("jdtls", ServerStatus::Ready).await;
     let state = h.launcher.state("jdtls");
     state.respond("java/buildWorkspace", json!(1));
+    state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
     assert_eq!(
         h.mgr.java_build(&h.root, true, &Default::default()).await.unwrap(),
         ide_lsp::jdtls::JavaBuildStatus::Succeeded
     );
     assert_eq!(state.requested("java/buildWorkspace"), vec![json!(true)]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn java_build_waits_for_service_ready_and_the_import_to_quiesce() {
+    let h = harness_for("java", "java", &[("jdtls", incremental_caps())], &[]);
+    let (_, _file) = h.open("Main.java", "public class Main {}");
+    h.wait_status("jdtls", ServerStatus::Ready).await;
+    let state = h.launcher.state("jdtls");
+    state.respond("java/buildWorkspace", json!(1));
+    // The server runs, but jdtls has not reported ServiceReady yet: no project is
+    // imported, and `wait_idle` alone would pass at once for lack of a busy signal.
+    let mgr = h.mgr.clone();
+    let root = h.root.clone();
+    let build = tokio::spawn(async move { mgr.java_build(&root, false, &Default::default()).await });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        state.requested("java/buildWorkspace").is_empty(),
+        "buildWorkspace ran before ServiceReady"
+    );
+    // ServiceReady arrives and the Maven import is running: still not quiescent.
+    state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
+    state.peer().notify("experimental/serverStatus", json!({ "health": "ok", "quiescent": false })).unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        state.requested("java/buildWorkspace").is_empty(),
+        "buildWorkspace ran while the import was still in progress"
+    );
+    // The import ends: the build runs and succeeds.
+    state.peer().notify("experimental/serverStatus", json!({ "health": "ok", "quiescent": true })).unwrap();
+    let status = tokio::time::timeout(Duration::from_secs(10), build).await.unwrap().unwrap().unwrap();
+    assert_eq!(status, ide_lsp::jdtls::JavaBuildStatus::Succeeded);
+    assert_eq!(state.requested("java/buildWorkspace"), vec![json!(false)]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1896,8 +1932,14 @@ async fn unmanaged_java_run_imports_sources_without_an_open_editor() {
     }));
     let state = h.launcher.state("jdtls");
     state.respond("java/buildWorkspace", json!(1));
+    // The build starts the server itself; gate it once the mock peer exists.
+    let mgr = h.mgr.clone();
+    let root = h.root.clone();
+    let build = tokio::spawn(async move { mgr.java_build(&root, false, &Default::default()).await });
+    eventually(|| state.peer.lock().is_some()).await;
+    state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
     assert_eq!(
-        h.mgr.java_build(&h.root, false, &Default::default()).await.unwrap(),
+        tokio::time::timeout(Duration::from_secs(10), build).await.unwrap().unwrap().unwrap(),
         ide_lsp::jdtls::JavaBuildStatus::Succeeded
     );
     assert_eq!(state.requested("initialize")[0]["initializationOptions"]["triggerFiles"], json!([uri_of(&file)]));
@@ -1911,6 +1953,7 @@ async fn java_launch_serializes_the_classpath_with_the_build_lock() {
     h.wait_status("jdtls", ServerStatus::Ready).await;
     let state = h.launcher.state("jdtls");
     state.respond("java/buildWorkspace", json!(1));
+    state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
 
     // A launch with a build re-takes the lock after java_build has released it.
     let info = tokio::time::timeout(
@@ -1950,6 +1993,7 @@ async fn java_launch_scopes_build_status_and_does_not_wait_for_unrelated_errors(
     h.wait_status("jdtls", ServerStatus::Ready).await;
     let state = h.launcher.state("jdtls");
     state.respond("java/buildWorkspace", json!(2));
+    state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
     let web = h.root.join("web");
     let classpath = json!({"classpaths": [web.join("target/classes"), h.root.join("service/target/classes")]});
     for (path, test, expected, classpaths_available) in [

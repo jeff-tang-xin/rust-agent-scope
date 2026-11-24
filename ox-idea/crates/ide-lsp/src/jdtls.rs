@@ -31,6 +31,11 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long to retry while the project is still being imported.
 const IMPORT_WAIT: Duration = Duration::from_secs(90);
+/// How long a launch build waits for the import to quiesce (`experimental/serverStatus`
+/// and `$/progress`): jdtls accepts `java/buildWorkspace` while still importing and then
+/// compiles against an incomplete classpath, reporting every import as unresolved.
+/// A large first import takes minutes; afterwards the build runs anyway, as before.
+const IMPORT_QUIESCE_WAIT: Duration = Duration::from_secs(10 * 60);
 /// Compile errors listed with a launch; the rest are only counted.
 const MAX_LAUNCH_ERRORS: usize = 10;
 /// Build markers can be published just after `java/buildWorkspace` answers.
@@ -512,6 +517,27 @@ async fn cancellable_wait<T>(cancel: &CancellationToken, wait: impl std::future:
     }
 }
 
+/// Waits until the instance `generation` reported jdtls `ServiceReady` and the workspace
+/// is quiescent (no `$/progress` task, not loading): the import has started and ended,
+/// so `java/buildWorkspace` compiles against the complete classpath. False on timeout,
+/// cancellation, or a server that went down.
+async fn wait_java_ready(server: &Server, generation: u64, wait: Duration, cancel: &CancellationToken) -> bool {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        if server.java_service_ready(generation) {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            return server.wait_idle(left, cancel).await;
+        }
+        if tokio::time::Instant::now() >= deadline || server.running().is_none() {
+            return false;
+        }
+        tokio::select! {
+            () = tokio::time::sleep(Duration::from_secs(1)) => {}
+            () = cancel.cancelled() => return false,
+        }
+    }
+}
+
 impl LspManager {
     /// m2e generates a project-specific forbidden-reference error, overriding
     /// workspace defaults. Apply those defaults only to cache-owned metadata.
@@ -790,8 +816,17 @@ impl LspManager {
     /// class files are up to date before a launch.
     /// `full` asks jdtls for a clean build (`java/buildWorkspace(true)`, IDEA's Rebuild).
     pub async fn java_build(&self, path: &Path, full: bool, cancel: &CancellationToken) -> IdeResult<JavaBuildStatus> {
-        let (server, _) = self.jdtls(path, cancel).await?;
+        let (server, run) = self.jdtls(path, cancel).await?;
         let _lock = cancellable_wait(cancel, server.java_build_lock.lock()).await?;
+        // A build while the project is still importing compiles against an incomplete
+        // classpath and reports every import as unresolved; jdtls accepts the request
+        // either way, so `jdtls_project_command`'s "not imported" retry never fires.
+        // Navigation waits out loading the same way (`loading::while_loading`).
+        // `ServiceReady` gates the window before the import even starts: the server
+        // runs, but no project exists yet, and `wait_idle` alone would pass at once.
+        if !wait_java_ready(&server, run.generation, IMPORT_QUIESCE_WAIT, cancel).await {
+            tracing::warn!("jdtls: building while the project is still loading; the import may be incomplete");
+        }
         let mut v = self.jdtls_request(path, "java/buildWorkspace", json!(full), BUILD_TIMEOUT, cancel).await?;
         // The first build can finish the Maven import before ServiceReady is handled.
         let (server, run) = self.jdtls(path, cancel).await?;

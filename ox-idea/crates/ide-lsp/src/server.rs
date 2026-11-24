@@ -126,6 +126,11 @@ pub struct Server {
     /// The instance whose just registered external project is loading, until an open file's
     /// diagnostics arrive (0: none).
     pub external_loading: std::sync::atomic::AtomicU64,
+    /// The generation that reported jdtls `language/status ServiceReady` (0: none yet).
+    /// `java/buildWorkspace` is accepted before the Maven import even starts and then
+    /// compiles against a workspace with no projects; the notification gates a launch
+    /// build until the service is up (generations restart at 1, so 0 never matches).
+    java_service_ready: Mutex<u64>,
 }
 
 impl Server {
@@ -163,6 +168,7 @@ impl Server {
             external_diagnostics: std::sync::atomic::AtomicBool::new(false),
             external_refresh_queued: std::sync::atomic::AtomicBool::new(false),
             external_loading: std::sync::atomic::AtomicU64::new(0),
+            java_service_ready: Mutex::new(0),
         }
     }
 
@@ -519,6 +525,16 @@ impl Server {
         }
         self.refresh_busy_status(sink);
         self.phase_ended();
+    }
+
+    /// Records that the instance `generation` reported jdtls `ServiceReady`.
+    pub fn set_java_service_ready(&self, generation: u64) {
+        *self.java_service_ready.lock() = generation;
+    }
+
+    /// Whether the instance `generation` has reported jdtls `ServiceReady`.
+    pub fn java_service_ready(&self, generation: u64) -> bool {
+        *self.java_service_ready.lock() == generation
     }
 
     /// Called after a `$/progress` task ended.

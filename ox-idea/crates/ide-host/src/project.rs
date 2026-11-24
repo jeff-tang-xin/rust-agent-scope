@@ -166,6 +166,18 @@ impl Host {
                 }
                 ide_sdk::java::cap_java_home(cfg, &ide_sdk::java::installed_jdks());
                 if cfg.name == "jdtls" {
+                    // ECJ only generates Lombok members when the language server's JVM
+                    // runs `-javaagent:lombok.jar`; the app-provided jar is inert without
+                    // Lombok on the classpath, so it is attached unless the user
+                    // configured an agent of their own.
+                    if let Some(arg) = ide_sdk::lombok::agent_argument(
+                        root,
+                        &effective.languages.java.jdtls_vm_args,
+                        ide_tools::managed_bundle(&data_dir, "lombok"),
+                        ide_sdk::apply::maven_local_repository(root, &effective),
+                    ) {
+                        cfg.args.push(arg);
+                    }
                     let problem = ide_lsp::jdtls::configure_formatter(
                         cfg,
                         effective.editor.code_style.languages.get("java"),

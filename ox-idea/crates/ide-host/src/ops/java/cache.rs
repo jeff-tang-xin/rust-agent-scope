@@ -34,6 +34,7 @@ fn record_path(root: &Path, cache: &Path, module: &Path, test: bool) -> Option<P
     }))
 }
 
+#[cfg(all(test, unix))]
 pub(super) fn has_record(root: &Path, cache: &Path, module: &Path) -> bool {
     [false, true].into_iter().any(|test| record_path(root, cache, module, test).is_some_and(|record| record.is_file()))
 }
