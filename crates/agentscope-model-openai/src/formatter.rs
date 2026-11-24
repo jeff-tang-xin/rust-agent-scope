@@ -68,6 +68,10 @@ impl Formatter for OpenAIChatFormatter {
             .response_format
             .clone()
             .or_else(|| defaults.and_then(|d| d.response_format.clone()));
+        params.extra_body = options
+            .extra_body
+            .clone()
+            .or_else(|| defaults.and_then(|d| d.extra_body.clone()));
     }
 
     fn apply_tools(&self, params: &mut Self::RequestParams, tools: &[ToolSchema]) {
@@ -619,6 +623,31 @@ mod tests {
         f.apply_options(&mut params, &options, Some(&defaults));
         assert_eq!(params.temperature, Some(0.9));
         assert_eq!(params.max_tokens, Some(512));
+    }
+
+    /// extra_body 透传：请求级优先、回退默认；序列化 flatten 进请求体顶层，None 不加键。
+    #[test]
+    fn apply_options_extra_body_flattens_into_request() {
+        let f = OpenAIChatFormatter::new();
+        let defaults = GenerateOptions {
+            extra_body: Some(json!({"enable_thinking": false})),
+            ..Default::default()
+        };
+        let options = GenerateOptions {
+            extra_body: Some(json!({"thinking": {"type": "disabled"}})),
+            ..Default::default()
+        };
+        let mut params = ChatCompletionRequest::default();
+        f.apply_options(&mut params, &options, Some(&defaults));
+        assert_eq!(params.extra_body, Some(json!({"thinking": {"type": "disabled"}})));
+        let body = serde_json::to_value(&params).unwrap();
+        assert_eq!(body["thinking"]["type"], "disabled");
+        let mut p2 = ChatCompletionRequest::default();
+        f.apply_options(&mut p2, &GenerateOptions::default(), Some(&defaults));
+        assert_eq!(p2.extra_body, Some(json!({"enable_thinking": false})));
+        let v3 = serde_json::to_value(ChatCompletionRequest::default()).unwrap();
+        assert!(v3.get("enable_thinking").is_none());
+        assert!(v3.get("thinking").is_none());
     }
 
     /// 工具定义下发：即使没有 strict 字段也保持原有形状（strict 属待补能力）。

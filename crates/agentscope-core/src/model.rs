@@ -49,6 +49,10 @@ pub struct GenerateOptions {
     pub tool_choice: Option<ToolChoice>,
     /// 响应格式（结构化输出）；为空表示纯文本。
     pub response_format: Option<crate::formatter::ResponseFormat>,
+    /// 厂商特有生成参数透传（序列化时 flatten 进请求体）：如关思考的 `enable_thinking` /
+    /// `thinking` / `reasoning_effort` 等。OpenAI 兼容生态的此类参数碎片化，框架不硬编码
+    /// 任何厂商参数，由调用方按所用端点注入；为空则不下发。
+    pub extra_body: Option<serde_json::Value>,
 }
 
 /// 一次模型调用的请求：完整消息列表 + 生成选项。

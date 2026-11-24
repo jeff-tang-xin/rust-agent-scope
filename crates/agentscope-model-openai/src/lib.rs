@@ -146,6 +146,10 @@ pub struct ChatCompletionRequest {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_options: Option<StreamOptions>,
+    /// 厂商特有参数透传（flatten 进请求体顶层）：关思考等碎片化扩展参数，见
+    /// `GenerateOptions::extra_body`。为空时不序列化任何额外键。
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub extra_body: Option<Value>,
 }
 
 /// 对齐 Java 版：流式请求一律带 `include_usage`，确保最后一个 chunk 携带用量
