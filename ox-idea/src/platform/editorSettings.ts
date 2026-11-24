@@ -173,7 +173,6 @@ export const EDITOR_EXTRA_DEFAULTS = {
     codeVisionUsages: true,
     codeVisionAuthor: true,
   },
-  inlineCompletion: { enabled: true, onlyOnPause: false, pauseMs: 500, disabledLanguages: [] as string[] },
   gutterIconsDisabled: [] as string[],
   showGutterIcons: true,
   codeStyle: {
@@ -272,7 +271,6 @@ export function powerSaveExtras(p: EditorExtras): EditorExtras {
     completion: { ...p.completion, autoPopup: false, parameterInfo: false, showDocumentation: false },
     codeEditing: { ...p.codeEditing, quickDocOnHover: false, highlightUsages: false },
     inlay: { ...p.inlay, codeVisionUsages: false },
-    inlineCompletion: { ...p.inlineCompletion, enabled: false },
   };
 }
 

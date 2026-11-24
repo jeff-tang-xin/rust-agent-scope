@@ -180,7 +180,6 @@ function Details({
       {agent.id === "ox-hareness" && (
         <>
           <OxModelFields envText={env.value} onEnvChange={env.set} saving={env.saving} />
-          <OxFimFields envText={env.value} onEnvChange={env.set} saving={env.saving} />
         </>
       )}
       {agent.commandReadOnlyReason !== "registry" && agent.commandReadOnlyReason !== "customAgent" && (
@@ -248,9 +247,6 @@ const OX_ENV_KEYS = {
   model: "AGENTSCOPE_MODEL",
   baseUrl: "AGENTSCOPE_BASE_URL",
   maxIters: "AGENTSCOPE_MAX_ITERS",
-  fimModel: "AGENTSCOPE_FIM_MODEL",
-  fimBaseUrl: "AGENTSCOPE_FIM_BASE_URL",
-  fimStyle: "AGENTSCOPE_FIM_STYLE",
 } as const;
 
 /** ReAct iteration caps offered for the OX agent; an unset key means the default (100). */
@@ -258,9 +254,6 @@ const OX_MAX_ITERS = ["30", "50", "100", "200", "500"] as const;
 
 /** Providers accepted by `AGENTSCOPE_PROVIDER`; an unset key means the dashscope default. */
 const OX_PROVIDERS = ["dashscope", "openai", "anthropic", "gemini", "ollama"] as const;
-
-/** FIM token styles accepted by `AGENTSCOPE_FIM_STYLE`; an unset key means qwen. */
-const OX_FIM_STYLES = ["qwen", "starcoder", "codellama"] as const;
 
 /**
  * Structured model configuration for the in-process OX agent, projected onto the
@@ -361,85 +354,6 @@ function OxModelFields({
       </div>
       <p className={styles.hint}>
         <T>Model is required; the rest falls back to provider defaults. Changes apply to new sessions.</T>
-      </p>
-    </>
-  );
-}
-
-/**
- * Optional fast inline-completion (FIM) path, projected onto the same staged env
- * text as the model fields. A dedicated code model on an OpenAI-compatible
- * `/completions` endpoint (e.g. a local ollama/vLLM) completes in well under a
- * second; leaving the model empty falls back to the chat model above.
- */
-function OxFimFields({
-  envText,
-  onEnvChange,
-  saving,
-}: {
-  envText: string;
-  onEnvChange: (text: string) => void;
-  saving: boolean;
-}) {
-  const parsed = safeParseEnv(envText);
-  const get = (key: string) => parsed?.[key] ?? "";
-  const patch = (key: string, value: string) => {
-    if (!parsed) return;
-    const env = { ...parsed };
-    if (value) env[key] = value;
-    else delete env[key];
-    onEnvChange(formatEnv(env));
-  };
-  return (
-    <>
-      <h4 className={styles.section}>
-        <T>Inline completion (FIM)</T>
-      </h4>
-      <label className={styles.label} htmlFor="ox-fim-model">
-        <T>FIM model</T>
-      </label>
-      <div className={styles.controls}>
-        <Input
-          id="ox-fim-model"
-          mono
-          value={get(OX_ENV_KEYS.fimModel)}
-          disabled={saving}
-          placeholder="qwen2.5-coder:7b"
-          onChange={(e) => patch(OX_ENV_KEYS.fimModel, e.target.value)}
-        />
-      </div>
-      <label className={styles.label} htmlFor="ox-fim-base-url">
-        <T>FIM base URL</T>
-      </label>
-      <div className={styles.controls}>
-        <Input
-          id="ox-fim-base-url"
-          mono
-          value={get(OX_ENV_KEYS.fimBaseUrl)}
-          disabled={saving}
-          placeholder="http://localhost:11434/v1"
-          onChange={(e) => patch(OX_ENV_KEYS.fimBaseUrl, e.target.value)}
-        />
-      </div>
-      <label className={styles.label} htmlFor="ox-fim-style">
-        <T>FIM style</T>
-      </label>
-      <div className={styles.controls}>
-        <Select
-          id="ox-fim-style"
-          value={get(OX_ENV_KEYS.fimStyle)}
-          disabled={saving}
-          options={[{ value: "", label: "Default (qwen)" }, ...OX_FIM_STYLES.map((s) => ({ value: s, label: s }))]}
-          onChange={(v) => patch(OX_ENV_KEYS.fimStyle, v)}
-          aria-label={tx("FIM style")}
-        />
-      </div>
-      <p className={styles.hint}>
-        <T>
-          Optional fast path: a code model on an OpenAI-compatible /completions endpoint (e.g. local ollama or vLLM).
-          Set the model to enable it; the base URL falls back to the model Base URL above and the API key is reused.
-          Leave empty to complete with the chat model. Match the style to your model.
-        </T>
       </p>
     </>
   );

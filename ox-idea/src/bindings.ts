@@ -442,6 +442,11 @@ export const commands = {
 	lspCompletion: (request: RequestId, doc: DocId, pos: Pos, trigger: string | null) => typedError<CompletionList, IdeError>(__TAURI_INVOKE("lsp_completion", { request, doc, pos, trigger })),
 	/**  Inline (ghost text) suggestions at `pos`; `automatic` when triggered by typing. */
 	lspInlineCompletion: (request: RequestId, doc: DocId, pos: Pos, automatic: boolean) => typedError<InlineCompletionItem[], IdeError>(__TAURI_INVOKE("lsp_inline_completion", { request, doc, pos, automatic })),
+	/**
+	 *  Cmd+K inline AI: generate/edit/answer/fix against the current code, using the
+	 *  built-in OX agent model. `range` is the selection (or a zero-width caret).
+	 */
+	aiInline: (request: RequestId, doc: DocId, range: Range, instruction: string, mode: string, diagnostics: Diagnostic[]) => typedError<InlineAiResult, IdeError>(__TAURI_INVOKE("ai_inline", { request, doc, range, instruction, mode, diagnostics })),
 	lspResolveCompletion: (doc: DocId, item: CompletionItem) => typedError<CompletionItem, IdeError>(__TAURI_INVOKE("lsp_resolve_completion", { doc, item })),
 	lspHover: (request: RequestId, doc: DocId, pos: Pos) => typedError<{
 	contents: Markup,
@@ -4849,6 +4854,13 @@ workspaceEdit?: boolean } |
 /**  A complete workspace edit can be undone as one operation. */
 { type: "workspaceEditApplied"; id: number; paths: IpcPath[] } | 
 /**
+ *  An agent edit tool changed a file (apply_patch / create_new_file): the UI
+ *  can follow along by opening the file and revealing the change.
+ */
+{ type: "agentEdit"; path: IpcPath; 
+/**  First changed line (0-based), when known. */
+line: number | null } | 
+/**
  *  An open document's language changed (Settings › File Types, Override File
  *  Type), or its UI mode (a framework's root marker appeared or went).
  */
@@ -5028,6 +5040,16 @@ export type InlayLabelPart = {
 	tooltip: string | null,
 	/**  Declaration the part stands for (⌘-click navigates there). */
 	location: Location | null,
+};
+
+/**
+ *  行内 AI 结果：`kind="code"` 带 `code`（前端 diff 预览 + 应用）；
+ *  `kind="answer"` 带 `text`（前端展示答疑）。
+ */
+export type InlineAiResult = {
+	kind: string,
+	code: string | null,
+	text: string | null,
 };
 
 /**  One `textDocument/inlineCompletion` suggestion (ghost text at the caret). */

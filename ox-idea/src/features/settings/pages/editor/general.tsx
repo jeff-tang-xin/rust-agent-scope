@@ -81,13 +81,6 @@ function InlayLanguages() {
   return <LanguageChecks k={`${P}.inlay.disabledLanguages`} label="Show inlay hints for:" disabled={!on} />;
 }
 
-function InlineCompletionLanguages() {
-  const [on] = useSetting<boolean>(`${P}.inlineCompletion.enabled`);
-  return (
-    <LanguageChecks k={`${P}.inlineCompletion.disabledLanguages`} label="Show inline completion for:" disabled={!on} />
-  );
-}
-
 const GENERAL = editorPage({
   id: "editor.general",
   title: "General",
@@ -715,40 +708,6 @@ const SMART_KEYS = editorPage({
   ],
 });
 
-const INLINE_COMPLETION = editorPage({
-  id: "editor.general.inlineCompletion",
-  title: "Inline Completion",
-  order: 7,
-  keywords: ["ghost text", "inline suggestions", "full line completion", "copilot"],
-  sections: [
-    {
-      items: [
-        {
-          t: "note",
-          text: "Gray suggestions at the caret from language servers that support inline completion. Tab accepts a suggestion, Escape dismisses it.",
-        },
-        {
-          t: "check",
-          key: `${P}.inlineCompletion.enabled`,
-          label: "Enable inline completion",
-          children: [
-            {
-              t: "check",
-              key: `${P}.inlineCompletion.onlyOnPause`,
-              label: "Show only when typing pauses for",
-              inline: ms(`${P}.inlineCompletion.pauseMs`, 3000),
-            },
-          ],
-        },
-      ],
-    },
-    {
-      title: "Languages",
-      items: [{ t: "custom", label: "Show inline completion for:", component: InlineCompletionLanguages }],
-    },
-  ],
-});
-
 const STICKY = editorPage({
   id: "editor.general.stickyLines",
   title: "Sticky Lines",
@@ -857,7 +816,6 @@ export const GENERAL_PAGES = [
   FOLDING,
   TABS,
   GUTTER,
-  INLINE_COMPLETION,
   RICH_COPY,
   SMART_KEYS,
   STICKY,

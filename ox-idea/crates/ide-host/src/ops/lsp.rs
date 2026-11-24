@@ -199,11 +199,7 @@ pub async fn lsp_inline_completion(
 ) -> IdeResult<Vec<InlineCompletionItem>> {
     let lsp = host.project(window)?.lsp.clone();
     let cancel = host.begin_request(request);
-    // AI source (chat FIM) runs concurrently with LSP so a slow model never blocks
-    // the server path; a non-empty AI result wins, otherwise LSP+plugin as before.
-    let ai = super::ai_completion::suggest(host, window, doc, pos, cancel.clone());
-    let server = lsp.inline_completion(doc, pos, automatic, cancel.clone());
-    let (ai, result) = tokio::join!(ai, server);
+    let result = lsp.inline_completion(doc, pos, automatic, cancel.clone()).await;
     // Plugins: cancelled (cooperatively) when the editor cancels the request.
     let plugin = match plugin_providers(host, window, doc, ProviderKind::InlineCompletion) {
         Some((plugins, d)) if !matches!(&result, Ok(items) if !items.is_empty()) => {
@@ -213,11 +209,6 @@ pub async fn lsp_inline_completion(
         _ => None,
     };
     host.end_request(request);
-    if let Some(items) = ai {
-        if !items.is_empty() {
-            return Ok(items);
-        }
-    }
     match plugin {
         Some((_, s)) => Ok(vec![InlineCompletionItem {
             insert_text: s.insert_text,

@@ -3,7 +3,7 @@
 //! and the command's arguments, and streams through [`Emit`] callbacks.
 
 pub mod agent;
-pub mod ai_completion;
+pub mod ai_inline;
 pub mod analysis;
 pub mod build;
 pub mod bytes;
@@ -67,6 +67,7 @@ impl<T> Clone for Channel<T> {
 /// Registers the commands of every module with the remote server.
 pub fn register_all(d: &mut crate::rpc::Dispatcher) {
     agent::register(d);
+    ai_inline::register(d);
     lsp::register(d);
     notebook::register(d);
     nav::register(d);

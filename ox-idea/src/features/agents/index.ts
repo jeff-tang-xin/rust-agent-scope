@@ -21,6 +21,7 @@ import { AgentsStatus } from "./AgentsStatus";
 import { HOME_KIND, REGISTRY_PAGE, SESSION_KIND, TASK_DRAG, TOOL_WINDOW } from "./model";
 import { sendPaths, sendSelection } from "./references";
 import { focusedSession } from "./sessionFocus";
+import { followAgentEdits } from "./followAgentEdits";
 import { connect, disconnect, openHome, useAgents } from "./store";
 import { taskActions } from "./taskActions";
 import { replyActions } from "./replyActions";
@@ -45,6 +46,7 @@ export function activate(): () => void {
   sync(useProject.getState().project?.root);
   const disposers = [
     activateSettingsPages(),
+    followAgentEdits(),
     useProject.subscribe((s, prev) => {
       if (s.project?.root !== prev.project?.root || s.project?.trusted !== prev.project?.trusted) sync(s.project?.root);
     }),

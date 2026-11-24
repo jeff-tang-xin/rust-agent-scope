@@ -73,6 +73,13 @@ pub enum IdeEvent {
         id: u32,
         paths: Vec<crate::IpcPath>,
     },
+    /// An agent edit tool changed a file (apply_patch / create_new_file): the UI
+    /// can follow along by opening the file and revealing the change.
+    AgentEdit {
+        path: crate::IpcPath,
+        /// First changed line (0-based), when known.
+        line: Option<u32>,
+    },
     /// An open document's language changed (Settings › File Types, Override File
     /// Type), or its UI mode (a framework's root marker appeared or went).
     DocLanguage {

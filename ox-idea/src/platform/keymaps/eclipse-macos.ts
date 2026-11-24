@@ -54,6 +54,8 @@ export const eclipseMacos: Record<string, string[]> = {
   "find.inFile": [],
   "find.inPath": ["Ctrl+H"],
   "find.next": ["Meta+K"],
+  // Eclipse reserves Cmd+K for Find Next; inline AI stays on the context menu / Find Action.
+  "editor.inlineAi.trigger": [],
   // The parent's Push binding would shadow Find Previous whenever a repository is open.
   "vcs.push": [],
   "find.previous": ["Meta+Shift+K"],

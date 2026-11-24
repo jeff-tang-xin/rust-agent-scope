@@ -76,12 +76,7 @@ export const intellijWindows: Record<string, string[]> = {
 
   // Code
   "code.completion": ["Ctrl+Space"],
-  "editor.inlineCompletion.trigger": ["Alt+\\"],
-  "editor.inlineCompletion.accept": ["Tab"],
-  "editor.inlineCompletion.acceptWord": ["Ctrl+Right"],
-  "editor.inlineCompletion.dismiss": ["Escape"],
-  "editor.inlineCompletion.next": ["Alt+]"],
-  "editor.inlineCompletion.previous": ["Alt+["],
+  "editor.inlineAi.trigger": ["Ctrl+k"],
   "code.parameterInfo": ["Ctrl+P"],
   "code.quickDocumentation": ["Ctrl+Q"],
   "code.quickDefinition": ["Ctrl+Shift+I"],

@@ -14,7 +14,7 @@ mod rename;
 
 use crate::Project;
 use crate::mcp::tool::{Call, Output, Param, ParamType, Tool};
-use ide_core::event::McpUiRequest;
+use ide_core::event::{IdeEvent, McpUiRequest};
 use ide_core::{Diagnostic, DocId, FileEdit, IdeError, IdeResult, Pos, Range, Severity, TextEdit, WorkspaceEdit};
 use patch::FileOp;
 use std::fmt::Write as _;
@@ -44,6 +44,7 @@ fn is_dirty(project: &Project, path: &Path) -> bool {
 
 async fn create_or_replace(call: &Call, path: PathBuf, text: Option<String>, overwrite: bool) -> IdeResult<()> {
     let project = call.project.clone();
+    let edited = path.clone();
     let edit = call
         .host
         .blocking(move || {
@@ -96,7 +97,12 @@ async fn create_or_replace(call: &Call, path: PathBuf, text: Option<String>, ove
         return Ok(());
     }
     let edit = crate::ops::lsp::prepare_workspace_edit(&call.host, call.window(), edit).await?;
-    crate::ops::lsp::apply_workspace_edit(&call.host, call.window(), edit).await
+    let line = first_changed_line(&edit);
+    let result = crate::ops::lsp::apply_workspace_edit(&call.host, call.window(), edit).await;
+    if result.is_ok() {
+        call.project.sink.emit(IdeEvent::AgentEdit { path: edited.into(), line });
+    }
+    result
 }
 
 /// The open document of `path`, or a transient one (`true`: close it after use).
@@ -144,6 +150,14 @@ fn edits_for(edit: &WorkspaceEdit, path: &Path) -> Vec<TextEdit> {
         })
         .flatten()
         .collect()
+}
+
+/// The first changed line of `edit` (0-based), for the UI to reveal after an agent edit.
+fn first_changed_line(edit: &WorkspaceEdit) -> Option<u32> {
+    edit.files.iter().find_map(|f| match f {
+        FileEdit::Edit { edits, .. } => edits.first().map(|e| e.range.start.line),
+        _ => None,
+    })
 }
 
 /// Re-reads the open, unmodified documents of `paths` whose files changed on disk, before
@@ -475,11 +489,17 @@ async fn apply_op(call: &Call, op: FileOp, notes: &mut Vec<String>) -> IdeResult
                     result
                 })
                 .await?;
+            let reveal = to.clone().unwrap_or_else(|| path.clone());
             if let Some(to) = to {
                 edit.files.push(FileEdit::Rename { from: path.into(), to: to.into() });
             }
             let edit = crate::ops::lsp::prepare_workspace_edit(&host, call.window(), edit).await?;
-            crate::ops::lsp::apply_workspace_edit(&host, call.window(), edit).await?;
+            let line = first_changed_line(&edit);
+            let result = crate::ops::lsp::apply_workspace_edit(&host, call.window(), edit).await;
+            if result.is_ok() {
+                call.project.sink.emit(IdeEvent::AgentEdit { path: reveal.into(), line });
+            }
+            result?;
             if dirty {
                 notes.push(format!("{shown}: patched the unsaved editor buffer"));
             }
@@ -525,4 +545,28 @@ Optionally puts the caret at a 1-based line and column.",
     .param(Param::required("filePath", ParamType::String, "Path relative to the project root"))
     .param(Param::optional("line", ParamType::Integer, "1-based line to put the caret on"))
     .param(Param::optional("column", ParamType::Integer, "1-based column on that line"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_changed_line_picks_the_first_edit() {
+        let line = |l: u32| TextEdit {
+            range: Range::new(Pos::new(l, 0), Pos::new(l, 3)),
+            new_text: String::new(),
+        };
+        let edit = |edits: Vec<TextEdit>| WorkspaceEdit {
+            files: vec![FileEdit::Edit { path: PathBuf::from("a.rs").into(), edits, version: None }],
+            preconditions: Vec::new(),
+        };
+        assert_eq!(first_changed_line(&edit(vec![line(7), line(2)])), Some(7));
+        assert_eq!(first_changed_line(&edit(Vec::new())), None);
+        let create = WorkspaceEdit {
+            files: vec![FileEdit::Create { path: PathBuf::from("b.rs").into(), overwrite: false }],
+            preconditions: Vec::new(),
+        };
+        assert_eq!(first_changed_line(&create), None);
+    }
 }

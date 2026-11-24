@@ -7,6 +7,7 @@
 //!   UI-allocated `RequestId` and are cancelled via `cancel_request`.
 
 pub mod agent;
+pub mod ai;
 pub mod analysis;
 pub mod android;
 pub mod app;
@@ -238,6 +239,7 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
         lsp::plugin_formatters,
         lsp::lsp_completion,
         lsp::lsp_inline_completion,
+        ai::ai_inline,
         lsp::lsp_resolve_completion,
         lsp::lsp_hover,
         lsp::lsp_signature_help,

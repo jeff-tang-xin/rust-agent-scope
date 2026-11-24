@@ -80,6 +80,8 @@ interface AgentsState {
   /** Task shown inside the Agents tool window instead of an editor tab. */
   docked: string | null;
   sessionLocation: SessionLocation;
+  /** Open + reveal the file an agent just changed (Autoscroll from Source). */
+  followAgentEdits: boolean;
   lastTask: string | null;
   homeOpen: boolean;
 }
@@ -88,6 +90,7 @@ const DRAFT_KEY = "oxidea.agents.draft.v2";
 const HISTORY_KEY = "oxidea.agents.history.v1";
 const HISTORY_SIZE = 50;
 const SESSION_LOCATION_KEY = "oxidea.agents.sessionLocation.v1";
+const FOLLOW_EDITS_KEY = "oxidea.agents.followAgentEdits.v1";
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -133,6 +136,7 @@ export const useAgents = create<AgentsState>(() => ({
   focus: null,
   docked: null,
   sessionLocation: load<unknown>(SESSION_LOCATION_KEY, null) === "toolWindow" ? "toolWindow" : "editor",
+  followAgentEdits: load<boolean>(FOLLOW_EDITS_KEY, true),
   lastTask: null,
   homeOpen: false,
   scrollPositions: new Map(),
@@ -553,6 +557,12 @@ export function dockTask(task: string) {
 
 export function undockTask() {
   setSessionLocation("editor");
+}
+
+/** Toggles whether the editor opens + reveals the file an agent just changed. */
+export function setFollowAgentEdits(on: boolean) {
+  useAgents.setState({ followAgentEdits: on });
+  save(FOLLOW_EDITS_KEY, on);
 }
 
 /** An explicit editor drop also updates where subsequent sessions open. */

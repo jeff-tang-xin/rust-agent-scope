@@ -56,6 +56,8 @@ export const eclipseWindows: Record<string, string[]> = {
   "find.inFile": [],
   "find.inPath": ["Ctrl+H"],
   "find.next": ["Ctrl+K"],
+  // Eclipse reserves Ctrl+K for Find Next; inline AI stays on the context menu / Find Action.
+  "editor.inlineAi.trigger": [],
   // The parent's Push binding would shadow Find Previous whenever a repository is open.
   "vcs.push": [],
   "find.previous": ["Ctrl+Shift+K"],

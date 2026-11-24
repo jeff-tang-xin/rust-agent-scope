@@ -2,7 +2,7 @@ import { serverCodeLenses } from "./serverCodeLens";
 /**
  * LSP-backed editor features: completion, diagnostics, hover / quick docs,
  * parameter info, navigation, document highlights, intentions, rename,
- * formatting, inlay hints, inline completion and semantic highlighting. Everything is contributed
+ * formatting, inlay hints, inline AI and semantic highlighting. Everything is contributed
  * through `editor/api` as CodeMirror extensions plus actions; editor/core is
  * never imported.
  */
@@ -24,7 +24,7 @@ import { parameterTabKeys, signatureExtension } from "./signature";
 import { navigationExtension } from "./navigation";
 import { intentionsExtension } from "./intentions";
 import { inlayExtension } from "./inlay";
-import { inlineCompletionExtension, registerInlineCompletionActions } from "./inlineCompletion";
+import { inlineAiExtension, installInlineAi, registerInlineAiActions } from "./inlineAi";
 import { semanticExtension } from "./semantic";
 import { usagesLensExtension } from "./codeLens";
 import { autoImportExtension } from "./autoImport";
@@ -59,7 +59,7 @@ export function lspExtensions(ctx: EditorDocContext): Extension[] {
     navigationExtension(),
     intentionsExtension(),
     inlayExtension(),
-    inlineCompletionExtension(),
+    inlineAiExtension(),
     semanticExtension(),
     usagesLensExtension(),
     autoImportExtension(),
@@ -75,6 +75,7 @@ export function activate(): () => void {
     installDiagnosticsEvents(),
     installAvailabilityEvents(),
     installConfigurationNavigationEvents(),
+    installInlineAi(),
     registerEditorContribution({ id: "lsp", order: 50, extensions: lspExtensions }),
     // After the run icons (order 55), as their own gutter column.
     registerEditorContribution({ id: "lsp.lineMarkers", order: 56, extensions: implementationGutter }),
@@ -97,7 +98,7 @@ export function activate(): () => void {
     }),
     registerLspActions(),
     registerImportsOnPasteActions(),
-    registerInlineCompletionActions(),
+    registerInlineAiActions(),
     registerNavigationActions(),
     registerFormatOnSave(),
     registerActionsOnSave(),

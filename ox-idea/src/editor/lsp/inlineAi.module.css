@@ -1,0 +1,124 @@
+.popup {
+  min-width: 360px;
+  max-width: min(640px, 80vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--border-popup);
+}
+.title {
+  flex: 1;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.input {
+  margin: 8px;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 44px;
+  max-height: 160px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border-popup);
+  border-radius: 6px;
+  font-size: var(--fs-small);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--fg-subtle);
+}
+.modes {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px;
+}
+.mode,
+.modeOn {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-popup);
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.modeOn {
+  color: var(--fg);
+  border-color: var(--fg-subtle);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.mode:disabled,
+.modeOn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.error {
+  padding: 4px 12px;
+  color: var(--gutter-deleted);
+  font-size: var(--fs-small);
+}
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px;
+}
+.pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+}
+.pending > span {
+  flex: 1;
+}
+.body {
+  max-height: 280px;
+  overflow: auto;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
+  line-height: var(--lh-code);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.removed,
+.added {
+  padding: 0 12px 0 4px;
+  white-space: pre;
+  color: var(--fg);
+}
+.removed {
+  background: color-mix(in srgb, var(--gutter-deleted) 14%, transparent);
+  color: var(--fg-muted);
+}
+.added {
+  background: color-mix(in srgb, var(--gutter-added) 16%, transparent);
+}
+.sign {
+  display: inline-block;
+  width: 16px;
+  color: var(--fg-faint);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.answer {
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px 12px;
+  color: var(--fg);
+  font-size: var(--fs-small);
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}

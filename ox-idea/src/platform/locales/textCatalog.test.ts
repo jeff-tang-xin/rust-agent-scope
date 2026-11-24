@@ -265,7 +265,6 @@ const UNTRANSLATED = new Set<string>([
   "run pytest",
   "run python",
   "snake_case",
-  "qwen2.5-coder:7b",
   "qwen3-coder-plus",
   "sk-…",
   "tests",

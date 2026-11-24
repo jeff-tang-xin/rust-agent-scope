@@ -75,12 +75,7 @@ export const intellijMacos: Record<string, string[]> = {
 
   // Code
   "code.completion": ["Ctrl+Space"],
-  "editor.inlineCompletion.trigger": ["Alt+\\"],
-  "editor.inlineCompletion.accept": ["Tab"],
-  "editor.inlineCompletion.acceptWord": ["Meta+Right"],
-  "editor.inlineCompletion.dismiss": ["Escape"],
-  "editor.inlineCompletion.next": ["Alt+]"],
-  "editor.inlineCompletion.previous": ["Alt+["],
+  "editor.inlineAi.trigger": ["Meta+k"],
   "code.parameterInfo": ["Meta+P"],
   "code.quickDocumentation": ["F1", "Ctrl+J"],
   "code.quickDefinition": ["Alt+Space", "Meta+Y"],

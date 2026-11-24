@@ -16,7 +16,7 @@ import {
   startPointerDrag,
 } from "@/ui";
 import { SESSION_KIND, TASK_DRAG, age, branchLabel, groupTasks, sessionKey, type TaskGroup } from "./model";
-import { openHome, useAgents } from "./store";
+import { openHome, setFollowAgentEdits, useAgents } from "./store";
 import { taskMenu } from "./taskActions";
 import { SessionEditor } from "./SessionEditor";
 import { HomeEditor } from "./HomeEditor";
@@ -31,11 +31,18 @@ export function AgentsHeaderActions() {
 
 export function AgentsLocationActions() {
   const location = useAgents((s) => s.sessionLocation);
+  const follow = useAgents((s) => s.followAgentEdits);
   const tx = useTx();
   return (
     <div role="group" aria-label={tx("Conversation location")} className={styles.location}>
       <IconButton icon="open-in-tool-window" action="agents.useToolWindow" pressed={location === "toolWindow"} />
       <IconButton icon="editor-only" action="agents.useEditor" pressed={location === "editor"} />
+      <IconButton
+        icon="autoscroll-from-source"
+        title="Follow Agent Edits"
+        pressed={follow}
+        onClick={() => setFollowAgentEdits(!follow)}
+      />
     </div>
   );
 }

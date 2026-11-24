@@ -115,12 +115,7 @@ export const vscodeMacos: Record<string, string[]> = {
 
   // Code
   "code.completion": ["Ctrl+Space"],
-  "editor.inlineCompletion.trigger": ["Alt+\\"],
-  "editor.inlineCompletion.accept": ["Tab"],
-  "editor.inlineCompletion.acceptWord": ["Meta+Right"],
-  "editor.inlineCompletion.dismiss": ["Escape"],
-  "editor.inlineCompletion.next": ["Alt+]"],
-  "editor.inlineCompletion.previous": ["Alt+["],
+  "editor.inlineAi.trigger": ["Meta+k"],
   "code.parameterInfo": ["Meta+Shift+Space"],
   "code.quickDocumentation": ["Meta+K Meta+I"],
   "code.quickDefinition": ["Alt+F12"],
