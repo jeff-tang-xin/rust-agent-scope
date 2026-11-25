@@ -27,6 +27,8 @@ dist-ssr
 
 # Rust
 target/
+# Shared target dir for plugin component builds (plugins/build.sh, CI plugins job)
+target-plugins/
 # Tauri generated schemas
 /src-tauri/gen/schemas
 *.tsbuildinfo
