@@ -57,6 +57,13 @@ async fn resolve_launch(
         .await
         .map_err(|e| IdeError::internal(e.to_string()))?
     };
+    // Apply the jdtls bundle's staging redirect before the build: ECJ then writes
+    // target/oxidea-ide/... and the launch publishes it into target/ (see publish_and_map).
+    // Best effort: an unreachable server or an older bundle just means an unredirected launch.
+    let _ = project
+        .lsp
+        .jdtls_command_cancellable(&project.root, "oxidea.java.build.redirect", Vec::new(), cancel)
+        .await;
     let mut info = project.lsp.java_launch(&module, test, build, full, false, cancel).await?;
     let lsp_ms = started.elapsed().as_millis();
     let data_dir = host.local_data_dir.clone();
@@ -82,6 +89,10 @@ async fn resolve_launch(
             }
         }
         info.class_paths = class_paths;
+        // Publish the bundle's staging build into the shared target/ tree and point the
+        // launch at the published entries (see publish_and_map).
+        let build_ok = matches!(info.build, None | Some(JavaBuildStatus::Succeeded));
+        publish_and_map(&mut info, &built, build_ok);
         apply_library_classpath(&mut info, &project.root, &settings.project_structure.libraries, test);
         let compile_ms = started.elapsed().as_millis() - lsp_ms;
         // The module/project JDK, else the JDK jdtls compiles the module against, else one matching its Java version.
@@ -182,6 +193,163 @@ fn apply_library_classpath(
 
 fn same_entry(a: &str, b: &str, windows: bool) -> bool {
     a == b || entry_key(a, windows) == entry_key(b, windows)
+}
+
+/// Publishes the jdtls bundle's staging build into the shared `target/` tree and points the
+/// launch at the published entries. The bundle redirects ECJ outputs and APT generated
+/// sources into `.../target/oxidea-ide/...` so the delete-and-regenerate
+/// annotation-processing cycle never touches the tree that terminal Maven builds write and
+/// running JVMs read; a successful staging build is copied back over `target/<rest>` with
+/// atomic per-file renames. Unredirected entries pass through unchanged, so a missing or
+/// failed bundle degrades to the previous behavior.
+fn publish_and_map(info: &mut JavaLaunchInfo, external_dirs: &[PathBuf], build_ok: bool) {
+    for entry in info.class_paths.iter_mut().chain(info.module_paths.iter_mut()) {
+        let Some(published) = published_entry(entry) else { continue };
+        if build_ok {
+            sync_staging(std::path::Path::new(entry), std::path::Path::new(&published), external_dirs);
+        }
+        *entry = published;
+    }
+    for paths in [&mut info.class_paths, &mut info.module_paths] {
+        let mut unique: Vec<String> = Vec::with_capacity(paths.len());
+        for path in paths.drain(..) {
+            if !unique.iter().any(|u| same_entry(u, &path, cfg!(windows))) {
+                unique.push(path);
+            }
+        }
+        *paths = unique;
+    }
+}
+
+/// The published form of a staging classpath entry: `.../target/oxidea-ide/<rest>` →
+/// `.../target/<rest>`; `None` for entries outside a staging tree.
+fn published_entry(entry: &str) -> Option<String> {
+    let norm = entry.replace('\\', "/");
+    let parts: Vec<&str> = norm.split('/').collect();
+    let at = parts.iter().position(|s| *s == "oxidea-ide")?;
+    if at == 0 || parts[at - 1] != "target" {
+        return None;
+    }
+    let mut out = String::with_capacity(norm.len());
+    for (i, part) in parts.iter().enumerate() {
+        if i == at {
+            continue;
+        }
+        if i > 0 {
+            out.push('/');
+        }
+        out.push_str(part);
+    }
+    Some(out)
+}
+
+/// Copies the staging tree over the published tree: changed files go through a temp name +
+/// rename (atomic per file, so a lazily loading JVM never reads a half-written class) and
+/// vanished files are pruned — unless the published tree was also written by this launch's
+/// external (non-Java) build, whose files staging does not own. Best effort: a locked file
+/// keeps its previous complete version until the next launch.
+fn sync_staging(staged: &std::path::Path, published: &std::path::Path, external_dirs: &[PathBuf]) {
+    let prune = !external_dirs.iter().any(|dir| same_path(dir, published));
+    if let Err(e) = sync_tree(staged, published, prune) {
+        tracing::warn!("staging publish {} → {}: {e}", staged.display(), published.display());
+    }
+}
+
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    same_entry(&a.to_string_lossy(), &b.to_string_lossy(), cfg!(windows))
+}
+
+fn sync_tree(from: &std::path::Path, to: &std::path::Path, prune: bool) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            sync_tree(&source, &target, prune)?;
+        } else if stale(&source, &target) {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let temp = to.join(format!(".oxidea-{}-{nonce}.tmp", std::process::id()));
+            std::fs::copy(&source, &temp)?;
+            if std::fs::rename(&temp, &target).is_err() {
+                // The file may be locked by a running JVM; keep the previous complete version.
+                let _ = std::fs::remove_file(&temp);
+            }
+        }
+    }
+    if prune {
+        for entry in std::fs::read_dir(to)? {
+            let entry = entry?;
+            if !from.join(entry.file_name()).exists() {
+                let target = entry.path();
+                if target.is_dir() {
+                    std::fs::remove_dir_all(&target)?;
+                } else {
+                    let _ = std::fs::remove_file(&target);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether the published copy is missing or older than the staging original.
+fn stale(source: &std::path::Path, target: &std::path::Path) -> bool {
+    let (Ok(source_meta), Ok(target_meta)) = (std::fs::metadata(source), std::fs::metadata(target)) else {
+        return true;
+    };
+    if source_meta.len() != target_meta.len() {
+        return true;
+    }
+    match (source_meta.modified(), target_meta.modified()) {
+        (Ok(source), Ok(target)) => source > target,
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod publish_tests {
+    use super::*;
+
+    #[test]
+    fn maps_staging_entries_to_their_published_form() {
+        assert_eq!(
+            published_entry(r"F:\code\omsx\target\oxidea-ide\classes"),
+            Some("F:/code/omsx/target/classes".to_owned())
+        );
+        assert_eq!(
+            published_entry("/proj/target/oxidea-ide/test-classes"),
+            Some("/proj/target/test-classes".to_owned())
+        );
+        assert_eq!(published_entry("F:/code/omsx/target/classes"), None);
+        assert_eq!(published_entry("F:/code/omsx/target/oxidea/classes"), None);
+        assert_eq!(published_entry("F:/code/oxidea-ide/classes"), None);
+    }
+
+    #[test]
+    fn syncs_changed_files_and_prunes_vanished_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let staged = dir.path().join("staged");
+        let published = dir.path().join("published");
+        std::fs::create_dir_all(staged.join("ai")).unwrap();
+        std::fs::write(staged.join("ai/A.class"), b"v1").unwrap();
+        std::fs::write(staged.join("ai/B.class"), b"b").unwrap();
+        sync_tree(&staged, &published, true).unwrap();
+        assert_eq!(std::fs::read(published.join("ai/A.class")).unwrap(), b"v1");
+        // A changed file is replaced, a vanished one is pruned.
+        std::fs::write(staged.join("ai/A.class"), b"v2-longer").unwrap();
+        std::fs::remove_file(staged.join("ai/B.class")).unwrap();
+        sync_tree(&staged, &published, true).unwrap();
+        assert_eq!(std::fs::read(published.join("ai/A.class")).unwrap(), b"v2-longer");
+        assert!(!published.join("ai/B.class").exists());
+        // Without prune, files staging does not own survive (external build output).
+        std::fs::write(published.join("ai/Kotlin.class"), b"k").unwrap();
+        sync_tree(&staged, &published, false).unwrap();
+        assert!(published.join("ai/Kotlin.class").exists());
+    }
 }
 
 /// Port of java-debug's DAP server inside the jdtls serving `module` (started on demand).

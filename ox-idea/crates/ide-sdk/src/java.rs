@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// A JDK home and its feature version (8, 11, 17, 21…).
+/// A JDK home and its feature version (8, 11, 17, 21鈥?.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Jdk {
     pub major: u32,
@@ -213,7 +213,7 @@ fn rescan(slot: &mut Option<Scan>) -> Arc<[Jdk]> {
     slot.insert(Scan { at: Instant::now(), jdks: scan().into() }).jdks.clone()
 }
 
-/// Scans for installed JDKs again (Settings › Detect again).
+/// Scans for installed JDKs again (Settings 鈥?Detect again).
 pub fn rescan_jdks() -> Arc<[Jdk]> {
     rescan(&mut JDKS.lock().unwrap_or_else(|e| e.into_inner()))
 }
@@ -377,7 +377,7 @@ fn path_key(p: &Path) -> String {
 /// jdtls reuses its workspace metadata across its own upgrades and never re-imports
 /// on our behalf, so anything that damages the cached metadata (a lost APT mapping,
 /// build state left behind by a crashed feature) persists forever unless the key
-/// changes. Bump this to force every workspace to re-import from scratch — fresh
+/// changes. Bump this to force every workspace to re-import from scratch 鈥?fresh
 /// APT config from the pom, clean build state.
 const WORKSPACE_SCHEMA: &str = "ws2";
 
@@ -415,7 +415,7 @@ const METADATA_PROPERTY: &str = "java.import.generatesMetadataFilesAtProjectRoot
 /// JDK 25's `ZipFile` validates the ZIP64 extra field, and jars written by older tools
 /// carry a size that check rejects: ECJ reports the dependency as "cannot be read or is
 /// not a valid ZIP file", the project using it gets a build path error, and every project
-/// depending on that one stops compiling — aspectjweaver 1.8.10 stalls a whole Maven
+/// depending on that one stops compiling 鈥?aspectjweaver 1.8.10 stalls a whole Maven
 /// build that way, while the same jar loads fine on IDEA's JBR 21. This is how 25 is told
 /// to behave the same.
 const ZIP64_LENIENCY: &str = "-Djdk.util.zip.disableZip64ExtraFieldValidation=true";
@@ -565,7 +565,7 @@ pub fn configure_jdtls(
 }
 
 /// Where the JDK that runs jdtls is chosen, named as the settings dialog shows it.
-const SERVER_JDK_SETTING: &str = "Settings › Languages & Frameworks › Java › Language Server › JDK";
+const SERVER_JDK_SETTING: &str = "Settings 鈥?Languages & Frameworks 鈥?Java 鈥?Language Server 鈥?JDK";
 
 /// `found JDK 8, 17` / `no JDK was found`.
 fn found_jdks(jdks: &[Jdk]) -> String {
@@ -607,7 +607,7 @@ pub fn missing_jdk_message(jdks: &[Jdk], release: Option<u32>) -> Option<String>
     }
     Some(format!(
         "This project targets Java {release}: it needs JDK {release} or newer ({}). Download JDK {release}, or \
-         choose a Project JDK in Settings › Languages & Frameworks › Java.",
+         choose a Project JDK in Settings 鈥?Languages & Frameworks 鈥?Java.",
         found_jdks(jdks)
     ))
 }
@@ -677,7 +677,7 @@ pub(crate) fn xml_value(text: &str, tag: &str) -> Option<String> {
     Some(text[start..start + end].trim().to_owned())
 }
 
-/// `21`, `"17"`, `1.8`, `'11'` → feature version.
+/// `21`, `"17"`, `1.8`, `'11'` 鈫?feature version.
 fn parse_java_version(v: &str) -> Option<u32> {
     let v = v.trim().trim_matches(['"', '\'']);
     let mut parts = v.split('.');
@@ -732,7 +732,7 @@ mod tests {
         std::fs::write(home.join("bin").join(crate::exe("javac")), "").unwrap();
         // `jdk_at` reports the canonical home; `configure_jdtls` writes it to
         // JAVA_HOME, so tests compare against the same real path (macOS
-        // /var→/private/var, Windows 8.3 short names).
+        // /var鈫?private/var, Windows 8.3 short names).
         let home = dunce::canonicalize(home).unwrap();
         Jdk { major, home }
     }
@@ -1251,7 +1251,7 @@ mod tests {
     #[test]
     fn issue_2227_a_project_java_home_too_old_for_the_server_is_replaced() {
         // A project's JAVA_HOME (JDK 8 for compilation) must not run jdtls when
-        // the chosen server_jdk — or any usable JDK — is new enough.
+        // the chosen server_jdk 鈥?or any usable JDK 鈥?is new enough.
         let fixtures = tempfile::tempdir().unwrap();
         let jdtls = || -> LanguageServerConfig { toml::from_str("name = \"jdtls\"\ncommand = \"jdtls\"").unwrap() };
         let project = test_jdk(fixtures.path(), 8, "/jdk8");
@@ -1522,7 +1522,7 @@ pub fn usages_bundle(data_dir: &Path) -> Option<PathBuf> {
     let extension = data_dir.join("java-usages-1.10.0.jar");
     let bytes = include_bytes!("../../../java/java-usages/oxidea-java-usages.jar");
     if std::fs::read(&extension).is_ok_and(|old| old == bytes) {
-        clean_usages_bundles(data_dir, &extension);
+        clean_bundles(data_dir, "java-usages-", &extension);
         return Some(extension);
     }
     // Write then rename: another window must never read a partially written jar.
@@ -1533,13 +1533,13 @@ pub fn usages_bundle(data_dir: &Path) -> Option<PathBuf> {
         .and_then(|_| std::fs::rename(&temporary, &extension));
     match result {
         Ok(()) => {
-            clean_usages_bundles(data_dir, &extension);
+            clean_bundles(data_dir, "java-usages-", &extension);
             Some(extension)
         }
         Err(e) => {
             let _ = std::fs::remove_file(&temporary);
             if std::fs::read(&extension).is_ok_and(|old| old == bytes) {
-                clean_usages_bundles(data_dir, &extension);
+                clean_bundles(data_dir, "java-usages-", &extension);
                 return Some(extension);
             }
             tracing::warn!("Java usages extension unavailable; using standard references: {e}");
@@ -1548,12 +1548,44 @@ pub fn usages_bundle(data_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-fn clean_usages_bundles(data_dir: &Path, current: &Path) {
+/// Installs the app-owned build-redirect bundle (staging outputs + APT genSrcDir),
+/// falling back to ordinary LSP on IO failure.
+pub fn build_redirect_bundle(data_dir: &Path) -> Option<PathBuf> {
+    let extension = data_dir.join("java-build-redirect-1.0.0.jar");
+    let bytes = include_bytes!("../../../java/java-build-redirect/oxidea-java-build.jar");
+    if std::fs::read(&extension).is_ok_and(|old| old == bytes) {
+        clean_bundles(data_dir, "java-build-redirect-", &extension);
+        return Some(extension);
+    }
+    // Write then rename: another window must never read a partially written jar.
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    let temporary = data_dir.join(format!("java-build-redirect-{}-{nonce}.tmp", std::process::id()));
+    let result = std::fs::create_dir_all(data_dir)
+        .and_then(|_| std::fs::write(&temporary, bytes))
+        .and_then(|_| std::fs::rename(&temporary, &extension));
+    match result {
+        Ok(()) => {
+            clean_bundles(data_dir, "java-build-redirect-", &extension);
+            Some(extension)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temporary);
+            if std::fs::read(&extension).is_ok_and(|old| old == bytes) {
+                clean_bundles(data_dir, "java-build-redirect-", &extension);
+                return Some(extension);
+            }
+            tracing::warn!("Java build-redirect extension unavailable; builds stay in target/: {e}");
+            None
+        }
+    }
+}
+
+fn clean_bundles(data_dir: &Path, prefix: &str, current: &Path) {
     let Ok(entries) = std::fs::read_dir(data_dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-        let Some(suffix) = name.strip_prefix("java-usages-") else { continue };
+        let Some(suffix) = name.strip_prefix(prefix) else { continue };
         let numeric = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
         let old_jar = suffix.strip_suffix(".jar").is_some_and(|v| {
             let parts: Vec<_> = v.split('.').collect();
