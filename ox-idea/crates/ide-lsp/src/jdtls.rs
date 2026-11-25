@@ -317,24 +317,6 @@ pub struct JavaCompileError {
     pub message: String,
 }
 
-/// Holds off JDT writers while an external compiler builds and snapshots launch outputs.
-/// Restores current settings even when preparation fails or is cancelled.
-pub struct JavaExternalBuild {
-    server: Arc<Server>,
-    run: Running,
-    _lock: tokio::sync::OwnedMutexGuard<()>,
-}
-
-impl Drop for JavaExternalBuild {
-    fn drop(&mut self) {
-        self.server.java_autobuild_suspended.store(false, std::sync::atomic::Ordering::SeqCst);
-        let settings = crate::handler::all_settings(&self.server.effective_config());
-        if let Err(e) = self.run.peer.notify("workspace/didChangeConfiguration", json!({ "settings": settings })) {
-            tracing::debug!("jdtls: restoring autobuild: {e}");
-        }
-    }
-}
-
 /// Error diagnostics sorted by file and position, capped at `limit`, and their total.
 pub fn compile_errors(
     diagnostics: Vec<(PathBuf, lsp_types::Diagnostic)>,
@@ -795,23 +777,6 @@ impl LspManager {
             .map_err(|e| crate::rpc_err(&server.name, "java/projectConfigurationsUpdate", e))
     }
 
-    /// Pause autobuild before resolving the launch classpath. That query takes the
-    /// Java project's workspace scheduling rule, draining the interrupted autobuild.
-    /// Keep this guard until Maven outputs have been copied out of JDT's reach.
-    pub async fn java_external_build(&self, path: &Path, cancel: &CancellationToken) -> IdeResult<JavaExternalBuild> {
-        let (server, run) = self.jdtls(path, cancel).await?;
-        let lock = cancellable_wait(cancel, server.java_build_lock.clone().lock_owned()).await?;
-        server.java_autobuild_suspended.store(true, std::sync::atomic::Ordering::SeqCst);
-        let guard = JavaExternalBuild { server, run, _lock: lock };
-        let settings = crate::handler::all_settings(&guard.server.effective_config());
-        guard
-            .run
-            .peer
-            .notify("workspace/didChangeConfiguration", json!({ "settings": settings }))
-            .map_err(|e| crate::rpc_err(SERVER, "workspace/didChangeConfiguration", e))?;
-        Ok(guard)
-    }
-
     /// Incremental build of the jdtls workspace (`java/buildWorkspace`), so
     /// class files are up to date before a launch.
     /// `full` asks jdtls for a clean build (`java/buildWorkspace(true)`, IDEA's Rebuild).
@@ -872,7 +837,7 @@ impl LspManager {
     /// Builds (when asked), then resolves the classpath and JDK of the module at `module`.
     /// The classpath queries take the module's workspace scheduling rule like the build
     /// commands do, so they run under the build lock; pass `build_lock_held` when the caller
-    /// already holds it (the delegated external build), or the wait would deadlock.
+    /// already holds it, or the wait would deadlock.
     pub async fn java_launch(
         &self,
         module: &Path,
