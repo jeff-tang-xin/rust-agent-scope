@@ -907,8 +907,7 @@ pub mod __rt {
     pub fn resolve_file_action<T: Plugin + crate::file_actions::FileActions + Default>(
         d: crate::file_actions_bindings::exports::oxidea::plugin::file_actions::Document,
         action: crate::file_actions_bindings::exports::oxidea::plugin::file_actions::FileAction,
-    ) -> Result<crate::file_actions_bindings::exports::oxidea::plugin::file_actions::FileAction, b::types::Error>
-    {
+    ) -> Result<crate::file_actions_bindings::exports::oxidea::plugin::file_actions::FileAction, b::types::Error> {
         let doc = file_doc(d);
         with::<T, _>(|x| x.resolve_file_action(&doc, file_action_in(action))).map(file_action_out).map_err(error_out)
     }
