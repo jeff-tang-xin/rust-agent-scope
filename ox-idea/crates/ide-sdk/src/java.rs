@@ -373,6 +373,14 @@ fn path_key(p: &Path) -> String {
     text_key(&p.to_string_lossy())
 }
 
+/// Workspace layout version, prepended to every generated jdtls workspace key.
+/// jdtls reuses its workspace metadata across its own upgrades and never re-imports
+/// on our behalf, so anything that damages the cached metadata (a lost APT mapping,
+/// build state left behind by a crashed feature) persists forever unless the key
+/// changes. Bump this to force every workspace to re-import from scratch — fresh
+/// APT config from the pom, clean build state.
+const WORKSPACE_SCHEMA: &str = "ws2";
+
 fn text_key(text: &str) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in text.as_bytes() {
@@ -442,8 +450,8 @@ pub fn configure_jdtls(
         // ECJ builds incrementally: classes compiled without (or with another) Lombok
         // agent would be kept, so each agent gets its own workspace and a full build.
         let mut key = match agent {
-            Some(jar) => format!("{}-{}", path_key(server_root), path_key(jar)),
-            None => path_key(server_root),
+            Some(jar) => format!("{WORKSPACE_SCHEMA}-{}-{}", path_key(server_root), path_key(jar)),
+            None => format!("{WORKSPACE_SCHEMA}-{}", path_key(server_root)),
         };
         if let Some(paths) = cfg.settings.as_ref().and_then(|s| s.pointer("/java/project/sourcePaths")) {
             // Invisible projects retain a cached resource tree across restarts.
@@ -966,7 +974,10 @@ mod tests {
         };
         let installed = [project.clone(), server.clone()];
         let before = workspace(&installed, &server, false);
-        let original = tmp.path().join("lsp/jdtls").join(path_key(tmp.path()));
+        let original = tmp
+            .path()
+            .join("lsp/jdtls")
+            .join(format!("{WORKSPACE_SCHEMA}-{}", path_key(tmp.path())));
         assert_eq!(before, original.to_string_lossy(), "working JDKs retain the pre-existing workspace");
         assert_eq!(before, workspace(&[], &other_server, false), "installing or removing working JDKs keeps the path");
         std::fs::write(java_executable(&project.home), "#!/bin/sh\nexit 126\n").unwrap();
