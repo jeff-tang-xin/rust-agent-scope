@@ -687,9 +687,7 @@ export function recentFilterValues<K extends keyof LogFilters>(name: K): LogFilt
 
 export function recentLogFilters(): LogFilters[] {
   try {
-    const raw: unknown = JSON.parse(
-      localStorage.getItem(`oxidea.vcs.logFilters.v1:${useVcs.getState().root}`) ?? "[]",
-    );
+    const raw: unknown = JSON.parse(localStorage.getItem(`oxidea.vcs.logFilters.v1:${useVcs.getState().root}`) ?? "[]");
     return Array.isArray(raw) ? raw.slice(0, 10).map(parseFilters) : [];
   } catch {
     return [];

@@ -1345,14 +1345,14 @@ The frame follows the IDE theme without reloading: its root carries
 `data-theme="light|dark"` and these CSS variables, with concrete colour
 values (the body already uses the text colour, UI font and size):
 
-| Variable                                                                                                          | Meaning                                                          |
-| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Variable                                                                                                | Meaning                                                          |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `--oxidea-bg`, `--oxidea-bg-elevated`, `--oxidea-bg-hover`, `--oxidea-bg-selected`, `--oxidea-bg-input` | Surfaces (the frame itself is transparent)                       |
-| `--oxidea-fg`, `--oxidea-fg-strong`, `--oxidea-fg-muted`                                                    | Text                                                             |
-| `--oxidea-border`, `--oxidea-focus-ring`, `--oxidea-link`                                                   | Lines, focus, links                                              |
-| `--oxidea-accent`, `--oxidea-fg-on-accent`                                                                    | Accent and text on it                                            |
-| `--oxidea-danger`, `--oxidea-warning`, `--oxidea-success`, `--oxidea-info`                                | Status colours                                                   |
-| `--oxidea-font-ui`, `--oxidea-font-mono`, `--oxidea-font-size`                                              | Fonts (web fonts the IDE bundles are not available in the frame) |
+| `--oxidea-fg`, `--oxidea-fg-strong`, `--oxidea-fg-muted`                                                | Text                                                             |
+| `--oxidea-border`, `--oxidea-focus-ring`, `--oxidea-link`                                               | Lines, focus, links                                              |
+| `--oxidea-accent`, `--oxidea-fg-on-accent`                                                              | Accent and text on it                                            |
+| `--oxidea-danger`, `--oxidea-warning`, `--oxidea-success`, `--oxidea-info`                              | Status colours                                                   |
+| `--oxidea-font-ui`, `--oxidea-font-mono`, `--oxidea-font-size`                                          | Fonts (web fonts the IDE bundles are not available in the frame) |
 
 Scripts get the same as `oxidea.theme` (`{ dark, vars }`) and
 `oxidea.onThemeChange(fn)`, for drawing on a canvas, say. Variables are only
@@ -1448,7 +1448,7 @@ page's own files (relative URLs, ES modules, fonts, WebAssembly) — so build
 it with relative paths (Vite: `base: "./"`). The same `oxidea` object as
 in `html` bodies is there before the page's scripts run, plus:
 
-| `window.oxidea`                    | What it does                                                                                                                                                       |
+| `window.oxidea`                      | What it does                                                                                                                                                       |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `document.get()`                     | `{ version, text, readOnly, name }` of the custom editor's document (`name`: the file's, without its directory; none in a tool window)                             |
 | `document.edit(version, edits)`      | Applies `[{ from, to, insert }]` (UTF-16 offsets) as one change of the document's undo history; rejects with `stale` when not at `version`; resolves `{ version }` |
@@ -2289,10 +2289,10 @@ A new host function touches:
 
 | Where                                                     | Checked by                                     |
 | --------------------------------------------------------- | ---------------------------------------------- |
-| `wit/*.wit`, copied to `sdk/rust/oxidea-plugin/wit`     | `api_compat.rs::the_sdk_carries_the_hosts_wit` |
+| `wit/*.wit`, copied to `sdk/rust/oxidea-plugin/wit`       | `api_compat.rs::the_sdk_carries_the_hosts_wit` |
 | `crates/ide-plugin/src/wit_host.rs`: binding, capability  | the compiler (bindgen's traits)                |
 | `crates/ide-plugin/src/runtime.rs`: `HostApi` method      | the compiler                                   |
-| `crates/ide-host/src/plugins/api.rs`: implementation      | the compiler (desktop and `oxidea-server`)   |
+| `crates/ide-host/src/plugins/api.rs`: implementation      | the compiler (desktop and `oxidea-server`)     |
 | SDK `src/host.rs`: the wasm and the mock `imp`            | the compiler (CI builds both targets)          |
 | SDK public wrapper                                        | SDK `tests/wit_coverage.rs`                    |
 | Capability: `ide-extension/src/capability.rs`, consent UI | review; a test that a missing grant is denied  |

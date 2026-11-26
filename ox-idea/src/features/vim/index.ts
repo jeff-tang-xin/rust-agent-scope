@@ -44,8 +44,7 @@ export function activate(): () => void {
     const problems = e.applyRcCommands(rc.commands);
     rcApplied = true;
     for (const p of problems) console.warn(`vimrc: ${p}`);
-    if (!quiet)
-      showStatusInfo(rc.commands.length ? "Vim: rc file reloaded" : "Vim: no ~/.oxideavimrc or ~/.ideavimrc");
+    if (!quiet) showStatusInfo(rc.commands.length ? "Vim: rc file reloaded" : "Vim: no ~/.oxideavimrc or ~/.ideavimrc");
   };
 
   const apply = async (enabled: boolean) => {

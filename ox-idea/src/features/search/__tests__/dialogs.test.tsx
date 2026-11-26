@@ -206,9 +206,7 @@ describe("Search Everywhere dialog", () => {
     fireEvent.click(screen.getByLabelText("Kotlin"));
     await tick();
     expect(useSearchEverywhere.getState().filters.files.languages).toEqual(["kotlin"]);
-    expect(JSON.parse(localStorage.getItem("oxidea.search.everywhereFilters.v1")!).files.languages).toEqual([
-      "kotlin",
-    ]);
+    expect(JSON.parse(localStorage.getItem("oxidea.search.everywhereFilters.v1")!).files.languages).toEqual(["kotlin"]);
     expect(document.getElementById("se-results")!.textContent).not.toContain("OrderController");
     act(() =>
       useSearchEverywhere.setState({

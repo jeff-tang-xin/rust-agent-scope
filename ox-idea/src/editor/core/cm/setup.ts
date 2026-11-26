@@ -183,10 +183,7 @@ export function fontExtension(settings: EditorSettings | undefined): Extension {
     vars.push(`--oxidea-editor-font: ${monoFontFamily(family, fallback, "var(--font-mono)")}`);
   }
   if (settings?.fontSize)
-    vars.push(
-      `--oxidea-editor-font-size: ${settings.fontSize}px`,
-      `--oxidea-editor-base-size: ${settings.fontSize}px`,
-    );
+    vars.push(`--oxidea-editor-font-size: ${settings.fontSize}px`, `--oxidea-editor-base-size: ${settings.fontSize}px`);
   if (settings?.lineHeight)
     vars.push(
       `--oxidea-editor-line-height: ${settings.lineHeight}px`,

@@ -48,16 +48,12 @@ describe("indent guides", () => {
     const v = mount(SOURCE);
     expect(line(v, 1).classList.contains("cm-oxidea-guides")).toBe(false);
     expect(line(v, 2).style.getPropertyValue("--oxidea-guide-positions")).toBe("calc(6px + 4ch) 0");
-    expect(line(v, 3).style.getPropertyValue("--oxidea-guide-positions")).toBe(
-      "calc(6px + 4ch) 0, calc(6px + 8ch) 0",
-    );
+    expect(line(v, 3).style.getPropertyValue("--oxidea-guide-positions")).toBe("calc(6px + 4ch) 0, calc(6px + 8ch) 0");
   });
 
   it("keeps guides through blank lines inside a block", () => {
     const v = mount(SOURCE);
-    expect(line(v, 4).style.getPropertyValue("--oxidea-guide-positions")).toBe(
-      "calc(6px + 4ch) 0, calc(6px + 8ch) 0",
-    );
+    expect(line(v, 4).style.getPropertyValue("--oxidea-guide-positions")).toBe("calc(6px + 4ch) 0, calc(6px + 8ch) 0");
   });
 
   it("continues the guides of an annotated line through its code lens row", () => {

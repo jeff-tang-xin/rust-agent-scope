@@ -136,10 +136,7 @@ it("drains an in-flight update and sends pending removals before startup", async
 
 it("flushes persisted breakpoints immediately after project loading", async () => {
   ipc.debugSetBreakpoints.mockResolvedValue({ status: "ok", data: [] });
-  localStorage.setItem(
-    "oxidea.debugger.breakpoints:/p",
-    JSON.stringify({ files: { "/p/Main.java": [{ line: 4 }] } }),
-  );
+  localStorage.setItem("oxidea.debugger.breakpoints:/p", JSON.stringify({ files: { "/p/Main.java": [{ line: 4 }] } }));
   loadBreakpoints("/p");
   await startSession(config("launch"));
   expect(ipc.debugSetBreakpoints).toHaveBeenCalledOnce();

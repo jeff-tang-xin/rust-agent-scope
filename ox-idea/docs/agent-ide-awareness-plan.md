@@ -6,12 +6,11 @@
 
 ## 〇、大脑的能力地图（三层）
 
-| 层 | 内容 | 现状 |
-|---|---|---|
-| **眼（感知）** | 环境简报、编辑器状态、Problems、进程状态 | 改动 1/2/3 |
+| 层             | 内容                                                                    | 现状       |
+| -------------- | ----------------------------------------------------------------------- | ---------- |
+| **眼（感知）** | 环境简报、编辑器状态、Problems、进程状态                                | 改动 1/2/3 |
 | **手（操控）** | 写代码 ✅、构建 ✅、运行 ✅（差进程管理）、**调试 ❌**、VCS 读 ✅ 写 ❌ | 改动 2/6/7 |
-| **脑（自知）** | 能力地图、plan 模式、任务/进度呈现 | 改动 3/4/5 |
-
+| **脑（自知）** | 能力地图、plan 模式、任务/进度呈现                                      | 改动 3/4/5 |
 
 ## 一、架构现状（数据流，全部已验证）
 
@@ -33,17 +32,17 @@ IDE Host (ide-host)
 
 ### 已接通（agent 现在就能用，23 个工具）
 
-| 维度 | 工具 | 说明 |
-|---|---|---|
-| 编辑器状态 | `get_all_open_file_paths`、`get_current_file` | 后者含**用户选中的文本**与光标位置 |
-| 代码质量 | `get_file_problems`、`get_project_problems` | Problems 视图（inspection + LSP） |
-| 搜索/符号 | `search_text/regex/symbol/file`、`get_symbol_info`、`find_references` | |
-| 编辑 | `apply_patch`、`create_new_file`、`rename_refactoring`（语义级）、`reformat_file`、`open_file_in_editor` | |
-| 文件 | `read_file`、`list_directory_tree` | |
-| 构建运行 | `build_project`、`get_run_configurations`、`execute_run_configuration` | 见下「运行机制」 |
-| VCS | `get_repositories`、`git_status`、`git_diff` | |
-| 数据库 | `db_query`（只读免确认）、`db_dml`（HITL 确认） | 面板有连接时 |
-| 浏览器 | `browser_navigate/snapshot/click_at/...` | agentscope-browser |
+| 维度       | 工具                                                                                                     | 说明                               |
+| ---------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| 编辑器状态 | `get_all_open_file_paths`、`get_current_file`                                                            | 后者含**用户选中的文本**与光标位置 |
+| 代码质量   | `get_file_problems`、`get_project_problems`                                                              | Problems 视图（inspection + LSP）  |
+| 搜索/符号  | `search_text/regex/symbol/file`、`get_symbol_info`、`find_references`                                    |                                    |
+| 编辑       | `apply_patch`、`create_new_file`、`rename_refactoring`（语义级）、`reformat_file`、`open_file_in_editor` |                                    |
+| 文件       | `read_file`、`list_directory_tree`                                                                       |                                    |
+| 构建运行   | `build_project`、`get_run_configurations`、`execute_run_configuration`                                   | 见下「运行机制」                   |
+| VCS        | `get_repositories`、`git_status`、`git_diff`                                                             |                                    |
+| 数据库     | `db_query`（只读免确认）、`db_dml`（HITL 确认）                                                          | 面板有连接时                       |
+| 浏览器     | `browser_navigate/snapshot/click_at/...`                                                                 | agentscope-browser                 |
 
 **运行机制**（`mcp/run/configs.rs`，已验证）：`get_run_configurations` 返回自动检测
 （Spring Boot 主类 / Cargo.toml / go.mod / package.json / Gradle / Maven / Tomcat / JUnit /
@@ -64,16 +63,16 @@ dotnet / cmake / ruby）+ IDEA `.idea/runConfigurations` 与 VSCode `launch.json
 
 ### ide-host 有、但未接的能力（路线图）
 
-| 能力 | 位置 | 价值 |
-|---|---|---|
-| **断点调试** | `ide-dap`（完整 DAP 客户端：Session/Connection/DebugManager，断点行/函数/数据，Java/Kotlin 走 JDWP、Rust 走 cargo、Python 走 debugpy，attach 附加已有进程） | **大脑的核心缺口**，改动 6 |
-| JDK/运行时检测 | `ide-host/src/java_runtime.rs` | 并入环境简报（本期做） |
-| 子进程环境叠加 | `environment.rs` / `shell_env.rs`（登录 shell + devcontainer remoteEnv） | 环境简报可提一句；深挖后置 |
-| 测试运行 | `ide-run/src/junit.rs`（JUnit 配置） | 已可经 `execute_run_configuration` 跑；结构化测试报告后置 |
-| 插件 MCP 工具 | `plugins/mcp.rs :: mcp_tools` | **已自动可用**（`Registry::call` 有插件分支），无需开发 |
-| 向进程发输入 | `ProcessManager::write_stdin` | 交互式程序应答，后置 |
-| VCS 写操作 | `ide-host/src/mcp/vcs.rs`（现有 status/diff 只读） | commit/branch/stage，改动 7 |
-| notebook / kotlin_bridge / phpstan / formatter | 各自模块 | 边缘，暂不接 |
+| 能力                                           | 位置                                                                                                                                                        | 价值                                                      |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| **断点调试**                                   | `ide-dap`（完整 DAP 客户端：Session/Connection/DebugManager，断点行/函数/数据，Java/Kotlin 走 JDWP、Rust 走 cargo、Python 走 debugpy，attach 附加已有进程） | **大脑的核心缺口**，改动 6                                |
+| JDK/运行时检测                                 | `ide-host/src/java_runtime.rs`                                                                                                                              | 并入环境简报（本期做）                                    |
+| 子进程环境叠加                                 | `environment.rs` / `shell_env.rs`（登录 shell + devcontainer remoteEnv）                                                                                    | 环境简报可提一句；深挖后置                                |
+| 测试运行                                       | `ide-run/src/junit.rs`（JUnit 配置）                                                                                                                        | 已可经 `execute_run_configuration` 跑；结构化测试报告后置 |
+| 插件 MCP 工具                                  | `plugins/mcp.rs :: mcp_tools`                                                                                                                               | **已自动可用**（`Registry::call` 有插件分支），无需开发   |
+| 向进程发输入                                   | `ProcessManager::write_stdin`                                                                                                                               | 交互式程序应答，后置                                      |
+| VCS 写操作                                     | `ide-host/src/mcp/vcs.rs`（现有 status/diff 只读）                                                                                                          | commit/branch/stage，改动 7                               |
+| notebook / kotlin_bridge / phpstan / formatter | 各自模块                                                                                                                                                    | 边缘，暂不接                                              |
 
 ## 三、改动清单（怎么改、在哪改、为什么）
 
@@ -89,7 +88,7 @@ dotnet / cmake / ruby）+ IDEA `.idea/runConfigurations` 与 VSCode `launch.json
    - **直接复用 `ide_run::detect(&project_root)`**（`lib.rs:242`，pub）——多语言
      检测统一入口，返回 RunConfig（kind/name/command/cwd/env），覆盖
      npm/cargo/gradle/maven/go/python/pytest/make/tomcat/junit/dotnet/cmake/ruby/shell
-     + IDEA/VSCode 配置导入。**不要自己写构建文件探测**——detect 已做且更全。
+     - IDEA/VSCode 配置导入。**不要自己写构建文件探测**——detect 已做且更全。
    - `java_runtime.rs` 的 JDK 检测（Java 项目时补充版本信息）；
    - 现有 `datasource_section` 的数据源画像并入。
    - 按语言分组拼成紧凑文本（目标 ≤ 40 行），塞进 `OxHostContext::project_brief`。
@@ -100,17 +99,17 @@ dotnet / cmake / ruby）+ IDEA `.idea/runConfigurations` 与 VSCode `launch.json
 
 **多语言能力矩阵**（全部已验证存在，agent 大脑对每种语言拿到的完整牌）：
 
-| 语言/栈 | 检测 | 运行 | 调试（改动 6） | 测试 |
-|---|---|---|---|---|
-| Java | detect（pom/gradle + Spring Boot 主类） | maven/gradle/tomcat | java-debug + JDWP attach | junit 配置 |
-| Kotlin | detect | gradle | kotlin-debug-adapter | junit 配置 |
-| Rust | Cargo.toml | cargo | codelldb | cargo test（shell） |
-| Go | go.mod | go（build+run 两段计划） | delve | go test（含测试文件运行） |
-| Node.js | package.json scripts | npm | js-debug | npm test（shell） |
-| Python | python/pytest 配置 | python/pytest | debugpy | pytest 配置 |
-| .NET | csproj/launchSettings | dotnet | netcoredbg | dotnet test |
-| C/C++ | cmake | cmake build+launch | codelldb / lldb-dap | — |
-| Ruby | ruby 配置 | ruby | rdbg | ruby_reporter（结构化测试报告） |
+| 语言/栈 | 检测                                    | 运行                     | 调试（改动 6）           | 测试                            |
+| ------- | --------------------------------------- | ------------------------ | ------------------------ | ------------------------------- |
+| Java    | detect（pom/gradle + Spring Boot 主类） | maven/gradle/tomcat      | java-debug + JDWP attach | junit 配置                      |
+| Kotlin  | detect                                  | gradle                   | kotlin-debug-adapter     | junit 配置                      |
+| Rust    | Cargo.toml                              | cargo                    | codelldb                 | cargo test（shell）             |
+| Go      | go.mod                                  | go（build+run 两段计划） | delve                    | go test（含测试文件运行）       |
+| Node.js | package.json scripts                    | npm                      | js-debug                 | npm test（shell）               |
+| Python  | python/pytest 配置                      | python/pytest            | debugpy                  | pytest 配置                     |
+| .NET    | csproj/launchSettings                   | dotnet                   | netcoredbg               | dotnet test                     |
+| C/C++   | cmake                                   | cmake build+launch       | codelldb / lldb-dap      | —                               |
+| Ruby    | ruby 配置                               | ruby                     | rdbg                     | ruby_reporter（结构化测试报告） |
 
 **为什么**：agent 开局即知「这是什么项目、可跑配置有哪些、数据源是什么」——
 Phase 1 的定位成本大幅下降，也不会再用 shell 瞎试启动。多语言不是额外开发，
@@ -147,6 +146,7 @@ detect 与 ide-dap 本来就是全语言实现，简报与调试工具天然继�
 **在哪改**：`agentscope-acp/src/session.rs` 的 sys_prompt（纯文本，无代码逻辑）。
 
 **内容**（新增一节，约 15 行）：
+
 - 环境简报说明：系统提示词里的「当前项目环境」是开局事实，先读它再动手；
 - 编辑器上下文引导：用户说「这个文件 / 我选中的」时先 `get_current_file` /
   `get_all_open_file_paths` 确认，不猜；
@@ -196,16 +196,17 @@ Java 远程 attach。前端调试 UI 在用同一套；**缺的只是 MCP 工具
 **在哪改**：新文件 `ox-idea/crates/ide-host/src/mcp/debug/`（仿 `run/` 的组织），
 注册进 `mcp/mod.rs` 工具清单：
 
-| 工具 | 映射的 ide-dap 能力 | 只读 |
-|---|---|---|
-| `start_debug_session` | DebugManager 启动（debug 配置名或 filePath+line，复用 run 配置检测；attach 模式附加已有进程） | 否（HITL 确认） |
-| `set_breakpoint` / `remove_breakpoint` | Breakpoint 增删（file+line） | 否 |
-| `debug_control` | continue / step_over / step_into / step_out / pause（一个工具多 action，避免工具爆炸） | 否 |
-| `get_debug_state` | stopped 后的栈帧 / 局部变量 / 断点命中位置（拉模式查询，DAP 事件仍推给前端 UI） | 是 |
-| `evaluate_expression` | 栈帧上下文求值（watch） | 是 |
-| `stop_debug_session` | 会话终止（连带 kill debuggee，对齐 `589c89be` 的语义） | 否（HITL） |
+| 工具                                   | 映射的 ide-dap 能力                                                                           | 只读            |
+| -------------------------------------- | --------------------------------------------------------------------------------------------- | --------------- |
+| `start_debug_session`                  | DebugManager 启动（debug 配置名或 filePath+line，复用 run 配置检测；attach 模式附加已有进程） | 否（HITL 确认） |
+| `set_breakpoint` / `remove_breakpoint` | Breakpoint 增删（file+line）                                                                  | 否              |
+| `debug_control`                        | continue / step_over / step_into / step_out / pause（一个工具多 action，避免工具爆炸）        | 否              |
+| `get_debug_state`                      | stopped 后的栈帧 / 局部变量 / 断点命中位置（拉模式查询，DAP 事件仍推给前端 UI）               | 是              |
+| `evaluate_expression`                  | 栈帧上下文求值（watch）                                                                       | 是              |
+| `stop_debug_session`                   | 会话终止（连带 kill debuggee，对齐 `589c89be` 的语义）                                        | 否（HITL）      |
 
 **为什么这样设计**：
+
 - DAP 是推模式（事件流），MCP 工具是拉模式——agent 用 `get_debug_state` 轮询即可，
   不需要给 agent 接事件订阅；前端调试 UI 的事件流不受影响（同一会话双消费）。
 - `debug_control` 合并五个控制动作：工具数量克制（用户工作原则：工具面精简，
@@ -223,9 +224,10 @@ Java 远程 attach。前端调试 UI 在用同一套；**缺的只是 MCP 工具
 
 **在哪改**：`ox-idea/crates/ide-host/src/mcp/vcs.rs` 加两个工具（现有
 git_status/git_diff/get_repositories 同文件）：
+
 - `git_commit` — stage 指定文件 + commit（message 参数必填；HITL 确认）；
 - `git_branch` — create/switch（HITL 确认）。
-push 不做（不可逆外发动作，保持用户手动或明确授权后走 shell）。
+  push 不做（不可逆外发动作，保持用户手动或明确授权后走 shell）。
 
 **为什么**：大脑要能完成「改 → 验证 → 提交」闭环；现在只能看不能提交，
 每次都要用户手动，断档。
