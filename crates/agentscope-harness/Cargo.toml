@@ -2,6 +2,7 @@
 name = "agentscope-harness"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Harness layer for AgentScope Rust: workspace, subagent declarations and background tasks"
 
 [dependencies]

@@ -7,9 +7,7 @@ exclude = ["sdk", "plugins"]
 [workspace.package]
 version = "0.0.8"
 edition = "2024"
-rust-version = "1.96"
 license = "Apache-2.0"
-authors = ["OXidea contributors"]
 
 [workspace.dependencies]
 # internal
@@ -62,17 +60,14 @@ async-trait = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 parking_lot = "0.12"
 rayon = "1"
-dashmap = "6"
 futures = "0.3"
 
 # errors & diagnostics
 thiserror = "2"
-anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # text & fs
-ropey = "1.6"
 encoding_rs = "0.8"
 chardetng = "0.1"
 ignore = "0.4"
