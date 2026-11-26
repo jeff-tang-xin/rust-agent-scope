@@ -128,9 +128,11 @@ jobs:
     needs: publish-tauri
     name: Official plugins
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     env:
       SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
-      COMMUNITY_PLUGINS_INDEX: https://github.com/l0ng-ai/oxidea-plugins/releases/download/index/index.json
+      COMMUNITY_PLUGINS_INDEX: https://github.com/l0ng-ai/openidea-plugins/releases/download/index/index.json
     steps:
       - id: key
         run: |
