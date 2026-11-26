@@ -1902,10 +1902,7 @@ async fn java_build_waits_for_service_ready_and_the_import_to_quiesce() {
     let root = h.root.clone();
     let build = tokio::spawn(async move { mgr.java_build(&root, false, &Default::default()).await });
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        state.requested("java/buildWorkspace").is_empty(),
-        "buildWorkspace ran before ServiceReady"
-    );
+    assert!(state.requested("java/buildWorkspace").is_empty(), "buildWorkspace ran before ServiceReady");
     // ServiceReady arrives and the Maven import is running: still not quiescent.
     state.peer().notify("language/status", json!({ "type": "ServiceReady" })).unwrap();
     state.peer().notify("experimental/serverStatus", json!({ "health": "ok", "quiescent": false })).unwrap();
@@ -2009,12 +2006,16 @@ async fn java_launch_scopes_build_status_and_does_not_wait_for_unrelated_errors(
             .notify("textDocument/publishDiagnostics", json!({"uri": uri_of(&file), "diagnostics": [diag]}))
             .unwrap();
         eventually(|| diagnostics_for(&h, &file) == 1).await;
+        // In-scope errors take the settle-then-rebuild pass (a quiet diagnostic window
+        // plus one buildWorkspace round-trip) before they block the launch; out-of-scope
+        // errors must return without any wait.
+        let wait = if expected == JavaBuildStatus::WithErrors { 30 } else { 1 };
         let info = tokio::time::timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(wait),
             h.mgr.java_launch(&web, test, true, false, false, &Default::default()),
         )
         .await
-        .expect("an already-published error must not incur the diagnostics wait")
+        .expect("java_launch did not return within its wait budget")
         .unwrap();
         assert_eq!(info.build, Some(expected), "{path}, test={test}, classpath={classpaths_available}");
         assert_eq!(info.error_count, u32::from(expected == JavaBuildStatus::WithErrors));

@@ -40,6 +40,12 @@ const IMPORT_QUIESCE_WAIT: Duration = Duration::from_secs(10 * 60);
 const MAX_LAUNCH_ERRORS: usize = 10;
 /// Build markers can be published just after `java/buildWorkspace` answers.
 const ERRORS_WAIT: Duration = Duration::from_secs(2);
+/// Diagnostic publishes may stay quiet this long before the stream counts as
+/// settled; a rebuild in progress keeps publishing continuously.
+const ERRORS_SETTLE_QUIET: Duration = Duration::from_secs(3);
+/// Upper bound on that wait. Past it the follow-up build still recompiles
+/// dependents once their dependencies exist, which is what heals the window.
+const ERRORS_SETTLE_MAX: Duration = Duration::from_secs(60);
 
 const ACCESS_OPTIONS: [&str; 2] = [
     "org.eclipse.jdt.core.compiler.problem.forbiddenReference",
@@ -499,6 +505,19 @@ async fn cancellable_wait<T>(cancel: &CancellationToken, wait: impl std::future:
     }
 }
 
+/// Returns once the diagnostic stream has stayed quiet for `ERRORS_SETTLE_QUIET`:
+/// a workspace rebuild publishes continuously, and quiet means the background
+/// build has caught up (or nothing is publishing).
+async fn wait_diagnostics_quiet(server: &Server, cancel: &CancellationToken) {
+    loop {
+        tokio::select! {
+            _ = server.published_notify.notified() => {}
+            _ = tokio::time::sleep(ERRORS_SETTLE_QUIET) => break,
+            _ = cancel.cancelled() => break,
+        }
+    }
+}
+
 /// Waits until the instance `generation` reported jdtls `ServiceReady` and the workspace
 /// is quiescent (no `$/progress` task, not loading): the import has started and ended,
 /// so `java/buildWorkspace` compiles against the complete classpath. False on timeout,
@@ -881,11 +900,34 @@ impl LspManager {
             (Some(JavaBuildStatus::WithErrors | JavaBuildStatus::Failed), _) | (None, true) => {
                 let scope_module = module.to_path_buf();
                 let cp = cp.clone();
-                let scope = tokio::task::spawn_blocking(move || LaunchScope::new(&scope_module, test, cp.as_ref()))
-                    .await
-                    .map_err(|e| IdeError::internal(e.to_string()))?;
+                let scope_paths = cp.clone();
+                let scope =
+                    tokio::task::spawn_blocking(move || LaunchScope::new(&scope_module, test, scope_paths.as_ref()))
+                        .await
+                        .map_err(|e| IdeError::internal(e.to_string()))?;
                 let scoped = scope.roots.is_some();
                 let (errors, count) = cancellable_wait(cancel, self.java_compile_errors(module, scope)).await??;
+                // A build that runs while jdtls is still importing or rebuilding the
+                // workspace reports every not-yet-rebuilt type as unresolved; the same
+                // project shows clean in the editor once the background build catches
+                // up. In-scope errors therefore get one settle-then-rebuild pass before
+                // they block a launch; out-of-scope errors never pay for it.
+                let (errors, count) = if count > 0 && scoped && build == Some(JavaBuildStatus::WithErrors) {
+                    if self.heal_transient_build_errors(module, cancel).await? {
+                        let scope_module = module.to_path_buf();
+                        let scope_paths = cp.clone();
+                        let scope = tokio::task::spawn_blocking(move || {
+                            LaunchScope::new(&scope_module, test, scope_paths.as_ref())
+                        })
+                        .await
+                        .map_err(|e| IdeError::internal(e.to_string()))?;
+                        cancellable_wait(cancel, self.java_compile_errors(module, scope)).await??
+                    } else {
+                        (errors, count)
+                    }
+                } else {
+                    (errors, count)
+                };
                 (errors, count, scoped)
             }
             _ => (Vec::new(), 0, false),
@@ -911,6 +953,27 @@ impl LspManager {
             error_count,
             hints: Vec::new(),
         })
+    }
+
+    /// A `WithErrors` build can be a rebuild window rather than broken code: while
+    /// jdtls is importing or rebuilding the workspace, a module compiles before its
+    /// dependencies are rebuilt and every not-yet-rebuilt type reports unresolved;
+    /// the same project shows clean in the editor once the background build catches
+    /// up. Wait for the diagnostic stream to go quiet, then run one more incremental
+    /// build — cheap when the workspace is already consistent, and it recompiles
+    /// dependents once their dependencies exist. Returns whether the rebuild
+    /// succeeded, so the caller can re-read the (now settled) diagnostics.
+    async fn heal_transient_build_errors(&self, module: &Path, cancel: &CancellationToken) -> IdeResult<bool> {
+        let (server, _) = self.jdtls(module, cancel).await?;
+        let _ = tokio::time::timeout(ERRORS_SETTLE_MAX, wait_diagnostics_quiet(&server, cancel)).await;
+        let status = self.java_build(module, false, cancel).await?;
+        if status != JavaBuildStatus::Succeeded {
+            return Ok(false);
+        }
+        // The build's corrected diagnostics may still be in flight; wait for them to
+        // land so the caller's re-read does not see the stale pre-build errors.
+        let _ = tokio::time::timeout(ERRORS_SETTLE_MAX, wait_diagnostics_quiet(&server, cancel)).await;
+        Ok(true)
     }
 
     /// Wait for late build markers only when no error diagnostics have arrived yet.

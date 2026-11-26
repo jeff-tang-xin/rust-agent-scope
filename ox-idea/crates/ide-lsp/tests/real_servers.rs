@@ -963,13 +963,10 @@ async fn build_redirect_bundle_moves_outputs_and_apt_sources_into_staging() {
     server.settings = Some(serde_json::json!({"java": {"autobuild": {"enabled": false}}}));
     let bundle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../java/java-build-redirect/oxidea-java-build.jar");
     if std::env::var("OXIDEA_TEST_NO_BUNDLE").is_err() {
-        server
-            .initialization_options
-            .as_mut()
-            .unwrap()
-            .as_table_mut()
-            .unwrap()
-            .insert("bundles".into(), toml::Value::Array(vec![toml::Value::String(bundle.to_string_lossy().into_owned())]));
+        server.initialization_options.as_mut().unwrap().as_table_mut().unwrap().insert(
+            "bundles".into(),
+            toml::Value::Array(vec![toml::Value::String(bundle.to_string_lossy().into_owned())]),
+        );
     }
     let (mgr, events) = manager(&root, LanguageRegistry::from_configs(vec![java]));
     let doc = DocId::next();
@@ -999,7 +996,8 @@ async fn build_redirect_bundle_moves_outputs_and_apt_sources_into_staging() {
     let prefs = retry("apt prefs", Duration::from_secs(30), || async {
         let text = std::fs::read_to_string(root.join(".settings/org.eclipse.jdt.apt.core.prefs")).ok()?;
         let main_ok = text.lines().any(|l| l.starts_with("org.eclipse.jdt.apt.genSrcDir=") && l.contains("oxidea-ide"));
-        let test_ok = text.lines().any(|l| l.starts_with("org.eclipse.jdt.apt.genTestSrcDir=") && l.contains("oxidea-ide"));
+        let test_ok =
+            text.lines().any(|l| l.starts_with("org.eclipse.jdt.apt.genTestSrcDir=") && l.contains("oxidea-ide"));
         (main_ok && test_ok).then_some(text)
     })
     .await;
