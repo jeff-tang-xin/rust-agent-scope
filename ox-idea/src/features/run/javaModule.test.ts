@@ -106,11 +106,15 @@ it("always applies the launch policy after a Before launch Build Project", async
   useProject.setState({ project: null });
 });
 
-it("does not start a configuration whose build failed", async () => {
+it("starts a configuration whose build failed, reporting the failure to the console", async () => {
   ipc.javaResolveLaunch.mockResolvedValueOnce({ status: "ok", data: launchInfo("failed") });
   const session = await startRun({ ...config, module: "app", buildPolicy: "make" });
-  expect(session?.status).toBe("failed");
-  expect(ipc.runStart).not.toHaveBeenCalled();
+  expect(session?.status).toBe("running");
+  expect(ipc.runStart).toHaveBeenCalled();
+  const output = runtime(session!.id)!
+    .console.lines.map((line) => line.text)
+    .join("\n");
+  expect(output).toContain("boom");
 });
 
 it("starts with the last compiled classes for makeAndContinueOnErrors", async () => {
@@ -121,12 +125,16 @@ it("starts with the last compiled classes for makeAndContinueOnErrors", async ()
 });
 
 it.each([undefined, "automatic", "make", "rebuild"] as const)(
-  "does not launch scoped compilation-error bytecode under %s",
+  "launches on the last compiled classes despite compile errors under %s",
   async (buildPolicy) => {
     ipc.javaResolveLaunch.mockResolvedValueOnce({ status: "ok", data: launchInfo("withErrors") });
     const session = await startRun({ ...config, module: "app", buildPolicy });
-    expect(session?.status).toBe("failed");
-    expect(ipc.runStart).not.toHaveBeenCalled();
+    expect(session?.status).toBe("running");
+    expect(ipc.runStart).toHaveBeenCalled();
+    const output = runtime(session!.id)!
+      .console.lines.map((line) => line.text)
+      .join("\n");
+    expect(output).toContain("boom");
   },
 );
 

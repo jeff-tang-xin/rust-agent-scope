@@ -204,9 +204,6 @@ export function buildPolicyOf(config: RunConfig): BuildPolicy {
   return config.buildPolicy ?? "automatic";
 }
 
-/** A build stopped the launch: the message is ready for the console and the notification. */
-export class JavaBuildFailedError extends Error {}
-
 export async function prepareJavaLaunch(config: RunConfig, preparation: JavaPreparation) {
   const { signal, report } = preparation;
   const policy = preparation.policy ?? buildPolicyOf(config);
@@ -236,15 +233,8 @@ export async function prepareJavaLaunch(config: RunConfig, preparation: JavaPrep
   console.info("Java launch preparation", { module, moduleMs, resolveMs: performance.now() - started - moduleMs });
   const errors = formatCompileErrors(info);
   if (errors) report?.(errors, "stderr");
-  // IDEA's default: a failed build (or one with compile errors) does not start the program;
-  // only "Build, no error check" continues with the last compiled classes.
-  if ((info.build === "failed" || info.build === "withErrors") && policy !== "makeAndContinueOnErrors") {
-    const reason =
-      info.build === "failed"
-        ? tx`Build failed; '${config.name}' was not started.`
-        : tx`Build has compile errors; '${config.name}' was not started.`;
-    throw new JavaBuildFailedError(reason);
-  }
+  // Compile errors and build failures are reported to the console above but do not block
+  // the launch: the program starts on the last compiled classes, as before the launch gate.
   if (parsed.classpath && !info.classPaths.length)
     throw new Error(tx("The classpath is empty: is the module imported by the Java language server?"));
   return { module, info, resolved: resolveJavaCommand(config, info) };

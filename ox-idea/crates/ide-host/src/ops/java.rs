@@ -71,10 +71,9 @@ async fn resolve_launch(
     tokio::task::spawn_blocking(move || {
         let built = if external {
             let built = compile::build_for_launch(&project.root, &model, &module, test, build_kind, &cancel)?;
+            // A failed external build is reported through the launch info (console) but does
+            // not block the launch: the program starts on the last compiled classes.
             if let Some(failure) = built.failure {
-                if policy != BuildPolicy::MakeAndContinueOnErrors {
-                    return Err(IdeError::internal(failure));
-                }
                 info.build = Some(JavaBuildStatus::Failed);
                 info.hints.push(failure);
             }
