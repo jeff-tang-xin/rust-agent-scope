@@ -147,6 +147,8 @@ test("accepting a deleted version removes the file before staging", async ({ pag
   await mountMerge(page, [BASE, OURS, null]);
   await captureWrites(page);
   await page.locator("#merge-host").getByRole("button", { name: "Accept Theirs", exact: true }).click();
+  // Accepting a deleted version asks for confirmation before removing the file.
+  await page.getByRole("button", { name: "Delete File", exact: true }).click();
   await expect.poll(async () => (await writes(page)).some((call) => call.command === "vcsStage")).toBe(true);
   expect(await writes(page)).toEqual([
     { command: "fsDelete", args: ["/project/demo.ts"] },
